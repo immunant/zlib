@@ -119,10 +119,24 @@ impl CompressProgress {
         }
     }
 
-    fn record_available(&mut self, scheduled: usize, available: crate::stdlib::uInt) {
-        self.used = self
-            .used
-            .wrapping_add(scheduled.wrapping_sub(available as usize));
+    fn used_after_available(
+        self,
+        scheduled: usize,
+        available: crate::stdlib::uInt,
+    ) -> Option<usize> {
+        let available = usize::try_from(available).ok()?;
+        let consumed = scheduled.checked_sub(available)?;
+        let used = self.used.checked_add(consumed)?;
+        (used <= self.total).then_some(used)
+    }
+
+    fn record_available(&mut self, scheduled: usize, available: crate::stdlib::uInt) -> bool {
+        let Some(used) = self.used_after_available(scheduled, available) else {
+            return false;
+        };
+
+        self.used = used;
+        true
     }
 }
 
@@ -142,9 +156,24 @@ impl CompressChunk {
         dest_progress: &mut CompressProgress,
         input_available: crate::stdlib::uInt,
         output_available: crate::stdlib::uInt,
-    ) {
-        source_progress.record_available(self.input_len, input_available);
-        dest_progress.record_available(self.output_len, output_available);
+    ) -> bool {
+        // Validate both ABI-reported availability values before committing
+        // either cursor. This keeps a malformed stream state from wrapping a
+        // progress counter into an out-of-range pointer offset on the next
+        // chunk.
+        let Some(source_used) =
+            source_progress.used_after_available(self.input_len, input_available)
+        else {
+            return false;
+        };
+        let Some(dest_used) = dest_progress.used_after_available(self.output_len, output_available)
+        else {
+            return false;
+        };
+
+        source_progress.used = source_used;
+        dest_progress.used = dest_used;
+        true
     }
 }
 
@@ -256,12 +285,14 @@ pub unsafe extern "C" fn compress2_z_ffi(
         stream.avail_out = chunk.output_len as crate::stdlib::uInt;
 
         let status = crate::src::deflate::deflate_ffi(&mut stream, chunk.flush);
-        chunk.record_progress(
+        if !chunk.record_progress(
             &mut source_progress,
             &mut dest_progress,
             stream.avail_in,
             stream.avail_out,
-        );
+        ) {
+            break crate::zlib_h::Z_STREAM_ERROR;
+        }
 
         if status != crate::zlib_h::Z_OK {
             break status;
@@ -519,7 +550,7 @@ mod tests {
             flush: crate::zlib_h::Z_NO_FLUSH,
         };
 
-        chunk.record_progress(&mut source_progress, &mut dest_progress, 2, 3);
+        assert!(chunk.record_progress(&mut source_progress, &mut dest_progress, 2, 3));
 
         assert_eq!(source_progress.used, 5);
         assert_eq!(dest_progress.used, 6);
@@ -533,11 +564,11 @@ mod tests {
         let mut progress = CompressProgress::new(total);
         assert_eq!(progress.next_chunk_len(), MAX_CHUNK);
         assert!(!progress.is_final_chunk(MAX_CHUNK));
-        progress.record_available(MAX_CHUNK, 2);
+        assert!(progress.record_available(MAX_CHUNK, 2));
         assert_eq!(progress.used, MAX_CHUNK - 2);
         assert_eq!(progress.next_chunk_len(), 5);
         assert!(progress.is_final_chunk(5));
-        progress.record_available(5, 0);
+        assert!(progress.record_available(5, 0));
         assert_eq!(progress.used, total);
         assert_eq!(progress.remaining(), 0);
     }
@@ -548,8 +579,36 @@ mod tests {
         assert_eq!(progress.flush_mode(3), crate::zlib_h::Z_NO_FLUSH);
         assert_eq!(progress.flush_mode(4), crate::zlib_h::Z_FINISH);
 
-        progress.record_available(4, 1);
+        assert!(progress.record_available(4, 1));
         assert_eq!(progress.flush_mode(1), crate::zlib_h::Z_FINISH);
+    }
+
+    #[test]
+    fn progress_rejects_impossible_availability_without_advancing() {
+        let mut progress = CompressProgress::new(4);
+
+        assert!(!progress.record_available(3, 4));
+        assert_eq!(progress.used, 0);
+
+        assert!(!progress.record_available(5, 0));
+        assert_eq!(progress.used, 0);
+    }
+
+    #[test]
+    fn chunk_progress_is_atomic_when_either_abi_counter_is_invalid() {
+        let mut source_progress = CompressProgress::new(5);
+        let mut dest_progress = CompressProgress::new(5);
+        let chunk = super::CompressChunk {
+            input_start: 0,
+            input_len: 3,
+            output_start: 0,
+            output_len: 3,
+            flush: crate::zlib_h::Z_NO_FLUSH,
+        };
+
+        assert!(!chunk.record_progress(&mut source_progress, &mut dest_progress, 0, 4));
+        assert_eq!(source_progress.used, 0);
+        assert_eq!(dest_progress.used, 0);
     }
 
     #[test]
