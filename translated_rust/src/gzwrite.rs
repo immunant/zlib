@@ -1292,7 +1292,11 @@ fn gz_zero_prepare_and_initialize_chunk(
 }
 
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let buffer = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
+    let buffer = if state.size == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
+    };
     let mut first: ::core::ffi::c_int = 0;
     let limits = gz_zero_chunk_limits();
     match gz_zero_initial_step(
@@ -1580,10 +1584,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     gzfwrite_result(size, len, gz_write(state, buf, len))
 }
-pub unsafe extern "C" fn gzputc(
-    mut file: crate::zlib_h::gzFile,
-    mut c: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+unsafe fn gzputc(mut file: crate::zlib_h::gzFile, mut c: ::core::ffi::c_int) -> ::core::ffi::c_int {
     let buf = [c as ::core::ffi::c_uchar];
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
@@ -1619,7 +1620,7 @@ pub unsafe extern "C" fn gzputc_ffi(
 ) -> ::core::ffi::c_int {
     gzputc(file, c)
 }
-pub unsafe extern "C" fn gzputs(
+unsafe fn gzputs(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
@@ -1694,7 +1695,7 @@ pub unsafe extern "C" fn gzflush_ffi(
     gz_comp(state, flush);
     return (*state).err;
 }
-pub unsafe extern "C" fn gzsetparams(
+unsafe fn gzsetparams(
     mut file: crate::zlib_h::gzFile,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
