@@ -2628,55 +2628,63 @@ pub unsafe extern "C" fn inflateCopy(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    crate::stdlib::memcpy(
-        copy as *mut ::core::ffi::c_void,
-        state as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
-    (*copy).strm = dest;
-    if (*state).lencode
-        >= &raw mut (*state).codes as *mut crate::src::inftrees::code
-            as *const crate::src::inftrees::code
-        && (*state).lencode
-            <= (&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                .offset(crate::src::inftrees::ENOUGH as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize))
-                as *const crate::src::inftrees::code
-    {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .lencode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as isize,
-        );
-        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .distcode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as isize,
-        );
-    }
-    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-        (*state)
-            .next
-            .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-            as isize,
-    );
-    if !window.is_null() {
-        crate::stdlib::memcpy(
-            window as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).whave as crate::__stddef_size_t_h::size_t,
-        );
-    }
-    (*copy).window = window;
-    (*dest).state = copy as *mut crate::src::deflate::internal_state;
+    let source = &*source;
+    let state = &*state;
+    let dest = &mut *dest;
+    let copy = &mut *copy;
+    let window = if window.is_null() {
+        None
+    } else {
+        Some((
+            ::core::slice::from_raw_parts(state.window, state.whave as usize),
+            ::core::slice::from_raw_parts_mut(
+                window,
+                (1 as ::core::ffi::c_uint).wrapping_shl(state.wbits) as usize,
+            ),
+        ))
+    };
+    inflate_copy_state(dest, source, copy, state, window);
+    dest.state = copy as *mut crate::src::inflate::inflate_state
+        as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
+}
+
+fn inflate_copy_state(
+    dest: &mut crate::zlib_h::z_stream,
+    source: &crate::zlib_h::z_stream,
+    copy: &mut crate::src::inflate::inflate_state,
+    state: &crate::src::inflate::inflate_state,
+    window: Option<(&[crate::stdlib::Bytef], &mut [crate::stdlib::Bytef])>,
+) {
+    *dest = *source;
+    *copy = *state;
+    copy.strm = dest;
+
+    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+    let source_codes = state.codes.as_ptr().addr();
+    let source_end = source_codes.wrapping_add(state.codes.len().wrapping_mul(code_size));
+    let lencode = state.lencode.addr();
+    if lencode >= source_codes && lencode < source_end {
+        let lencode_index = lencode.wrapping_sub(source_codes).wrapping_div(code_size);
+        let distcode_index = state
+            .distcode
+            .addr()
+            .wrapping_sub(source_codes)
+            .wrapping_div(code_size);
+        copy.lencode = copy.codes.as_ptr().wrapping_add(lencode_index);
+        copy.distcode = copy.codes.as_ptr().wrapping_add(distcode_index);
+    }
+    let next_index = state
+        .next
+        .addr()
+        .wrapping_sub(source_codes)
+        .wrapping_div(code_size);
+    copy.next = copy.codes.as_mut_ptr().wrapping_add(next_index);
+
+    if let Some((source_window, dest_window)) = window {
+        dest_window[..source_window.len()].copy_from_slice(source_window);
+        copy.window = dest_window.as_mut_ptr();
+    }
 }
 #[export_name = "inflateCopy"]
 
