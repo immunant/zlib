@@ -219,7 +219,7 @@ pub const finish_started: block_state = 2;
 pub const need_more: block_state = 0;
 
 pub type compress_func = Option<
-    unsafe extern "C" fn(
+    unsafe fn(
         *mut crate::src::deflate::deflate_state,
         ::core::ffi::c_int,
     ) -> block_state,
@@ -254,7 +254,7 @@ static configuration_table: [config; 10] = [
         max_chain: 0 as crate::zutil_h::ush,
         func: Some(
             deflate_stored
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -267,7 +267,7 @@ static configuration_table: [config; 10] = [
         max_chain: 4 as crate::zutil_h::ush,
         func: Some(
             deflate_fast
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -280,7 +280,7 @@ static configuration_table: [config; 10] = [
         max_chain: 8 as crate::zutil_h::ush,
         func: Some(
             deflate_fast
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -293,7 +293,7 @@ static configuration_table: [config; 10] = [
         max_chain: 32 as crate::zutil_h::ush,
         func: Some(
             deflate_fast
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -306,7 +306,7 @@ static configuration_table: [config; 10] = [
         max_chain: 16 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -319,7 +319,7 @@ static configuration_table: [config; 10] = [
         max_chain: 32 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -332,7 +332,7 @@ static configuration_table: [config; 10] = [
         max_chain: 128 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -345,7 +345,7 @@ static configuration_table: [config; 10] = [
         max_chain: 256 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -358,7 +358,7 @@ static configuration_table: [config; 10] = [
         max_chain: 1024 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -371,7 +371,7 @@ static configuration_table: [config; 10] = [
         max_chain: 4096 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe extern "C" fn(
+                as unsafe fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -1674,7 +1674,9 @@ fn flush_pending_progress(
     *pending = pending.wrapping_sub(len as crate::zutil_h::ulg);
 }
 
-unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
+// Private raw adapters are Rust-ABI functions.  The public `_ffi` wrappers
+// remain the only C ABI boundary for callers outside this crate.
+unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
     let stream = &mut *strm;
@@ -2444,7 +2446,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     deflateCopy(dest, source)
 }
-unsafe extern "C" fn longest_match(
+unsafe fn longest_match(
     mut s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
@@ -2683,7 +2685,7 @@ fn stored_block_size(
     ))
 }
 
-unsafe extern "C" fn deflate_stored(
+unsafe fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -2881,7 +2883,7 @@ unsafe extern "C" fn deflate_stored(
     }) as block_state;
 }
 
-unsafe extern "C" fn deflate_fast(
+unsafe fn deflate_fast(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3026,7 +3028,7 @@ unsafe extern "C" fn deflate_fast(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_slow(
+unsafe fn deflate_slow(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3247,7 +3249,7 @@ fn rle_match_length(
     length as crate::stdlib::uInt
 }
 
-unsafe extern "C" fn deflate_rle(
+unsafe fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3359,7 +3361,7 @@ unsafe extern "C" fn deflate_rle(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_huff(
+unsafe fn deflate_huff(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {

@@ -3707,7 +3707,10 @@ fn bi_windup_state(
     state.bi_valid = 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
+// This is a private raw-state helper called only by translated Rust code.
+// Keep the C ABI at the exported wrappers, rather than propagating it through
+// the tree-building implementation.
+unsafe fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
     let pending = ::core::slice::from_raw_parts_mut(
         state.pending_buf,
@@ -3716,7 +3719,7 @@ unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
     bi_windup_state(state, pending);
 }
 
-unsafe extern "C" fn gen_codes(
+unsafe fn gen_codes(
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
     mut bl_count: *mut crate::zutil_h::ushf,
@@ -3799,7 +3802,7 @@ pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_s
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 
-unsafe extern "C" fn pqdownheap(
+unsafe fn pqdownheap(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
     mut k: ::core::ffi::c_int,
@@ -3838,7 +3841,7 @@ unsafe extern "C" fn pqdownheap(
     (*s).heap[k as usize] = v;
 }
 
-unsafe extern "C" fn gen_bitlen(
+unsafe fn gen_bitlen(
     mut s: *mut crate::src::deflate::deflate_state,
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
@@ -3942,7 +3945,7 @@ unsafe extern "C" fn gen_bitlen(
     }
 }
 
-unsafe extern "C" fn build_tree(
+unsafe fn build_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
@@ -4035,7 +4038,7 @@ unsafe extern "C" fn build_tree(
     );
 }
 
-unsafe extern "C" fn scan_tree(
+unsafe fn scan_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
@@ -4099,7 +4102,7 @@ unsafe extern "C" fn scan_tree(
     }
 }
 
-unsafe extern "C" fn send_tree(
+unsafe fn send_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
@@ -4390,7 +4393,7 @@ unsafe extern "C" fn send_tree(
     }
 }
 
-unsafe extern "C" fn build_bl_tree(
+unsafe fn build_bl_tree(
     mut s: *mut crate::src::deflate::deflate_state,
 ) -> ::core::ffi::c_int {
     let mut max_blindex: ::core::ffi::c_int = 0;
@@ -4431,7 +4434,7 @@ unsafe extern "C" fn build_bl_tree(
     return max_blindex;
 }
 
-unsafe extern "C" fn send_all_trees(
+unsafe fn send_all_trees(
     mut s: *mut crate::src::deflate::deflate_state,
     mut lcodes: ::core::ffi::c_int,
     mut dcodes: ::core::ffi::c_int,
@@ -4665,7 +4668,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     _tr_align(s)
 }
-unsafe extern "C" fn compress_block(
+unsafe fn compress_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut ltree: *const crate::src::deflate::ct_data,
     mut dtree: *const crate::src::deflate::ct_data,
@@ -4901,7 +4904,7 @@ unsafe extern "C" fn compress_block(
     };
 }
 
-unsafe extern "C" fn detect_data_type(
+unsafe fn detect_data_type(
     mut s: *mut crate::src::deflate::deflate_state,
 ) -> ::core::ffi::c_int {
     let mut block_mask: ::core::ffi::c_ulong = 0xf3ffc07f as ::core::ffi::c_ulong;
