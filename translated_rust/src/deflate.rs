@@ -2574,6 +2574,29 @@ fn gzip_default_xfl(
     }
 }
 
+fn gzip_default_header_bytes(
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> [crate::stdlib::Bytef; 10] {
+    [31, 139, 8, 0, 0, 0, 0, 0, gzip_default_xfl(level, strategy), 3]
+}
+
+fn gzip_trailer_bytes(
+    adler: crate::stdlib::uLong,
+    total_in: crate::stdlib::uLong,
+) -> [crate::stdlib::Bytef; 8] {
+    [
+        adler as crate::stdlib::Byte,
+        (adler >> 8) as crate::stdlib::Byte,
+        (adler >> 16) as crate::stdlib::Byte,
+        (adler >> 24) as crate::stdlib::Byte,
+        total_in as crate::stdlib::Byte,
+        (total_in >> 8) as crate::stdlib::Byte,
+        (total_in >> 16) as crate::stdlib::Byte,
+        (total_in >> 24) as crate::stdlib::Byte,
+    ]
+}
+
 fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
     flush * 2 - if flush > 4 { 9 } else { 0 }
 }
@@ -2729,47 +2752,28 @@ pub unsafe extern "C" fn deflate(
     }
     if (*s).status == crate::src::deflate::GZIP_STATE {
         (*strm).adler = 0 as crate::stdlib::uLong;
-        let c2rust_fresh0 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.wrapping_add(c2rust_fresh0 as usize) =
-            31 as ::core::ffi::c_int as crate::stdlib::Bytef;
-        let c2rust_fresh1 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.wrapping_add(c2rust_fresh1 as usize) =
-            139 as ::core::ffi::c_int as crate::stdlib::Bytef;
-        let c2rust_fresh2 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.wrapping_add(c2rust_fresh2 as usize) =
-            8 as ::core::ffi::c_int as crate::stdlib::Bytef;
+        let state = &mut *s;
+        let pending_buffer = core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        let layout = pending_storage_layout(state.lit_bufsize);
+        assert!(with_pending_storage(pending_buffer, layout, |storage| {
+            storage.append_pending(&mut state.pending, &[31, 139, 8])
+        })
+        .expect("pending storage layout matches its allocation"));
         if (*s).gzhead.is_null() {
-            let c2rust_fresh3 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.wrapping_add(c2rust_fresh3 as usize) =
-                0 as ::core::ffi::c_int as crate::stdlib::Bytef;
-            let c2rust_fresh4 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.wrapping_add(c2rust_fresh4 as usize) =
-                0 as ::core::ffi::c_int as crate::stdlib::Bytef;
-            let c2rust_fresh5 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.wrapping_add(c2rust_fresh5 as usize) =
-                0 as ::core::ffi::c_int as crate::stdlib::Bytef;
-            let c2rust_fresh6 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.wrapping_add(c2rust_fresh6 as usize) =
-                0 as ::core::ffi::c_int as crate::stdlib::Bytef;
-            let c2rust_fresh7 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.wrapping_add(c2rust_fresh7 as usize) =
-                0 as ::core::ffi::c_int as crate::stdlib::Bytef;
-            let c2rust_fresh8 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.wrapping_add(c2rust_fresh8 as usize) =
-                gzip_default_xfl((*s).level, (*s).strategy);
-            let c2rust_fresh9 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.wrapping_add(c2rust_fresh9 as usize) =
-                3 as ::core::ffi::c_int as crate::stdlib::Bytef;
+            let state = &mut *s;
+            let pending_buffer = core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            let layout = pending_storage_layout(state.lit_bufsize);
+            let header = gzip_default_header_bytes(state.level, state.strategy);
+            assert!(with_pending_storage(pending_buffer, layout, |storage| {
+                storage.append_pending(&mut state.pending, &header[3..])
+            })
+            .expect("pending storage layout matches its allocation"));
             (*s).status = crate::src::deflate::BUSY_STATE;
             flush_pending(strm);
             if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -3100,44 +3104,17 @@ pub unsafe extern "C" fn deflate(
         return crate::zlib_h::Z_STREAM_END;
     }
     if (*s).wrap == 2 as ::core::ffi::c_int {
-        let c2rust_fresh25 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh25 as isize) =
-            ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh26 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh26 as isize) =
-            ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh27 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh27 as isize) =
-            ((*strm).adler >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh28 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh28 as isize) =
-            ((*strm).adler >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh29 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh29 as isize) =
-            ((*strm).total_in & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh30 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh30 as isize) =
-            ((*strm).total_in >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh31 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh31 as isize) =
-            ((*strm).total_in >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh32 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh32 as isize) =
-            ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
+        let state = &mut *s;
+        let pending_buffer = core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        let layout = pending_storage_layout(state.lit_bufsize);
+        let trailer = gzip_trailer_bytes((*strm).adler, (*strm).total_in);
+        assert!(with_pending_storage(pending_buffer, layout, |storage| {
+            storage.append_pending(&mut state.pending, &trailer)
+        })
+        .expect("pending storage layout matches its allocation"));
     } else {
         let state = &mut *s;
         let pending_buffer =
@@ -4643,7 +4620,8 @@ mod tests {
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
         fill_window_state_after_slide, fill_window_zero_range, flush_pending_core,
-        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        gzip_default_header_bytes, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
+        gzip_header_crc_pending_range, gzip_trailer_bytes,
         lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
@@ -5559,6 +5537,26 @@ mod tests {
         assert_eq!(gzip_default_xfl(2, crate::zlib_h::Z_DEFAULT_STRATEGY), 0);
         assert_eq!(gzip_default_xfl(8, crate::zlib_h::Z_DEFAULT_STRATEGY), 0);
         assert_eq!(gzip_default_xfl(6, 2), 4);
+    }
+
+    #[test]
+    fn gzip_default_header_bytes_match_the_fixed_gzip_header() {
+        assert_eq!(
+            gzip_default_header_bytes(6, crate::zlib_h::Z_DEFAULT_STRATEGY),
+            [31, 139, 8, 0, 0, 0, 0, 0, 0, 3]
+        );
+        assert_eq!(
+            gzip_default_header_bytes(9, crate::zlib_h::Z_DEFAULT_STRATEGY),
+            [31, 139, 8, 0, 0, 0, 0, 0, 2, 3]
+        );
+    }
+
+    #[test]
+    fn gzip_trailer_bytes_are_little_endian_checksum_then_size() {
+        assert_eq!(
+            gzip_trailer_bytes(0x1234_5678, 0x9abc_def0),
+            [0x78, 0x56, 0x34, 0x12, 0xf0, 0xde, 0xbc, 0x9a]
+        );
     }
 
     #[test]
