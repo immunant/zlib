@@ -3458,7 +3458,7 @@ fn tr_flush_block_decision(
     }
 }
 
-fn tr_flush_block_impl(
+pub(crate) fn tr_flush_block_impl(
     state: &mut crate::src::deflate::deflate_state,
     data_type: &mut ::core::ffi::c_int,
     pending_buf: &mut [crate::stdlib::Bytef],
