@@ -78,6 +78,39 @@ fn initialize_inflate_back_state(
     state.whave = 0 as ::core::ffi::c_uint;
     state.sane = 1 as ::core::ffi::c_int;
 }
+
+/// Allocate, initialize, and install the opaque inflateBack state through one
+/// named implementation boundary. The stream takes ownership only after its
+/// ABI state field has been installed.
+fn initialize_allocated_inflate_back_state(
+    strm: &mut crate::zlib_h::z_stream,
+    window_bits: ::core::ffi::c_int,
+    window: &mut [::core::ffi::c_uchar],
+) -> ::core::ffi::c_int {
+    // The ABI allocator and its returned raw storage remain confined to this
+    // ownership boundary. Initialize the allocation before exposing it via the
+    // stream's ABI state field.
+    let state = unsafe {
+        Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state
+    };
+    if state.is_null() {
+        return crate::zlib_h::Z_MEM_ERROR;
+    }
+    unsafe {
+        let state = &mut *state;
+        *state = crate::src::inflate::empty_inflate_state();
+        initialize_inflate_back_state(state, window_bits);
+        state.window = window.as_mut_ptr();
+    }
+    strm.state = state.cast::<crate::src::deflate::internal_state>();
+    crate::zlib_h::Z_OK
+}
+
 pub fn inflateBackInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut windowBits: ::core::ffi::c_int,
@@ -103,26 +136,7 @@ pub fn inflateBackInit_(
     let window = window.expect("checked non-null window");
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     crate::src::zutil::install_default_allocators(strm);
-    // The ABI allocator remains the only unsafe boundary in this named
-    // initializer. Its returned allocation is initialized to a valid Rust
-    // value before the inflateBack-specific fields are configured below.
-    let state = unsafe {
-        Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    };
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    strm.state = state as *mut crate::src::deflate::internal_state;
-    let state = unsafe { &mut *state };
-    *state = crate::src::inflate::empty_inflate_state();
-    initialize_inflate_back_state(state, windowBits);
-    state.window = window.as_mut_ptr();
-    return crate::zlib_h::Z_OK;
+    initialize_allocated_inflate_back_state(strm, windowBits, window)
 }
 #[export_name = "inflateBackInit_"]
 
