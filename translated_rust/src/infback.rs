@@ -1806,7 +1806,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    inflateBack(strm.as_mut(), in_0, in_desc, out, out_desc)
+    // SAFETY: this ABI adapter only binds the optional foreign stream
+    // reference. The implementation retains callback validation and all
+    // callback-owned cursor handling.
+    let strm = unsafe { strm.as_mut() };
+    inflateBack(strm, in_0, in_desc, out, out_desc)
 }
 // The ABI forwarder only binds the foreign stream reference. Keep validation
 // and the post-release transition reference-bound; only the configured C
@@ -1849,5 +1853,8 @@ pub fn inflateBackEnd(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::ffi
 pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateBackEnd(strm.as_mut())
+    // SAFETY: this ABI adapter only binds the optional foreign stream
+    // reference before the reference-based teardown dispatcher validates it.
+    let strm = unsafe { strm.as_mut() };
+    inflateBackEnd(strm)
 }
