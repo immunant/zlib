@@ -107,6 +107,14 @@ macro_rules! inflate_distcode {
     }};
 }
 
+macro_rules! inflate_update_header_crc {
+    ($state:expr, $bytes:expr $(,)?) => {{
+        let state = &mut *$state;
+        state.check = crate::src::crc32::crc32_bytes(state.check as crate::stdlib::uLong, $bytes)
+            as ::core::ffi::c_ulong;
+    }};
+}
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 
@@ -705,20 +713,15 @@ pub unsafe extern "C" fn inflate(
                                                                                                             if (*state).wbits == 0 as ::core::ffi::c_uint {
                                                                                                                 (*state).wbits = 15 as ::core::ffi::c_uint;
                                                                                                             }
-                                                                                                            (*state).check = crate::src::crc32::crc32(
+                                                                                                            (*state).check = crate::src::crc32::crc32_bytes(
                                                                                                                 0 as crate::stdlib::uLong,
-                                                                                                                ::core::ptr::null:: <crate::stdlib::Bytef>(),
-                                                                                                                0 as crate::stdlib::uInt,
+                                                                                                                &[],
                                                                                                             ) as ::core::ffi::c_ulong;
                                                                                                             hbuf[0 as ::core::ffi::c_int as usize] = hold
                                                                                                                 as ::core::ffi::c_uchar;
                                                                                                             hbuf[1 as ::core::ffi::c_int as usize] = (hold
                                                                                                                 >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                                            (*state).check = crate::src::crc32::crc32(
-                                                                                                                (*state).check as crate::stdlib::uLong,
-                                                                                                                &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                                                                                                                2 as crate::stdlib::uInt,
-                                                                                                            ) as ::core::ffi::c_ulong;
+                                                                                                            inflate_update_header_crc!(state, &hbuf[..2]);
                                                                                                             hold = 0 as ::core::ffi::c_ulong;
                                                                                                             bits = 0 as ::core::ffi::c_uint;
                                                                                                             (*state).mode = crate::src::inflate::FLAGS;
@@ -829,11 +832,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                                 as ::core::ffi::c_uchar;
                                                                                                             hbuf[1 as ::core::ffi::c_int as usize] = (hold
                                                                                                                 >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                                            (*state).check = crate::src::crc32::crc32(
-                                                                                                                (*state).check as crate::stdlib::uLong,
-                                                                                                                &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                                                                                                                2 as crate::stdlib::uInt,
-                                                                                                            ) as ::core::ffi::c_ulong;
+                                                                                                            inflate_update_header_crc!(state, &hbuf[..2]);
                                                                                                         }
                                                                                                         hold = 0 as ::core::ffi::c_ulong;
                                                                                                         bits = 0 as ::core::ffi::c_uint;
@@ -1266,11 +1265,7 @@ pub unsafe extern "C" fn inflate(
                                                                                         >> 16 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
                                                                                     hbuf[3 as ::core::ffi::c_int as usize] = (hold
                                                                                         >> 24 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                    (*state).check = crate::src::crc32::crc32(
-                                                                                        (*state).check as crate::stdlib::uLong,
-                                                                                        &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                                                                                        4 as crate::stdlib::uInt,
-                                                                                    ) as ::core::ffi::c_ulong;
+                                                                                    inflate_update_header_crc!(state, &hbuf);
                                                                                 }
                                                                                 hold = 0 as ::core::ffi::c_ulong;
                                                                                 bits = 0 as ::core::ffi::c_uint;
@@ -1587,11 +1582,7 @@ pub unsafe extern "C" fn inflate(
                                                                         as usize] = (hold
                                                                         >> 8 as ::core::ffi::c_int)
                                                                         as ::core::ffi::c_uchar;
-                                                                    (*state).check = crate::src::crc32::crc32(
-                                                                        (*state).check as crate::stdlib::uLong,
-                                                                        &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                                                                        2 as crate::stdlib::uInt,
-                                                                    ) as ::core::ffi::c_ulong;
+                                                                    inflate_update_header_crc!(state, &hbuf[..2]);
                                                                 }
                                                                 hold = 0 as ::core::ffi::c_ulong;
                                                                 bits = 0 as ::core::ffi::c_uint;
@@ -1727,13 +1718,7 @@ pub unsafe extern "C" fn inflate(
                                                         hbuf[1 as ::core::ffi::c_int as usize] =
                                                             (hold >> 8 as ::core::ffi::c_int)
                                                                 as ::core::ffi::c_uchar;
-                                                        (*state).check = crate::src::crc32::crc32(
-                                                            (*state).check as crate::stdlib::uLong,
-                                                            &raw mut hbuf
-                                                                as *mut ::core::ffi::c_uchar,
-                                                            2 as crate::stdlib::uInt,
-                                                        )
-                                                            as ::core::ffi::c_ulong;
+                                                        inflate_update_header_crc!(state, &hbuf[..2]);
                                                     }
                                                     hold = 0 as ::core::ffi::c_ulong;
                                                     bits = 0 as ::core::ffi::c_uint;
@@ -1916,12 +1901,11 @@ pub unsafe extern "C" fn inflate(
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                                                 && (*state).wrap & 4 as ::core::ffi::c_int != 0
                                             {
-                                                (*state).check = crate::src::crc32::crc32(
-                                                    (*state).check as crate::stdlib::uLong,
-                                                    next,
-                                                    copy as crate::stdlib::uInt,
-                                                )
-                                                    as ::core::ffi::c_ulong;
+                                                let input_start = in_0.wrapping_sub(have) as usize;
+                                                inflate_update_header_crc!(
+                                                    state,
+                                                    &input[input_start..input_start + copy as usize],
+                                                );
                                             }
                                             have = have.wrapping_sub(copy);
                                             next = next.offset(copy as isize);
@@ -1990,12 +1974,11 @@ pub unsafe extern "C" fn inflate(
                                 if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                                     && (*state).wrap & 4 as ::core::ffi::c_int != 0
                                 {
-                                    (*state).check = crate::src::crc32::crc32(
-                                        (*state).check as crate::stdlib::uLong,
-                                        next,
-                                        copy as crate::stdlib::uInt,
-                                    )
-                                        as ::core::ffi::c_ulong;
+                                    let input_start = in_0.wrapping_sub(have) as usize;
+                                    inflate_update_header_crc!(
+                                        state,
+                                        &input[input_start..input_start + copy as usize],
+                                    );
                                 }
                                 have = have.wrapping_sub(copy);
                                 next = next.offset(copy as isize);
@@ -2112,11 +2095,11 @@ pub unsafe extern "C" fn inflate(
                         if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                             && (*state).wrap & 4 as ::core::ffi::c_int != 0
                         {
-                            (*state).check = crate::src::crc32::crc32(
-                                (*state).check as crate::stdlib::uLong,
-                                next,
-                                copy as crate::stdlib::uInt,
-                            ) as ::core::ffi::c_ulong;
+                            let input_start = in_0.wrapping_sub(have) as usize;
+                            inflate_update_header_crc!(
+                                state,
+                                &input[input_start..input_start + copy as usize],
+                            );
                         }
                         have = have.wrapping_sub(copy);
                         next = next.offset(copy as isize);
@@ -2180,11 +2163,8 @@ pub unsafe extern "C" fn inflate(
                     (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
                 (*(*state).head).done = 1 as ::core::ffi::c_int;
             }
-            (*state).check = crate::src::crc32::crc32(
-                0 as crate::stdlib::uLong,
-                ::core::ptr::null::<crate::stdlib::Bytef>(),
-                0 as crate::stdlib::uInt,
-            ) as ::core::ffi::c_ulong;
+            (*state).check = crate::src::crc32::crc32_bytes(0 as crate::stdlib::uLong, &[])
+                as ::core::ffi::c_ulong;
             (*strm).adler = (*state).check as crate::stdlib::uLong;
             (*state).mode = crate::src::inflate::TYPE;
             continue '_inf_leave;
