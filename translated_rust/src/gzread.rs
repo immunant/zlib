@@ -919,7 +919,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
     let next_index = if state.x.have == 0 {
         0
     } else {
-        state.x.next.offset_from(state.out) as usize
+        (state.x.next as usize).wrapping_sub(state.out as usize)
     };
     let out = ::core::slice::from_raw_parts_mut(
         state.out as *mut crate::stdlib::Bytef,

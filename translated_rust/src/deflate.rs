@@ -687,7 +687,7 @@ macro_rules! deflate_init2_body {
             return crate::zlib_h::Z_MEM_ERROR;
         }
         (*s).sym_buf =
-            (*s).pending_buf.offset((*s).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
+            (*s).pending_buf.wrapping_add((*s).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
         (*s).sym_end = (*s)
             .lit_bufsize
             .wrapping_sub(1 as crate::stdlib::uInt)
@@ -832,7 +832,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
             (*s).block_start = 0 as ::core::ffi::c_long;
             (*s).insert = 0 as crate::stdlib::uInt;
         }
-        dictionary = dictionary.offset(dictLength.wrapping_sub((*s).w_size) as isize);
+        dictionary = dictionary.wrapping_add(dictLength.wrapping_sub((*s).w_size) as usize);
         dictLength = (*s).w_size;
     }
     avail = (*strm).avail_in as ::core::ffi::c_uint;
@@ -850,14 +850,14 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
                 (*s).ins_h,
                 (*s).hash_shift,
                 (*s).hash_mask,
-                *(*s).window.offset(
+                *(*s).window.wrapping_add(
                     str.wrapping_add(3 as crate::stdlib::uInt)
-                        .wrapping_sub(1 as crate::stdlib::uInt) as isize,
+                        .wrapping_sub(1 as crate::stdlib::uInt) as usize,
                 ),
             );
-            *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            *(*s).head.offset((*s).ins_h as isize) =
+            *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
+                *(*s).head.wrapping_add((*s).ins_h as usize);
+            *(*s).head.wrapping_add((*s).ins_h as usize) =
                 str as crate::src::deflate::Pos as crate::src::deflate::Posf;
             str = str.wrapping_add(1);
             n = n.wrapping_sub(1);
@@ -2015,7 +2015,8 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
                 let c2rust_fresh19 = (*s).gzindex;
                 (*s).gzindex = (*s).gzindex.wrapping_add(1);
-                val = *(*(*s).gzhead).name.offset(c2rust_fresh19 as isize) as ::core::ffi::c_int;
+                val = *(*(*s).gzhead).name.wrapping_add(c2rust_fresh19 as usize)
+                    as ::core::ffi::c_int;
                 let pending_buf = ::core::slice::from_raw_parts_mut(
                     (*s).pending_buf,
                     (*s).pending_buf_size as usize,
@@ -2062,8 +2063,8 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
                 let c2rust_fresh21 = (*s).gzindex;
                 (*s).gzindex = (*s).gzindex.wrapping_add(1);
-                val_0 =
-                    *(*(*s).gzhead).comment.offset(c2rust_fresh21 as isize) as ::core::ffi::c_int;
+                val_0 = *(*(*s).gzhead).comment.wrapping_add(c2rust_fresh21 as usize)
+                    as ::core::ffi::c_int;
                 let pending_buf = ::core::slice::from_raw_parts_mut(
                     (*s).pending_buf,
                     (*s).pending_buf_size as usize,
