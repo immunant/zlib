@@ -1102,12 +1102,12 @@ pub unsafe extern "C" fn inflate(
                                                                                                             (*state).check = (if (*state).flags != 0 {
                                                                                                                 crate::src::crc32::crc32_z(
                                                                                                                     (*state).check as crate::stdlib::uLong,
-                                                                                                                    core::slice::from_raw_parts(put.offset(-(out as isize)), out as usize),
+                                                                                                                    core::slice::from_raw_parts(put.wrapping_offset(-(out as isize)), out as usize),
                                                                                                                 )
                                                                                                             } else {
                                                                                                                 crate::src::adler32::adler32_z(
                                                                                                                     (*state).check as crate::stdlib::uLong,
-                                                                                                                    core::slice::from_raw_parts(put.offset(-(out as isize)), out as usize),
+                                                                                                                    core::slice::from_raw_parts(put.wrapping_offset(-(out as isize)), out as usize),
                                                                                                                 )
                                                                                                             }) as ::core::ffi::c_ulong;
                                                                                                             (*strm).adler = (*state).check as crate::stdlib::uLong;
@@ -2309,12 +2309,18 @@ pub unsafe extern "C" fn inflate(
         (*state).check = (if (*state).flags != 0 {
             crate::src::crc32::crc32_z(
                 (*state).check as crate::stdlib::uLong,
-                core::slice::from_raw_parts((*strm).next_out.offset(-(out as isize)), out as usize),
+                core::slice::from_raw_parts(
+                    (*strm).next_out.wrapping_offset(-(out as isize)),
+                    out as usize,
+                ),
             )
         } else {
             crate::src::adler32::adler32_z(
                 (*state).check as crate::stdlib::uLong,
-                core::slice::from_raw_parts((*strm).next_out.offset(-(out as isize)), out as usize),
+                core::slice::from_raw_parts(
+                    (*strm).next_out.wrapping_offset(-(out as isize)),
+                    out as usize,
+                ),
             )
         }) as ::core::ffi::c_ulong;
         (*strm).adler = (*state).check as crate::stdlib::uLong;
