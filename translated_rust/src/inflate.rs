@@ -3102,11 +3102,6 @@ pub fn inflateCopy(
     dest: &mut crate::zlib_h::z_stream,
     source: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
-    // SAFETY: this implementation preserves zlib's raw stream and allocator
-    // protocol. Each raw allocation or stream binding is validated before it
-    // is turned into a reference, and no such reference spans an allocator
-    // callback that may inspect the stream.
-    unsafe {
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -3180,7 +3175,11 @@ pub fn inflateCopy(
     // owner-window binder keeps the source history as a checked slice instead
     // of reopening the saved raw cursor here.
     let source_stream = *source;
-    let copy = &mut *copy;
+    // SAFETY: the configured allocator returned this non-null allocation for
+    // exactly one `inflate_state`; no allocator callback can run after this
+    // binding. All other stream and window access below stays reference- or
+    // slice-based.
+    let copy = unsafe { &mut *copy };
     if window.is_null() {
         inflate_copy_state(dest, &source_stream, copy, &source_state, &plan, None);
     } else {
@@ -3211,7 +3210,6 @@ pub fn inflateCopy(
     dest.state =
         copy as *mut crate::src::inflate::inflate_state as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
-    }
 }
 
 struct InflateCopyPlan {
