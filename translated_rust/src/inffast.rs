@@ -190,6 +190,14 @@ fn fast_dist_action(op: ::core::ffi::c_uint) -> FastDistAction {
     }
 }
 
+fn fast_window_distance_is_invalid(
+    distance_from_window: ::core::ffi::c_uint,
+    window_available: ::core::ffi::c_uint,
+    sane: bool,
+) -> bool {
+    distance_from_window > window_available && sane
+}
+
 pub unsafe extern "C" fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -395,14 +403,12 @@ pub unsafe extern "C" fn inflate_fast(
                     }
                     _ => {
                         op = dist.wrapping_sub(op);
-                        if op > whave {
-                            if (*state).sane != 0 {
-                                (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                                    as *const ::core::ffi::c_char
-                                    as *mut ::core::ffi::c_char;
-                                (*state).mode = crate::src::inflate::BAD;
-                                break;
-                            }
+                        if fast_window_distance_is_invalid(op, whave, (*state).sane != 0) {
+                            (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                                as *const ::core::ffi::c_char
+                                as *mut ::core::ffi::c_char;
+                            (*state).mode = crate::src::inflate::BAD;
+                            break;
                         }
                         from = window.wrapping_add(window_match_start(wsize, wnext, op));
                         if wnext == 0 as ::core::ffi::c_uint {
@@ -572,9 +578,9 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_dist_action, fast_litlen_action, input_remaining_after_read, low_bits,
-        output_cursor_after_write, subtable_offset, unread_input_state, window_match_start,
-        FastDistAction, FastLitLenAction,
+        fast_dist_action, fast_litlen_action, fast_window_distance_is_invalid,
+        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_offset,
+        unread_input_state, window_match_start, FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -583,6 +589,14 @@ mod tests {
         assert_eq!(bit_mask(1), 1);
         assert_eq!(bit_mask(5), 0b1_1111);
         assert_eq!(bit_mask(15), 0x7fff);
+    }
+
+    #[test]
+    fn fast_window_distance_validation_preserves_strict_sane_rule() {
+        assert!(!fast_window_distance_is_invalid(4, 4, true));
+        assert!(!fast_window_distance_is_invalid(3, 4, true));
+        assert!(fast_window_distance_is_invalid(5, 4, true));
+        assert!(!fast_window_distance_is_invalid(5, 4, false));
     }
 
     #[test]
