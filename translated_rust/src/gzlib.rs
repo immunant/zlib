@@ -789,6 +789,56 @@ impl<'input, 'output> GzEmbeddedDeflateDispatch<'input, 'output> {
     ) -> Option<(GzEmbeddedDeflateState, GzEmbeddedDeflateProgress)> {
         self.call.finish_state(self.state, snapshot)
     }
+
+    // Keep the temporary ABI projection behind the complete bounded request.
+    // The callback receives only the two checked buffers and their advertised
+    // extents, then returns scalar stream fields.  This lets the gzip write
+    // loop consume the pointer-free result without reopening either cursor;
+    // replacing the callback with an owned deflate core will not change the
+    // surrounding state machine.
+    pub(crate) fn dispatch(
+        self,
+        invoke: impl FnOnce(
+            &'input [u8],
+            crate::stdlib::uInt,
+            &mut [u8],
+            crate::stdlib::uInt,
+        ) -> GzEmbeddedDeflateResult,
+    ) -> Option<(GzEmbeddedDeflateState, GzEmbeddedDeflateProgress)> {
+        let GzEmbeddedDeflateDispatch { state, call } = self;
+        let GzEmbeddedDeflateCall {
+            input,
+            input_available,
+            mut output,
+        } = call;
+        let output_available = crate::stdlib::uInt::try_from(output.bytes.len()).ok()?;
+        let snapshot = invoke(input, input_available, output.bytes_mut(), output_available);
+        let remaining_input = usize::try_from(snapshot.remaining_input).ok()?;
+        let remaining_output = usize::try_from(snapshot.output_available).ok()?;
+        if remaining_input > input.len() || remaining_output > output.bytes.len() {
+            return None;
+        }
+        let input_used = input_available.checked_sub(snapshot.remaining_input)?;
+        let output_used = output_available.checked_sub(snapshot.output_available)?;
+        let input_available = state.input_available.checked_sub(input_used)?;
+        (input_available == snapshot.remaining_input).then_some((
+            GzEmbeddedDeflateState {
+                input_available,
+                output_available: snapshot.output_available,
+                total_in: snapshot.total_in,
+                total_out: snapshot.total_out,
+            },
+            GzEmbeddedDeflateProgress {
+                result: snapshot.result,
+                remaining_input: snapshot.remaining_input,
+                output_available: snapshot.output_available,
+                input_used,
+                output_used,
+                total_in: snapshot.total_in,
+                total_out: snapshot.total_out,
+            },
+        ))
+    }
 }
 
 impl GzEmbeddedDeflateState {
