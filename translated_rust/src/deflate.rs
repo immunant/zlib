@@ -3380,7 +3380,7 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     end
 }
 fn deflate_copy_state_is_valid(
-    strm: &crate::zlib_h::z_stream_s,
+    allocators_present: bool,
     state: &crate::src::deflate::deflate_state,
 ) -> bool {
     let Ok(window_size) = usize::try_from(state.window_size) else {
@@ -3402,7 +3402,7 @@ fn deflate_copy_state_is_valid(
         return false;
     };
 
-    deflate_params_stream_is_valid(strm)
+    allocators_present
         && deflate_params_state_is_valid(state)
         && state
             .window
@@ -3420,6 +3420,14 @@ fn deflate_copy_state_is_valid(
                 && pending <= buffer.len().saturating_sub(state.pending_out)
                 && buffer.len() == pending_size
         })
+}
+
+/// Safe input prepared at the FFI boundary after its stream and state links
+/// have been converted to Rust references. The state owner has no raw fields,
+/// and allocator validation remains in `deflateCopy`.
+struct DeflateCopySource<'a> {
+    state: &'a crate::src::deflate::deflate_state,
+    allocators_present: bool,
 }
 
 fn deflate_copy_state(
@@ -3545,49 +3553,55 @@ fn deflate_copy_impl(
     Ok(copied_state)
 }
 
-/// Convert ABI stream pointers once before the copy implementation borrows
-/// either stream.  Keeping this adapter separate leaves the exported symbol
-/// as a one-call dispatch while all copy validation remains in the
-/// implementation.
-unsafe fn deflateCopy(
-    dest: crate::zlib_h::z_streamp,
-    source: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    if dest.is_null() || source.is_null() || dest == source {
-        return crate::zlib_h::Z_STREAM_ERROR;
+/// Validate and clone a prepared source stream without touching the
+/// destination. This is deliberately separate from the allocation handoff so
+/// all copy rules are testable without raw pointers or callbacks.
+fn deflateCopy(
+    source: DeflateCopySource<'_>,
+) -> Result<crate::src::deflate::deflate_state, ::core::ffi::c_int> {
+    if !deflate_copy_state_is_valid(source.allocators_present, source.state) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    let source = &*source;
-    if !deflate_params_stream_is_valid(source) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(source_state) = source.state.as_ref() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !deflate_copy_state_is_valid(source, source_state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let copied_state = match deflate_copy_impl(source_state) {
-        Ok(snapshot) => snapshot,
-        Err(error) => return error,
-    };
+    deflate_copy_impl(source.state)
+}
 
-    // Keep the custom allocator paired with the source stream exactly as in
-    // the C ABI.  Every fallible Rust-owned clone above has already succeeded,
-    // so there is no post-allocation cleanup path here.
-    let dest = &mut *dest;
+/// Keep the ABI allocator paired with the source stream exactly as in the C
+/// ABI. Every fallible Rust-owned clone has already succeeded, so there is no
+/// post-allocation cleanup path here.
+unsafe fn deflate_copy_install(
+    dest: &mut crate::zlib_h::z_stream_s,
+    source: &crate::zlib_h::z_stream_s,
+    copied_state: crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
     *dest = *source;
-    let state_memory = dest.zalloc.expect("validated source allocator")(
-        dest.opaque,
-        1,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    )
+    let state_memory = unsafe {
+        dest.zalloc.expect("validated source allocator")(
+            dest.opaque,
+            1,
+            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+        )
+    }
     .cast::<crate::src::deflate::deflate_state>();
     if state_memory.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    core::ptr::write(state_memory, copied_state);
+    unsafe { core::ptr::write(state_memory, copied_state) };
     dest.state = state_memory;
     crate::zlib_h::Z_OK
+}
+
+/// Allocate and install an already-safe copied state. This retains the
+/// callback and ownership transfer outside the FFI wrapper.
+unsafe fn deflate_copy_boundary(
+    dest: &mut crate::zlib_h::z_stream_s,
+    source: &crate::zlib_h::z_stream_s,
+    copy_source: DeflateCopySource<'_>,
+) -> ::core::ffi::c_int {
+    let copied_state = match deflateCopy(copy_source) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return error,
+    };
+    unsafe { deflate_copy_install(dest, source, copied_state) }
 }
 #[export_name = "deflateCopy"]
 
@@ -3595,7 +3609,19 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateCopy(dest, source)
+    if dest.is_null() || source.is_null() || dest == source {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dest = &mut *dest;
+    let source = &*source;
+    let Some(source_state) = source.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let copy_source = DeflateCopySource {
+        state: source_state,
+        allocators_present: source.zalloc.is_some() && source.zfree.is_some(),
+    };
+    deflate_copy_boundary(dest, source, copy_source)
 }
 fn longest_match(
     s: &mut crate::src::deflate::deflate_state,
