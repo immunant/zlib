@@ -506,11 +506,11 @@ pub(crate) unsafe extern "C" fn gz_zero(
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_write(
+unsafe fn gz_write(
     mut state: crate::gzguts_h::gz_statep,
-    mut buf: crate::stdlib::voidpc,
-    mut len: crate::stdlib::z_size_t,
+    mut source: &[u8],
 ) -> crate::stdlib::z_size_t {
+    let mut len = source.len();
     let mut put: crate::stdlib::z_size_t = len;
     let mut ret: ::core::ffi::c_int = 0;
     if len == 0 as crate::stdlib::z_size_t {
@@ -523,7 +523,6 @@ unsafe extern "C" fn gz_write(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    let mut source = ::core::slice::from_raw_parts(buf as *const u8, len);
     if len < state.size as crate::stdlib::z_size_t {
         loop {
             let Some(input) = state.buffers.as_ref().map(|buffers| &buffers.input) else {
@@ -583,17 +582,19 @@ unsafe extern "C" fn gz_write(
     }
     return put;
 }
-pub unsafe extern "C" fn gzwrite(
+#[export_name = "gzwrite"]
+
+pub unsafe extern "C" fn gzwrite_ffi(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     if file.is_null() {
-        return 0 as ::core::ffi::c_int;
+        return 0;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
     if !gzwrite_state_is_valid(state.mode, state.err, state.again) {
-        return 0 as ::core::ffi::c_int;
+        return 0;
     }
     crate::src::gzlib::gz_error_clear(state);
     if !crate::src::gzlib::gz_request_len_fits_int(len) {
@@ -602,45 +603,17 @@ pub unsafe extern "C" fn gzwrite(
             crate::zlib_h::Z_DATA_ERROR,
             b"requested length does not fit in int\0",
         );
-        return 0 as ::core::ffi::c_int;
+        return 0;
     }
-    return gz_write(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_int;
-}
-#[export_name = "gzwrite"]
-
-pub unsafe extern "C" fn gzwrite_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: crate::stdlib::voidpc,
-    mut len: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    gzwrite(file, buf, len)
-}
-pub unsafe extern "C" fn gzfwrite(
-    mut buf: crate::stdlib::voidpc,
-    mut size: crate::stdlib::z_size_t,
-    mut nitems: crate::stdlib::z_size_t,
-    mut file: crate::zlib_h::gzFile,
-) -> crate::stdlib::z_size_t {
-    if file.is_null() {
-        return 0 as crate::stdlib::z_size_t;
+    if len != 0 && buf.is_null() {
+        return 0;
     }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    if !gzwrite_state_is_valid(state.mode, state.err, state.again) {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    crate::src::gzlib::gz_error_clear(state);
-    match gzfwrite_request_len(size, nitems) {
-        None => {
-            crate::src::gzlib::gz_error_static(
-                state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"request does not fit in a size_t\0",
-            );
-            0
-        }
-        Some(0) => 0,
-        Some(len) => gzfwrite_completed_items(gz_write(state, buf, len), size),
-    }
+    let source = if len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(buf as *const u8, len as usize)
+    };
+    gz_write(state, source) as ::core::ffi::c_int
 }
 #[export_name = "gzfwrite"]
 
@@ -650,7 +623,37 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    gzfwrite(buf, size, nitems, file)
+    if file.is_null() {
+        return 0;
+    }
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzwrite_state_is_valid(state.mode, state.err, state.again) {
+        return 0;
+    }
+    crate::src::gzlib::gz_error_clear(state);
+    let len = match gzfwrite_request_len(size, nitems) {
+        Some(len) => len,
+        None => {
+            crate::src::gzlib::gz_error_static(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"request does not fit in a size_t\0",
+            );
+            return 0;
+        }
+    };
+    if len == 0 {
+        return 0;
+    }
+    if len != 0 && buf.is_null() {
+        return 0;
+    }
+    let source = if len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(buf as *const u8, len)
+    };
+    gzfwrite_completed_items(gz_write(state, source), size)
 }
 pub unsafe extern "C" fn gzputc(
     mut file: crate::zlib_h::gzFile,
@@ -711,12 +714,7 @@ pub unsafe extern "C" fn gzputc(
         // below, which flushes it before inserting this byte.
     }
     buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
-    if gz_write(
-        state,
-        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidpc,
-        1 as crate::stdlib::z_size_t,
-    ) != 1 as crate::stdlib::z_size_t
-    {
+    if gz_write(state, &buf) != 1 as crate::stdlib::z_size_t {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
@@ -753,7 +751,7 @@ pub unsafe extern "C" fn gzputs_ffi(
         );
         return -1;
     }
-    let put = gz_write(state, bytes.as_ptr() as crate::stdlib::voidpc, len);
+    let put = gz_write(state, bytes);
     if len != 0 && put == 0 {
         -1
     } else {
