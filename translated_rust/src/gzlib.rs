@@ -864,6 +864,45 @@ pub(crate) fn gz_read_progress(
     }
 }
 
+// A failed fetch can still have produced buffered output.  Classify that
+// state-only result before the read coordinator decides whether to retry the
+// buffer or return the failure to its caller-buffer boundary.
+pub(crate) enum GzReadFetchResult {
+    Retry,
+    Error,
+}
+
+pub(crate) fn gz_read_after_fetch(
+    fetch: ::core::ffi::c_int,
+    buffered: ::core::ffi::c_uint,
+) -> GzReadFetchResult {
+    if fetch == -1 && buffered == 0 {
+        GzReadFetchResult::Error
+    } else {
+        GzReadFetchResult::Retry
+    }
+}
+
+// `gz_decomp()` leaves its produced bytes in the bound output state.  Take
+// and clear that count without involving the caller buffer used for the
+// inflate call.
+pub(crate) fn gz_read_take_decompressed(
+    state: &mut crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_uint {
+    let produced = state.x.have;
+    state.x.have = 0;
+    produced
+}
+
+// Keep the loop's scalar continuation condition separate from the raw caller
+// pointer advance performed by `gz_read()`.
+pub(crate) fn gz_read_should_continue(
+    remaining: crate::stdlib::z_size_t,
+    status: ::core::ffi::c_int,
+) -> bool {
+    remaining != 0 && status == 0
+}
+
 pub(crate) fn gz_read_mark_past(state: &mut crate::gzguts_h::gz_state, remaining: crate::stdlib::z_size_t) {
     if remaining != 0 && state.eof != 0 {
         state.past = 1;

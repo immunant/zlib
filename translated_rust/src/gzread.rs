@@ -489,17 +489,15 @@ fn gz_read(
             }
             crate::src::gzlib::GzReadPlan::End => break 's_140,
             crate::src::gzlib::GzReadPlan::Fetch => {
-                if gz_fetch(state) == -1 as ::core::ffi::c_int
-                    && state.x.have == 0 as ::core::ffi::c_uint
-                {
-                    err = -1 as ::core::ffi::c_int;
-                }
                 // Fetch only fills gzip's internal output buffer.  It has not
                 // yet copied a byte to the caller, so retry before accounting.
-                if err == 0 {
-                    continue 's_140;
+                match crate::src::gzlib::gz_read_after_fetch(gz_fetch(state), state.x.have) {
+                    crate::src::gzlib::GzReadFetchResult::Retry => continue 's_140,
+                    crate::src::gzlib::GzReadFetchResult::Error => {
+                        err = -1 as ::core::ffi::c_int;
+                        break 's_140;
+                    }
                 }
-                break 's_140;
             }
             crate::src::gzlib::GzReadPlan::Copy(chunk) => {
                 n = chunk;
@@ -512,13 +510,12 @@ fn gz_read(
                 state.strm.avail_out = n as crate::stdlib::uInt;
                 state.strm.next_out = buf as *mut crate::stdlib::Bytef;
                 err = gz_decomp(state);
-                n = state.x.have;
-                state.x.have = 0 as ::core::ffi::c_uint;
+                n = crate::src::gzlib::gz_read_take_decompressed(state);
             }
         }
         crate::src::gzlib::gz_read_progress(state, &mut len, &mut got, n, consumed_buffered);
         buf = (buf as *mut crate::stdlib::Bytef).wrapping_add(n as usize) as crate::stdlib::voidp;
-        if !(len != 0 && err == 0) {
+        if !crate::src::gzlib::gz_read_should_continue(len, err) {
             break;
         }
     }
