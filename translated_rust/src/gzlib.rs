@@ -675,6 +675,19 @@ pub(crate) struct GzDecompStep {
     pub(crate) action: GzDecompAction,
 }
 
+// Completing a gzip inflate pass publishes all of the pointer-free state that
+// the ABI boundary must mirror back to `gz_state`.  Keep this as one owned
+// snapshot so the eventual gzip owner can finish a codec operation without
+// exposing individual stream cursor fields to the read layer.
+pub(crate) struct GzDecompFinish {
+    pub(crate) result: ::core::ffi::c_int,
+    pub(crate) input: GzCodecInput,
+    pub(crate) written: crate::stdlib::uInt,
+    pub(crate) junk: ::core::ffi::c_int,
+    pub(crate) eof: ::core::ffi::c_int,
+    pub(crate) how: ::core::ffi::c_int,
+}
+
 // The decompression loop mutates only these scalar gzip fields in response to
 // an inflate result.  Keep that transition with the bounded output accounting
 // so an eventual owned gzip codec can run the loop without borrowing the ABI
@@ -746,24 +759,37 @@ impl GzDecompState {
         step.action
     }
 
-    pub(crate) fn finish(&mut self, result: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    pub(crate) fn finish(mut self, result: ::core::ffi::c_int) -> GzDecompFinish {
         if result == crate::zlib_h::Z_STREAM_END {
             self.junk = 0;
             self.how = crate::gzguts_h::LOOK;
-            0
+            GzDecompFinish {
+                result: 0,
+                input: self.input,
+                written: self.output.written(),
+                junk: self.junk,
+                eof: self.eof,
+                how: self.how,
+            }
         } else if result != crate::zlib_h::Z_OK {
-            -1
+            GzDecompFinish {
+                result: -1,
+                input: self.input,
+                written: self.output.written(),
+                junk: self.junk,
+                eof: self.eof,
+                how: self.how,
+            }
         } else {
-            0
+            GzDecompFinish {
+                result: 0,
+                input: self.input,
+                written: self.output.written(),
+                junk: self.junk,
+                eof: self.eof,
+                how: self.how,
+            }
         }
-    }
-
-    pub(crate) fn written(&self) -> crate::stdlib::uInt {
-        self.output.written()
-    }
-
-    pub(crate) fn fields(&self) -> (::core::ffi::c_int, ::core::ffi::c_int, ::core::ffi::c_int) {
-        (self.junk, self.eof, self.how)
     }
 }
 

@@ -624,13 +624,13 @@ impl GzDecompLoopState<'_> {
 // state.  `inflate` is injected so the only ABI stream projection stays in
 // the caller until the codec owner/view split can remove it as well.
 fn gz_decomp_loop(
-    decomp: &mut crate::src::gzlib::GzDecompState,
+    mut decomp: crate::src::gzlib::GzDecompState,
     state: &mut GzDecompLoopState<'_>,
     mut inflate: impl FnMut(&[u8], &GzCodecInput, crate::stdlib::uInt) -> Option<GzInflateResult>,
-) -> ::core::ffi::c_int {
+) -> crate::src::gzlib::GzDecompFinish {
     let mut result = crate::zlib_h::Z_OK;
     loop {
-        if decomp.needs_input() && state.refill(decomp).is_err() {
+        if decomp.needs_input() && state.refill(&mut decomp).is_err() {
             result = *state.err;
             break;
         }
@@ -828,7 +828,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     // at the beginning of this output span. Retain that boundary value rather
     // than recovering it later with raw-pointer arithmetic.
     let output_start = state.strm.next_out;
-    let result = {
+    let finish = {
         // The stream itself is embedded in the state we already exclusively
         // own. Its cursor projection and the unsafe codec call stay in this
         // small closure; the loop around it is pointer-free.
@@ -845,7 +845,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             path: state.path.as_deref(),
         };
         gz_decomp_loop(
-            &mut decomp,
+            decomp,
             &mut loop_state,
             |input, input_cursor, available_out| {
                 strm.next_in = input
@@ -884,19 +884,17 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             },
         )
     };
-    state.x.have = decomp.written() as ::core::ffi::c_uint;
+    state.x.have = finish.written as ::core::ffi::c_uint;
     state.x.next = output_start;
-    let input = decomp.input();
     let Some(buffer) = state.in_0.as_deref_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    state.strm.next_in = buffer.as_mut_ptr().wrapping_add(input.cursor());
-    state.strm.avail_in = input.available();
-    let (junk, eof, how) = decomp.fields();
-    state.junk = junk;
-    state.eof = eof;
-    state.how = how;
-    result
+    state.strm.next_in = buffer.as_mut_ptr().wrapping_add(finish.input.cursor());
+    state.strm.avail_in = finish.input.available();
+    state.junk = finish.junk;
+    state.eof = finish.eof;
+    state.how = finish.how;
+    finish.result
 }
 
 unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
