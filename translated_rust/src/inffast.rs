@@ -48,10 +48,7 @@ pub use crate::zlib_h::gz_headerp;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
-pub unsafe extern "C" fn inflate_fast(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
-) {
+pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core::ffi::c_uint) {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -77,12 +74,12 @@ pub unsafe extern "C" fn inflate_fast(
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    last = in_0.offset((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
-    out = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as isize));
-    end = out.offset((*strm).avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
+    state = strm.state as *mut crate::src::inflate::inflate_state;
+    in_0 = strm.next_in as *mut ::core::ffi::c_uchar;
+    last = in_0.offset(strm.avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
+    out = strm.next_out as *mut ::core::ffi::c_uchar;
+    beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
+    end = out.offset(strm.avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
     wsize = (*state).wsize;
     whave = (*state).whave;
     wnext = (*state).wnext;
@@ -179,7 +176,7 @@ pub unsafe extern "C" fn inflate_fast(
                             op = dist.wrapping_sub(op);
                             if op > whave {
                                 if (*state).sane != 0 {
-                                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                                    strm.msg = b"invalid distance too far back\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
                                     (*state).mode = crate::src::inflate::BAD;
@@ -340,8 +337,7 @@ pub unsafe extern "C" fn inflate_fast(
                                     as isize,
                             );
                     } else {
-                        (*strm).msg = b"invalid distance code\0".as_ptr()
-                            as *const ::core::ffi::c_char
+                        strm.msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
                         (*state).mode = crate::src::inflate::BAD;
                         break 's_627;
@@ -360,8 +356,7 @@ pub unsafe extern "C" fn inflate_fast(
                 (*state).mode = crate::src::inflate::TYPE;
                 break 's_627;
             } else {
-                (*strm).msg = b"invalid literal/length code\0".as_ptr()
-                    as *const ::core::ffi::c_char
+                strm.msg = b"invalid literal/length code\0".as_ptr() as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
                 (*state).mode = crate::src::inflate::BAD;
                 break 's_627;
@@ -376,14 +371,14 @@ pub unsafe extern "C" fn inflate_fast(
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
-    (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
-    (*strm).next_out = out as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = (if in_0 < last {
+    strm.next_in = in_0 as *mut crate::stdlib::Bytef;
+    strm.next_out = out as *mut crate::stdlib::Bytef;
+    strm.avail_in = (if in_0 < last {
         5 as isize + last.offset_from(in_0)
     } else {
         5 as isize - in_0.offset_from(last)
     }) as ::core::ffi::c_uint as crate::stdlib::uInt;
-    (*strm).avail_out = (if out < end {
+    strm.avail_out = (if out < end {
         257 as isize + end.offset_from(out)
     } else {
         257 as isize - out.offset_from(end)
@@ -397,5 +392,8 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
 ) {
-    inflate_fast(strm, start)
+    let Some(strm) = strm.as_mut() else {
+        return;
+    };
+    unsafe { inflate_fast(strm, start) }
 }

@@ -726,10 +726,7 @@ pub unsafe extern "C" fn inflateBack(
             (*strm).avail_in = have as crate::stdlib::uInt;
             (*state).hold = hold;
             (*state).bits = bits;
-            crate::src::inffast::inflate_fast(
-                strm as *mut crate::zlib_h::z_stream_s,
-                (*state).wsize,
-            );
+            crate::src::inffast::inflate_fast(&mut *strm, (*state).wsize);
             put = (*strm).next_out as *mut ::core::ffi::c_uchar;
             left = (*strm).avail_out as ::core::ffi::c_uint;
             next = (*strm).next_in as *mut ::core::ffi::c_uchar;
