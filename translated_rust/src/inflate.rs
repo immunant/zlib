@@ -3153,24 +3153,45 @@ pub unsafe extern "C" fn inflate_ffi(
             (&mut *state).mode = crate::src::inflate::BAD;
             continue;
         };
-        let mut from = match source {
-            InflateMatchSource::Window { index } => (*state).window.wrapping_add(index as usize),
-            InflateMatchSource::Output { offset } => put.wrapping_sub(offset as usize),
-        };
-        copy = count;
-        left = remaining_output;
-        (*state).length = remaining_length;
-        loop {
-            let c2rust_fresh30 = from;
-            from = from.wrapping_add(1);
-            let c2rust_fresh31 = put;
-            put = put.wrapping_add(1);
-            *c2rust_fresh31 = *c2rust_fresh30;
-            copy = copy.wrapping_sub(1);
-            if !(copy != 0) {
-                break;
+        match source {
+            InflateMatchSource::Output { offset } => {
+                // This source and destination are both within the current
+                // caller output range.  One mutable view is therefore enough
+                // to preserve the byte-at-a-time overlap semantics without
+                // creating aliased Rust references.
+                let output =
+                    core::slice::from_raw_parts_mut(output_start as *mut _, out as usize);
+                let written = inflate_cursor_progress(out, left) as usize;
+                if !inflate_copy_match_from_output(output, written, offset as usize, count as usize) {
+                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                        as *const ::core::ffi::c_char
+                        as *mut ::core::ffi::c_char;
+                    (*state).mode = crate::src::inflate::BAD;
+                    continue;
+                }
+                put = put.wrapping_add(count as usize);
+            }
+            InflateMatchSource::Window { index } => {
+                // `window` can be caller-owned foreign storage and may alias
+                // the output buffer.  Keep this crossing raw until the
+                // persistent window owner can enforce a non-aliasing view.
+                let mut from = (*state).window.wrapping_add(index as usize);
+                copy = count;
+                loop {
+                    let c2rust_fresh30 = from;
+                    from = from.wrapping_add(1);
+                    let c2rust_fresh31 = put;
+                    put = put.wrapping_add(1);
+                    *c2rust_fresh31 = *c2rust_fresh30;
+                    copy = copy.wrapping_sub(1);
+                    if !(copy != 0) {
+                        break;
+                    }
+                }
             }
         }
+        left = remaining_output;
+        (*state).length = remaining_length;
         inflate_apply_match_progress(&mut *state, remaining_length);
     }
     (*strm).next_out = put as *mut crate::stdlib::Bytef;
@@ -4694,6 +4715,53 @@ mod tests {
 
         assert!(inflate_copy_match_from_output(&mut output, 3, 1, 0));
         assert_eq!(output, original);
+    }
+
+    #[test]
+    fn inflate_ffi_uses_safe_output_match_copy_for_a_slow_path_match() {
+        // This zlib stream emits "abc" as literals and then an overlapping
+        // output match.  The small output buffer deliberately keeps it out
+        // of inflate_fast(), exercising the ordinary MATCH path.
+        let mut input = [120, 156, 75, 76, 74, 78, 4, 35, 0, 17, 61, 3, 115];
+        let mut output = [0_u8; 32];
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: input.as_mut_ptr(),
+            avail_in: input.len() as crate::stdlib::uInt,
+            total_in: 0,
+            next_out: output.as_mut_ptr(),
+            avail_out: output.len() as crate::stdlib::uInt,
+            total_out: 0,
+            msg: core::ptr::null_mut(),
+            state: core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(
+            unsafe { super::inflate_ffi(&mut stream, crate::zlib_h::Z_NO_FLUSH) },
+            crate::zlib_h::Z_STREAM_END
+        );
+        assert_eq!(&output[..9], b"abcabcabc");
+        assert_eq!(stream.total_out, 9);
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut stream) },
+            crate::zlib_h::Z_OK
+        );
     }
 
     #[test]
