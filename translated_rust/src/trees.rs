@@ -777,7 +777,7 @@ pub static mut _length_code: [crate::zutil_h::uch; 256] = [
 
 pub mod trees_h {
 
-    pub static mut static_ltree: [crate::src::deflate::ct_data; 288] = [
+    pub static static_ltree: [crate::src::deflate::ct_data; 288] = [
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
                 freq: 12 as crate::zutil_h::ush,
