@@ -259,7 +259,27 @@ macro_rules! gz_comp_at_boundary {
                 } else {
                     ::core::slice::from_raw_parts(state_ref.strm.next_in, input_len)
                 };
-                ret = crate::src::deflate::deflate(&mut state_ref.strm, &mut input, flush);
+                let output_start = state_ref.strm.next_out as usize;
+                let output_len = state_ref.strm.avail_out as usize;
+                let (strm, buffers) = (&mut state_ref.strm, &mut state_ref.buffers);
+                let Some(backing) = buffers
+                    .as_mut()
+                    .and_then(|buffers| buffers.output.as_mut())
+                else {
+                    break 'gz_comp_result -1;
+                };
+                let base = backing.as_mut_ptr() as usize;
+                let Some(start) = output_start.checked_sub(base) else {
+                    break 'gz_comp_result -1;
+                };
+                let Some(end) = start.checked_add(output_len) else {
+                    break 'gz_comp_result -1;
+                };
+                let Some(output) = backing.get_mut(start..end) else {
+                    break 'gz_comp_result -1;
+                };
+                let mut output = crate::src::deflate::DeflateOutput::new(output);
+                ret = crate::src::deflate::deflate(strm, &mut input, &mut output, flush);
                 match crate::src::gzwrite::gz_comp_after_deflate(
                     have,
                     state_ref.strm.avail_out,

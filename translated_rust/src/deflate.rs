@@ -1958,9 +1958,20 @@ macro_rules! deflate_params_at_boundary {
                 } else {
                     ::core::slice::from_raw_parts((*strm).next_in, input_len)
                 };
+                let output_len = (*strm).avail_out as usize;
+                if output_len != 0 && (*strm).next_out.is_null() {
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let output = if output_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut((*strm).next_out, output_len)
+                };
+                let mut output = crate::src::deflate::DeflateOutput::new(output);
                 let err = crate::src::deflate::deflate(
                     &mut *strm,
                     &mut input,
+                    &mut output,
                     crate::zlib_h::Z_BLOCK,
                 );
                 if err == crate::zlib_h::Z_STREAM_ERROR {
@@ -2651,6 +2662,40 @@ enum FlushPendingMark {
     PendingRemains,
 }
 
+/// One bounded caller-output lend for an ordinary `deflate()` transition.
+/// The ABI boundary creates this cursor once; internal flushes only advance
+/// its checked slice offset and synchronize the legacy stream cursor.
+pub struct DeflateOutput<'a> {
+    bytes: &'a mut [crate::stdlib::Byte],
+    used: usize,
+}
+
+impl<'a> DeflateOutput<'a> {
+    pub fn new(bytes: &'a mut [crate::stdlib::Byte]) -> Self {
+        Self { bytes, used: 0 }
+    }
+
+    fn remaining_len(&self) -> usize {
+        self.bytes.len().saturating_sub(self.used)
+    }
+
+    fn remaining_mut(&mut self) -> Option<&mut [crate::stdlib::Byte]> {
+        self.bytes.get_mut(self.used..)
+    }
+
+    fn advance(&mut self, len: usize) -> bool {
+        let Some(next) = self.used.checked_add(len) else {
+            return false;
+        };
+        if next > self.bytes.len() {
+            return false;
+        }
+        self.used = next;
+        true
+    }
+
+}
+
 /// Flush pending output and return its post-flush progress.
 ///
 /// Callers retain ownership of the stream/state records, so this boundary only
@@ -2658,6 +2703,7 @@ enum FlushPendingMark {
 fn flush_pending(
     strm: &mut crate::zlib_h::z_stream,
     s: &mut crate::src::deflate::deflate_state,
+    output: &mut DeflateOutput<'_>,
     mark_last_flush: FlushPendingMark,
 ) -> (crate::stdlib::uInt, Option<crate::zutil_h::ulg>) {
     // The callers already own the validated stream and state records. Only
@@ -2689,7 +2735,7 @@ fn flush_pending(
         let Ok(len) = usize::try_from(len) else {
             return (strm.avail_out, Some(s.pending));
         };
-        if strm.next_out.is_null() || len > strm.avail_out as usize {
+        if len > output.remaining_len() || output.remaining_len() != strm.avail_out as usize {
             return (strm.avail_out, Some(s.pending));
         }
         // `memcpy` required raw cursors even after their bounds had been
@@ -2704,14 +2750,27 @@ fn flush_pending(
         let Some(pending_address) = (s.pending_buf as usize).checked_add(s.pending_out) else {
             return (strm.avail_out, Some(s.pending));
         };
-        if !deflate_spans_are_disjoint(strm.next_out as usize, len, pending_address, len) {
+        let Some(output_buf) = output.remaining_mut() else {
+            return (strm.avail_out, Some(s.pending));
+        };
+        if !deflate_spans_are_disjoint(
+            output_buf.as_mut_ptr() as usize,
+            len,
+            pending_address,
+            len,
+        ) {
             return (strm.avail_out, Some(s.pending));
         }
         let Some(pending) = pending_buf.get(s.pending_out..pending_end) else {
             return (strm.avail_out, Some(s.pending));
         };
-        let output = ::core::slice::from_raw_parts_mut(strm.next_out, len);
-        if !flush_pending_copy_state(output, pending) {
+        let Some(output_slice) = output_buf.get_mut(..len) else {
+            return (strm.avail_out, Some(s.pending));
+        };
+        if !flush_pending_copy_state(output_slice, pending) {
+            return (strm.avail_out, Some(s.pending));
+        }
+        if !output.advance(len) {
             return (strm.avail_out, Some(s.pending));
         }
         // The copied length is bounded by the validated output and pending
@@ -2871,6 +2930,7 @@ fn deflate_reborrow<T: ?Sized>(value: &T) -> &T {
 pub fn deflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     mut input: &mut &[crate::stdlib::Byte],
+    output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     // This legacy dispatcher still has to adopt the callback-owned state,
@@ -2954,7 +3014,7 @@ pub fn deflate(
             if flush_pending(
                 strm_ref,
                 s,
-                FlushPendingMark::OutputFull,
+                output, FlushPendingMark::OutputFull,
             )
             .0 == 0 as crate::stdlib::uInt
             {
@@ -3051,7 +3111,7 @@ pub fn deflate(
             if flush_pending(
                 strm_ref,
                 s,
-                FlushPendingMark::PendingRemains,
+                output, FlushPendingMark::PendingRemains,
             )
             .1 != Some(0)
             {
@@ -3113,7 +3173,7 @@ pub fn deflate(
                 if flush_pending(
                     strm_ref,
                     s,
-                    FlushPendingMark::PendingRemains,
+                    output, FlushPendingMark::PendingRemains,
                 )
                 .1 != Some(0)
                 {
@@ -3169,7 +3229,7 @@ pub fn deflate(
                         if flush_pending(
                             strm_ref,
                             s,
-                            FlushPendingMark::PendingRemains,
+                            output, FlushPendingMark::PendingRemains,
                         )
                         .1 != Some(0)
                         {
@@ -3225,7 +3285,7 @@ pub fn deflate(
                         if flush_pending(
                             strm_ref,
                             s,
-                            FlushPendingMark::PendingRemains,
+                            output, FlushPendingMark::PendingRemains,
                         )
                         .1 != Some(0)
                         {
@@ -3280,7 +3340,7 @@ pub fn deflate(
                         if flush_pending(
                             strm_ref,
                             s,
-                            FlushPendingMark::PendingRemains,
+                            output, FlushPendingMark::PendingRemains,
                         )
                         .1 != Some(0)
                         {
@@ -3317,7 +3377,7 @@ pub fn deflate(
                     if flush_pending(
                         strm_ref,
                         s,
-                        FlushPendingMark::PendingRemains,
+                        output, FlushPendingMark::PendingRemains,
                     )
                     .1 != Some(0)
                     {
@@ -3351,7 +3411,7 @@ pub fn deflate(
             if flush_pending(
                 strm_ref,
                 s,
-                FlushPendingMark::PendingRemains,
+                output, FlushPendingMark::PendingRemains,
             )
             .1 != Some(0)
             {
@@ -3377,11 +3437,11 @@ pub fn deflate(
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
                 match compressor {
-                    DeflateCompressor::Stored => deflate_stored(state, strm_ref, &mut input, flush),
-                    DeflateCompressor::Huffman => deflate_huff(state, strm_ref, &mut input, flush),
-                    DeflateCompressor::Rle => deflate_rle(state, strm_ref, &mut input, flush),
-                    DeflateCompressor::Fast => deflate_fast(state, strm_ref, &mut input, flush),
-                    DeflateCompressor::Slow => deflate_slow(state, strm_ref, &mut input, flush),
+                    DeflateCompressor::Stored => deflate_stored(state, strm_ref, &mut input, output, flush),
+                    DeflateCompressor::Huffman => deflate_huff(state, strm_ref, &mut input, output, flush),
+                    DeflateCompressor::Rle => deflate_rle(state, strm_ref, &mut input, output, flush),
+                    DeflateCompressor::Fast => deflate_fast(state, strm_ref, &mut input, output, flush),
+                    DeflateCompressor::Slow => deflate_slow(state, strm_ref, &mut input, output, flush),
                 }
             };
             if bstate as ::core::ffi::c_uint
@@ -3482,7 +3542,7 @@ pub fn deflate(
                 if flush_pending(
                     strm_ref,
                     s,
-                    FlushPendingMark::OutputFull,
+                    output, FlushPendingMark::OutputFull,
                 )
                 .0 == 0 as crate::stdlib::uInt
                 {
@@ -3534,7 +3594,7 @@ pub fn deflate(
         flush_pending(
             strm_ref,
             s,
-            FlushPendingMark::Never,
+            output, FlushPendingMark::Never,
         );
         let pending_after_flush = {
             let state = deflate_reborrow_mut(s);
@@ -3568,7 +3628,17 @@ pub unsafe extern "C" fn deflate_ffi(
         } else {
             ::core::slice::from_raw_parts((*strm).next_in, input_len)
         };
-        deflate(&mut *strm, &mut input, flush)
+        let output_len = (*strm).avail_out as usize;
+        if output_len != 0 && (*strm).next_out.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let output = if output_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut((*strm).next_out, output_len)
+        };
+        let mut output = DeflateOutput::new(output);
+        deflate(&mut *strm, &mut input, &mut output, flush)
     }
 }
 fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
@@ -4327,6 +4397,7 @@ fn deflate_stored(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // This transitional codec boundary still owns the compatibility-state
@@ -4391,18 +4462,16 @@ fn deflate_stored(
             if !emit_stored_direct_header_state(s, pending_buf, len, last) {
                 return need_more;
             }
-            flush_pending(strm, s, FlushPendingMark::Never);
+            flush_pending(strm, s, output, FlushPendingMark::Never);
             if left != 0 || len != 0 {
                 let Ok(output_len) = usize::try_from(strm.avail_out) else {
                     return need_more;
                 };
-                if output_len != 0 && strm.next_out.is_null() {
+                if output_len != output.remaining_len() {
                     return need_more;
                 }
-                let output = if output_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(strm.next_out, output_len)
+                let Some(output_slice) = output.remaining_mut() else {
+                    return need_more;
                 };
                 let mut output_used = 0usize;
                 if left != 0 {
@@ -4419,7 +4488,7 @@ fn deflate_stored(
                     };
                     let Some(copy) = copy_stored_window_to_output_state(
                         window,
-                        output,
+                        output_slice,
                         s.block_start,
                         left,
                         len,
@@ -4430,9 +4499,6 @@ fn deflate_stored(
                         return need_more;
                     };
                     output_used = copied;
-                    // `copy.copied` is bounded by the output view above. Preserve
-                    // the ABI cursor advance without unsafe pointer arithmetic.
-                    strm.next_out = strm.next_out.wrapping_add(copied);
                     if !record_stored_output_state(
                         &mut strm.avail_out,
                         &mut strm.total_out,
@@ -4444,7 +4510,7 @@ fn deflate_stored(
                     len = copy.remaining;
                 }
                 if len != 0 {
-                    let Some(destination) = output.get_mut(output_used..) else {
+                    let Some(destination) = output_slice.get_mut(output_used..) else {
                         return need_more;
                     };
                     let progress = read_buf(strm, input, destination, len, s.wrap);
@@ -4453,7 +4519,7 @@ fn deflate_stored(
                     // this equals `len`; retaining the returned value keeps a
                     // malformed cursor/input pairing from publishing progress it
                     // did not make.
-                    strm.next_out = strm.next_out.wrapping_add(progress.copied as usize);
+                    output_used = output_used.wrapping_add(progress.copied as usize);
                     if !record_stored_output_state(
                         &mut strm.avail_out,
                         &mut strm.total_out,
@@ -4462,6 +4528,10 @@ fn deflate_stored(
                         return need_more;
                     }
                 }
+                if !output.advance(output_used) {
+                    return need_more;
+                }
+                strm.next_out = strm.next_out.wrapping_add(output_used);
             }
             if last != 0 as ::core::ffi::c_int {
                 break;
@@ -4575,7 +4645,7 @@ fn deflate_stored(
                 if !emit_stored_window_block_state(s, pending_buf, stored, last) {
                     return need_more;
                 }
-                flush_pending(strm, s, FlushPendingMark::Never);
+                flush_pending(strm, s, output, FlushPendingMark::Never);
             }
         }
         return (if last != 0 {
@@ -4590,6 +4660,7 @@ fn deflate_fast(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // The fast loop still needs the legacy state, window, hash, symbol, and
@@ -4767,7 +4838,7 @@ fn deflate_fast(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, FlushPendingMark::Never).0
+                        flush_pending(strm, state, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -4795,7 +4866,7 @@ fn deflate_fast(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, FlushPendingMark::Never).0
+                        flush_pending(strm, state, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -4856,7 +4927,7 @@ fn deflate_fast(
             let avail_out = {
                 let state: &mut crate::src::deflate::deflate_state = s;
                 state.block_start = state.strstart as ::core::ffi::c_long;
-                flush_pending(strm, state, FlushPendingMark::Never).0
+                flush_pending(strm, state, output, FlushPendingMark::Never).0
             };
             if let Some(result) = deflate_post_flush_result(avail_out, last) {
                 return result;
@@ -4873,6 +4944,7 @@ fn deflate_slow(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // Slow parsing still needs the legacy state, hash-table, symbol-buffer,
@@ -5093,7 +5165,7 @@ fn deflate_slow(
             }
             if bflush != 0 {
                 let avail_out = {
-                    flush_pending(strm, s, FlushPendingMark::Never).0
+                    flush_pending(strm, s, output, FlushPendingMark::Never).0
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
@@ -5193,7 +5265,7 @@ fn deflate_slow(
         if let Some(last) = tail_last {
             let avail_out = {
                 s.block_start = s.strstart as ::core::ffi::c_long;
-                flush_pending(strm, s, FlushPendingMark::Never).0
+                flush_pending(strm, s, output, FlushPendingMark::Never).0
             };
             if let Some(result) = deflate_post_flush_result(avail_out, last) {
                 return result;
@@ -5523,6 +5595,7 @@ fn deflate_rle(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // RLE parsing retains the same transitional callback-owned lends as the
@@ -5580,7 +5653,7 @@ fn deflate_rle(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 1);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, FlushPendingMark::Never).0
+                        flush_pending(strm, state, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, true) {
                         return result;
@@ -5591,7 +5664,7 @@ fn deflate_rle(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, FlushPendingMark::Never).0
+                        flush_pending(strm, state, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -5622,7 +5695,7 @@ fn deflate_rle(
                 flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                 let avail_out = {
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(strm, state, FlushPendingMark::Never).0
+                    flush_pending(strm, state, output, FlushPendingMark::Never).0
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
@@ -5636,6 +5709,7 @@ fn deflate_huff(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // The Huffman-only loop still owns transitional raw state, window, and
@@ -5685,7 +5759,7 @@ fn deflate_huff(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 1);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, FlushPendingMark::Never).0
+                        flush_pending(strm, state, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, true) {
                         return result;
@@ -5696,7 +5770,7 @@ fn deflate_huff(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, FlushPendingMark::Never).0
+                        flush_pending(strm, state, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -5729,7 +5803,7 @@ fn deflate_huff(
                 flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                 let avail_out = {
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(strm, state, FlushPendingMark::Never).0
+                    flush_pending(strm, state, output, FlushPendingMark::Never).0
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;

@@ -120,9 +120,17 @@ macro_rules! compress2_z_at_boundary {
             } else {
                 ::core::slice::from_raw_parts(stream.next_in, input_len)
             };
+            let output_len = stream.avail_out as usize;
+            let output = if output_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(stream.next_out, output_len)
+            };
+            let mut output = crate::src::deflate::DeflateOutput::new(output);
             err = crate::src::deflate::deflate(
                 &mut stream,
                 &mut input,
+                &mut output,
                 if sourceLen != 0 {
                     crate::zlib_h::Z_NO_FLUSH
                 } else {
