@@ -98,8 +98,27 @@ pub(crate) fn gz_request_len_fits_int(len: ::core::ffi::c_uint) -> bool {
 /// The scalar portion of gzip open-mode parsing.  The C-string traversal,
 /// allocations, and descriptor setup remain at the ABI boundary.
 #[derive(Clone, Copy)]
+enum GzOpenMode {
+    Read,
+    Write,
+    Append,
+}
+
+impl GzOpenMode {
+    fn as_raw(self) -> ::core::ffi::c_int {
+        match self {
+            Self::Read => crate::gzguts_h::GZ_READ,
+            Self::Write => crate::gzguts_h::GZ_WRITE,
+            Self::Append => crate::gzguts_h::GZ_APPEND,
+        }
+    }
+}
+
+/// The scalar portion of gzip open-mode parsing.  The C-string traversal,
+/// allocations, and descriptor setup remain at the ABI boundary.
+#[derive(Clone, Copy)]
 struct GzOpenOptions {
-    mode: ::core::ffi::c_int,
+    mode: Option<GzOpenMode>,
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
     direct: ::core::ffi::c_int,
@@ -110,7 +129,7 @@ struct GzOpenOptions {
 impl GzOpenOptions {
     fn new() -> Self {
         Self {
-            mode: crate::gzguts_h::GZ_NONE,
+            mode: None,
             level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
             strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
             direct: 0,
@@ -127,6 +146,7 @@ impl GzOpenOptions {
 #[derive(Clone, Copy)]
 struct GzOpenPlan {
     options: GzOpenOptions,
+    mode: GzOpenMode,
     descriptor_flags: ::core::ffi::c_int,
 }
 
@@ -138,9 +158,9 @@ fn gz_open_option_byte(mut options: GzOpenOptions, byte: u8) -> Option<GzOpenOpt
         return Some(options);
     }
     match byte {
-        b'r' => options.mode = crate::gzguts_h::GZ_READ,
-        b'w' => options.mode = crate::gzguts_h::GZ_WRITE,
-        b'a' => options.mode = crate::gzguts_h::GZ_APPEND,
+        b'r' => options.mode = Some(GzOpenMode::Read),
+        b'w' => options.mode = Some(GzOpenMode::Write),
+        b'a' => options.mode = Some(GzOpenMode::Append),
         b'+' => return None,
         b'e' => options.oflag |= crate::stdlib::O_CLOEXEC,
         b'x' => options.exclusive = 1,
@@ -171,42 +191,42 @@ fn gz_open_options(mode: &[u8]) -> Option<GzOpenOptions> {
 /// Reject impossible mode/direct combinations and normalize the default
 /// read mode to transparent-operation probing, matching zlib's open path.
 fn gz_open_options_finalize(mut options: GzOpenOptions) -> Option<GzOpenOptions> {
-    if options.mode == crate::gzguts_h::GZ_NONE {
-        return None;
-    }
-    if options.mode == crate::gzguts_h::GZ_READ {
-        if options.direct == 1 {
-            return None;
+    match options.mode? {
+        GzOpenMode::Read => {
+            if options.direct == 1 {
+                return None;
+            }
+            if options.direct == 0 {
+                options.direct = 1;
+            }
         }
-        if options.direct == 0 {
-            options.direct = 1;
-        }
-    } else if options.direct == -1 {
-        return None;
+        GzOpenMode::Write | GzOpenMode::Append if options.direct == -1 => return None,
+        GzOpenMode::Write | GzOpenMode::Append => {}
     }
     Some(options)
 }
 
 /// Add the access/create flags after mode parsing without touching a file
 /// descriptor or opaque gzip state.
-fn gz_open_descriptor_flags(options: GzOpenOptions) -> ::core::ffi::c_int {
+fn gz_open_descriptor_flags(options: GzOpenOptions, mode: GzOpenMode) -> ::core::ffi::c_int {
     options.oflag
         | crate::stdlib::O_LARGEFILE
-        | if options.mode == crate::gzguts_h::GZ_READ {
-            crate::stdlib::O_RDONLY
-        } else {
-            crate::stdlib::O_WRONLY
-                | crate::stdlib::O_CREAT
-                | if options.exclusive != 0 {
-                    crate::stdlib::O_EXCL
-                } else {
-                    0
-                }
-                | if options.mode == crate::gzguts_h::GZ_WRITE {
-                    crate::stdlib::O_TRUNC
-                } else {
-                    crate::stdlib::O_APPEND
-                }
+        | match mode {
+            GzOpenMode::Read => crate::stdlib::O_RDONLY,
+            GzOpenMode::Write | GzOpenMode::Append => {
+                crate::stdlib::O_WRONLY
+                    | crate::stdlib::O_CREAT
+                    | if options.exclusive != 0 {
+                        crate::stdlib::O_EXCL
+                    } else {
+                        0
+                    }
+                    | if matches!(mode, GzOpenMode::Write) {
+                        crate::stdlib::O_TRUNC
+                    } else {
+                        crate::stdlib::O_APPEND
+                    }
+            }
         }
 }
 
@@ -214,16 +234,18 @@ fn gz_open_descriptor_flags(options: GzOpenOptions) -> ::core::ffi::c_int {
 /// before the FFI boundary allocates state or adopts/opens a descriptor.
 fn gz_open_plan(mode: &[u8]) -> Option<GzOpenPlan> {
     let options = gz_open_options(mode)?;
+    let mode = options.mode?;
     Some(GzOpenPlan {
-        descriptor_flags: gz_open_descriptor_flags(options),
+        descriptor_flags: gz_open_descriptor_flags(options, mode),
         options,
+        mode,
     })
 }
 
 /// Extract the scalar state settings from a parsed plan before the raw open
 /// boundary writes them to its newly allocated ABI state.
 fn gz_open_option_values(
-    options: GzOpenOptions,
+    plan: GzOpenPlan,
 ) -> (
     ::core::ffi::c_int,
     ::core::ffi::c_int,
@@ -231,10 +253,10 @@ fn gz_open_option_values(
     ::core::ffi::c_int,
 ) {
     (
-        options.mode,
-        options.level,
-        options.strategy,
-        options.direct,
+        plan.mode.as_raw(),
+        plan.options.level,
+        plan.options.strategy,
+        plan.options.direct,
     )
 }
 
@@ -332,7 +354,7 @@ unsafe extern "C" fn gz_open(
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     };
-    let (mode, level, strategy, direct) = gz_open_option_values(plan.options);
+    let (mode, level, strategy, direct) = gz_open_option_values(plan);
     (*state).mode = mode;
     (*state).level = level;
     (*state).strategy = strategy;
