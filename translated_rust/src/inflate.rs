@@ -64,6 +64,10 @@ pub const BAD: crate::src::inflate::inflate_mode = 16209;
 pub const MEM: crate::src::inflate::inflate_mode = 16210;
 
 pub const SYNC: crate::src::inflate::inflate_mode = 16211;
+
+const CODE_LENGTH_ORDER: [::core::ffi::c_ushort; 19] = [
+    16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+];
 #[derive(Copy, Clone)]
 #[repr(C)]
 
@@ -626,27 +630,6 @@ pub unsafe extern "C" fn inflate(
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
-    static mut order: [::core::ffi::c_ushort; 19] = [
-        16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        8 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        7 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        9 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        6 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        10 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        5 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        11 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        4 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        12 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        3 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        13 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        2 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        14 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        1 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        15 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-    ];
     if inflateStateCheck(strm) != 0
         || (*strm).next_out.is_null()
         || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
@@ -1117,7 +1100,7 @@ pub unsafe extern "C" fn inflate(
                     }
                     let c2rust_fresh15 = (*state).have;
                     (*state).have = (*state).have.wrapping_add(1);
-                    (*state).lens[order[c2rust_fresh15 as usize] as usize] = (hold
+                    (*state).lens[CODE_LENGTH_ORDER[c2rust_fresh15 as usize] as usize] = (hold
                         as ::core::ffi::c_uint
                         & ((1 as ::core::ffi::c_uint) << 3 as ::core::ffi::c_int)
                             .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -1128,7 +1111,7 @@ pub unsafe extern "C" fn inflate(
                 while (*state).have < 19 as ::core::ffi::c_uint {
                     let c2rust_fresh16 = (*state).have;
                     (*state).have = (*state).have.wrapping_add(1);
-                    (*state).lens[order[c2rust_fresh16 as usize] as usize] =
+                    (*state).lens[CODE_LENGTH_ORDER[c2rust_fresh16 as usize] as usize] =
                         0 as ::core::ffi::c_ushort;
                 }
                 let state = &mut *state;
@@ -2614,9 +2597,17 @@ mod tests {
     use super::{
         apply_window_update, inflate_mark_value, inflate_mode_is_valid, inflate_prime_update,
         inflate_state_metadata_is_valid, inflate_sync_search_core, initial_window_metadata,
-        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD, COPY_1,
-        HEAD, MATCH, SYNC,
+        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD,
+        CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, SYNC,
     };
+
+    #[test]
+    fn code_length_order_matches_deflate_spec() {
+        assert_eq!(
+            CODE_LENGTH_ORDER,
+            [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+        );
+    }
 
     #[test]
     fn inflate_prime_update_preserves_reset_and_zero_bit_requests() {

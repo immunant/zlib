@@ -1,6 +1,6 @@
 // =============== BEGIN trees_h ================
 #[no_mangle]
-pub static mut _dist_code: [crate::zutil_h::uch; 512] = [
+pub static _dist_code: [crate::zutil_h::uch; 512] = [
     0 as ::core::ffi::c_int as crate::zutil_h::uch,
     1 as ::core::ffi::c_int as crate::zutil_h::uch,
     2 as ::core::ffi::c_int as crate::zutil_h::uch,
@@ -516,7 +516,7 @@ pub static mut _dist_code: [crate::zutil_h::uch; 512] = [
 ];
 #[no_mangle]
 
-pub static mut _length_code: [crate::zutil_h::uch; 256] = [
+pub static _length_code: [crate::zutil_h::uch; 256] = [
     0 as ::core::ffi::c_int as crate::zutil_h::uch,
     1 as ::core::ffi::c_int as crate::zutil_h::uch,
     2 as ::core::ffi::c_int as crate::zutil_h::uch,
