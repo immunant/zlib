@@ -1468,6 +1468,130 @@ mod callback_owner {
         (state, request)
     }
 
+    // Stream/state association belongs to the callback owner as well as the
+    // four-buffer projection.  Callers receive only this scoped request;
+    // they never reopen a second callback-storage boundary after the owner
+    // has admitted an operation.
+    pub(super) unsafe fn stream_and_storage<'stream, 'request>(
+        strm: &'stream mut crate::zlib_h::z_stream_s,
+        projection: DeflateStorageProjection<'request>,
+    ) -> Option<(
+        &'stream mut crate::zlib_h::z_stream_s,
+        ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
+        &'stream mut crate::src::deflate::deflate_state,
+        DeflateCallbackStorageRequest<'stream>,
+    )> {
+        if strm.zalloc.is_none() || strm.zfree.is_none() {
+            return None;
+        }
+        // Convert the opaque state handle once, before any operation-specific
+        // dispatch. The resulting typed handle accompanies the scoped state
+        // borrow so teardown does not re-read `strm.state` after projection.
+        let mut state_handle = strm.state?.cast::<crate::src::deflate::deflate_state>();
+        let state = state_handle.as_mut();
+        let admission = admit_deflate_projection(
+            state.status,
+            state.level,
+            state.strategy,
+            state.last_flush,
+            &projection,
+        )?;
+        let dispatch_cursors = admission.dispatch_cursors;
+        let lifecycle = state.callback_storage;
+        let (state, mut storage) = storage_views(state, &projection);
+        if dispatch_cursors {
+            if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
+                strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
+                    .as_ptr()
+                    .cast_mut();
+                return None;
+            }
+            let input = if strm.avail_in == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+            };
+            let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+            storage = storage.with_cursors(DeflateAbiCursors { input, output });
+        }
+        if let DeflateStorageProjection::DictionaryInstall { dictionary, result } = projection {
+            let Some(storage) = storage.into_dictionary_storage() else {
+                return Some((strm, state_handle, state, lifecycle.empty_request()));
+            };
+            let mut dictionary_state = DictionaryState {
+                wrap: state.wrap,
+                status: state.status,
+                lookahead: state.lookahead,
+                w_size: state.w_size,
+                slid: state.slid,
+                strstart: state.strstart,
+                block_start: state.block_start,
+                insert: state.insert,
+                ins_h: state.ins_h,
+                hash_shift: state.hash_shift,
+                hash_mask: state.hash_mask,
+                w_mask: state.w_mask,
+                prev_length: state.prev_length,
+                match_length: state.match_length,
+                match_available: state.match_available,
+                high_water: state.high_water,
+            };
+            let Ok(checksum) = deflateSetDictionary(
+                &mut dictionary_state,
+                storage.window,
+                storage.head,
+                storage.prev,
+                dictionary,
+                strm.adler,
+            ) else {
+                return Some((strm, state_handle, state, lifecycle.empty_request()));
+            };
+            state.wrap = dictionary_state.wrap;
+            state.slid = dictionary_state.slid;
+            state.strstart = dictionary_state.strstart;
+            state.block_start = dictionary_state.block_start;
+            state.insert = dictionary_state.insert;
+            state.ins_h = dictionary_state.ins_h;
+            state.lookahead = dictionary_state.lookahead;
+            state.prev_length = dictionary_state.prev_length;
+            state.match_length = dictionary_state.match_length;
+            state.match_available = dictionary_state.match_available;
+            state.high_water = dictionary_state.high_water;
+            if let Some(checksum) = checksum {
+                strm.adler = checksum;
+            }
+            *result = crate::zlib_h::Z_OK;
+            return Some((strm, state_handle, state, lifecycle.empty_request()));
+        }
+        if let DeflateStorageProjection::DictionaryQuery {
+            dictionary,
+            dict_length,
+            result,
+        } = projection
+        {
+            let Some(window) = storage.window() else {
+                return Some((strm, state_handle, state, storage));
+            };
+            let mut len = state.strstart.wrapping_add(state.lookahead);
+            if len > state.w_size {
+                len = state.w_size;
+            }
+            let len = len as usize;
+            let end = state.strstart.wrapping_add(state.lookahead) as usize;
+            *result = deflate_get_dictionary(
+                DeflateDictionaryRequest {
+                    window,
+                    start: end - len,
+                    len,
+                },
+                dictionary,
+                dict_length,
+            );
+            return Some((strm, state_handle, state, storage));
+        }
+        Some((strm, state_handle, state, storage))
+    }
+
     // The request builder is pointer-free: the lifecycle ledger determines
     // whether the complete scoped view may be used, then hands only the
     // slices required by the operation to deflate's safe cores.
@@ -2330,130 +2454,6 @@ fn admit_deflate_projection(
     Some(DeflateProjectionAdmission { dispatch_cursors })
 }
 
-// The caller first checks and borrows the ABI stream, then this short-lived
-// projection validates its opaque state.  Keeping all returned borrows tied
-// to that stream borrow prevents a state or callback-buffer reference from
-// escaping the ABI call.
-unsafe fn deflate_stream_and_state<'stream, 'request>(
-    strm: &'stream mut crate::zlib_h::z_stream_s,
-    projection: DeflateStorageProjection<'request>,
-) -> Option<(
-    &'stream mut crate::zlib_h::z_stream_s,
-    ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-    &'stream mut crate::src::deflate::deflate_state,
-    DeflateCallbackStorageRequest<'stream>,
-)> {
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
-        return None;
-    }
-    // Convert the opaque state handle once, before any operation-specific
-    // dispatch.  The resulting typed handle accompanies the scoped state
-    // borrow so teardown does not re-read `strm.state` after the projection.
-    let mut state_handle = strm.state?.cast::<crate::src::deflate::deflate_state>();
-    let state = state_handle.as_mut();
-    let admission = admit_deflate_projection(
-        state.status,
-        state.level,
-        state.strategy,
-        state.last_flush,
-        &projection,
-    )?;
-    let dispatch_cursors = admission.dispatch_cursors;
-    let lifecycle = state.callback_storage;
-    let (state, mut storage) = callback_owner::storage_views(state, &projection);
-    if dispatch_cursors {
-        if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
-            strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
-                .as_ptr()
-                .cast_mut();
-            return None;
-        }
-        let input = if strm.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-        };
-        let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
-        storage = storage.with_cursors(DeflateAbiCursors { input, output });
-    }
-    if let DeflateStorageProjection::DictionaryInstall { dictionary, result } = projection {
-        let Some(storage) = storage.into_dictionary_storage() else {
-            return Some((strm, state_handle, state, lifecycle.empty_request()));
-        };
-        let mut dictionary_state = DictionaryState {
-            wrap: state.wrap,
-            status: state.status,
-            lookahead: state.lookahead,
-            w_size: state.w_size,
-            slid: state.slid,
-            strstart: state.strstart,
-            block_start: state.block_start,
-            insert: state.insert,
-            ins_h: state.ins_h,
-            hash_shift: state.hash_shift,
-            hash_mask: state.hash_mask,
-            w_mask: state.w_mask,
-            prev_length: state.prev_length,
-            match_length: state.match_length,
-            match_available: state.match_available,
-            high_water: state.high_water,
-        };
-        let Ok(checksum) = deflateSetDictionary(
-            &mut dictionary_state,
-            storage.window,
-            storage.head,
-            storage.prev,
-            dictionary,
-            strm.adler,
-        ) else {
-            return Some((strm, state_handle, state, lifecycle.empty_request()));
-        };
-        state.wrap = dictionary_state.wrap;
-        state.slid = dictionary_state.slid;
-        state.strstart = dictionary_state.strstart;
-        state.block_start = dictionary_state.block_start;
-        state.insert = dictionary_state.insert;
-        state.ins_h = dictionary_state.ins_h;
-        state.lookahead = dictionary_state.lookahead;
-        state.prev_length = dictionary_state.prev_length;
-        state.match_length = dictionary_state.match_length;
-        state.match_available = dictionary_state.match_available;
-        state.high_water = dictionary_state.high_water;
-        if let Some(checksum) = checksum {
-            strm.adler = checksum;
-        }
-        *result = crate::zlib_h::Z_OK;
-        return Some((strm, state_handle, state, lifecycle.empty_request()));
-    }
-    if let DeflateStorageProjection::DictionaryQuery {
-        dictionary,
-        dict_length,
-        result,
-    } = projection
-    {
-        let Some(window) = storage.window() else {
-            return Some((strm, state_handle, state, storage));
-        };
-        let mut len = state.strstart.wrapping_add(state.lookahead);
-        if len > state.w_size {
-            len = state.w_size;
-        }
-        let len = len as usize;
-        let end = state.strstart.wrapping_add(state.lookahead) as usize;
-        *result = deflate_get_dictionary(
-            DeflateDictionaryRequest {
-                window,
-                start: end - len,
-                len,
-            },
-            dictionary,
-            dict_length,
-        );
-        return Some((strm, state_handle, state, storage));
-    }
-    Some((strm, state_handle, state, storage))
-}
-
 // Insert the initial dictionary strings into the hash chains.  The caller
 // supplies bounded views of the state allocations, so this kernel can keep
 // the cursor arithmetic and table updates entirely pointer-free.
@@ -2740,7 +2740,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     let dictionary =
         ::core::slice::from_raw_parts(dictionary.as_ptr().cast_const(), dictLength as usize);
     let mut result = crate::zlib_h::Z_STREAM_ERROR;
-    let _ = deflate_stream_and_state(
+    let _ = callback_owner::stream_and_storage(
         strm,
         DeflateStorageProjection::DictionaryInstall {
             dictionary,
@@ -2800,7 +2800,7 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
         ))
     };
     let mut result = crate::zlib_h::Z_STREAM_ERROR;
-    let _ = deflate_stream_and_state(
+    let _ = callback_owner::stream_and_storage(
         strm,
         DeflateStorageProjection::DictionaryQuery {
             dictionary,
@@ -3005,7 +3005,7 @@ pub unsafe fn deflateSetHeader(
     head: Option<&crate::zlib_h::gz_header_s>,
 ) -> ::core::ffi::c_int {
     let Some((_strm, _state_handle, state, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+        callback_owner::stream_and_storage(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -5856,7 +5856,8 @@ pub(crate) unsafe fn deflate_scalar_from_abi_stream(
             }),
         ),
     };
-    let Some((strm, _state_handle, state, storage)) = deflate_stream_and_state(strm, projection)
+    let Some((strm, _state_handle, state, storage)) =
+        callback_owner::stream_and_storage(strm, projection)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -6209,7 +6210,7 @@ pub unsafe fn deflateEnd(
     // owner retains both the state allocation and all backing handles through
     // the complete matching-release transaction.
     let Some((strm, state_handle, _state, _)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+        callback_owner::stream_and_storage(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -6268,7 +6269,7 @@ unsafe fn deflate_copy_from_abi_boundary(
     source: &mut crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_int {
     let Some((source, _source_state_handle, ss, source_storage)) =
-        deflate_stream_and_state(source, DeflateStorageProjection::Complete)
+        callback_owner::stream_and_storage(source, DeflateStorageProjection::Complete)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
