@@ -543,20 +543,22 @@ struct GzReadResetFields {
 // This is the pointer-free scalar part of gzip's embedded codec stream that
 // reset and seek transitions currently own.  Keeping it as a separate value
 // starts the stream-owner split without letting an ABI `z_stream` leak into
-// those safe transitions; later work can add the bounded input/output views
-// without re-expanding the counters at every projection boundary.
-struct GzCodecInput {
-    available: crate::stdlib::uInt,
+// those safe transitions.  Carry both availability counters here: reset
+// clears only pending input, while output capacity remains owned by the
+// active codec operation.
+struct GzCodecCounters {
+    available_input: crate::stdlib::uInt,
+    available_output: crate::stdlib::uInt,
     total_in: crate::stdlib::uLong,
     total_out: crate::stdlib::uLong,
 }
 
-impl GzCodecInput {
+impl GzCodecCounters {
     // zlib reset clears pending input but deliberately retains the stream's
     // cumulative counters.  Keep that distinction in the safe projection so
     // a future owned codec state can preserve the same observable values.
     fn reset_input(&mut self) {
-        self.available = 0;
+        self.available_input = 0;
     }
 }
 
@@ -585,7 +587,7 @@ struct GzResetState {
     err: ::core::ffi::c_int,
     msg: Option<Box<[u8]>>,
     pos: crate::stdlib::off64_t,
-    codec_input: GzCodecInput,
+    codec: GzCodecCounters,
 }
 
 // This is the mutable, pointer-free portion of a gzip reset projection.  It
@@ -605,6 +607,7 @@ struct GzResetTarget<'a> {
     msg: &'a mut Option<Box<[u8]>>,
     pos: &'a mut crate::stdlib::off64_t,
     codec_available_input: &'a mut crate::stdlib::uInt,
+    codec_available_output: &'a mut crate::stdlib::uInt,
     codec_total_in: &'a mut crate::stdlib::uLong,
     codec_total_out: &'a mut crate::stdlib::uLong,
 }
@@ -638,7 +641,7 @@ impl GzResetState {
         self.skip = fields.skip;
         gz_clear_error(&mut self.msg, &mut self.err);
         self.pos = fields.pos;
-        self.codec_input.reset_input();
+        self.codec.reset_input();
     }
 }
 
@@ -656,8 +659,9 @@ fn reset_gz_target(mode: ::core::ffi::c_int, target: GzResetTarget<'_>) {
         err: *target.err,
         msg: target.msg.take(),
         pos: *target.pos,
-        codec_input: GzCodecInput {
-            available: *target.codec_available_input,
+        codec: GzCodecCounters {
+            available_input: *target.codec_available_input,
+            available_output: *target.codec_available_output,
             total_in: *target.codec_total_in,
             total_out: *target.codec_total_out,
         },
@@ -680,9 +684,10 @@ fn store_gz_reset_target(target: GzResetTarget<'_>, reset: GzResetState) {
     *target.err = reset.err;
     *target.msg = reset.msg;
     *target.pos = reset.pos;
-    *target.codec_available_input = reset.codec_input.available;
-    *target.codec_total_in = reset.codec_input.total_in;
-    *target.codec_total_out = reset.codec_input.total_out;
+    *target.codec_available_input = reset.codec.available_input;
+    *target.codec_available_output = reset.codec.available_output;
+    *target.codec_total_in = reset.codec.total_in;
+    *target.codec_total_out = reset.codec.total_out;
 }
 
 fn gz_reset_fields(mode: ::core::ffi::c_int) -> GzResetFields {
@@ -870,8 +875,9 @@ impl GzOpenConfig {
             err: crate::zlib_h::Z_OK,
             msg: None,
             pos: 0,
-            codec_input: GzCodecInput {
-                available: 0,
+            codec: GzCodecCounters {
+                available_input: 0,
+                available_output: 0,
                 total_in: 0,
                 total_out: 0,
             },
@@ -1013,11 +1019,11 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
         msg: None,
         strm: crate::zlib_h::z_stream {
             next_in: ::core::ptr::null_mut(),
-            avail_in: initial.reset.codec_input.available,
-            total_in: 0,
+            avail_in: initial.reset.codec.available_input,
+            total_in: initial.reset.codec.total_in,
             next_out: ::core::ptr::null_mut(),
-            avail_out: 0,
-            total_out: 0,
+            avail_out: initial.reset.codec.available_output,
+            total_out: initial.reset.codec.total_out,
             msg: ::core::ptr::null_mut(),
             state: ::core::ptr::null_mut(),
             zalloc: None,
@@ -1164,7 +1170,7 @@ fn gzseek64_state<'a>(
             state.reset.past = 0;
             state.reset.skip = 0;
             gz_clear_error(&mut state.reset.msg, &mut state.reset.err);
-            state.reset.codec_input.available = 0;
+            state.reset.codec.reset_input();
             state.reset.pos = position;
             return (state.reset.pos, state, 0);
         }
@@ -1236,6 +1242,7 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
             msg: &mut state.msg,
             pos: &mut state.x.pos,
             codec_available_input: &mut state.strm.avail_in,
+            codec_available_output: &mut state.strm.avail_out,
             codec_total_in: &mut state.strm.total_in,
             codec_total_out: &mut state.strm.total_out,
         },
@@ -1282,8 +1289,9 @@ pub unsafe extern "C" fn gzseek64(
                 err: state.err,
                 msg: state.msg.take(),
                 pos: state.x.pos,
-                codec_input: GzCodecInput {
-                    available: state.strm.avail_in,
+                codec: GzCodecCounters {
+                    available_input: state.strm.avail_in,
+                    available_output: state.strm.avail_out,
                     total_in: state.strm.total_in,
                     total_out: state.strm.total_out,
                 },
@@ -1309,6 +1317,7 @@ pub unsafe extern "C" fn gzseek64(
             msg: &mut state.msg,
             pos: &mut state.x.pos,
             codec_available_input: &mut state.strm.avail_in,
+            codec_available_output: &mut state.strm.avail_out,
             codec_total_in: &mut state.strm.total_in,
             codec_total_out: &mut state.strm.total_out,
         },
