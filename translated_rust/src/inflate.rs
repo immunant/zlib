@@ -99,6 +99,39 @@ impl distance_table {
         }
     }
 }
+
+#[derive(Copy, Clone)]
+pub enum length_table {
+    Fixed,
+    Dynamic(usize),
+}
+
+impl length_table {
+    pub fn entry(
+        self,
+        codes: &[crate::src::inftrees::code; 1444],
+        index: usize,
+    ) -> crate::src::inftrees::code {
+        const INVALID: crate::src::inftrees::code = crate::src::inftrees::code {
+            op: 64,
+            bits: 0,
+            val: 0,
+        };
+
+        match self {
+            length_table::Fixed => crate::src::inftrees::lenfix
+                .get(index)
+                .copied()
+                .unwrap_or(INVALID),
+            length_table::Dynamic(start) => start
+                .checked_add(index)
+                .and_then(|entry| codes.get(entry))
+                .copied()
+                .unwrap_or(INVALID),
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 
@@ -123,7 +156,7 @@ pub struct inflate_state {
     pub length: ::core::ffi::c_uint,
     pub offset: ::core::ffi::c_uint,
     pub extra: ::core::ffi::c_uint,
-    pub lencode: *const crate::src::inftrees::code,
+    pub lencode: crate::src::inflate::length_table,
     pub distcode: crate::src::inflate::distance_table,
     pub lenbits: ::core::ffi::c_uint,
     pub distbits: ::core::ffi::c_uint,
@@ -233,7 +266,7 @@ pub unsafe extern "C" fn inflateResetKeep(
     (*state).bits = 0 as ::core::ffi::c_uint;
     (*state).next = 0;
     (*state).distcode = crate::src::inflate::distance_table::Dynamic(0);
-    (*state).lencode = &raw mut (*state).codes as *mut crate::src::inftrees::code;
+    (*state).lencode = crate::src::inflate::length_table::Dynamic(0);
     (*state).sane = 1 as ::core::ffi::c_int;
     (*state).back = -1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
@@ -1119,7 +1152,7 @@ pub unsafe extern "C" fn inflate(
                                                                                             0;
                                                                                         let mut table = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                                                                                         (*state).distcode = crate::src::inflate::distance_table::Dynamic(0);
-                                                                                        (*state).lencode = table as *const crate::src::inftrees::code;
+                                                                                        (*state).lencode = crate::src::inflate::length_table::Dynamic(0);
                                                                                         (*state).lenbits = 7 as ::core::ffi::c_uint;
                                                                                         ret = crate::src::inftrees::inflate_table(
                                                                                             crate::src::inftrees::CODES,
@@ -1219,13 +1252,12 @@ pub unsafe extern "C" fn inflate(
                                                                                 )
                                                                         {
                                                                             loop {
-                                                                                here = *(*state)
-                                                                                    .lencode
-                                                                                    .offset(
-                                                                                        (hold as ::core::ffi::c_uint
-                                                                                            & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
-                                                                                                .wrapping_sub(1 as ::core::ffi::c_uint)) as isize,
-                                                                                    );
+                                                                                here = (*state).lencode.entry(
+                                                                                    &(*state).codes,
+                                                                                    (hold as ::core::ffi::c_uint
+                                                                                        & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
+                                                                                            .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
+                                                                                );
                                                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                                                     break;
                                                                                 }
@@ -1400,7 +1432,7 @@ pub unsafe extern "C" fn inflate(
                                                                         } else {
                                                                             (*state).next = 0;
                                                                             let mut table = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                                                                            (*state).lencode = table as *const crate::src::inftrees::code;
+                                                                            (*state).lencode = crate::src::inflate::length_table::Dynamic(0);
                                                                             (*state).lenbits = 9 as ::core::ffi::c_uint;
                                                                             ret = crate::src::inftrees::inflate_table(
                                                                                 crate::src::inftrees::LENS,
@@ -1713,12 +1745,13 @@ pub unsafe extern "C" fn inflate(
                                         } else {
                                             (*state).back = 0 as ::core::ffi::c_int;
                                             loop {
-                                                here = *(*state).lencode.offset(
+                                                here = (*state).lencode.entry(
+                                                    &(*state).codes,
                                                     (hold as ::core::ffi::c_uint
                                                         & ((1 as ::core::ffi::c_uint)
                                                             << (*state).lenbits)
                                                             .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                        as isize,
+                                                        as usize,
                                                 );
                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                     break;
@@ -1742,7 +1775,8 @@ pub unsafe extern "C" fn inflate(
                                             {
                                                 last = here;
                                                 loop {
-                                                    here = *(*state).lencode.offset(
+                                                    here = (*state).lencode.entry(
+                                                        &(*state).codes,
                                                         (last.val as ::core::ffi::c_uint)
                                                             .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
@@ -1756,7 +1790,7 @@ pub unsafe extern "C" fn inflate(
                                                                     ))
                                                                 >> last.bits as ::core::ffi::c_int,
                                                         )
-                                                            as isize,
+                                                            as usize,
                                                     );
                                                     if (last.bits as ::core::ffi::c_int
                                                         + here.bits as ::core::ffi::c_int)
@@ -2577,22 +2611,6 @@ pub unsafe extern "C" fn inflateCopy(
         ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
     );
     (*copy).strm = dest;
-    if (*state).lencode
-        >= &raw mut (*state).codes as *mut crate::src::inftrees::code
-            as *const crate::src::inftrees::code
-        && (*state).lencode
-            <= (&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                .offset(crate::src::inftrees::ENOUGH as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize))
-                as *const crate::src::inftrees::code
-    {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .lencode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as isize,
-        );
-    }
     (*copy).next = (*state).next;
     if !window.is_null() {
         crate::stdlib::memcpy(
