@@ -95,6 +95,21 @@ fn inflate_back_init_config(
     Ok(inflate_back_state_config(window_bits))
 }
 
+// Keep the callback-window shape check value-only so both the ABI adapter and
+// the named decoder agree on the one valid caller-window layout.  In
+// particular, do not derive a slice length from an unchecked `wbits` value at
+// the ABI boundary.
+fn inflate_back_callback_window_len(
+    wbits: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+) -> Option<usize> {
+    if !(8..=15).contains(&wbits) {
+        return None;
+    }
+    let len = 1usize.checked_shl(wbits)?;
+    (len == wsize as usize).then_some(len)
+}
+
 #[derive(Copy, Clone)]
 enum InflateBackBlockType {
     Stored,
@@ -1156,12 +1171,14 @@ pub(crate) fn inflateBack(
     let Some(callback_window) = callback_window else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if callback_window.len() != state.wsize as usize {
+    let Some(window_size) = inflate_back_callback_window_len(state.wbits, state.wsize) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if callback_window.len() != window_size {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     inflate_back_begin_decode(strm, state);
     inflate_back_normalize_initial_input(strm);
-    let window_size = state.wsize as usize;
     let saved_next_out = strm.next_out;
     let saved_avail_out = strm.avail_out;
     let saved_public = (strm.total_in, strm.total_out, strm.data_type, strm.adler);
@@ -1265,13 +1282,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
         };
         (state.window, state.wbits, state.wsize)
     };
-    let callback_window = if !(8..=15).contains(&wbits)
-        || 1usize.checked_shl(wbits) != Some(wsize as usize)
-        || window.is_null()
-    {
-        None
-    } else {
-        Some(unsafe { ::core::slice::from_raw_parts_mut(window, wsize as usize) })
+    let callback_window = match inflate_back_callback_window_len(wbits, wsize) {
+        Some(len) if !window.is_null() => {
+            Some(unsafe { ::core::slice::from_raw_parts_mut(window, len) })
+        }
+        _ => None,
     };
     inflateBack(Some(strm), callback_window, in_0, in_desc, out, out_desc)
 }
