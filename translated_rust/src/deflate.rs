@@ -1536,7 +1536,7 @@ fn lm_initial_state(w_size: crate::stdlib::uInt) -> (crate::zutil_h::ulg, crate:
 }
 
 fn lm_head_clear_len(hash_size: crate::stdlib::uInt) -> crate::__stddef_size_t_h::size_t {
-    (hash_size.wrapping_sub(1 as crate::stdlib::uInt) as crate::__stddef_size_t_h::size_t)
+    (hash_size as crate::__stddef_size_t_h::size_t)
         .wrapping_mul(
             ::core::mem::size_of::<crate::src::deflate::Posf>() as crate::__stddef_size_t_h::size_t
         )
@@ -1544,13 +1544,11 @@ fn lm_head_clear_len(hash_size: crate::stdlib::uInt) -> crate::__stddef_size_t_h
 
 #[derive(Debug, PartialEq, Eq)]
 struct LmHeadResetPlan {
-    last_entry_index: usize,
     clear_len: crate::__stddef_size_t_h::size_t,
 }
 
 fn lm_head_reset_plan(hash_size: crate::stdlib::uInt) -> LmHeadResetPlan {
     LmHeadResetPlan {
-        last_entry_index: hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
         clear_len: lm_head_clear_len(hash_size),
     }
 }
@@ -1600,7 +1598,6 @@ unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
     let plan = lm_reset_plan(state.w_size, state.level);
     let head_reset = lm_head_reset_plan(state.hash_size);
-    *state.head.wrapping_add(head_reset.last_entry_index) = NIL as crate::src::deflate::Posf;
     crate::stdlib::memset(
         state.head as *mut ::core::ffi::c_void,
         0 as ::core::ffi::c_int,
@@ -4747,31 +4744,25 @@ mod tests {
     }
 
     #[test]
-    fn lm_head_reset_plan_preserves_sentinel_index_and_clear_length() {
+    fn lm_head_reset_plan_covers_the_entire_hash_table() {
         let entry_size =
             ::core::mem::size_of::<crate::src::deflate::Posf>() as crate::__stddef_size_t_h::size_t;
 
         assert_eq!(
             lm_head_reset_plan(1),
             super::LmHeadResetPlan {
-                last_entry_index: 0,
-                clear_len: 0,
+                clear_len: entry_size,
             },
         );
         assert_eq!(
             lm_head_reset_plan(17),
             super::LmHeadResetPlan {
-                last_entry_index: 16,
-                clear_len: 16 * entry_size,
+                clear_len: 17 * entry_size,
             },
         );
         assert_eq!(
             lm_head_reset_plan(0),
-            super::LmHeadResetPlan {
-                last_entry_index: crate::stdlib::uInt::MAX as usize,
-                clear_len: (crate::stdlib::uInt::MAX as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(entry_size),
-            },
+            super::LmHeadResetPlan { clear_len: 0 },
         );
     }
 
