@@ -2729,28 +2729,28 @@ pub unsafe extern "C" fn inflateCopy(
             as *const crate::src::inftrees::code
         && (*state).lencode
             <= (&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                .offset(crate::src::inftrees::ENOUGH as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize))
+                .wrapping_add(crate::src::inftrees::ENOUGH.wrapping_sub(1) as usize)
                 as *const crate::src::inftrees::code
     {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
+        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(
             (*state)
                 .lencode
                 .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as ::core::ffi::c_long as isize,
+                as usize,
         );
-        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .distcode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as ::core::ffi::c_long as isize,
-        );
+        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code)
+            .wrapping_add(
+                (*state)
+                    .distcode
+                    .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
+                    as usize,
+            );
     }
-    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
+    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(
         (*state)
             .next
             .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-            as ::core::ffi::c_long as isize,
+            as usize,
     );
     if !window.is_null() {
         crate::stdlib::memcpy(
