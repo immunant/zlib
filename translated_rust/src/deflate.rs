@@ -791,20 +791,24 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null()
-        || (*s).strm != strm
-        || (*s).status != crate::src::deflate::INIT_STATE
-            && (*s).status != crate::src::deflate::GZIP_STATE
-            && (*s).status != crate::src::deflate::EXTRA_STATE
-            && (*s).status != crate::src::deflate::NAME_STATE
-            && (*s).status != crate::src::deflate::COMMENT_STATE
-            && (*s).status != crate::src::deflate::HCRC_STATE
-            && (*s).status != crate::src::deflate::BUSY_STATE
-            && (*s).status != crate::src::deflate::FINISH_STATE
-    {
+    if s.is_null() || (*s).strm != strm || !deflate_status_is_valid((*s).status) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
+}
+
+fn deflate_status_is_valid(status: ::core::ffi::c_int) -> bool {
+    matches!(
+        status,
+        crate::src::deflate::INIT_STATE
+            | crate::src::deflate::GZIP_STATE
+            | crate::src::deflate::EXTRA_STATE
+            | crate::src::deflate::NAME_STATE
+            | crate::src::deflate::COMMENT_STATE
+            | crate::src::deflate::HCRC_STATE
+            | crate::src::deflate::BUSY_STATE
+            | crate::src::deflate::FINISH_STATE
+    )
 }
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
@@ -1603,6 +1607,48 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         (*s).pending_out = (*s).pending_buf;
     }
 }
+
+fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    flush * 2 - if flush > 4 { 9 } else { 0 }
+}
+
+fn deflate_no_progress(
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+    old_flush: ::core::ffi::c_int,
+) -> bool {
+    avail_in == 0 && deflate_flush_rank(flush) <= deflate_flush_rank(old_flush)
+        && flush != crate::zlib_h::Z_FINISH
+}
+
+fn deflate_zlib_level_flags(
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> crate::stdlib::uInt {
+    if strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || level < 2 {
+        0
+    } else if level < 6 {
+        1
+    } else if level == 6 {
+        2
+    } else {
+        3
+    }
+}
+
+fn deflate_gzip_xfl(
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> crate::stdlib::Bytef {
+    if level == 9 {
+        2
+    } else if strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || level < 2 {
+        4
+    } else {
+        0
+    }
+}
+
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -1652,21 +1698,7 @@ pub unsafe extern "C" fn deflate(
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
         }
-    } else if (*strm).avail_in == 0 as crate::stdlib::uInt
-        && flush * 2 as ::core::ffi::c_int
-            - (if flush > 4 as ::core::ffi::c_int {
-                9 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            })
-            <= old_flush * 2 as ::core::ffi::c_int
-                - (if old_flush > 4 as ::core::ffi::c_int {
-                    9 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-        && flush != crate::zlib_h::Z_FINISH
-    {
+    } else if deflate_no_progress((*strm).avail_in, flush, old_flush) {
         (*strm).msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
             || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -1700,16 +1732,7 @@ pub unsafe extern "C" fn deflate(
             (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt).wrapping_add(
                 (*s).w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int,
             ) << 8 as ::core::ffi::c_int;
-        let mut level_flags: crate::stdlib::uInt = 0;
-        if (*s).strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || (*s).level < 2 as ::core::ffi::c_int {
-            level_flags = 0 as crate::stdlib::uInt;
-        } else if (*s).level < 6 as ::core::ffi::c_int {
-            level_flags = 1 as crate::stdlib::uInt;
-        } else if (*s).level == 6 as ::core::ffi::c_int {
-            level_flags = 2 as crate::stdlib::uInt;
-        } else {
-            level_flags = 3 as crate::stdlib::uInt;
-        }
+        let level_flags = deflate_zlib_level_flags((*s).level, (*s).strategy);
         header |= level_flags << 6 as ::core::ffi::c_int;
         if (*s).strstart != 0 as crate::stdlib::uInt {
             header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
@@ -1783,15 +1806,7 @@ pub unsafe extern "C" fn deflate(
             let c2rust_fresh8 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh8 as isize) =
-                (if (*s).level == 9 as ::core::ffi::c_int {
-                    2 as ::core::ffi::c_int
-                } else if (*s).strategy >= 2 as ::core::ffi::c_int
-                    || (*s).level < 2 as ::core::ffi::c_int
-                {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) as crate::stdlib::Bytef;
+                deflate_gzip_xfl((*s).level, (*s).strategy);
             let c2rust_fresh9 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh9 as isize) =
@@ -1849,15 +1864,7 @@ pub unsafe extern "C" fn deflate(
             let c2rust_fresh15 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh15 as isize) =
-                (if (*s).level == 9 as ::core::ffi::c_int {
-                    2 as ::core::ffi::c_int
-                } else if (*s).strategy >= 2 as ::core::ffi::c_int
-                    || (*s).level < 2 as ::core::ffi::c_int
-                {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) as crate::stdlib::Bytef;
+                deflate_gzip_xfl((*s).level, (*s).strategy);
             let c2rust_fresh16 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh16 as isize) =
