@@ -27,76 +27,25 @@ pub extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
     zlibVersion()
 }
+
+// zlib encodes the size of each ABI type in two bits. Keeping that encoding
+// in a value-only helper makes the exported flag calculation independent of
+// the repetitive C-style switch structure.
+fn zlib_size_flag(size: usize, shift: u32) -> crate::stdlib::uLong {
+    let encoded = match size {
+        2 => 0,
+        4 => 1,
+        8 => 2,
+        _ => 3,
+    };
+    (encoded << shift) as crate::stdlib::uLong
+}
+
 pub extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
-    let mut flags: crate::stdlib::uLong = 0;
-    flags = 0 as crate::stdlib::uLong;
-    match ::core::mem::size_of::<crate::stdlib::uInt>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(1 as crate::stdlib::uLong);
-        }
-        8 => {
-            flags = flags.wrapping_add(2 as crate::stdlib::uLong);
-        }
-        _ => {
-            flags = flags.wrapping_add(3 as crate::stdlib::uLong);
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::uLong>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::voidpf>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::off_t>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    return flags;
+    zlib_size_flag(::core::mem::size_of::<crate::stdlib::uInt>(), 0)
+        | zlib_size_flag(::core::mem::size_of::<crate::stdlib::uLong>(), 2)
+        | zlib_size_flag(::core::mem::size_of::<crate::stdlib::voidpf>(), 4)
+        | zlib_size_flag(::core::mem::size_of::<crate::stdlib::off_t>(), 6)
 }
 #[export_name = "zlibCompileFlags"]
 
