@@ -764,13 +764,16 @@ pub unsafe extern "C" fn gzungetc_ffi(
     gzungetc(c, file)
 }
 unsafe fn gzgets(
-    file: crate::zlib_h::gzFile,
+    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
     output: &mut [u8],
 ) -> *mut ::core::ffi::c_char {
-    if file.is_null() || output.is_empty() {
+    if output.is_empty() {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    let Some(mut state) = state else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let state = state.as_mut();
     if state.mode != crate::gzguts_h::GZ_READ {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
@@ -836,7 +839,10 @@ pub unsafe extern "C" fn gzgets_ffi(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize);
-    gzgets(file, output)
+    gzgets(
+        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
+        output,
+    )
 }
 pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
