@@ -76,7 +76,7 @@ pub type Posf = crate::src::deflate::Pos;
 pub type IPos = ::core::ffi::c_uint;
 
 pub type deflate_state = crate::src::deflate::internal_state;
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 
 pub struct internal_state {
@@ -141,6 +141,75 @@ pub struct internal_state {
     pub bi_used: ::core::ffi::c_int,
     pub high_water: crate::zutil_h::ulg,
     pub slid: ::core::ffi::c_int,
+    // `z_stream::state` is opaque at the ABI boundary.  Keep the translated
+    // cursors above while code is migrated, but make their backing allocation
+    // Rust-owned so implementations can borrow slices instead of rebuilding
+    // them from allocator-owned raw pointers.
+    buffers: Option<Box<deflate_buffers>>,
+}
+
+#[derive(Clone)]
+struct deflate_buffers {
+    pending: Vec<crate::stdlib::Bytef>,
+    window: Vec<crate::stdlib::Bytef>,
+    prev: Vec<crate::src::deflate::Posf>,
+    head: Vec<crate::src::deflate::Posf>,
+}
+
+impl deflate_buffers {
+    fn zeroed<T: Default + Clone>(len: usize) -> Result<Vec<T>, ()> {
+        let mut values = Vec::new();
+        values.try_reserve_exact(len).map_err(|_| ())?;
+        values.resize(len, T::default());
+        Ok(values)
+    }
+
+    fn new(w_size: crate::stdlib::uInt, hash_size: crate::stdlib::uInt, lit_bufsize: crate::stdlib::uInt) -> Result<Self, ()> {
+        Ok(Self {
+            pending: Self::zeroed(lit_bufsize as usize * 4)?,
+            window: Self::zeroed(w_size as usize * 2)?,
+            prev: Self::zeroed(w_size as usize)?,
+            head: Self::zeroed(hash_size as usize)?,
+        })
+    }
+}
+
+static EMPTY_STATIC_TREE_DESC: crate::src::deflate::static_tree_desc_s =
+    crate::src::deflate::static_tree_desc_s {
+        static_tree: None,
+        extra_bits: &[],
+        extra_base: 0,
+        elems: 0,
+        max_length: 0,
+    };
+
+const EMPTY_CT_DATA: ct_data_s = ct_data_s {
+    fc: C2Rust_Unnamed_1 { freq: 0 },
+    dl: C2Rust_Unnamed_0 { dad: 0 },
+};
+
+impl Default for internal_state {
+    fn default() -> Self {
+        Self {
+            strm: ::core::ptr::null_mut(), status: 0, pending_buf: ::core::ptr::null_mut(),
+            pending_buf_size: 0, pending_out: ::core::ptr::null_mut(), pending: 0, wrap: 0,
+            gzhead: ::core::ptr::null_mut(), gzindex: 0, method: 0, last_flush: 0, w_size: 0,
+            w_bits: 0, w_mask: 0, window: ::core::ptr::null_mut(), window_size: 0,
+            prev: ::core::ptr::null_mut(), head: ::core::ptr::null_mut(), ins_h: 0, hash_size: 0,
+            hash_bits: 0, hash_mask: 0, hash_shift: 0, block_start: 0, match_length: 0,
+            prev_match: 0, match_available: 0, strstart: 0, match_start: 0, lookahead: 0,
+            prev_length: 0, max_chain_length: 0, max_lazy_match: 0, level: 0, strategy: 0,
+            good_match: 0, nice_match: 0, dyn_ltree: [EMPTY_CT_DATA; 573],
+            dyn_dtree: [EMPTY_CT_DATA; 61], bl_tree: [EMPTY_CT_DATA; 39],
+            l_desc: tree_desc_s { max_code: 0, stat_desc: &EMPTY_STATIC_TREE_DESC },
+            d_desc: tree_desc_s { max_code: 0, stat_desc: &EMPTY_STATIC_TREE_DESC },
+            bl_desc: tree_desc_s { max_code: 0, stat_desc: &EMPTY_STATIC_TREE_DESC },
+            bl_count: [0; 16], heap: [0; 573], heap_len: 0, heap_max: 0, depth: [0; 573],
+            sym_buf: ::core::ptr::null_mut(), lit_bufsize: 0, sym_next: 0, sym_end: 0,
+            opt_len: 0, static_len: 0, matches: 0, insert: 0, bi_buf: 0, bi_valid: 0,
+            bi_used: 0, high_water: 0, slid: 0, buffers: None,
+        }
+    }
 }
 
 pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
@@ -666,90 +735,52 @@ pub fn deflateInit2_(
     if windowBits == 8 as ::core::ffi::c_int {
         windowBits = 9 as ::core::ffi::c_int;
     }
-    s = Some((*strm).zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
-    if s.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    crate::stdlib::memset(
-        s as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
-    (*strm).state = s as *mut crate::src::deflate::internal_state;
-    (*s).strm = strm;
-    (*s).status = crate::src::deflate::INIT_STATE;
-    (*s).wrap = wrap;
-    (*s).gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
-    (*s).w_bits = windowBits as crate::stdlib::uInt;
-    (*s).w_size = ((1 as ::core::ffi::c_int) << (*s).w_bits) as crate::stdlib::uInt;
-    (*s).w_mask = (*s).w_size.wrapping_sub(1 as crate::stdlib::uInt);
-    (*s).hash_bits = (memLevel as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
-    (*s).hash_size = ((1 as ::core::ffi::c_int) << (*s).hash_bits) as crate::stdlib::uInt;
-    (*s).hash_mask = (*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt);
-    (*s).hash_shift = (*s)
+    let mut owned = Box::new(crate::src::deflate::internal_state::default());
+    owned.strm = std::ptr::from_mut(strm);
+    owned.status = crate::src::deflate::INIT_STATE;
+    owned.wrap = wrap;
+    owned.gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+    owned.w_bits = windowBits as crate::stdlib::uInt;
+    owned.w_size = ((1 as ::core::ffi::c_int) << owned.w_bits) as crate::stdlib::uInt;
+    owned.w_mask = owned.w_size.wrapping_sub(1 as crate::stdlib::uInt);
+    owned.hash_bits = (memLevel as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
+    owned.hash_size = ((1 as ::core::ffi::c_int) << owned.hash_bits) as crate::stdlib::uInt;
+    owned.hash_mask = owned.hash_size.wrapping_sub(1 as crate::stdlib::uInt);
+    owned.hash_shift = owned
         .hash_bits
         .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-    (*s).window = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        (*s).w_size,
-        (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-            as crate::stdlib::uInt,
-    ) as *mut crate::stdlib::Bytef;
-    (*s).prev = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        (*s).w_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    (*s).head = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        (*s).hash_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    (*s).high_water = 0 as crate::zutil_h::ulg;
-    (*s).lit_bufsize =
+    owned.high_water = 0 as crate::zutil_h::ulg;
+    owned.lit_bufsize =
         ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        (*s).lit_bufsize,
-        4 as crate::stdlib::uInt,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    (*s).pending_buf_size =
-        ((*s).lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
-    if (*s).window.is_null()
-        || (*s).prev.is_null()
-        || (*s).head.is_null()
-        || (*s).pending_buf.is_null()
-    {
-        (*s).status = crate::src::deflate::FINISH_STATE;
-        (*strm).msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
-            < -6 as ::core::ffi::c_int
-            || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-        {
-            9 as ::core::ffi::c_int
-        } else {
-            2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
-        }) as usize];
-        deflateEnd(strm);
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    (*s).sym_buf = (*s).pending_buf.offset((*s).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
-    (*s).sym_end = (*s)
+    owned.buffers = match crate::src::deflate::deflate_buffers::new(
+        owned.w_size,
+        owned.hash_size,
+        owned.lit_bufsize,
+    ) {
+        Ok(buffers) => Some(Box::new(buffers)),
+        Err(()) => {
+            (*strm).msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
+                < -6 as ::core::ffi::c_int
+                || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+            {
+                9 as ::core::ffi::c_int
+            } else {
+                2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
+            }) as usize];
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+    };
+    owned.sym_end = owned
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_mul(3 as crate::stdlib::uInt);
-    (*s).level = level;
-    (*s).strategy = strategy;
-    (*s).method = method as crate::stdlib::Byte;
+    owned.level = level;
+    owned.strategy = strategy;
+    owned.method = method as crate::stdlib::Byte;
+    s = Box::into_raw(owned);
+    (*strm).state = s as *mut crate::src::deflate::internal_state;
     return deflateReset(strm);
     }
 }
@@ -994,32 +1025,44 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     deflateResetKeep(strm)
 }
 unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
-        .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
-    *(*s)
+    let s = &mut *s;
+    let (pending_buf, window, prev, head, pending_len) = {
+        let buffers = s.buffers.as_mut().expect("deflate buffers initialized");
+        (
+            buffers.pending.as_mut_ptr(),
+            buffers.window.as_mut_ptr(),
+            buffers.prev.as_mut_ptr(),
+            buffers.head.as_mut_ptr(),
+            buffers.pending.len(),
+        )
+    };
+    s.pending_buf = pending_buf;
+    s.pending_buf_size = pending_len as crate::zutil_h::ulg;
+    s.pending_out = pending_buf;
+    s.window = window;
+    s.prev = prev;
+    s.head = head;
+    s.sym_buf = pending_buf.wrapping_add(s.lit_bufsize as usize) as *mut crate::zutil_h::uchf;
+    s.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
+        .wrapping_mul(s.w_size as crate::zutil_h::ulg);
+    s.buffers
+        .as_mut()
+        .expect("deflate buffers initialized")
         .head
-        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-        NIL as crate::src::deflate::Posf;
-    crate::stdlib::memset(
-        (*s).head as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-    );
-    (*s).slid = 0 as ::core::ffi::c_int;
-    (*s).max_lazy_match = configuration_table[(*s).level as usize].max_lazy as crate::stdlib::uInt;
-    (*s).good_match = configuration_table[(*s).level as usize].good_length as crate::stdlib::uInt;
-    (*s).nice_match = configuration_table[(*s).level as usize].nice_length as ::core::ffi::c_int;
-    (*s).max_chain_length =
-        configuration_table[(*s).level as usize].max_chain as crate::stdlib::uInt;
-    (*s).strstart = 0 as crate::stdlib::uInt;
-    (*s).block_start = 0 as ::core::ffi::c_long;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).insert = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*s).ins_h = 0 as crate::stdlib::uInt;
+        .fill(NIL as crate::src::deflate::Posf);
+    s.slid = 0 as ::core::ffi::c_int;
+    s.max_lazy_match = configuration_table[s.level as usize].max_lazy as crate::stdlib::uInt;
+    s.good_match = configuration_table[s.level as usize].good_length as crate::stdlib::uInt;
+    s.nice_match = configuration_table[s.level as usize].nice_length as ::core::ffi::c_int;
+    s.max_chain_length = configuration_table[s.level as usize].max_chain as crate::stdlib::uInt;
+    s.strstart = 0 as crate::stdlib::uInt;
+    s.block_start = 0 as ::core::ffi::c_long;
+    s.lookahead = 0 as crate::stdlib::uInt;
+    s.insert = 0 as crate::stdlib::uInt;
+    s.prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    s.match_length = s.prev_length;
+    s.match_available = 0 as ::core::ffi::c_int;
+    s.ins_h = 0 as crate::stdlib::uInt;
 }
 pub fn deflateReset(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     unsafe {
@@ -2075,35 +2118,9 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    status = (*(*strm).state).status;
-    if !(*(*strm).state).pending_buf.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).pending_buf as crate::stdlib::voidpf,
-        );
-    }
-    if !(*(*strm).state).head.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).head as crate::stdlib::voidpf,
-        );
-    }
-    if !(*(*strm).state).prev.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).prev as crate::stdlib::voidpf,
-        );
-    }
-    if !(*(*strm).state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).window as crate::stdlib::voidpf,
-        );
-    }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
+    let state = Box::from_raw((*strm).state as *mut crate::src::deflate::deflate_state);
+    status = state.status;
+    drop(state);
     (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
@@ -2120,109 +2137,32 @@ pub unsafe extern "C" fn deflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut ds: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut ss: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if deflateStateCheck(source) != 0 || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    ss = (*source).state as *mut crate::src::deflate::deflate_state;
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    ds = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
-    if ds.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    crate::stdlib::memset(
-        ds as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
-    (*dest).state = ds as *mut crate::src::deflate::internal_state;
-    crate::stdlib::memcpy(
-        ds as *mut ::core::ffi::c_void,
-        ss as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
-    (*ds).strm = dest;
-    (*ds).window = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).w_size,
-        (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-            as crate::stdlib::uInt,
-    ) as *mut crate::stdlib::Bytef;
-    (*ds).prev = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).w_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    (*ds).head = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).hash_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    (*ds).pending_buf = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).lit_bufsize,
-        4 as crate::stdlib::uInt,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    if (*ds).window.is_null()
-        || (*ds).prev.is_null()
-        || (*ds).head.is_null()
-        || (*ds).pending_buf.is_null()
-    {
-        deflateEnd(dest);
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    crate::stdlib::memcpy(
-        (*ds).window as *mut ::core::ffi::c_void,
-        (*ss).window as *const ::core::ffi::c_void,
-        (*ss).high_water as crate::__stddef_size_t_h::size_t,
-    );
-    crate::stdlib::memcpy(
-        (*ds).prev as *mut ::core::ffi::c_void,
-        (*ss).prev as *const ::core::ffi::c_void,
-        ((if (*ss).slid != 0 || (*ss).strstart.wrapping_sub((*ss).insert) > (*ds).w_size {
-            (*ds).w_size
-        } else {
-            (*ss).strstart.wrapping_sub((*ss).insert)
-        }) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-    );
-    crate::stdlib::memcpy(
-        (*ds).head as *mut ::core::ffi::c_void,
-        (*ss).head as *const ::core::ffi::c_void,
-        ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-    );
-    (*ds).pending_out = (*ds)
-        .pending_buf
-        .offset((*ss).pending_out.offset_from((*ss).pending_buf) as isize);
-    crate::stdlib::memcpy(
-        (*ds).pending_out as *mut ::core::ffi::c_void,
-        (*ss).pending_out as *const ::core::ffi::c_void,
-        (*ss).pending as crate::__stddef_size_t_h::size_t,
-    );
-    (*ds).sym_buf =
-        (*ds).pending_buf.offset((*ds).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
-    crate::stdlib::memcpy(
-        (*ds).sym_buf as *mut ::core::ffi::c_void,
-        (*ss).sym_buf as *const ::core::ffi::c_void,
-        (*ss).sym_next as crate::__stddef_size_t_h::size_t,
-    );
+    let ss = &*( (*source).state as *const crate::src::deflate::deflate_state);
+    let pending_offset = ss.pending_out.offset_from(ss.pending_buf) as usize;
+    let mut copied = ss.clone();
+    copied.strm = dest;
+    let (pending_buf, window, prev, head, pending_len) = {
+        let buffers = copied.buffers.as_mut().expect("deflate buffers initialized");
+        (
+            buffers.pending.as_mut_ptr(),
+            buffers.window.as_mut_ptr(),
+            buffers.prev.as_mut_ptr(),
+            buffers.head.as_mut_ptr(),
+            buffers.pending.len(),
+        )
+    };
+    copied.pending_buf = pending_buf;
+    copied.pending_buf_size = pending_len as crate::zutil_h::ulg;
+    copied.pending_out = pending_buf.wrapping_add(pending_offset);
+    copied.window = window;
+    copied.prev = prev;
+    copied.head = head;
+    copied.sym_buf = pending_buf.wrapping_add(copied.lit_bufsize as usize) as *mut crate::zutil_h::uchf;
+    *dest = *source;
+    (*dest).state = Box::into_raw(Box::new(copied));
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
