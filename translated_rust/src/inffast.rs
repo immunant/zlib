@@ -247,6 +247,23 @@ fn inflate_fast_impl(
     }
 }
 
+// Once the stream-owned views have been bound, fast inflation is ordinary
+// slice and state work. Keeping this dispatch separate prevents the raw
+// cursor adapter below from acquiring any decoding or result-policy logic.
+fn inflate_fast_bound(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    window: &[crate::stdlib::Bytef],
+    lcode: &[crate::src::inftrees::code],
+    dcode: &[crate::src::inftrees::code],
+    used: usize,
+) {
+    let result = inflate_fast_impl(state, input, output, window, lcode, dcode, used);
+    publish_inflate_fast_result(strm, input, output, result);
+}
+
 pub unsafe fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -282,8 +299,7 @@ pub unsafe fn inflate_fast(
     };
     let lcode = ::core::slice::from_raw_parts(state.lencode, lcode_len);
     let dcode = ::core::slice::from_raw_parts(state.distcode, dcode_len);
-    let result = inflate_fast_impl(state, input, output, window, lcode, dcode, used);
-    publish_inflate_fast_result(strm, input, output, result);
+    inflate_fast_bound(strm, state, input, output, window, lcode, dcode, used);
 }
 #[export_name = "inflate_fast"]
 
