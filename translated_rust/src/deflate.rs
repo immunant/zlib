@@ -1630,17 +1630,36 @@ unsafe extern "C" fn putShortMSB(
     let _ = put_short_msb_state(pending_buf, &mut (*s).pending, b);
 }
 
+fn flush_pending_state(
+    pending_buf_size: crate::zutil_h::ulg,
+    pending: &mut crate::zutil_h::ulg,
+    output_len: crate::stdlib::uInt,
+) -> Option<(::core::ffi::c_uint, bool)> {
+    if *pending > pending_buf_size {
+        return None;
+    }
+    let len = if *pending > output_len as crate::zutil_h::ulg {
+        output_len
+    } else {
+        *pending as ::core::ffi::c_uint
+    };
+    if len == 0 {
+        return Some((0, false));
+    }
+    *pending = pending.checked_sub(len as crate::zutil_h::ulg)?;
+    Some((len, *pending == 0))
+}
+
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
     crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
-    len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
-        (*strm).avail_out as ::core::ffi::c_uint
-    } else {
-        (*s).pending as ::core::ffi::c_uint
+    let Some((len, reset_pending_out)) =
+        flush_pending_state((*s).pending_buf_size, &mut (*s).pending, (*strm).avail_out)
+    else {
+        return;
     };
-    if len == 0 as ::core::ffi::c_uint {
+    if len == 0 {
         return;
     }
     crate::stdlib::memcpy(
@@ -1652,8 +1671,7 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     (*s).pending_out = (*s).pending_out.offset(len as isize);
     (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
     (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
-    (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if (*s).pending == 0 as crate::zutil_h::ulg {
+    if reset_pending_out {
         (*s).pending_out = (*s).pending_buf;
     }
 }
