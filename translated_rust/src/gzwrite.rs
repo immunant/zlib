@@ -823,7 +823,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 }
 
 unsafe fn gz_comp(
-    mut state: crate::gzguts_h::gz_statep,
+    state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
@@ -831,7 +831,6 @@ unsafe fn gz_comp(
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
     let mut max: ::core::ffi::c_uint = gz_comp_max_write_chunk();
-    let state = &mut *state;
     if !gz_buffer_is_initialized(state.size) && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
@@ -1301,6 +1300,7 @@ pub unsafe extern "C" fn gzflush(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
+    let state = &mut *state;
     if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1343,8 +1343,9 @@ pub unsafe extern "C" fn gzsetparams(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
-    strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if !gzsetparams_state_is_usable((*state).mode, (*state).err, (*state).again, (*state).direct) {
+    let state = &mut *state;
+    strm = &raw mut state.strm as crate::zlib_h::z_streamp;
+    if !gzsetparams_state_is_usable(state.mode, state.err, state.again, state.direct) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_error(
@@ -1387,7 +1388,8 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gzclose_mode_is_writable((*state).mode) {
+    let state = &mut *state;
+    if !gzclose_mode_is_writable(state.mode) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let zero_error =
@@ -1420,7 +1422,7 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     );
     crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
     let close_failed = crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int;
-    crate::stdlib::free(state as *mut ::core::ffi::c_void);
+    crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
     return gzclose_w_result(zero_error, finish_error, close_failed);
 }
 #[export_name = "gzclose_w"]
