@@ -149,7 +149,7 @@ pub struct inflate_state {
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
     pub wnext: ::core::ffi::c_uint,
-    pub window: *mut ::core::ffi::c_uchar,
+    pub window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>>,
     pub hold: ::core::ffi::c_ulong,
     pub bits: ::core::ffi::c_uint,
     pub length: ::core::ffi::c_uint,
@@ -391,12 +391,12 @@ fn inflate_reset2_impl(
     let Some((wrap, window_bits)) = inflate_reset2_window_bits(window_bits) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !state.window.is_null() && state.wbits != window_bits {
+    if state.window.is_some() && state.wbits != window_bits {
         let Some(zfree) = strm.zfree else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        unsafe { zfree(strm.opaque, state.window as crate::stdlib::voidpf) };
-        state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        unsafe { zfree(strm.opaque, state.window.unwrap().as_ptr().cast()) };
+        state.window = None;
     }
     state.wrap = wrap;
     state.wbits = window_bits;
@@ -479,7 +479,7 @@ pub unsafe extern "C" fn inflateInit2_(
         ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
     );
     (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    (*state).window = None;
     (*state).mode = crate::src::inflate::HEAD;
     ret = inflateReset2(strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
@@ -583,14 +583,14 @@ unsafe fn updatewindow(
     state: &mut crate::src::inflate::inflate_state,
     end: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    if state.window.is_null() {
-        state.window = Some(zalloc.expect("non-null function pointer"))
+    if state.window.is_none() {
+        state.window = ::core::ptr::NonNull::new(Some(zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             opaque,
             (1 as crate::stdlib::uInt) << state.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
-        if state.window.is_null() {
+        ) as *mut ::core::ffi::c_uchar);
+        if state.window.is_none() {
             return 1 as ::core::ffi::c_int;
         }
     }
@@ -606,7 +606,7 @@ unsafe fn updatewindow(
     }
     // `window` is allocated above (or supplied by inflateBackInit_) with
     // exactly `wsize` bytes.  Its lifetime is managed by the stream state.
-    let window = ::core::slice::from_raw_parts_mut(state.window, wsize);
+    let window = ::core::slice::from_raw_parts_mut(state.window.unwrap().as_ptr(), wsize);
     if end.len() >= wsize {
         window.copy_from_slice(&end[end.len() - wsize..]);
         state.wnext = 0 as ::core::ffi::c_uint;
@@ -2324,11 +2324,11 @@ pub unsafe fn inflate(
             if copy > (*state).wnext {
                 copy = copy.wrapping_sub((*state).wnext);
                 from = (*state)
-                    .window
+                    .window.unwrap().as_ptr()
                     .wrapping_offset((*state).wsize.wrapping_sub(copy) as isize);
             } else {
                 from = (*state)
-                    .window
+                    .window.unwrap().as_ptr()
                     .wrapping_offset((*state).wnext.wrapping_sub(copy) as isize);
             }
             if copy > (*state).length {
@@ -2468,27 +2468,31 @@ pub unsafe extern "C" fn inflate_ffi(
     inflate_from_stream(&mut *strm, flush)
 }
 pub unsafe fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    let state = strm.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *state;
-    if !inflate_state_valid(strm, state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if !state.window.is_null() {
+    // Recover the state through the shared checked conversion.  Copy the
+    // window handle before invoking the allocator, so no Rust borrow of the
+    // state survives either deallocation.
+    let window = match inflate_validate_state(strm) {
+        Some(state) => state.window,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
+    if let Some(window) = window {
         Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             strm.opaque,
-            state.window as crate::stdlib::voidpf,
+            window.as_ptr().cast(),
         );
     }
     Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
         strm.opaque,
-        strm.state as crate::stdlib::voidpf,
+        strm.state.cast(),
     );
-    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    clear_inflate_state(strm);
     crate::zlib_h::Z_OK
 }
+
+fn clear_inflate_state(strm: &mut crate::zlib_h::z_stream_s) {
+    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+}
+
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
@@ -2555,11 +2559,11 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     let window = if whave == 0 {
         None
     } else {
-        if state.window.is_null() {
+        let Some(window) = state.window else {
             return crate::zlib_h::Z_STREAM_ERROR;
-        }
+        };
         Some(::core::slice::from_raw_parts(
-            state.window,
+            window.as_ptr(),
             state.wsize as usize,
         ))
     };
@@ -2794,7 +2798,7 @@ unsafe fn inflate_copy_impl(
 ) -> ::core::ffi::c_int {
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>> = None;
     copy = Some(source.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         source.opaque,
@@ -2804,15 +2808,14 @@ unsafe fn inflate_copy_impl(
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !state.window.is_null() {
-        window = Some(source.zalloc.expect("non-null function pointer"))
+    if state.window.is_some() {
+        window = ::core::ptr::NonNull::new(Some(source.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             source.opaque,
             (1 as crate::stdlib::uInt) << state.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
-        if window.is_null() {
+        ) as *mut ::core::ffi::c_uchar);
+        if window.is_none() {
             Some(source.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 source.opaque, copy as crate::stdlib::voidpf
@@ -2823,10 +2826,14 @@ unsafe fn inflate_copy_impl(
     *dest = *source;
     *copy = *state;
     (*copy).next = state.next;
-    if !window.is_null() {
-        ::core::ptr::copy_nonoverlapping(state.window, window, state.whave as usize);
+    if let Some(window) = window {
+        ::core::ptr::copy_nonoverlapping(
+            state.window.unwrap().as_ptr(),
+            window.as_ptr(),
+            state.whave as usize,
+        );
+        (*copy).window = Some(window);
     }
-    (*copy).window = window;
     dest.state = copy as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
 }

@@ -213,7 +213,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     (*state).dmax = 32768 as ::core::ffi::c_uint;
     (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
     (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
-    (*state).window = window;
+    (*state).window = ::core::ptr::NonNull::new(window);
     (*state).wnext = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
     (*state).sane = 1 as ::core::ffi::c_int;
@@ -926,7 +926,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &mut *state;
-    if state.window.is_null() || state.wsize == 0 {
+    if state.window.is_none() || state.wsize == 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
@@ -938,7 +938,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
             strm.avail_in as usize,
         ))
     };
-    let window = ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize);
+    let window = ::core::slice::from_raw_parts_mut(
+        state.window.unwrap().as_ptr(),
+        state.wsize as usize,
+    );
     let mut input = BackInput::new(
         move || {
             let Some(callback) = in_0 else {

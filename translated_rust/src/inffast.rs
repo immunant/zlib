@@ -86,7 +86,7 @@ pub unsafe extern "C" fn inflate_fast(
     wsize = (*state).wsize;
     whave = (*state).whave;
     wnext = (*state).wnext;
-    window = (*state).window;
+    window = (*state).window.unwrap().as_ptr();
     hold = (*state).hold;
     bits = (*state).bits;
     lcode = (*state).lencode;
