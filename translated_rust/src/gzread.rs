@@ -256,6 +256,56 @@ fn gz_look_step(state: GzLookState<'_>) -> Result<GzLookAction, ()> {
     Ok(GzLookAction::Copy { have: input.len() })
 }
 
+// Fetch dispatch is a scalar gzip state-machine decision.  Keep it outside
+// the ABI-shaped state so a later gzip owner can drive LOOK/COPY/GZIP without
+// exposing its stream or buffered cursor to the dispatch layer.
+struct GzFetchState {
+    how: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+}
+
+enum GzFetchAction {
+    Look,
+    Copy,
+    Gzip,
+    Corrupt,
+}
+
+impl GzFetchState {
+    fn new(
+        how: ::core::ffi::c_int,
+        have: ::core::ffi::c_uint,
+        eof: ::core::ffi::c_int,
+        avail_in: crate::stdlib::uInt,
+    ) -> Self {
+        Self {
+            how,
+            have,
+            eof,
+            avail_in,
+        }
+    }
+
+    fn action(&self) -> GzFetchAction {
+        match self.how {
+            crate::gzguts_h::LOOK => GzFetchAction::Look,
+            crate::gzguts_h::COPY => GzFetchAction::Copy,
+            crate::gzguts_h::GZIP => GzFetchAction::Gzip,
+            _ => GzFetchAction::Corrupt,
+        }
+    }
+
+    // A fetch continues only when the selected operation produced no buffered
+    // bytes and either needs another read or still has codec input to consume.
+    // This preserves the original check while keeping it independent of the
+    // ABI stream projection.
+    fn needs_more(&self) -> bool {
+        self.have == 0 && (self.eof == 0 || self.avail_in != 0)
+    }
+}
+
 // Skipping buffered gzip output needs only a checked buffer offset and scalar
 // progress.  Keep that transition independent of the ABI cursor so the
 // eventual gzip owner can reuse it after the cursor becomes an offset rather
@@ -816,8 +866,9 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
 
 unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
-        match state.how {
-            crate::gzguts_h::LOOK => {
+        let fetch = GzFetchState::new(state.how, state.x.have, state.eof, state.strm.avail_in);
+        match fetch.action() {
+            GzFetchAction::Look => {
                 if gz_look(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
@@ -825,7 +876,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                     return 0 as ::core::ffi::c_int;
                 }
             }
-            crate::gzguts_h::COPY => {
+            GzFetchAction::Copy => {
                 let (ret, have) = match gz_copy_load(GzCopyLoadState {
                     output: &mut state.out,
                     fd: state.fd.as_ref().unwrap(),
@@ -848,12 +899,12 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 state.x.next = state.out.as_deref_mut().unwrap().as_mut_ptr();
                 return 0 as ::core::ffi::c_int;
             }
-            crate::gzguts_h::GZIP => {
+            GzFetchAction::Gzip => {
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
-            _ => {
+            GzFetchAction::Corrupt => {
                 crate::src::gzlib::gz_set_error(
                     &mut state.msg,
                     &mut state.err,
@@ -866,8 +917,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if !(state.x.have == 0 as ::core::ffi::c_uint
-            && (state.eof == 0 || state.strm.avail_in != 0))
+        if !GzFetchState::new(state.how, state.x.have, state.eof, state.strm.avail_in).needs_more()
         {
             break;
         }
