@@ -640,11 +640,9 @@ pub struct config_s {
 }
 #[no_mangle]
 
-pub static mut deflate_copyright: [::core::ffi::c_char; 70] = unsafe {
-    ::core::mem::transmute::<[u8; 70], [::core::ffi::c_char; 70]>(
-        *b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0",
-    )
-};
+pub static deflate_copyright: [::core::ffi::c_char; 70] = crate::internal::c_char_array(
+    b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0",
+);
 
 pub const NIL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 

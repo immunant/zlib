@@ -14,6 +14,15 @@ pub mod __stddef_size_t_h {
     pub type size_t = usize;
 }
 pub mod internal {
+    pub const fn c_char_array<const N: usize>(bytes: &[u8; N]) -> [::core::ffi::c_char; N] {
+        let mut chars = [0; N];
+        let mut index = 0;
+        while index < N {
+            chars[index] = bytes[index] as ::core::ffi::c_char;
+            index += 1;
+        }
+        chars
+    }
     pub const __INT_MAX__: ::core::ffi::c_int = 2147483647 as ::core::ffi::c_int;
 }
 pub mod limits_h {
