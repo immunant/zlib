@@ -2354,49 +2354,40 @@ pub fn deflate(
             let mut bstate: block_state = need_more;
             let level = (*s).level;
             let compression = configuration_table[level as usize].func;
-            bstate = (if level != 0 && (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-                deflate_huff(s, strm, flush) as ::core::ffi::c_uint
-            } else if level != 0 && (*s).strategy == crate::zlib_h::Z_RLE {
-                deflate_rle(s, strm, flush) as ::core::ffi::c_uint
+            let input = if (*strm).avail_in == 0 {
+                Vec::new()
+            } else {
+                ::core::slice::from_raw_parts((*strm).next_in, (*strm).avail_in as usize)
+                    .to_vec()
+            };
+            let mut io = deflate_io::new(input, (*strm).avail_out as usize, (*strm).adler);
+            let state = &mut *s;
+            bstate = if level != 0 && state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
+                deflate_huff(state, &mut io, flush)
+            } else if level != 0 && state.strategy == crate::zlib_h::Z_RLE {
+                deflate_rle(state, &mut io, flush)
             } else {
                 match compression {
-                    CompressionFunction::Stored | CompressionFunction::Fast | CompressionFunction::Slow => {
-                        let input = if (*strm).avail_in == 0 {
-                            Vec::new()
-                        } else {
-                            ::core::slice::from_raw_parts(
-                                (*strm).next_in,
-                                (*strm).avail_in as usize,
-                            )
-                            .to_vec()
-                        };
-                        let mut io =
-                            deflate_io::new(input, (*strm).avail_out as usize, (*strm).adler);
-                        let state = &mut *s;
-                        let result = match compression {
-                            CompressionFunction::Stored => deflate_stored(state, &mut io, flush),
-                            CompressionFunction::Fast => deflate_fast(state, &mut io, flush),
-                            CompressionFunction::Slow => deflate_slow(state, &mut io, flush),
-                        };
-                        ::core::slice::from_raw_parts_mut((*strm).next_out, io.output_capacity)
-                            [..io.output.len()]
-                            .copy_from_slice(&io.output);
-                        (*strm).next_in = (*strm).next_in.offset(io.input_pos as isize);
-                        (*strm).avail_in = io.avail_in();
-                        (*strm).total_in = (*strm)
-                            .total_in
-                            .wrapping_add(io.input_pos as crate::stdlib::uLong);
-                        (*strm).next_out = (*strm).next_out.offset(io.output.len() as isize);
-                        (*strm).avail_out = io.avail_out();
-                        (*strm).total_out = (*strm)
-                            .total_out
-                            .wrapping_add(io.output.len() as crate::stdlib::uLong);
-                        (*strm).adler = io.adler;
-                        (*strm).data_type = io.data_type;
-                        result as ::core::ffi::c_uint
-                    }
+                    CompressionFunction::Stored => deflate_stored(state, &mut io, flush),
+                    CompressionFunction::Fast => deflate_fast(state, &mut io, flush),
+                    CompressionFunction::Slow => deflate_slow(state, &mut io, flush),
                 }
-            }) as block_state;
+            };
+            ::core::slice::from_raw_parts_mut((*strm).next_out, io.output_capacity)
+                [..io.output.len()]
+                .copy_from_slice(&io.output);
+            (*strm).next_in = (*strm).next_in.offset(io.input_pos as isize);
+            (*strm).avail_in = io.avail_in();
+            (*strm).total_in = (*strm)
+                .total_in
+                .wrapping_add(io.input_pos as crate::stdlib::uLong);
+            (*strm).next_out = (*strm).next_out.offset(io.output.len() as isize);
+            (*strm).avail_out = io.avail_out();
+            (*strm).total_out = (*strm)
+                .total_out
+                .wrapping_add(io.output.len() as crate::stdlib::uLong);
+            (*strm).adler = io.adler;
+            (*strm).data_type = io.data_type;
             if bstate as ::core::ffi::c_uint
                 == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
                 || bstate as ::core::ffi::c_uint
@@ -2684,13 +2675,6 @@ fn rle_match_length(
 }
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
-
-macro_rules! encode_block {
-    ($s:expr, $last:expr) => {{
-        let state = &mut *$s;
-        encode_block_from_window(state, $last);
-    }};
-}
 
 fn deflate_stored(
     s: &mut crate::src::deflate::deflate_state,
@@ -3171,226 +3155,108 @@ fn deflate_slow(
     block_done
 }
 
-unsafe extern "C" fn deflate_rle(
-    mut s: *mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream,
-    mut flush: ::core::ffi::c_int,
+fn deflate_rle(
+    s: &mut crate::src::deflate::deflate_state,
+    io: &mut deflate_io,
+    flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
-            fill_window(s, strm);
-            if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+        if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
+            fill_window_fast(s, io);
+            if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
                 return need_more;
             }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if s.lookahead == 0 {
                 break;
             }
         }
-        (*s).match_length =
-            rle_match_length(&(&*s).buffers().window, (*s).strstart, (*s).lookahead);
-        if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let mut len: crate::zutil_h::uch =
-                (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-            let mut dist: crate::zutil_h::ush = 1 as ::core::ffi::c_int as crate::zutil_h::ush;
-            let c2rust_fresh50 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh50 as usize] =
-                dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-            let c2rust_fresh51 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh51 as usize] =
-                (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
-                    as crate::zutil_h::uchf;
-            let c2rust_fresh52 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh52 as usize] = len as crate::zutil_h::uchf;
-            dist = dist.wrapping_sub(1);
-            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
-            let dist_code = crate::src::trees::_dist_code[if (dist as ::core::ffi::c_int)
-                < 256 as ::core::ffi::c_int
-            {
-                dist as usize
-            } else {
-                (256 as ::core::ffi::c_int
-                    + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                    as usize
-            }] as ::core::ffi::c_int;
-            (*s).dyn_ltree[(length_code
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq = (*s).dyn_ltree[(length_code
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq
-                .wrapping_add(1);
-            (*s).dyn_dtree[dist_code as usize].fc.freq =
-                (*s).dyn_dtree[dist_code as usize].fc.freq.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-            (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
-            (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
-            (*s).match_length = 0 as crate::stdlib::uInt;
+        s.match_length = rle_match_length(&s.buffers().window, s.strstart, s.lookahead);
+        let bflush = if s.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+            let len = s.match_length.wrapping_sub(3) as crate::zutil_h::uch;
+            let flush_block = s.tally_symbol(1, len as ::core::ffi::c_uint) != 0;
+            s.lookahead = s.lookahead.wrapping_sub(s.match_length);
+            s.strstart = s.strstart.wrapping_add(s.match_length);
+            s.match_length = 0;
+            flush_block
         } else {
-            let mut cc: crate::zutil_h::uch =
-                (&*s).buffers().window[(*s).strstart as usize] as crate::zutil_h::uch;
-            let c2rust_fresh53 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh53 as usize] = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh54 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh54 as usize] = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh55 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh55 as usize] = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc.freq =
-                (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-            (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            (*s).strstart = (*s).strstart.wrapping_add(1);
-        }
-        if bflush != 0 {
-            encode_block!(s, 0);
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-            flush_pending(strm);
-            if strm.avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+            let cc = s.buffers().window[s.strstart as usize] as crate::zutil_h::uch;
+            let flush_block = s.tally_symbol(0, cc as ::core::ffi::c_uint) != 0;
+            s.lookahead = s.lookahead.wrapping_sub(1);
+            s.strstart = s.strstart.wrapping_add(1);
+            flush_block
+        };
+        if bflush {
+            let out_full = flush_compression_block(s, io, 0);
+            s.block_start = s.strstart as ::core::ffi::c_long;
+            if out_full {
+                return need_more;
             }
         }
     }
-    (*s).insert = 0 as crate::stdlib::uInt;
+    s.insert = 0;
     if flush == crate::zlib_h::Z_FINISH {
-        encode_block!(s, 1);
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending(strm);
-        if strm.avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        let out_full = flush_compression_block(s, io, 1);
+        s.block_start = s.strstart as ::core::ffi::c_long;
+        if out_full {
+            return finish_started;
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
-        encode_block!(s, 0);
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending(strm);
-        if strm.avail_out == 0 as crate::stdlib::uInt {
-            return (if false {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+    if s.sym_next != 0 {
+        let out_full = flush_compression_block(s, io, 0);
+        s.block_start = s.strstart as ::core::ffi::c_long;
+        if out_full {
+            return need_more;
         }
     }
-    return block_done;
+    block_done
 }
 
-unsafe extern "C" fn deflate_huff(
-    mut s: *mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream,
-    mut flush: ::core::ffi::c_int,
+fn deflate_huff(
+    s: &mut crate::src::deflate::deflate_state,
+    io: &mut deflate_io,
+    flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead == 0 as crate::stdlib::uInt {
-            fill_window(s, strm);
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+        if s.lookahead == 0 {
+            fill_window_fast(s, io);
+            if s.lookahead == 0 {
                 if flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
                 }
                 break;
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        let mut cc: crate::zutil_h::uch =
-            (&*s).buffers().window[(*s).strstart as usize] as crate::zutil_h::uch;
-        let c2rust_fresh56 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        (&mut (*s).buffers)
-            .as_deref_mut()
-            .expect("deflate buffers initialized")
-            .sym_buf[c2rust_fresh56 as usize] = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh57 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        (&mut (*s).buffers)
-            .as_deref_mut()
-            .expect("deflate buffers initialized")
-            .sym_buf[c2rust_fresh57 as usize] = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh58 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        (&mut (*s).buffers)
-            .as_deref_mut()
-            .expect("deflate buffers initialized")
-            .sym_buf[c2rust_fresh58 as usize] = cc as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc as usize].fc.freq = (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-        (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-        (*s).strstart = (*s).strstart.wrapping_add(1);
-        if bflush != 0 {
-            encode_block!(s, 0);
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-            flush_pending(strm);
-            if strm.avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+        s.match_length = 0;
+        let cc = s.buffers().window[s.strstart as usize] as crate::zutil_h::uch;
+        let bflush = s.tally_symbol(0, cc as ::core::ffi::c_uint) != 0;
+        s.lookahead = s.lookahead.wrapping_sub(1);
+        s.strstart = s.strstart.wrapping_add(1);
+        if bflush {
+            let out_full = flush_compression_block(s, io, 0);
+            s.block_start = s.strstart as ::core::ffi::c_long;
+            if out_full {
+                return need_more;
             }
         }
     }
-    (*s).insert = 0 as crate::stdlib::uInt;
+    s.insert = 0;
     if flush == crate::zlib_h::Z_FINISH {
-        encode_block!(s, 1);
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending(strm);
-        if strm.avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        let out_full = flush_compression_block(s, io, 1);
+        s.block_start = s.strstart as ::core::ffi::c_long;
+        if out_full {
+            return finish_started;
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
-        encode_block!(s, 0);
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending(strm);
-        if strm.avail_out == 0 as crate::stdlib::uInt {
-            return (if false {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+    if s.sym_next != 0 {
+        let out_full = flush_compression_block(s, io, 0);
+        s.block_start = s.strstart as ::core::ffi::c_long;
+        if out_full {
+            return need_more;
         }
     }
-    return block_done;
+    block_done
 }
