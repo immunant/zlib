@@ -2620,7 +2620,6 @@ pub fn deflate(
         // This is the last raw stream/storage bridge. The named safe update
         // below owns level and strategy selection.
         let bstate = unsafe {
-            let stream = &mut *strm;
             if state.window.is_null() || state.pending_buf.is_null() {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
@@ -2642,17 +2641,17 @@ pub fn deflate(
                     state.w_size as usize,
                 ))
             };
-            let input = if stream.avail_in == 0 {
+            let input = if strm.avail_in == 0 {
                 &[]
             } else {
-                ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
             };
-            let Some(output) = output_tail(stream, &mut output_buffer) else {
+            let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             let Some(bstate) = deflate_update(
                 state,
-                stream,
+                strm,
                 window,
                 head,
                 prev,
