@@ -13,8 +13,6 @@ pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::gzguts_h::LOOK;
 pub use crate::internal::__INT_MAX__;
 pub use crate::limits_h::INT_MAX;
-pub use crate::stdlib::fcntl;
-pub use crate::stdlib::open;
 pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
@@ -32,6 +30,8 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
+pub use crate::stdlib::fcntl;
+pub use crate::stdlib::open;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -73,6 +73,7 @@ pub fn gz_init_buffers(
     state.in_buf.clear();
     state.out_buf.clear();
     state.in_end = 0;
+    state.out_start = 0;
 
     if state.in_buf.try_reserve_exact(input_len).is_err() {
         state.in_0 = ::core::ptr::null_mut();
@@ -148,6 +149,7 @@ unsafe extern "C" fn gz_open(
         in_buf: Vec::new(),
         out_buf: Vec::new(),
         in_end: 0,
+        out_start: 0,
         in_0: ::core::ptr::null_mut(),
         out: ::core::ptr::null_mut(),
         direct: 0,

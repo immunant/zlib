@@ -1,5 +1,3 @@
-pub use crate::src::inflate::inflate_mode;
-pub use crate::src::inflate::inflate_state;
 pub use crate::src::inflate::BAD;
 pub use crate::src::inflate::CHECK;
 pub use crate::src::inflate::CODELENS;
@@ -399,3 +397,5 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 ) {
     inflate_fast(strm, start)
 }
+pub use crate::src::inflate::inflate_mode;
+pub use crate::src::inflate::inflate_state;

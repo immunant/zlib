@@ -201,14 +201,14 @@ pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_UNKNOWN;
 pub use crate::zlib_h::Z_VERSION_ERROR;
-pub use crate::zutil_h::uch;
-pub use crate::zutil_h::uchf;
-pub use crate::zutil_h::ulg;
-pub use crate::zutil_h::ush;
 pub use crate::zutil_h::DEF_MEM_LEVEL;
 pub use crate::zutil_h::MAX_MATCH;
 pub use crate::zutil_h::MIN_MATCH;
 pub use crate::zutil_h::PRESET_DICT;
+pub use crate::zutil_h::uch;
+pub use crate::zutil_h::uchf;
+pub use crate::zutil_h::ulg;
+pub use crate::zutil_h::ush;
 
 pub const block_done: block_state = 1;
 

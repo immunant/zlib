@@ -55,6 +55,7 @@ pub mod gzguts_h {
         // End of the pending input in `in_buf`.  This keeps buffered-write
         // progress in a Rust index rather than deriving it from raw cursors.
         pub in_end: usize,
+        pub out_start: usize,
         pub in_0: *mut ::core::ffi::c_uchar,
         pub out: *mut ::core::ffi::c_uchar,
         pub direct: ::core::ffi::c_int,
