@@ -52,6 +52,10 @@ fn write_buffered_byte(buffer: &mut [u8], index: usize, byte: u8) -> bool {
     true
 }
 
+fn clear_buffered_input(buffer: &mut [u8]) {
+    buffer.fill(0);
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
@@ -251,11 +255,8 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             (*state).size
         };
         if first != 0 {
-            crate::stdlib::memset(
-                (*state).in_0 as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                n as crate::__stddef_size_t_h::size_t,
-            );
+            let input = ::core::slice::from_raw_parts_mut((*state).in_0, n as usize);
+            clear_buffered_input(input);
             first = 0 as ::core::ffi::c_int;
         }
         (*strm).avail_in = n as crate::stdlib::uInt;
