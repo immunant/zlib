@@ -224,6 +224,10 @@ fn gz_read_should_continue(len: crate::stdlib::z_size_t, err: ::core::ffi::c_int
     len != 0 && err == 0
 }
 
+fn gz_read_request_is_empty(len: crate::stdlib::z_size_t) -> bool {
+    len == 0 as crate::stdlib::z_size_t
+}
+
 fn gz_read_marks_past_eof(len: crate::stdlib::z_size_t, eof: ::core::ffi::c_int) -> bool {
     len != 0 && eof != 0
 }
@@ -1160,6 +1164,17 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_request_is_empty_matches_only_zero_length_requests() {
+        assert!(gz_read_request_is_empty(0));
+        assert!(!gz_read_request_is_empty(1));
+    }
+
+    #[test]
+    fn gz_read_request_is_empty_handles_large_unsigned_lengths() {
+        assert!(!gz_read_request_is_empty(crate::stdlib::z_size_t::MAX));
+    }
+
+    #[test]
     fn gz_ungetc_buffer_state_prioritizes_empty_buffer() {
         assert!(matches!(
             gz_ungetc_buffer_state(0, 8),
@@ -1379,7 +1394,7 @@ unsafe extern "C" fn gz_read(
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut err: ::core::ffi::c_int = 0;
-    if len == 0 as crate::stdlib::z_size_t {
+    if gz_read_request_is_empty(len) {
         return 0 as crate::stdlib::z_size_t;
     }
     if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {

@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -461,6 +461,10 @@ fn gz_open_recorded_offset(
     }
 }
 
+fn gz_open_should_set_nonblocking(oflag: ::core::ffi::c_int) -> bool {
+    oflag & crate::stdlib::O_NONBLOCK != 0
+}
+
 fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::stdlib::off64_t) {
     gz_apply_post_open_metadata(state, current_offset);
     gz_reset_state(state);
@@ -517,7 +521,7 @@ unsafe extern "C" fn gz_open(
             0o666 as ::core::ffi::c_int,
         );
     } else {
-        if plan.oflag & crate::stdlib::O_NONBLOCK != 0 {
+        if gz_open_should_set_nonblocking(plan.oflag) {
             crate::stdlib::fcntl(
                 fd,
                 crate::stdlib::F_SETFL,
@@ -1038,8 +1042,9 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_legacy_offset_result,
-        gz_open_offset_plan, gz_open_recorded_offset, gz_parse_open_mode, gz_post_open_metadata,
-        gz_prepare_open, gz_reset_core, gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
+        gz_open_offset_plan, gz_open_recorded_offset, gz_open_should_set_nonblocking,
+        gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
+        gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
         gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
@@ -1579,6 +1584,16 @@ mod tests {
     #[test]
     fn gz_open_offset_plan_skips_seeking_for_write_mode() {
         assert_eq!(gz_open_offset_plan(crate::gzguts_h::GZ_WRITE), None);
+    }
+
+    #[test]
+    fn gz_open_should_set_nonblocking_detects_only_the_nonblocking_flag() {
+        assert!(gz_open_should_set_nonblocking(crate::stdlib::O_NONBLOCK));
+        assert!(gz_open_should_set_nonblocking(
+            crate::stdlib::O_NONBLOCK | crate::stdlib::O_CLOEXEC
+        ));
+        assert!(!gz_open_should_set_nonblocking(crate::stdlib::O_CLOEXEC));
+        assert!(!gz_open_should_set_nonblocking(0));
     }
 
     #[test]
