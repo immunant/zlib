@@ -1086,6 +1086,17 @@ fn deflate_state_values_are_valid(
         )
 }
 
+/// Represent a compatibility cursor relative to its allocation base without
+/// dereferencing either address.  The ABI boundary converts raw cursors to
+/// address tokens; the copy logic only needs the direction and byte count.
+fn deflate_cursor_direction(cursor: usize, base: usize) -> (bool, usize) {
+    if cursor >= base {
+        (true, cursor - base)
+    } else {
+        (false, base - cursor)
+    }
+}
+
 pub(crate) unsafe extern "C" fn deflateStateCheck(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -2910,16 +2921,17 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
     );
-    let pending_out_offset = (*ss).pending_out.offset_from((*ss).pending_buf);
+    let (pending_out_after_base, pending_out_distance) = deflate_cursor_direction(
+        (*ss).pending_out as usize,
+        (*ss).pending_buf as usize,
+    );
     // `pending_out` is normally within the pending allocation. Keep the
     // translated wrapping behavior for malformed state too, but express the
-    // signed cursor as an unsigned direction before forming the new pointer.
-    (*ds).pending_out = if pending_out_offset >= 0 {
-        (*ds).pending_buf.wrapping_add(pending_out_offset as usize)
+    // cursor as an unsigned direction before forming the new pointer.
+    (*ds).pending_out = if pending_out_after_base {
+        (*ds).pending_buf.wrapping_add(pending_out_distance)
     } else {
-        (*ds)
-            .pending_buf
-            .wrapping_sub(pending_out_offset.unsigned_abs())
+        (*ds).pending_buf.wrapping_sub(pending_out_distance)
     };
     crate::stdlib::memcpy(
         (*ds).pending_out as *mut ::core::ffi::c_void,
