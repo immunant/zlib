@@ -143,6 +143,7 @@ unsafe extern "C" fn gz_open(
         },
         mode: crate::gzguts_h::GZ_NONE,
         fd: -1,
+        write_file: None,
         path: std::ffi::CString::default(),
         size: 0,
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
@@ -332,7 +333,14 @@ pub unsafe extern "C" fn gzopen_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen(path, mode)
+    let file = gzopen(path, mode);
+    if !file.is_null() {
+        let state = &mut *(file as crate::gzguts_h::gz_statep);
+        if state.mode == crate::gzguts_h::GZ_WRITE {
+            state.write_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
+        }
+    }
+    file
 }
 pub unsafe extern "C" fn gzopen64(
     mut path: *const ::core::ffi::c_char,
@@ -350,7 +358,14 @@ pub unsafe extern "C" fn gzopen64_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen64(path, mode)
+    let file = gzopen64(path, mode);
+    if !file.is_null() {
+        let state = &mut *(file as crate::gzguts_h::gz_statep);
+        if state.mode == crate::gzguts_h::GZ_WRITE {
+            state.write_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
+        }
+    }
+    file
 }
 pub unsafe extern "C" fn gzdopen(
     mut fd: ::core::ffi::c_int,
@@ -388,7 +403,14 @@ pub unsafe extern "C" fn gzdopen_ffi(
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzdopen(fd, mode)
+    let file = gzdopen(fd, mode);
+    if !file.is_null() {
+        let state = &mut *(file as crate::gzguts_h::gz_statep);
+        if state.mode == crate::gzguts_h::GZ_WRITE {
+            state.write_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
+        }
+    }
+    file
 }
 pub unsafe extern "C" fn gzbuffer(
     mut file: crate::zlib_h::gzFile,

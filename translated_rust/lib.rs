@@ -42,6 +42,10 @@ pub mod gzguts_h {
         pub x: crate::zlib_h::gzFile_s,
         pub mode: ::core::ffi::c_int,
         pub fd: ::core::ffi::c_int,
+        // Write descriptors are adopted at the C ABI boundary.  Keeping the
+        // owned handle here lets the gzip write path use `std::io::Write`
+        // instead of calling the libc write entry point.
+        pub write_file: Option<std::fs::File>,
         // `gz_state` is opaque at the C ABI boundary.  Keep the text it owns
         // in Rust containers instead of separately allocated C buffers.
         pub path: std::ffi::CString,

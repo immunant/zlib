@@ -44,11 +44,22 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-fn gz_errno_error(state: &mut crate::gzguts_h::gz_state) {
-    let error = std::io::Error::last_os_error();
+fn gz_io_error(state: &mut crate::gzguts_h::gz_state, error: std::io::Error) {
     state.again = (error.kind() == std::io::ErrorKind::WouldBlock) as ::core::ffi::c_int;
     let message = std::ffi::CString::new(error.to_string()).ok();
     crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_ERRNO, message.as_deref());
+}
+
+fn gz_write_file(
+    write_file: &mut Option<std::fs::File>,
+    bytes: &[u8],
+) -> Result<usize, std::io::Error> {
+    use std::io::Write;
+
+    write_file
+        .as_mut()
+        .expect("gzip write descriptor must be adopted at the FFI boundary")
+        .write(bytes)
 }
 
 unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -120,20 +131,20 @@ unsafe fn gz_comp(
     }
     if state.direct != 0 {
         while state.strm.avail_in != 0 {
-            *crate::stdlib::__errno_location() = 0;
-            state.again = 0;
             put = if state.strm.avail_in > max {
                 max
             } else {
                 state.strm.avail_in as ::core::ffi::c_uint
             };
+            *crate::stdlib::__errno_location() = 0;
+            state.again = 0;
             writ = crate::stdlib::write(
                 state.fd,
                 state.strm.next_in as *const ::core::ffi::c_void,
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             if writ < 0 {
-                gz_errno_error(state);
+                gz_io_error(state, std::io::Error::last_os_error());
                 return -1;
             }
             state.strm.avail_in = state.strm.avail_in.wrapping_sub(writ as ::core::ffi::c_uint);
@@ -157,17 +168,17 @@ unsafe fn gz_comp(
             let produced = state.size as usize - state.strm.avail_out as usize;
             while state.out_start < produced {
                 put = (produced - state.out_start).min(max as usize) as ::core::ffi::c_uint;
-                *crate::stdlib::__errno_location() = 0;
                 state.again = 0;
-                writ = crate::stdlib::write(
-                    state.fd,
-                    state.out_buf.as_ptr().wrapping_add(state.out_start).cast(),
-                    put as crate::__stddef_size_t_h::size_t,
-                ) as ::core::ffi::c_int;
-                if writ < 0 {
-                    gz_errno_error(state);
-                    return -1;
-                }
+                let start = state.out_start;
+                let end = start + put as usize;
+                let (write_file, out_buf) = (&mut state.write_file, &state.out_buf);
+                writ = match gz_write_file(write_file, &out_buf[start..end]) {
+                    Ok(written) => written as ::core::ffi::c_int,
+                    Err(error) => {
+                        gz_io_error(state, error);
+                        return -1;
+                    }
+                };
                 state.out_start += writ as usize;
             }
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
@@ -611,7 +622,9 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
+    if let Some(file) = (*state).write_file.take() {
+        drop(file);
+    } else if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
     drop(Box::from_raw(state));
