@@ -58,6 +58,15 @@ fn copy_buffered_input(input: &[u8], output: &mut [u8]) {
     output[..input.len()].copy_from_slice(input);
 }
 
+fn copy_through_newline(input: &[u8], output: &mut [u8]) -> (usize, bool) {
+    let copied = input
+        .iter()
+        .position(|&byte| byte == b'\n')
+        .map_or(input.len(), |newline| newline + 1);
+    output[..copied].copy_from_slice(&input[..copied]);
+    (copied, copied != input.len())
+}
+
 fn pushback_empty(buffer: &mut [u8], byte: u8) -> Option<usize> {
     let next = buffer.len().checked_sub(1)?;
     buffer[next] = byte;
@@ -769,7 +778,6 @@ pub unsafe extern "C" fn gzgets(
     let mut left: ::core::ffi::c_uint = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut eol: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
@@ -808,26 +816,16 @@ pub unsafe extern "C" fn gzgets(
                 } else {
                     (*state).x.have
                 };
-                eol = crate::stdlib::memchr(
-                    (*state).x.next as *const ::core::ffi::c_void,
-                    '\n' as ::core::ffi::c_int,
-                    n as crate::__stddef_size_t_h::size_t,
-                ) as *mut ::core::ffi::c_uchar;
-                if !eol.is_null() {
-                    n = (eol.offset_from((*state).x.next) as ::core::ffi::c_uint)
-                        .wrapping_add(1 as ::core::ffi::c_uint);
-                }
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    (*state).x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
+                let input = ::core::slice::from_raw_parts((*state).x.next, n as usize);
+                let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), n as usize);
+                let (copied, found_newline) = copy_through_newline(input, output);
+                n = copied as ::core::ffi::c_uint;
                 (*state).x.have = (*state).x.have.wrapping_sub(n);
                 (*state).x.next = (*state).x.next.offset(n as isize);
                 (*state).x.pos += n as crate::stdlib::off64_t;
                 left = left.wrapping_sub(n);
                 buf = buf.offset(n as isize);
-                if !(left != 0 && eol.is_null()) {
+                if !(left != 0 && !found_newline) {
                     break;
                 }
             }
