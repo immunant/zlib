@@ -3668,110 +3668,129 @@ unsafe extern "C" fn deflate_slow(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
-    let sym_buf_start = (*s).sym_buf_start;
+    // The legacy dispatcher still owns the ABI cursor.  Project it once so
+    // the lazy-match state machine below only works through this scoped
+    // state view and bounded allocation slices.
+    let state = &mut *s;
+    let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
     let pending_buf = ::core::slice::from_raw_parts_mut(
-        (*s).pending_buf
+        state.pending_buf
             .expect("initialized pending buffer")
             .as_ptr(),
-        (*s).pending_buf_size as usize,
+        state.pending_buf_size as usize,
     );
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
-        if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
+        if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
-            if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
                 return need_more;
             }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if state.lookahead == 0 as crate::stdlib::uInt {
                 break;
             }
         }
         hash_head = NIL as crate::src::deflate::IPos;
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let window = ::core::slice::from_raw_parts(
-                (*s).window.expect("initialized window").as_ptr(),
-                (*s).window_size as usize,
-            );
+        // `fill_window()` above has established the initialized extent for
+        // this iteration. Reuse one bounded read view for both hashing and a
+        // possible delayed literal instead of rebuilding raw views for each.
+        let window = ::core::slice::from_raw_parts(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
+        // The insertion step does not inspect the previous match fields, so
+        // establish the lazy-match candidate before borrowing `prev`. This
+        // lets the safe matcher reuse that same bounded hash-table view.
+        state.prev_length = state.match_length;
+        state.prev_match = state.match_start as crate::src::deflate::IPos;
+        state.match_length =
+            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+        if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let head = ::core::slice::from_raw_parts_mut(
-                (*s).head.expect("initialized head table").as_ptr(),
-                (*s).hash_size as usize,
+                state.head.expect("initialized head table").as_ptr(),
+                state.hash_size as usize,
             );
             let prev = ::core::slice::from_raw_parts_mut(
-                (*s).prev.expect("initialized prev table").as_ptr(),
-                (*s).w_size as usize,
+                state.prev.expect("initialized prev table").as_ptr(),
+                state.w_size as usize,
             );
-            ((*s).ins_h, hash_head) = insert_hash(
+            (state.ins_h, hash_head) = insert_hash(
                 window,
                 head,
                 prev,
-                (*s).ins_h,
-                (*s).hash_shift,
-                (*s).hash_mask,
-                (*s).w_mask,
-                (*s).strstart,
+                state.ins_h,
+                state.hash_shift,
+                state.hash_mask,
+                state.w_mask,
+                state.strstart,
             );
-        }
-        (*s).prev_length = (*s).match_length;
-        (*s).prev_match = (*s).match_start as crate::src::deflate::IPos;
-        (*s).match_length =
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        if hash_head != NIL as crate::src::deflate::IPos
-            && (*s).prev_length < (*s).max_lazy_match
-            && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= (*s)
-                    .w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-        {
-            (*s).match_length = longest_match(s, hash_head);
-            if (*s).match_length <= 5 as crate::stdlib::uInt
-                && ((*s).strategy == crate::zlib_h::Z_FILTERED
-                    || (*s).match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                        && (*s).strstart.wrapping_sub((*s).match_start)
-                            > TOO_FAR as crate::stdlib::uInt)
+            if hash_head != NIL as crate::src::deflate::IPos
+                && state.prev_length < state.max_lazy_match
+                && (state.strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
+                    <= state
+                        .w_size
+                        .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
             {
-                (*s).match_length =
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+                let result = longest_match_core(
+                    window,
+                    prev,
+                    &LongestMatchInput {
+                        max_chain_length: state.max_chain_length,
+                        strstart: state.strstart,
+                        w_size: state.w_size,
+                        w_mask: state.w_mask,
+                        prev_length: state.prev_length,
+                        good_match: state.good_match,
+                        nice_match: state.nice_match,
+                        lookahead: state.lookahead,
+                        match_start: state.match_start,
+                    },
+                    hash_head,
+                );
+                state.match_start = result.start;
+                state.match_length = result.length;
             }
         }
-        let delayed_literal = if (*s).match_available != 0 {
-            Some(
-                *(*s)
-                    .window
-                    .expect("initialized window")
-                    .as_ptr()
-                    .wrapping_add((*s).strstart.wrapping_sub(1) as usize)
-                    as crate::zutil_h::uch,
-            )
+        if state.match_length <= 5 as crate::stdlib::uInt
+            && (state.strategy == crate::zlib_h::Z_FILTERED
+                || state.match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                    && state.strstart.wrapping_sub(state.match_start) > TOO_FAR as crate::stdlib::uInt)
+        {
+            state.match_length =
+                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+        }
+        let delayed_literal = if state.match_available != 0 {
+            Some(window[state.strstart.wrapping_sub(1) as usize] as crate::zutil_h::uch)
         } else {
             None
         };
         let mut slow_state = SlowMatchState {
-            prev_length: (*s).prev_length,
-            match_length: (*s).match_length,
-            prev_match: (*s).prev_match,
-            match_available: (*s).match_available,
-            strstart: (*s).strstart,
-            lookahead: (*s).lookahead,
+            prev_length: state.prev_length,
+            match_length: state.match_length,
+            prev_match: state.prev_match,
+            match_available: state.match_available,
+            strstart: state.strstart,
+            lookahead: state.lookahead,
         };
         let action = advance_slow_match(
             &mut slow_state,
             sym_buf,
-            &mut (*s).sym_next,
-            (*s).sym_end,
-            &mut (*s).dyn_ltree,
-            &mut (*s).dyn_dtree,
-            &mut (*s).matches,
+            &mut state.sym_next,
+            state.sym_end,
+            &mut state.dyn_ltree,
+            &mut state.dyn_dtree,
+            &mut state.matches,
             delayed_literal,
         );
-        (*s).prev_length = slow_state.prev_length;
-        (*s).match_length = slow_state.match_length;
-        (*s).match_available = slow_state.match_available;
-        (*s).strstart = slow_state.strstart;
-        (*s).lookahead = slow_state.lookahead;
+        state.prev_length = slow_state.prev_length;
+        state.match_length = slow_state.match_length;
+        state.match_available = slow_state.match_available;
+        state.strstart = slow_state.strstart;
+        state.lookahead = slow_state.lookahead;
         match action {
             SlowMatchAction::Match {
                 insert_start,
@@ -3781,47 +3800,47 @@ unsafe extern "C" fn deflate_slow(
                 bflush = next_bflush;
                 for offset in 0..insert_count {
                     let window = ::core::slice::from_raw_parts(
-                        (*s).window.expect("initialized window").as_ptr(),
-                        (*s).window_size as usize,
+                        state.window.expect("initialized window").as_ptr(),
+                        state.window_size as usize,
                     );
                     let head = ::core::slice::from_raw_parts_mut(
-                        (*s).head.expect("initialized head table").as_ptr(),
-                        (*s).hash_size as usize,
+                        state.head.expect("initialized head table").as_ptr(),
+                        state.hash_size as usize,
                     );
                     let prev = ::core::slice::from_raw_parts_mut(
-                        (*s).prev.expect("initialized prev table").as_ptr(),
-                        (*s).w_size as usize,
+                        state.prev.expect("initialized prev table").as_ptr(),
+                        state.w_size as usize,
                     );
-                    ((*s).ins_h, hash_head) = insert_hash(
+                    (state.ins_h, hash_head) = insert_hash(
                         window,
                         head,
                         prev,
-                        (*s).ins_h,
-                        (*s).hash_shift,
-                        (*s).hash_mask,
-                        (*s).w_mask,
+                        state.ins_h,
+                        state.hash_shift,
+                        state.hash_mask,
+                        state.w_mask,
                         insert_start.wrapping_add(offset),
                     );
                 }
                 if bflush != 0 {
                     crate::src::trees::_tr_flush_block(
                         s as *mut crate::src::deflate::internal_state,
-                        if (*s).block_start >= 0 as ::core::ffi::c_long {
-                            (*s).window
+                        if state.block_start >= 0 as ::core::ffi::c_long {
+                            state.window
                                 .expect("initialized window")
                                 .as_ptr()
-                                .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
+                                .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
                                 as *mut crate::stdlib::charf
                         } else {
                             ::core::ptr::null_mut::<crate::stdlib::charf>()
                         },
-                        ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
+                        (state.strstart as ::core::ffi::c_long - state.block_start)
                             as crate::zutil_h::ulg,
                         0,
                     );
-                    (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                    flush_pending((*s).strm.as_ptr());
-                    if (*(*s).strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+                    state.block_start = state.strstart as ::core::ffi::c_long;
+                    flush_pending(state.strm.as_ptr());
+                    if (&*state.strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
                         return need_more;
                     }
                 }
@@ -3831,75 +3850,74 @@ unsafe extern "C" fn deflate_slow(
                 if bflush != 0 {
                     crate::src::trees::_tr_flush_block(
                         s as *mut crate::src::deflate::internal_state,
-                        if (*s).block_start >= 0 as ::core::ffi::c_long {
-                            (*s).window
+                        if state.block_start >= 0 as ::core::ffi::c_long {
+                            state.window
                                 .expect("initialized window")
                                 .as_ptr()
-                                .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
+                                .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
                                 as *mut crate::stdlib::charf
                         } else {
                             ::core::ptr::null_mut::<crate::stdlib::charf>()
                         },
-                        ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
+                        (state.strstart as ::core::ffi::c_long - state.block_start)
                             as crate::zutil_h::ulg,
                         0,
                     );
-                    (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                    flush_pending((*s).strm.as_ptr());
+                    state.block_start = state.strstart as ::core::ffi::c_long;
+                    flush_pending(state.strm.as_ptr());
                 }
-                (*s).strstart = (*s).strstart.wrapping_add(1);
-                (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-                if (*(*s).strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+                state.strstart = state.strstart.wrapping_add(1);
+                state.lookahead = state.lookahead.wrapping_sub(1);
+                if (&*state.strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
                     return need_more;
                 }
             }
             SlowMatchAction::Defer => {}
         }
     }
-    if (*s).match_available != 0 {
-        let mut cc_0: crate::zutil_h::uch = *(*s)
-            .window
-            .expect("initialized window")
-            .as_ptr()
-            .wrapping_add((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize)
-            as crate::zutil_h::uch;
+    if state.match_available != 0 {
+        let window = ::core::slice::from_raw_parts(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
+        let cc_0 = window[state.strstart.wrapping_sub(1) as usize] as crate::zutil_h::uch;
         bflush = tally_slow_symbol(
             sym_buf,
-            &mut (*s).sym_next,
-            (*s).sym_end,
-            &mut (*s).dyn_ltree,
-            &mut (*s).dyn_dtree,
-            &mut (*s).matches,
+            &mut state.sym_next,
+            state.sym_end,
+            &mut state.dyn_ltree,
+            &mut state.dyn_dtree,
+            &mut state.matches,
             0,
             cc_0 as ::core::ffi::c_uint,
         );
-        (*s).match_available = 0 as ::core::ffi::c_int;
+        state.match_available = 0;
     }
-    (*s).insert = if (*s).strstart
+    state.insert = if state.strstart
         < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     {
-        (*s).strstart
+        state.strstart
     } else {
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
+            if state.block_start >= 0 as ::core::ffi::c_long {
+                state.window
                     .expect("initialized window")
                     .as_ptr()
-                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
+                    .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
             1 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm.as_ptr());
-        if (*(*s).strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm.as_ptr());
+        if (&*state.strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3908,24 +3926,24 @@ unsafe extern "C" fn deflate_slow(
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
+    if state.sym_next != 0 {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
+            if state.block_start >= 0 as ::core::ffi::c_long {
+                state.window
                     .expect("initialized window")
                     .as_ptr()
-                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
+                    .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
             0 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm.as_ptr());
-        if (*(*s).strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm.as_ptr());
+        if (&*state.strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
