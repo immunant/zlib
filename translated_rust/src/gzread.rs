@@ -362,18 +362,7 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
             let mut p: *mut ::core::ffi::c_uchar = (*state).in_0;
             let mut q: *const ::core::ffi::c_uchar = (*strm).next_in;
             if q != p as *const ::core::ffi::c_uchar {
-                let mut n: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-                loop {
-                    let c2rust_fresh0 = q;
-                    q = q.offset(1);
-                    let c2rust_fresh1 = p;
-                    p = p.offset(1);
-                    *c2rust_fresh1 = *c2rust_fresh0;
-                    n = n.wrapping_sub(1);
-                    if !(n != 0) {
-                        break;
-                    }
-                }
+                core::ptr::copy_nonoverlapping(q, p, (*strm).avail_in as usize);
             }
         }
         if gz_load(
