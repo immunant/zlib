@@ -2741,7 +2741,10 @@ unsafe fn deflate_stored(
             let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
             let output = ::core::slice::from_raw_parts_mut(stream.next_out, left as usize);
             if let Some(copied) = copy_stored_window(output, window, state.block_start, left) {
-                stream.next_out = stream.next_out.offset(copied as isize);
+                // `copied` is bounded by the output slice above. Wrapping
+                // arithmetic keeps the valid zero-length null cursor case
+                // without requiring `offset`'s in-bounds unsafe operation.
+                stream.next_out = stream.next_out.wrapping_add(copied as usize);
                 stored_output_progress(stream, copied);
                 state.block_start += copied as ::core::ffi::c_long;
                 len = len.wrapping_sub(copied);
@@ -2752,8 +2755,10 @@ unsafe fn deflate_stored(
             let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
             let output = ::core::slice::from_raw_parts_mut(stream.next_out, len as usize);
             let copied = read_buf_bytes(stream, output, input, state.wrap);
-            stream.next_in = stream.next_in.offset(copied as isize);
-            stream.next_out = stream.next_out.offset(copied as isize);
+            // Both cursors advance by a count bounded by the slices passed
+            // to `read_buf_bytes()`, including its possible zero-byte case.
+            stream.next_in = stream.next_in.wrapping_add(copied as usize);
+            stream.next_out = stream.next_out.wrapping_add(copied as usize);
             stored_output_progress(stream, copied);
         }
         if last != 0 as ::core::ffi::c_int {
@@ -2764,7 +2769,10 @@ unsafe fn deflate_stored(
     if used != 0 {
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let input = ::core::slice::from_raw_parts(
-            (*state.strm).next_in.offset(-(used as isize)),
+            // `used` is the amount consumed from `next_in` in this call, so
+            // wrapping subtraction recovers that bounded input range without
+            // relying on `offset`'s unsafe provenance requirement.
+            (*state.strm).next_in.wrapping_sub(used as usize),
             used as usize,
         );
         update_stored_window(state, window, input);
@@ -2817,7 +2825,9 @@ unsafe fn deflate_stored(
             input,
             state.wrap,
         );
-        stream.next_in = stream.next_in.offset(copied as isize);
+        // `copied` is bounded by `input`, and wrapping arithmetic preserves
+        // the zero-byte/null-cursor behavior of the C implementation.
+        stream.next_in = stream.next_in.wrapping_add(copied as usize);
         state.strstart = state.strstart.wrapping_add(copied);
         state.insert = state
             .insert
