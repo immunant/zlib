@@ -3118,42 +3118,6 @@ fn longest_match_core(
     }
 }
 
-unsafe extern "C" fn longest_match(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut cur_match: crate::src::deflate::IPos,
-) -> crate::stdlib::uInt {
-    let state = &mut *s;
-    // `window_size` and `w_size` are the exact capacities established by
-    // deflateInit2_() and retained by deflateCopy().  Keep the raw views
-    // bounded by those capacities before handing matching to the safe core.
-    let window = ::core::slice::from_raw_parts(
-        state.window.expect("initialized window").as_ptr(),
-        state.window_size as usize,
-    );
-    let prev = ::core::slice::from_raw_parts(
-        state.prev.expect("initialized prev table").as_ptr(),
-        state.w_size as usize,
-    );
-    let result = longest_match_core(
-        window,
-        prev,
-        &LongestMatchInput {
-            max_chain_length: state.max_chain_length,
-            strstart: state.strstart,
-            w_size: state.w_size,
-            w_mask: state.w_mask,
-            prev_length: state.prev_length,
-            good_match: state.good_match,
-            nice_match: state.nice_match,
-            lookahead: state.lookahead,
-            match_start: state.match_start,
-        },
-        cur_match,
-    );
-    state.match_start = result.start;
-    result.length
-}
-
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
 unsafe extern "C" fn deflate_stored(
@@ -3509,7 +3473,31 @@ unsafe extern "C" fn deflate_fast(
                     .w_size
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
         {
-            state.match_length = longest_match(s, hash_head);
+            // The hash insertion view above has ended.  Reborrow the exact
+            // previous-chain allocation as an immutable bounded slice for
+            // the matcher, leaving the match algorithm itself pointer-free.
+            let prev = ::core::slice::from_raw_parts(
+                state.prev.expect("initialized prev table").as_ptr(),
+                state.w_size as usize,
+            );
+            let result = longest_match_core(
+                window,
+                prev,
+                &LongestMatchInput {
+                    max_chain_length: state.max_chain_length,
+                    strstart: state.strstart,
+                    w_size: state.w_size,
+                    w_mask: state.w_mask,
+                    prev_length: state.prev_length,
+                    good_match: state.good_match,
+                    nice_match: state.nice_match,
+                    lookahead: state.lookahead,
+                    match_start: state.match_start,
+                },
+                hash_head,
+            );
+            state.match_start = result.start;
+            state.match_length = result.length;
         }
         if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let len: crate::zutil_h::uch =
