@@ -167,6 +167,59 @@ pub struct inflate_state {
     pub back: ::core::ffi::c_int,
     pub was: ::core::ffi::c_uint,
 }
+
+impl inflate_state {
+    /// Construct the exact zero-initialized state expected by the translated
+    /// reset path, with the few fields that must be valid before that reset.
+    ///
+    /// The allocation itself remains at the FFI boundary, where callback
+    /// allocation semantics are observable.  Keeping initialization here
+    /// avoids relying on a foreign whole-struct `memset` after allocation.
+    fn newly_allocated() -> Self {
+        Self {
+            strm: ::core::ptr::null_mut(),
+            mode: HEAD,
+            last: 0,
+            wrap: 0,
+            havedict: 0,
+            flags: 0,
+            dmax: 0,
+            check: 0,
+            total: 0,
+            head: ::core::ptr::null_mut(),
+            wbits: 0,
+            wsize: 0,
+            whave: 0,
+            wnext: 0,
+            window: ::core::ptr::null_mut(),
+            window_ownership: WindowOwnership::Missing.raw(),
+            hold: 0,
+            bits: 0,
+            length: 0,
+            offset: 0,
+            extra: 0,
+            lencode: DecodeTableLocation::dynamic(0),
+            distcode: DecodeTableLocation::dynamic(0),
+            lenbits: 0,
+            distbits: 0,
+            ncode: 0,
+            nlen: 0,
+            ndist: 0,
+            have: 0,
+            next: 0,
+            lens: [0; 320],
+            work: [0; 288],
+            codes: [crate::src::inftrees::code {
+                op: 0,
+                bits: 0,
+                val: 0,
+            }; 1444],
+            sane: 0,
+            back: 0,
+            was: 0,
+        }
+    }
+}
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::adler32::adler32;
@@ -1336,17 +1389,9 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        state as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>()
-            as crate::__stddef_size_t_h::size_t,
-    );
+    core::ptr::write(state, inflate_state::newly_allocated());
     (*strm).state = state as *mut crate::src::deflate::internal_state;
     (*state).strm = strm;
-    (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    (*state).window_ownership = WindowOwnership::Missing.raw();
-    (*state).mode = crate::src::inflate::HEAD;
     ret = inflateReset2(strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
@@ -3794,6 +3839,53 @@ mod tests {
         InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
         COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO, WindowOwnership,
     };
+
+    #[test]
+    fn newly_allocated_inflate_state_initializes_pre_reset_state() {
+        let state = super::inflate_state::newly_allocated();
+
+        assert!(state.strm.is_null());
+        assert_eq!(state.mode, HEAD);
+        assert!(state.window.is_null());
+        assert_eq!(state.window_ownership, WindowOwnership::Missing.raw());
+        assert!(state.head.is_null());
+        assert_eq!(state.lencode, super::DecodeTableLocation::dynamic(0));
+        assert_eq!(state.distcode, super::DecodeTableLocation::dynamic(0));
+        assert!(state.lens.iter().all(|&value| value == 0));
+        assert!(state.work.iter().all(|&value| value == 0));
+        assert!(state
+            .codes
+            .iter()
+            .all(|entry| entry.op == 0 && entry.bits == 0 && entry.val == 0));
+        assert!(
+            state.last == 0
+                && state.wrap == 0
+                && state.havedict == 0
+                && state.flags == 0
+                && state.dmax == 0
+                && state.check == 0
+                && state.total == 0
+                && state.wbits == 0
+                && state.wsize == 0
+                && state.whave == 0
+                && state.wnext == 0
+                && state.hold == 0
+                && state.bits == 0
+                && state.length == 0
+                && state.offset == 0
+                && state.extra == 0
+                && state.lenbits == 0
+                && state.distbits == 0
+                && state.ncode == 0
+                && state.nlen == 0
+                && state.ndist == 0
+                && state.have == 0
+                && state.next == 0
+                && state.sane == 0
+                && state.back == 0
+                && state.was == 0
+        );
+    }
 
     #[test]
     fn inflate_add_and_consume_extra_bits_preserves_low_bits_and_wrapping() {

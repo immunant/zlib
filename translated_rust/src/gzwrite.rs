@@ -143,8 +143,17 @@ impl<'a> GzWriteInputStorage<'a> {
         Self { bytes }
     }
 
-    fn zero_prefix_and_mark(&mut self, first: &mut ::core::ffi::c_int, len: usize) {
-        gz_zero_initialize_chunk_buffer(first, &mut self.bytes[..len]);
+    fn zero_prefix_and_mark(&mut self, first: &mut ::core::ffi::c_int, len: usize) -> bool {
+        let Some(prefix) = self.bytes.get_mut(..len) else {
+            return false;
+        };
+
+        gz_zero_initialize_chunk_buffer(first, prefix);
+        true
+    }
+
+    fn prefix(&self, len: usize) -> Option<&[crate::stdlib::Byte]> {
+        self.bytes.get(..len)
     }
 }
 
@@ -1312,12 +1321,12 @@ fn gz_zero_prepare_and_initialize_chunk(
     skip: crate::stdlib::off64_t,
     input: &mut GzWriteInputStorage<'_>,
     first: &mut ::core::ffi::c_int,
-) -> GzZeroPreparedChunk {
+) -> Option<GzZeroPreparedChunk> {
     let chunk = gz_zero_chunk_plan(*first, size, skip);
-    if chunk.initialize_buffer {
-        input.zero_prefix_and_mark(first, chunk.len as usize);
+    if chunk.initialize_buffer && !input.zero_prefix_and_mark(first, chunk.len as usize) {
+        return None;
     }
-    chunk
+    Some(chunk)
 }
 
 struct GzZeroCore {
@@ -1342,6 +1351,7 @@ enum GzZeroDriveStatus {
     Done,
     FlushError,
     CompressionError,
+    InvalidBuffer,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1382,7 +1392,10 @@ impl GzZeroCore {
         }
     }
 
-    fn prepare_chunk(&mut self, input: &mut GzWriteInputStorage<'_>) -> GzZeroPreparedChunk {
+    fn prepare_chunk(
+        &mut self,
+        input: &mut GzWriteInputStorage<'_>,
+    ) -> Option<GzZeroPreparedChunk> {
         gz_zero_prepare_and_initialize_chunk(self.size, self.skip, input, &mut self.first)
     }
 
@@ -1429,10 +1442,21 @@ where
     }
 
     loop {
-        let chunk = zero.prepare_chunk(&mut input);
-        let result = match compress(GzZeroCompressionRequest::Zeroes(
-            &input.bytes[..chunk.len as usize],
-        )) {
+        let Some(chunk) = zero.prepare_chunk(&mut input) else {
+            return GzZeroDriveOutcome {
+                pos: zero.pos,
+                skip: zero.skip,
+                status: GzZeroDriveStatus::InvalidBuffer,
+            };
+        };
+        let Some(zeroes) = input.prefix(chunk.len as usize) else {
+            return GzZeroDriveOutcome {
+                pos: zero.pos,
+                skip: zero.skip,
+                status: GzZeroDriveStatus::InvalidBuffer,
+            };
+        };
+        let result = match compress(GzZeroCompressionRequest::Zeroes(zeroes)) {
             Ok(remaining_avail_in) => (remaining_avail_in, 0),
             Err(remaining_avail_in) => (remaining_avail_in, -1),
         };
@@ -1667,7 +1691,9 @@ macro_rules! gz_zero_at_ffi_boundary {
             -1 as ::core::ffi::c_int
         } else {
             loop {
-                let chunk = zero.prepare_chunk(&mut input);
+                let Some(chunk) = zero.prepare_chunk(&mut input) else {
+                    break -1 as ::core::ffi::c_int;
+                };
                 state.strm.avail_in = chunk.len;
                 state.strm.next_in = state.in_0;
                 let ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
@@ -2184,10 +2210,22 @@ mod tests {
         let mut first = 1;
         let mut input = GzWriteInputStorage::new(&mut bytes);
 
-        input.zero_prefix_and_mark(&mut first, 2);
+        assert!(input.zero_prefix_and_mark(&mut first, 2));
 
         assert_eq!(first, 0);
         assert_eq!(bytes, [0, 0, 0xa5]);
+    }
+
+    #[test]
+    fn gz_write_input_storage_rejects_an_oversized_prefix_without_mutating() {
+        let mut bytes = [0xff, 0xa5];
+        let mut first = 1;
+        let mut input = GzWriteInputStorage::new(&mut bytes);
+
+        assert!(!input.zero_prefix_and_mark(&mut first, 3));
+        assert_eq!(input.prefix(3), None);
+        assert_eq!(first, 1);
+        assert_eq!(bytes, [0xff, 0xa5]);
     }
 
     #[test]
@@ -3695,6 +3733,7 @@ mod tests {
         let initial = {
             let mut input = GzWriteInputStorage::new(&mut buffer);
             gz_zero_prepare_and_initialize_chunk(state.size, state.skip, &mut input, &mut first)
+                .expect("chunk must fit the input buffer")
         };
         assert_eq!(initial.len, 4);
         assert!(initial.initialize_buffer);
@@ -3705,6 +3744,7 @@ mod tests {
         let final_chunk = {
             let mut input = GzWriteInputStorage::new(&mut buffer);
             gz_zero_prepare_and_initialize_chunk(state.size, state.skip, &mut input, &mut first)
+                .expect("chunk must fit the input buffer")
         };
         assert_eq!(final_chunk.len, 2);
         assert!(!final_chunk.initialize_buffer);
@@ -3721,7 +3761,9 @@ mod tests {
 
         let mut buffer = [0xff; 4];
         let mut input = GzWriteInputStorage::new(&mut buffer);
-        let chunk = zero.prepare_chunk(&mut input);
+        let chunk = zero
+            .prepare_chunk(&mut input)
+            .expect("chunk must fit the input buffer");
         assert_eq!(chunk.len, 4);
         assert!(chunk.initialize_buffer);
         assert_eq!(buffer, [0; 4]);
@@ -3737,7 +3779,9 @@ mod tests {
 
         let mut buffer = [0xff; 4];
         let mut input = GzWriteInputStorage::new(&mut buffer);
-        let chunk = zero.prepare_chunk(&mut input);
+        let chunk = zero
+            .prepare_chunk(&mut input)
+            .expect("chunk must fit the input buffer");
         assert!(matches!(
             zero.apply_compression(chunk.len, 2, 0),
             GzZeroAction::Continue
@@ -3745,7 +3789,9 @@ mod tests {
         assert_eq!(zero.pos, 12);
         assert_eq!(zero.skip, 4);
 
-        let final_chunk = zero.prepare_chunk(&mut input);
+        let final_chunk = zero
+            .prepare_chunk(&mut input)
+            .expect("chunk must fit the input buffer");
         assert_eq!(final_chunk.len, 4);
         assert!(!final_chunk.initialize_buffer);
         assert!(matches!(
