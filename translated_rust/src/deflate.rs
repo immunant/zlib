@@ -434,18 +434,15 @@ impl DeflateStorageLayout {
         Self {
             window: DeflateAllocation {
                 items: w_size,
-                size: (2 * ::core::mem::size_of::<crate::stdlib::Byte>())
-                    as crate::stdlib::uInt,
+                size: (2 * ::core::mem::size_of::<crate::stdlib::Byte>()) as crate::stdlib::uInt,
             },
             prev: DeflateAllocation {
                 items: w_size,
-                size: ::core::mem::size_of::<crate::src::deflate::Pos>()
-                    as crate::stdlib::uInt,
+                size: ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
             },
             head: DeflateAllocation {
                 items: hash_size,
-                size: ::core::mem::size_of::<crate::src::deflate::Pos>()
-                    as crate::stdlib::uInt,
+                size: ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
             },
             pending: DeflateAllocation {
                 items: lit_bufsize,
@@ -635,8 +632,10 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         {
             // `window` is allocated with exactly `window_size` bytes in
             // `deflateInit2_()` and `deflateCopy()`.
-            let window =
-                ::core::slice::from_raw_parts_mut(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+            let window = ::core::slice::from_raw_parts_mut(
+                state.window.expect("initialized window").as_ptr(),
+                state.window_size as usize,
+            );
             slide_window_bytes(window, wsize, more);
             state.match_start = state.match_start.wrapping_sub(wsize);
             state.strstart = state.strstart.wrapping_sub(wsize);
@@ -671,8 +670,10 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             // `window` is allocated with exactly `window_size` bytes in
             // `deflateInit2_()` and `deflateCopy()`, and this write is bounded
             // by the `more` capacity calculated above.
-            let window =
-                ::core::slice::from_raw_parts_mut(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+            let window = ::core::slice::from_raw_parts_mut(
+                state.window.expect("initialized window").as_ptr(),
+                state.window_size as usize,
+            );
             let start = state.strstart.wrapping_add(state.lookahead) as usize;
             let output = &mut window[start..start + n as usize];
             stream.adler = read_buf_bytes(input, output, stream.adler, state.wrap);
@@ -687,7 +688,10 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             // These are the exact capacities allocated by `deflateInit2_()`
             // and `deflateCopy()`. Keep the raw views local to this update,
             // rather than repeatedly indexing through the raw cursors.
-            let window = ::core::slice::from_raw_parts(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+            let window = ::core::slice::from_raw_parts(
+                state.window.expect("initialized window").as_ptr(),
+                state.window_size as usize,
+            );
             let prev = ::core::slice::from_raw_parts_mut(
                 state.prev.expect("initialized prev table").as_ptr(),
                 wsize as usize,
@@ -730,7 +734,10 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         // `window` has exactly `window_size` bytes by construction.  Form
         // that bounded view once; the initialization policy itself is fully
         // pointer-free.
-        let window = ::core::slice::from_raw_parts_mut(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+        let window = ::core::slice::from_raw_parts_mut(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
         state.high_water =
             initialize_window_high_water(window, state.high_water, state.strstart, state.lookahead);
     }
@@ -828,36 +835,36 @@ pub unsafe extern "C" fn deflateInit2_(
     (*s).hash_size = layout.hash_size;
     (*s).hash_mask = layout.hash_mask;
     (*s).hash_shift = layout.hash_shift;
-    (*s).window = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        storage.window.items,
-        storage.window.size,
-    ) as *mut crate::stdlib::Bytef);
+    (*s).window =
+        ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*strm).opaque,
+            storage.window.items,
+            storage.window.size,
+        ) as *mut crate::stdlib::Bytef);
     (*s).prev = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
-        storage.prev.items,
-        storage.prev.size,
+        (*strm).opaque, storage.prev.items, storage.prev.size
     ) as *mut crate::src::deflate::Posf);
     (*s).head = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
-        storage.head.items,
-        storage.head.size,
+        (*strm).opaque, storage.head.items, storage.head.size
     ) as *mut crate::src::deflate::Posf);
     (*s).high_water = 0 as crate::zutil_h::ulg;
     (*s).lit_bufsize = layout.lit_bufsize;
-    (*s).pending_buf = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        storage.pending.items,
-        storage.pending.size,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef);
+    (*s).pending_buf =
+        ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*strm).opaque,
+            storage.pending.items,
+            storage.pending.size,
+        ) as *mut crate::zutil_h::uchf
+            as *mut crate::stdlib::Bytef);
     (*s).pending_buf_size = storage
         .pending
         .byte_len()
-        .expect("validated pending allocation geometry") as crate::zutil_h::ulg;
+        .expect("validated pending allocation geometry")
+        as crate::zutil_h::ulg;
     if (*s).window.is_none()
         || (*s).prev.is_none()
         || (*s).head.is_none()
@@ -1063,7 +1070,10 @@ pub unsafe extern "C" fn deflateSetDictionary(
         n = (*s).lookahead.wrapping_sub(
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
         );
-        let window = ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
+        let window = ::core::slice::from_raw_parts(
+            (*s).window.expect("initialized window").as_ptr(),
+            (*s).window_size as usize,
+        );
         let head = ::core::slice::from_raw_parts_mut(
             (*s).head.expect("initialized head table").as_ptr(),
             (*s).hash_size as usize,
@@ -1126,7 +1136,10 @@ pub unsafe extern "C" fn deflateGetDictionary(
     if !dictionary.is_null() && len != 0 {
         // The window allocation has exactly `window_size` bytes.  The C API
         // supplies a destination large enough for the returned dictionary.
-        let window = ::core::slice::from_raw_parts(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+        let window = ::core::slice::from_raw_parts(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
         let end = state.strstart.wrapping_add(state.lookahead) as usize;
         let len = len as usize;
         let source = &window[end - len..end];
@@ -1263,10 +1276,7 @@ pub unsafe extern "C" fn deflateSetHeader(
             extra: if header.extra.is_null() {
                 None
             } else {
-                Some(
-                    ::core::slice::from_raw_parts(header.extra, extra_len as usize)
-                        .into(),
-                )
+                Some(::core::slice::from_raw_parts(header.extra, extra_len as usize).into())
             },
             name: if header.name.is_null() {
                 None
@@ -1425,8 +1435,13 @@ pub unsafe extern "C" fn deflatePrime(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
+    );
     deflate_prime_bits(
         pending_buf,
         &mut state.pending,
@@ -1874,11 +1889,12 @@ fn deflate_copy_layout(
         .prev
         .element_len::<crate::src::deflate::Posf>()
         .expect("validated previous-table allocation geometry");
-    let prev_entries = if slid != 0 || strstart.wrapping_sub(insert) > prev_capacity as crate::stdlib::uInt {
-        prev_capacity
-    } else {
-        strstart.wrapping_sub(insert) as usize
-    };
+    let prev_entries =
+        if slid != 0 || strstart.wrapping_sub(insert) > prev_capacity as crate::stdlib::uInt {
+            prev_capacity
+        } else {
+            strstart.wrapping_sub(insert) as usize
+        };
     DeflateCopyLayout {
         window_bytes: high_water as usize,
         prev_entries,
@@ -1962,8 +1978,13 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate:
     // rather than repeatedly dereferencing the ABI pointers.
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
+    );
     crate::src::trees::flush_pending_bits(
         pending_buf,
         &mut state.pending,
@@ -2112,7 +2133,10 @@ pub unsafe extern "C" fn deflate(
             // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
             // `deflateInit2_()` and copied at that extent in `deflateCopy()`).
             let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                state
+                    .pending_buf
+                    .expect("initialized pending buffer")
+                    .as_ptr(),
                 state.pending_buf_size as usize,
             );
             put_short_msb_bytes(pending_buf, &mut state.pending, header);
@@ -2142,8 +2166,13 @@ pub unsafe extern "C" fn deflate(
         let state = &mut *s;
         // This initial gzip header always fits in the pending allocation. Keep
         // a single exact-capacity view for the contiguous write sequence.
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("initialized pending buffer")
+                .as_ptr(),
+            state.pending_buf_size as usize,
+        );
         push_pending_byte(pending_buf, &mut state.pending, 31);
         push_pending_byte(pending_buf, &mut state.pending, 139);
         push_pending_byte(pending_buf, &mut state.pending, 8);
@@ -2241,7 +2270,9 @@ pub unsafe extern "C" fn deflate(
                 let mut copy: crate::zutil_h::ulg =
                     (*s).pending_buf_size.wrapping_sub((*s).pending);
                 let pending_buf = ::core::slice::from_raw_parts_mut(
-                    (*s).pending_buf.expect("initialized pending buffer").as_ptr(),
+                    (*s).pending_buf
+                        .expect("initialized pending buffer")
+                        .as_ptr(),
                     (*s).pending_buf_size as usize,
                 );
                 append_pending_bytes(pending_buf, &mut (*s).pending, &extra[..copy as usize]);
@@ -2259,7 +2290,9 @@ pub unsafe extern "C" fn deflate(
             }
             if left != 0 {
                 let pending_buf = ::core::slice::from_raw_parts_mut(
-                    (*s).pending_buf.expect("initialized pending buffer").as_ptr(),
+                    (*s).pending_buf
+                        .expect("initialized pending buffer")
+                        .as_ptr(),
                     (*s).pending_buf_size as usize,
                 );
                 append_pending_bytes(pending_buf, &mut (*s).pending, &extra[..left]);
@@ -2286,7 +2319,10 @@ pub unsafe extern "C" fn deflate(
                     if hcrc && (*s).pending > beg_0 {
                         let state = &mut *s;
                         let pending_buf = ::core::slice::from_raw_parts(
-                            state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                            state
+                                .pending_buf
+                                .expect("initialized pending buffer")
+                                .as_ptr(),
                             state.pending_buf_size as usize,
                         );
                         (*strm).adler = crate::src::crc32::crc32_z(
@@ -2305,7 +2341,10 @@ pub unsafe extern "C" fn deflate(
                     let state = &mut *s;
                     let mut source_index = state.gzindex;
                     let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                        state
+                            .pending_buf
+                            .expect("initialized pending buffer")
+                            .as_ptr(),
                         state.pending_buf_size as usize,
                     );
                     let complete = append_gzip_cstring_bytes(
@@ -2324,7 +2363,10 @@ pub unsafe extern "C" fn deflate(
             if hcrc && (*s).pending > beg_0 {
                 let state = &mut *s;
                 let pending_buf = ::core::slice::from_raw_parts(
-                    state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                    state
+                        .pending_buf
+                        .expect("initialized pending buffer")
+                        .as_ptr(),
                     state.pending_buf_size as usize,
                 );
                 (*strm).adler = crate::src::crc32::crc32_z(
@@ -2351,7 +2393,10 @@ pub unsafe extern "C" fn deflate(
                     if hcrc && (*s).pending > beg_1 {
                         let state = &mut *s;
                         let pending_buf = ::core::slice::from_raw_parts(
-                            state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                            state
+                                .pending_buf
+                                .expect("initialized pending buffer")
+                                .as_ptr(),
                             state.pending_buf_size as usize,
                         );
                         (*strm).adler = crate::src::crc32::crc32_z(
@@ -2370,7 +2415,10 @@ pub unsafe extern "C" fn deflate(
                     let state = &mut *s;
                     let mut source_index = state.gzindex;
                     let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                        state
+                            .pending_buf
+                            .expect("initialized pending buffer")
+                            .as_ptr(),
                         state.pending_buf_size as usize,
                     );
                     let complete = append_gzip_cstring_bytes(
@@ -2389,7 +2437,10 @@ pub unsafe extern "C" fn deflate(
             if hcrc && (*s).pending > beg_1 {
                 let state = &mut *s;
                 let pending_buf = ::core::slice::from_raw_parts(
-                    state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                    state
+                        .pending_buf
+                        .expect("initialized pending buffer")
+                        .as_ptr(),
                     state.pending_buf_size as usize,
                 );
                 (*strm).adler = crate::src::crc32::crc32_z(
@@ -2401,11 +2452,7 @@ pub unsafe extern "C" fn deflate(
         (*s).status = crate::src::deflate::HCRC_STATE;
     }
     if (*s).status == crate::src::deflate::HCRC_STATE {
-        if (*s)
-            .gzhead
-            .as_ref()
-            .is_some_and(|header| header.hcrc)
-        {
+        if (*s).gzhead.as_ref().is_some_and(|header| header.hcrc) {
             if (*s).pending.wrapping_add(2 as crate::zutil_h::ulg) > (*s).pending_buf_size {
                 flush_pending(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -2418,7 +2465,10 @@ pub unsafe extern "C" fn deflate(
             // The preceding capacity check ensures that both HCRC bytes fit
             // in this exact pending allocation.
             let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                state
+                    .pending_buf
+                    .expect("initialized pending buffer")
+                    .as_ptr(),
                 state.pending_buf_size as usize,
             );
             append_pending_bytes(
@@ -2521,8 +2571,12 @@ pub unsafe extern "C" fn deflate(
         // The final gzip trailer has a fixed eight-byte representation.  The
         // pending allocation has exactly `pending_buf_size` bytes, established
         // by `deflateInit2_()` or `deflateCopy()`.
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut((*s).pending_buf.expect("initialized pending buffer").as_ptr(), (*s).pending_buf_size as usize);
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            (*s).pending_buf
+                .expect("initialized pending buffer")
+                .as_ptr(),
+            (*s).pending_buf_size as usize,
+        );
         append_pending_bytes(
             pending_buf,
             &mut (*s).pending,
@@ -2550,7 +2604,10 @@ pub unsafe extern "C" fn deflate(
             // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
             // `deflateInit2_()` and copied at that extent in `deflateCopy()`).
             let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf.expect("initialized pending buffer").as_ptr(),
+                state
+                    .pending_buf
+                    .expect("initialized pending buffer")
+                    .as_ptr(),
                 state.pending_buf_size as usize,
             );
             put_short_msb_bytes(
@@ -2676,30 +2733,35 @@ pub unsafe extern "C" fn deflateCopy(
     ::core::ptr::addr_of_mut!((*ds).gzhead).write((*ss).gzhead.as_ref().map(copy_gzip_header));
     (*ds).strm = ::core::ptr::NonNull::new(dest).expect("validated destination stream");
     let storage = DeflateStorageLayout::new((*ds).w_size, (*ds).hash_size, (*ds).lit_bufsize);
-    (*ds).window = ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        storage.window.items,
-        storage.window.size,
-    ) as *mut crate::stdlib::Bytef);
-    (*ds).prev = ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        storage.prev.items,
-        storage.prev.size,
-    ) as *mut crate::src::deflate::Posf);
-    (*ds).head = ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        storage.head.items,
-        storage.head.size,
-    ) as *mut crate::src::deflate::Posf);
-    (*ds).pending_buf = ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        storage.pending.items,
-        storage.pending.size,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef);
+    (*ds).window =
+        ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*dest).opaque,
+            storage.window.items,
+            storage.window.size,
+        ) as *mut crate::stdlib::Bytef);
+    (*ds).prev =
+        ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*dest).opaque,
+            storage.prev.items,
+            storage.prev.size,
+        ) as *mut crate::src::deflate::Posf);
+    (*ds).head =
+        ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*dest).opaque,
+            storage.head.items,
+            storage.head.size,
+        ) as *mut crate::src::deflate::Posf);
+    (*ds).pending_buf =
+        ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*dest).opaque,
+            storage.pending.items,
+            storage.pending.size,
+        ) as *mut crate::zutil_h::uchf
+            as *mut crate::stdlib::Bytef);
     if (*ds).window.is_none()
         || (*ds).prev.is_none()
         || (*ds).head.is_none()
@@ -2738,21 +2800,21 @@ pub unsafe extern "C" fn deflateCopy(
     // Both allocations have the copied `pending_buf_size` capacity.  Form
     // each bounded view once and keep the two logical-region copies in the
     // pointer-free kernel.
-    let source_pending =
-        ::core::slice::from_raw_parts(
-            (*ss).pending_buf.expect("initialized pending buffer").as_ptr(),
-            (*ss).pending_buf_size as usize,
-        );
-    let destination_pending =
-        ::core::slice::from_raw_parts_mut(
-            (*ds).pending_buf.expect("initialized pending buffer").as_ptr(),
-            (*ds).pending_buf_size as usize,
-        );
-    copy_pending_regions(
-        source_pending,
-        destination_pending,
-        copy_layout.pending,
+    let source_pending = ::core::slice::from_raw_parts(
+        (*ss)
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        (*ss).pending_buf_size as usize,
     );
+    let destination_pending = ::core::slice::from_raw_parts_mut(
+        (*ds)
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        (*ds).pending_buf_size as usize,
+    );
+    copy_pending_regions(source_pending, destination_pending, copy_layout.pending);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
@@ -2863,7 +2925,10 @@ unsafe extern "C" fn longest_match(
     // `window_size` and `w_size` are the exact capacities established by
     // deflateInit2_() and retained by deflateCopy().  Keep the raw views
     // bounded by those capacities before handing matching to the safe core.
-    let window = ::core::slice::from_raw_parts(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+    let window = ::core::slice::from_raw_parts(
+        state.window.expect("initialized window").as_ptr(),
+        state.window_size as usize,
+    );
     let prev = ::core::slice::from_raw_parts(
         state.prev.expect("initialized prev table").as_ptr(),
         state.w_size as usize,
@@ -2901,7 +2966,10 @@ unsafe extern "C" fn deflate_stored(
     // The backing window has the exact `window_size` established by
     // `deflateInit2_()` and retained by `deflateCopy()`. Retain this one
     // bounded view while stored blocks copy or slide its contents.
-    let window = ::core::slice::from_raw_parts_mut(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+    let window = ::core::slice::from_raw_parts_mut(
+        state.window.expect("initialized window").as_ptr(),
+        state.window_size as usize,
+    );
     let mut min_block: ::core::ffi::c_uint = (if state
         .pending_buf_size
         .wrapping_sub(5 as crate::zutil_h::ulg)
@@ -2940,7 +3008,8 @@ unsafe extern "C" fn deflate_stored(
         if len < min_block
             && (len == 0 as ::core::ffi::c_uint && flush != crate::zlib_h::Z_FINISH
                 || flush == crate::zlib_h::Z_NO_FLUSH
-                || len != (left as crate::stdlib::uInt).wrapping_add((*state.strm.as_ptr()).avail_in))
+                || len
+                    != (left as crate::stdlib::uInt).wrapping_add((*state.strm.as_ptr()).avail_in))
         {
             break;
         }
@@ -2957,18 +3026,25 @@ unsafe extern "C" fn deflate_stored(
             0 as crate::zutil_h::ulg,
             last,
         );
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("initialized pending buffer")
+                .as_ptr(),
+            state.pending_buf_size as usize,
+        );
         set_stored_block_length(pending_buf, state.pending, len);
         flush_pending(state.strm.as_ptr());
         if left != 0 {
             if left > len {
                 left = len;
             }
-            let output = ::core::slice::from_raw_parts_mut((*state.strm.as_ptr()).next_out, left as usize);
+            let output =
+                ::core::slice::from_raw_parts_mut((*state.strm.as_ptr()).next_out, left as usize);
             let start = state.block_start as usize;
             output.copy_from_slice(&window[start..start + left as usize]);
-            (*state.strm.as_ptr()).next_out = (*state.strm.as_ptr()).next_out.wrapping_add(left as usize);
+            (*state.strm.as_ptr()).next_out =
+                (*state.strm.as_ptr()).next_out.wrapping_add(left as usize);
             (*state.strm.as_ptr()).avail_out = (*state.strm.as_ptr()).avail_out.wrapping_sub(left);
             (*state.strm.as_ptr()).total_out = (*state.strm.as_ptr())
                 .total_out
@@ -2999,7 +3075,9 @@ unsafe extern "C" fn deflate_stored(
         if used >= state.w_size {
             state.matches = 2 as crate::stdlib::uInt;
             let input = ::core::slice::from_raw_parts(
-                (*state.strm.as_ptr()).next_in.wrapping_sub(state.w_size as usize),
+                (*state.strm.as_ptr())
+                    .next_in
+                    .wrapping_sub(state.w_size as usize),
                 state.w_size as usize,
             );
             window[..state.w_size as usize].copy_from_slice(input);
@@ -3059,7 +3137,9 @@ unsafe extern "C" fn deflate_stored(
     have = state
         .window_size
         .wrapping_sub(state.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
-    if (*state.strm.as_ptr()).avail_in > have && state.block_start >= state.w_size as ::core::ffi::c_long {
+    if (*state.strm.as_ptr()).avail_in > have
+        && state.block_start >= state.w_size as ::core::ffi::c_long
+    {
         state.block_start -= state.w_size as ::core::ffi::c_long;
         state.strstart = state.strstart.wrapping_sub(state.w_size);
         window.copy_within(
@@ -3087,7 +3167,10 @@ unsafe extern "C" fn deflate_stored(
         // `window` is allocated with exactly `window_size` bytes in
         // `deflateInit2_()` and `deflateCopy()`, and `have` is capped by the
         // remaining capacity from `strstart` above.
-        let window = ::core::slice::from_raw_parts_mut(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+        let window = ::core::slice::from_raw_parts_mut(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
         let output = &mut window[start..start + have as usize];
         stream.adler = read_buf_bytes(input, output, stream.adler, wrap);
         stream.next_in = next_in;
@@ -3142,7 +3225,8 @@ unsafe extern "C" fn deflate_stored(
         };
         crate::src::trees::_tr_stored_block(
             s as *mut crate::src::deflate::internal_state,
-            (state.window.expect("initialized window").as_ptr() as *mut crate::stdlib::charf).wrapping_add(state.block_start as usize),
+            (state.window.expect("initialized window").as_ptr() as *mut crate::stdlib::charf)
+                .wrapping_add(state.block_start as usize),
             len as crate::zutil_h::ulg,
             last,
         );
@@ -3168,8 +3252,12 @@ unsafe extern "C" fn deflate_fast(
     let sym_buf_start = (*s).sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut((*s).pending_buf.expect("initialized pending buffer").as_ptr(), (*s).pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        (*s).pending_buf_size as usize,
+    );
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
@@ -3185,7 +3273,10 @@ unsafe extern "C" fn deflate_fast(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let window = ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
+            let window = ::core::slice::from_raw_parts(
+                (*s).window.expect("initialized window").as_ptr(),
+                (*s).window_size as usize,
+            );
             let head = ::core::slice::from_raw_parts_mut(
                 (*s).head.expect("initialized head table").as_ptr(),
                 (*s).hash_size as usize,
@@ -3235,8 +3326,10 @@ unsafe extern "C" fn deflate_fast(
                 (*s).match_length = (*s).match_length.wrapping_sub(1);
                 loop {
                     (*s).strstart = (*s).strstart.wrapping_add(1);
-                    let window =
-                        ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
+                    let window = ::core::slice::from_raw_parts(
+                        (*s).window.expect("initialized window").as_ptr(),
+                        (*s).window_size as usize,
+                    );
                     let head = ::core::slice::from_raw_parts_mut(
                         (*s).head.expect("initialized head table").as_ptr(),
                         (*s).hash_size as usize,
@@ -3264,12 +3357,19 @@ unsafe extern "C" fn deflate_fast(
             } else {
                 (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
                 (*s).match_length = 0 as crate::stdlib::uInt;
-                let window = ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
+                let window = ::core::slice::from_raw_parts(
+                    (*s).window.expect("initialized window").as_ptr(),
+                    (*s).window_size as usize,
+                );
                 (*s).ins_h = initial_hash(window, (*s).strstart, (*s).hash_shift, (*s).hash_mask);
             }
         } else {
-            let mut cc: crate::zutil_h::uch =
-                *(*s).window.expect("initialized window").as_ptr().wrapping_add((*s).strstart as usize) as crate::zutil_h::uch;
+            let mut cc: crate::zutil_h::uch = *(*s)
+                .window
+                .expect("initialized window")
+                .as_ptr()
+                .wrapping_add((*s).strstart as usize)
+                as crate::zutil_h::uch;
             bflush = crate::src::trees::tally_symbol(
                 sym_buf,
                 &mut (*s).sym_next,
@@ -3287,7 +3387,9 @@ unsafe extern "C" fn deflate_fast(
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
-                    (*s).window.expect("initialized window").as_ptr()
+                    (*s).window
+                        .expect("initialized window")
+                        .as_ptr()
                         .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
                 } else {
@@ -3318,7 +3420,9 @@ unsafe extern "C" fn deflate_fast(
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window.expect("initialized window").as_ptr()
+                (*s).window
+                    .expect("initialized window")
+                    .as_ptr()
                     .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
@@ -3342,7 +3446,9 @@ unsafe extern "C" fn deflate_fast(
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window.expect("initialized window").as_ptr()
+                (*s).window
+                    .expect("initialized window")
+                    .as_ptr()
                     .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
@@ -3373,8 +3479,12 @@ unsafe extern "C" fn deflate_slow(
     let sym_buf_start = (*s).sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut((*s).pending_buf.expect("initialized pending buffer").as_ptr(), (*s).pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        (*s).pending_buf_size as usize,
+    );
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
@@ -3390,7 +3500,10 @@ unsafe extern "C" fn deflate_slow(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let window = ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
+            let window = ::core::slice::from_raw_parts(
+                (*s).window.expect("initialized window").as_ptr(),
+                (*s).window_size as usize,
+            );
             let head = ::core::slice::from_raw_parts_mut(
                 (*s).head.expect("initialized head table").as_ptr(),
                 (*s).hash_size as usize,
@@ -3462,8 +3575,10 @@ unsafe extern "C" fn deflate_slow(
             loop {
                 (*s).strstart = (*s).strstart.wrapping_add(1);
                 if (*s).strstart <= max_insert {
-                    let window =
-                        ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
+                    let window = ::core::slice::from_raw_parts(
+                        (*s).window.expect("initialized window").as_ptr(),
+                        (*s).window_size as usize,
+                    );
                     let head = ::core::slice::from_raw_parts_mut(
                         (*s).head.expect("initialized head table").as_ptr(),
                         (*s).hash_size as usize,
@@ -3496,7 +3611,9 @@ unsafe extern "C" fn deflate_slow(
                 crate::src::trees::_tr_flush_block(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
-                        (*s).window.expect("initialized window").as_ptr()
+                        (*s).window
+                            .expect("initialized window")
+                            .as_ptr()
                             .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                             as *mut crate::stdlib::charf
                     } else {
@@ -3518,7 +3635,9 @@ unsafe extern "C" fn deflate_slow(
             }
         } else if (*s).match_available != 0 {
             let mut cc: crate::zutil_h::uch = *(*s)
-                .window.expect("initialized window").as_ptr()
+                .window
+                .expect("initialized window")
+                .as_ptr()
                 .wrapping_add((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize)
                 as crate::zutil_h::uch;
             bflush = crate::src::trees::tally_symbol(
@@ -3535,7 +3654,9 @@ unsafe extern "C" fn deflate_slow(
                 crate::src::trees::_tr_flush_block(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
-                        (*s).window.expect("initialized window").as_ptr()
+                        (*s).window
+                            .expect("initialized window")
+                            .as_ptr()
                             .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                             as *mut crate::stdlib::charf
                     } else {
@@ -3561,7 +3682,9 @@ unsafe extern "C" fn deflate_slow(
     }
     if (*s).match_available != 0 {
         let mut cc_0: crate::zutil_h::uch = *(*s)
-            .window.expect("initialized window").as_ptr()
+            .window
+            .expect("initialized window")
+            .as_ptr()
             .wrapping_add((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize)
             as crate::zutil_h::uch;
         bflush = crate::src::trees::tally_symbol(
@@ -3587,7 +3710,9 @@ unsafe extern "C" fn deflate_slow(
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window.expect("initialized window").as_ptr()
+                (*s).window
+                    .expect("initialized window")
+                    .as_ptr()
                     .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
@@ -3611,7 +3736,9 @@ unsafe extern "C" fn deflate_slow(
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window.expect("initialized window").as_ptr()
+                (*s).window
+                    .expect("initialized window")
+                    .as_ptr()
                     .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
@@ -3681,8 +3808,13 @@ unsafe extern "C" fn deflate_rle(
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
+    );
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
@@ -3700,7 +3832,10 @@ unsafe extern "C" fn deflate_rle(
         // `window_size` is the full allocation capacity set by
         // `deflateInit2_()`/`deflateCopy()`, not merely the current input.
         // `rle_match_length()` uses checked slice accesses for the walk.
-        let window = ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
+        let window = ::core::slice::from_raw_parts(
+            (*s).window.expect("initialized window").as_ptr(),
+            (*s).window_size as usize,
+        );
         (*s).match_length = rle_match_length(window, (*s).strstart as usize, (*s).lookahead);
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let len = (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt);
@@ -3763,7 +3898,9 @@ unsafe extern "C" fn deflate_rle(
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window.expect("initialized window").as_ptr()
+                (*s).window
+                    .expect("initialized window")
+                    .as_ptr()
                     .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
@@ -3787,7 +3924,9 @@ unsafe extern "C" fn deflate_rle(
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window.expect("initialized window").as_ptr()
+                (*s).window
+                    .expect("initialized window")
+                    .as_ptr()
                     .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
@@ -3818,8 +3957,13 @@ unsafe extern "C" fn deflate_huff(
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
+    );
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if state.lookahead == 0 as crate::stdlib::uInt {
@@ -3832,7 +3976,10 @@ unsafe extern "C" fn deflate_huff(
             }
         }
         state.match_length = 0 as crate::stdlib::uInt;
-        let window = ::core::slice::from_raw_parts(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
+        let window = ::core::slice::from_raw_parts(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
         let cc = window[state.strstart as usize] as crate::zutil_h::uch;
         bflush = crate::src::trees::tally_symbol(
             sym_buf,
@@ -3850,7 +3997,10 @@ unsafe extern "C" fn deflate_huff(
             crate::src::trees::_tr_flush_block(
                 state as *mut crate::src::deflate::internal_state,
                 if state.block_start >= 0 as ::core::ffi::c_long {
-                    state.window.expect("initialized window").as_ptr()
+                    state
+                        .window
+                        .expect("initialized window")
+                        .as_ptr()
                         .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
                 } else {
@@ -3874,7 +4024,10 @@ unsafe extern "C" fn deflate_huff(
         crate::src::trees::_tr_flush_block(
             state as *mut crate::src::deflate::internal_state,
             if state.block_start >= 0 as ::core::ffi::c_long {
-                state.window.expect("initialized window").as_ptr()
+                state
+                    .window
+                    .expect("initialized window")
+                    .as_ptr()
                     .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
@@ -3897,7 +4050,10 @@ unsafe extern "C" fn deflate_huff(
         crate::src::trees::_tr_flush_block(
             state as *mut crate::src::deflate::internal_state,
             if state.block_start >= 0 as ::core::ffi::c_long {
-                state.window.expect("initialized window").as_ptr()
+                state
+                    .window
+                    .expect("initialized window")
+                    .as_ptr()
                     .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {

@@ -112,8 +112,12 @@ enum GzSeekAction {
         seek_by: crate::stdlib::off64_t,
         position: crate::stdlib::off64_t,
     },
-    Rewind { offset: crate::stdlib::off64_t },
-    Skip { offset: crate::stdlib::off64_t },
+    Rewind {
+        offset: crate::stdlib::off64_t,
+    },
+    Skip {
+        offset: crate::stdlib::off64_t,
+    },
     Reject,
 }
 
@@ -148,10 +152,7 @@ fn gzseek_plan(
     } else {
         offset += if past != 0 { 0 } else { skip };
     }
-    if mode == crate::gzguts_h::GZ_READ
-        && how == crate::gzguts_h::COPY
-        && pos + offset >= 0
-    {
+    if mode == crate::gzguts_h::GZ_READ && how == crate::gzguts_h::COPY && pos + offset >= 0 {
         return Some(GzSeekPlan {
             clear_skip,
             action: GzSeekAction::Direct {
@@ -162,11 +163,17 @@ fn gzseek_plan(
     }
     if offset < 0 {
         if mode != crate::gzguts_h::GZ_READ {
-            return Some(GzSeekPlan { clear_skip, action: GzSeekAction::Reject });
+            return Some(GzSeekPlan {
+                clear_skip,
+                action: GzSeekAction::Reject,
+            });
         }
         offset += pos;
         if offset < 0 {
-            return Some(GzSeekPlan { clear_skip, action: GzSeekAction::Reject });
+            return Some(GzSeekPlan {
+                clear_skip,
+                action: GzSeekAction::Reject,
+            });
         }
         return Some(GzSeekPlan {
             clear_skip,
@@ -187,10 +194,7 @@ pub fn gzeof(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi:
     }
 }
 
-pub(crate) fn gz_clear_error(
-    message: &mut Option<Box<[u8]>>,
-    error: &mut ::core::ffi::c_int,
-) {
+pub(crate) fn gz_clear_error(message: &mut Option<Box<[u8]>>, error: &mut ::core::ffi::c_int) {
     *message = None;
     *error = crate::zlib_h::Z_OK;
 }
@@ -559,7 +563,9 @@ unsafe extern "C" fn gz_open(
             Err(error) => errno::set_errno(errno::Errno(error.raw_os_error())),
         }
     } else {
-        state_ref.fd = Some(<rustix::fd::OwnedFd as rustix::fd::FromRawFd>::from_raw_fd(fd));
+        state_ref.fd = Some(<rustix::fd::OwnedFd as rustix::fd::FromRawFd>::from_raw_fd(
+            fd,
+        ));
         if oflag & crate::stdlib::O_NONBLOCK != 0 {
             if let Ok(flags) = rustix::fs::fcntl_getfl(state_ref.fd.as_ref().unwrap()) {
                 let _ = rustix::fs::fcntl_setfl(
@@ -583,10 +589,7 @@ unsafe extern "C" fn gz_open(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     if state_ref.mode == crate::gzguts_h::GZ_APPEND {
-        let _ = rustix::fs::seek(
-            state_ref.fd.as_ref().unwrap(),
-            rustix::fs::SeekFrom::End(0),
-        );
+        let _ = rustix::fs::seek(state_ref.fd.as_ref().unwrap(), rustix::fs::SeekFrom::End(0));
         state_ref.mode = crate::gzguts_h::GZ_WRITE;
     }
     if state_ref.mode == crate::gzguts_h::GZ_READ {
@@ -759,7 +762,9 @@ unsafe fn gzrewind(
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzrewind(::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep))
+    gzrewind(::core::ptr::NonNull::new(
+        file as crate::gzguts_h::gz_statep,
+    ))
 }
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
@@ -807,9 +812,7 @@ pub unsafe extern "C" fn gzseek64(
             return state.x.pos;
         }
         GzSeekAction::Rewind { offset } => {
-            if gzrewind(Some(::core::ptr::NonNull::from(&mut *state)))
-                == -1 as ::core::ffi::c_int
-            {
+            if gzrewind(Some(::core::ptr::NonNull::from(&mut *state))) == -1 as ::core::ffi::c_int {
                 return -1 as crate::stdlib::off64_t;
             }
             offset

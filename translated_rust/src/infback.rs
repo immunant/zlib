@@ -121,7 +121,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     (*state).dmax = 32768 as ::core::ffi::c_uint;
     (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
     (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
-    (*state).window = window;
+    (*state).window = Some(::core::ptr::NonNull::new(window).expect("validated caller window"));
     (*state).wnext = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
     (*state).sane = 1 as ::core::ffi::c_int;
@@ -204,7 +204,7 @@ pub unsafe extern "C" fn inflateBack(
     }) as ::core::ffi::c_uint;
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
-    put = (*state).window;
+    put = (*state).window.expect("inflateBack window").as_ptr();
     left = (*state).wsize;
     '_inf_leave: loop {
         match (*state).mode as ::core::ffi::c_uint {
@@ -309,7 +309,7 @@ pub unsafe extern "C" fn inflateBack(
                             }
                         }
                         if left == 0 as ::core::ffi::c_uint {
-                            put = (*state).window;
+                            put = (*state).window.expect("inflateBack window").as_ptr();
                             left = (*state).wsize;
                             (*state).whave = left;
                             if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
@@ -837,7 +837,7 @@ pub unsafe extern "C" fn inflateBack(
             (*state).length = here.val as ::core::ffi::c_uint;
             if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                 if left == 0 as ::core::ffi::c_uint {
-                    put = (*state).window;
+                    put = (*state).window.expect("inflateBack window").as_ptr();
                     left = (*state).wsize;
                     (*state).whave = left;
                     if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
@@ -998,7 +998,7 @@ pub unsafe extern "C" fn inflateBack(
                     } else {
                         loop {
                             if left == 0 as ::core::ffi::c_uint {
-                                put = (*state).window;
+                                put = (*state).window.expect("inflateBack window").as_ptr();
                                 left = (*state).wsize;
                                 (*state).whave = left;
                                 if out.expect("non-null function pointer")(out_desc, put, left) != 0
@@ -1043,7 +1043,7 @@ pub unsafe extern "C" fn inflateBack(
     if left < (*state).wsize {
         if out.expect("non-null function pointer")(
             out_desc,
-            (*state).window,
+            (*state).window.expect("inflateBack window").as_ptr(),
             (*state).wsize.wrapping_sub(left),
         ) != 0
             && ret == crate::zlib_h::Z_STREAM_END

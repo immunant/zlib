@@ -35,5 +35,7 @@ unsafe fn gzclose(
 #[export_name = "gzclose"]
 
 pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose(::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep))
+    gzclose(::core::ptr::NonNull::new(
+        file as crate::gzguts_h::gz_statep,
+    ))
 }

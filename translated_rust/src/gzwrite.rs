@@ -79,8 +79,7 @@ fn gzwrite_length_fits_int(len: usize) -> bool {
 }
 
 fn gzputs_length_fits_int(len: crate::stdlib::z_size_t) -> bool {
-    (len as ::core::ffi::c_int) >= 0
-        && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
+    (len as ::core::ffi::c_int) >= 0 && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
 }
 
 fn gzfwrite_length(
@@ -772,7 +771,9 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         .fd
         .take()
         .map(|fd| unsafe {
-            rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(fd))
+            rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(
+                fd,
+            ))
         })
         .transpose()
         .is_err()

@@ -4794,7 +4794,10 @@ fn crc_word_big(mut data: z_word_t) -> z_word_t {
     }
     return data;
 }
-pub fn crc32_z(crc: crate::stdlib::uLong, buf: Option<&[::core::ffi::c_uchar]>) -> crate::stdlib::uLong {
+pub fn crc32_z(
+    crc: crate::stdlib::uLong,
+    buf: Option<&[::core::ffi::c_uchar]>,
+) -> crate::stdlib::uLong {
     let Some(buf) = buf else {
         return 0;
     };

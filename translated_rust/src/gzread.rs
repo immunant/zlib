@@ -73,12 +73,7 @@ fn pushback_empty(buffer: &mut [u8], byte: u8) -> Option<usize> {
     Some(next)
 }
 
-fn pushback_buffer(
-    buffer: &mut [u8],
-    next: usize,
-    have: usize,
-    byte: u8,
-) -> Option<usize> {
+fn pushback_buffer(buffer: &mut [u8], next: usize, have: usize, byte: u8) -> Option<usize> {
     if next > buffer.len() || have >= buffer.len() {
         return None;
     }
@@ -115,10 +110,7 @@ unsafe fn gz_load(
         if get > max {
             get = max;
         }
-        ret = match rustix::io::read(
-            state.fd.as_ref().unwrap(),
-            &mut output[..get as usize],
-        ) {
+        ret = match rustix::io::read(state.fd.as_ref().unwrap(), &mut output[..get as usize]) {
             Ok(read) => read as ::core::ffi::c_int,
             Err(error) => {
                 errno::set_errno(errno::Errno(error.raw_os_error()));
@@ -135,9 +127,7 @@ unsafe fn gz_load(
     }
     if ret < 0 as ::core::ffi::c_int {
         let errno_value = errno::errno().0;
-        if errno_value == crate::stdlib::EAGAIN
-            || errno_value == crate::stdlib::EWOULDBLOCK
-        {
+        if errno_value == crate::stdlib::EAGAIN || errno_value == crate::stdlib::EWOULDBLOCK {
             state.again = 1 as ::core::ffi::c_int;
             if *have != 0 as ::core::ffi::c_uint {
                 return 0 as ::core::ffi::c_int;
@@ -381,9 +371,8 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     }
     state.x.have =
         (had as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as ::core::ffi::c_uint;
-    state.x.next = (*strm)
-        .next_out
-        .wrapping_sub(state.x.have as usize) as *mut ::core::ffi::c_uchar;
+    state.x.next =
+        (*strm).next_out.wrapping_sub(state.x.have as usize) as *mut ::core::ffi::c_uchar;
     if ret == crate::zlib_h::Z_STREAM_END {
         state.junk = 0 as ::core::ffi::c_int;
         state.how = crate::gzguts_h::LOOK;
@@ -423,8 +412,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return 0 as ::core::ffi::c_int;
             }
             crate::gzguts_h::GZIP => {
-                (*strm).avail_out =
-                    (state.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+                (*strm).avail_out = (state.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
                 (*strm).next_out = state.out.as_deref_mut().unwrap().as_mut_ptr();
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
@@ -443,8 +431,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if !(state.x.have == 0 as ::core::ffi::c_uint
-            && (state.eof == 0 || (*strm).avail_in != 0))
+        if !(state.x.have == 0 as ::core::ffi::c_uint && (state.eof == 0 || (*strm).avail_in != 0))
         {
             break;
         }
@@ -495,9 +482,7 @@ unsafe fn gz_read(
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if state.skip != 0
-        && gz_skip(state) == -1 as ::core::ffi::c_int
-    {
+    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -538,9 +523,7 @@ unsafe fn gz_read(
                 if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                     break 's_140;
                 }
-                if state.how == crate::gzguts_h::LOOK
-                    || n < state.size << 1 as ::core::ffi::c_int
-                {
+                if state.how == crate::gzguts_h::LOOK || n < state.size << 1 as ::core::ffi::c_int {
                     if gz_fetch(state) == -1 as ::core::ffi::c_int
                         && state.x.have == 0 as ::core::ffi::c_uint
                     {
@@ -733,11 +716,7 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         state.x.next = state.x.next.wrapping_add(1);
         return byte as ::core::ffi::c_int;
     }
-    return if gz_read(
-        state,
-        &mut buf,
-    ) < 1 as crate::stdlib::z_size_t
-    {
+    return if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as usize] as ::core::ffi::c_int
@@ -820,7 +799,12 @@ pub unsafe extern "C" fn gzungetc(
     let Some(next) = cursor.addr().checked_sub(out.addr()) else {
         return -1 as ::core::ffi::c_int;
     };
-    let Some(next) = pushback_buffer(buffer, next, state.x.have as usize, c as ::core::ffi::c_uchar) else {
+    let Some(next) = pushback_buffer(
+        buffer,
+        next,
+        state.x.have as usize,
+        c as ::core::ffi::c_uchar,
+    ) else {
         return -1 as ::core::ffi::c_int;
     };
     state.x.have = state.x.have.wrapping_add(1);
@@ -970,7 +954,9 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
     state.msg = None;
     ret = match state.fd.take() {
         Some(fd) => unsafe {
-            rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(fd))
+            rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(
+                fd,
+            ))
         }
         .map(|()| 0 as ::core::ffi::c_int)
         .unwrap_or(-1 as ::core::ffi::c_int),

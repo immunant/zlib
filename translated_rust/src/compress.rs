@@ -178,12 +178,7 @@ fn compress2(
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut got: crate::stdlib::z_size_t = *dest_len as crate::stdlib::z_size_t;
-    ret = compress2_z(
-        dest,
-        &mut got,
-        source,
-        level,
-    );
+    ret = compress2_z(dest, &mut got, source, level);
     *dest_len = got as crate::stdlib::uLong as crate::stdlib::uLongf;
     return ret;
 }
@@ -220,12 +215,7 @@ fn compress_z(
     dest_len: &mut crate::stdlib::z_size_t,
     source: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    return compress2_z(
-        dest,
-        dest_len,
-        source,
-        crate::zlib_h::Z_DEFAULT_COMPRESSION,
-    );
+    return compress2_z(dest, dest_len, source, crate::zlib_h::Z_DEFAULT_COMPRESSION);
 }
 #[export_name = "compress_z"]
 
@@ -259,12 +249,7 @@ fn compress(
     dest_len: &mut crate::stdlib::uLongf,
     source: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    return compress2(
-        dest,
-        dest_len,
-        source,
-        crate::zlib_h::Z_DEFAULT_COMPRESSION,
-    );
+    return compress2(dest, dest_len, source, crate::zlib_h::Z_DEFAULT_COMPRESSION);
 }
 #[export_name = "compress"]
 
@@ -293,9 +278,7 @@ pub unsafe extern "C" fn compress_ffi(
     };
     compress(dest, &mut *destLen, source)
 }
-pub fn compressBound_z(
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
+pub fn compressBound_z(mut sourceLen: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
     let mut bound: crate::stdlib::z_size_t = sourceLen
         .wrapping_add(sourceLen >> 12 as ::core::ffi::c_int)
         .wrapping_add(sourceLen >> 14 as ::core::ffi::c_int)
@@ -314,9 +297,7 @@ pub unsafe extern "C" fn compressBound_z_ffi(
 ) -> crate::stdlib::z_size_t {
     compressBound_z(sourceLen)
 }
-pub fn compressBound(
-    mut sourceLen: crate::stdlib::uLong,
-) -> crate::stdlib::uLong {
+pub fn compressBound(mut sourceLen: crate::stdlib::uLong) -> crate::stdlib::uLong {
     let mut bound: crate::stdlib::z_size_t = compressBound_z(sourceLen as crate::stdlib::z_size_t);
     return if bound != bound {
         -1 as ::core::ffi::c_int as crate::stdlib::uLong

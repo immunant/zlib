@@ -83,7 +83,12 @@ pub unsafe extern "C" fn inflate_fast(
     wsize = (*state).wsize;
     whave = (*state).whave;
     wnext = (*state).wnext;
-    window = (*state).window;
+    // A fresh normal-inflate stream reaches this path before `updatewindow()`
+    // has materialized history.  The fast decoder already handles the null
+    // local in that case; keep the optional owner out of the core state.
+    window = (*state)
+        .window
+        .map_or(::core::ptr::null_mut::<::core::ffi::c_uchar>(), |window| window.as_ptr());
     hold = (*state).hold;
     bits = (*state).bits;
     lcode = (*state).lencode;

@@ -114,7 +114,10 @@ pub struct inflate_state {
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
     pub wnext: ::core::ffi::c_uint,
-    pub window: *mut ::core::ffi::c_uchar,
+    // The normal inflate history window is allocated lazily.  Retain that
+    // absence explicitly; raw cursor projections are formed only by the
+    // existing unsafe codec boundaries.
+    pub window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>>,
     pub hold: ::core::ffi::c_ulong,
     pub bits: ::core::ffi::c_uint,
     pub length: ::core::ffi::c_uint,
@@ -293,12 +296,12 @@ pub unsafe extern "C" fn inflateReset2(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if !(*state).window.is_null() && (*state).wbits != windowBits as ::core::ffi::c_uint {
+    if (*state).window.is_some() && (*state).wbits != windowBits as ::core::ffi::c_uint {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
+            (*state).window.expect("window checked").as_ptr() as crate::stdlib::voidpf,
         );
-        (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        (*state).window = None;
     }
     (*state).wrap = wrap;
     (*state).wbits = windowBits as ::core::ffi::c_uint;
@@ -362,7 +365,7 @@ pub unsafe extern "C" fn inflateInit2_(
     // observed, so clearing allocator-provided storage here is dead work.
     (*strm).state = state as *mut crate::src::deflate::internal_state;
     (*state).stream_identity = strm.addr();
-    (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    (*state).window = None;
     (*state).mode = crate::src::inflate::HEAD;
     ret = inflateReset2(strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
@@ -454,17 +457,18 @@ unsafe extern "C" fn updatewindow(
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut dist: ::core::ffi::c_uint = 0;
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).window.is_null() {
-        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
+    if (*state).window.is_none() {
+        (*state).window = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*strm).opaque,
             (1 as crate::stdlib::uInt) << (*state).wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
-        if (*state).window.is_null() {
+        ) as *mut ::core::ffi::c_uchar);
+        if (*state).window.is_none() {
             return 1 as ::core::ffi::c_int;
         }
     }
+    let window = (*state).window.expect("window allocated").as_ptr();
     if (*state).wsize == 0 as ::core::ffi::c_uint {
         (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
         (*state).wnext = 0 as ::core::ffi::c_uint;
@@ -472,7 +476,7 @@ unsafe extern "C" fn updatewindow(
     }
     if copy >= (*state).wsize {
         crate::stdlib::memcpy(
-            (*state).window as *mut ::core::ffi::c_void,
+            window as *mut ::core::ffi::c_void,
             end.offset(-((*state).wsize as isize)) as *const ::core::ffi::c_void,
             (*state).wsize as crate::__stddef_size_t_h::size_t,
         );
@@ -484,14 +488,14 @@ unsafe extern "C" fn updatewindow(
             dist = copy;
         }
         crate::stdlib::memcpy(
-            (*state).window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
+            window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
             end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
             dist as crate::__stddef_size_t_h::size_t,
         );
         copy = copy.wrapping_sub(dist);
         if copy != 0 {
             crate::stdlib::memcpy(
-                (*state).window as *mut ::core::ffi::c_void,
+                window as *mut ::core::ffi::c_void,
                 end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
@@ -2175,10 +2179,14 @@ pub unsafe extern "C" fn inflate(
                 copy = copy.wrapping_sub((*state).wnext);
                 from = (*state)
                     .window
+                    .expect("history exists when distance reaches window")
+                    .as_ptr()
                     .offset((*state).wsize.wrapping_sub(copy) as isize);
             } else {
                 from = (*state)
                     .window
+                    .expect("history exists when distance reaches window")
+                    .as_ptr()
                     .offset((*state).wnext.wrapping_sub(copy) as isize);
             }
             if copy > (*state).length {
@@ -2302,10 +2310,10 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if !(*state).window.is_null() {
+    if let Some(window) = (*state).window {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
+            window.as_ptr() as crate::stdlib::voidpf,
         );
     }
     Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
@@ -2334,14 +2342,14 @@ pub unsafe extern "C" fn inflateGetDictionary(
     if (*state).whave != 0 && !dictionary.is_null() {
         crate::stdlib::memcpy(
             dictionary as *mut ::core::ffi::c_void,
-            (*state).window.offset((*state).wnext as isize) as *const ::core::ffi::c_void,
+            (*state).window.expect("history exists").as_ptr().offset((*state).wnext as isize) as *const ::core::ffi::c_void,
             (*state).whave.wrapping_sub((*state).wnext) as crate::__stddef_size_t_h::size_t,
         );
         crate::stdlib::memcpy(
             dictionary
                 .offset((*state).whave as isize)
                 .offset(-((*state).wnext as isize)) as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
+            (*state).window.expect("history exists").as_ptr() as *const ::core::ffi::c_void,
             (*state).wnext as crate::__stddef_size_t_h::size_t,
         );
     }
@@ -2567,7 +2575,7 @@ pub unsafe extern "C" fn inflateCopy(
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>> = None;
     if inflateStateCheck(source) != 0 || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2584,15 +2592,14 @@ pub unsafe extern "C" fn inflateCopy(
     // The allocation is not observed before the complete state copy below.
     // Clearing it here would be dead work and only adds an unsafe foreign
     // memory call; the copy establishes every state byte before use.
-    window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !(*state).window.is_null() {
-        window = Some((*source).zalloc.expect("non-null function pointer"))
+    if (*state).window.is_some() {
+        window = ::core::ptr::NonNull::new(Some((*source).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*source).opaque,
             (1 as crate::stdlib::uInt) << (*state).wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
-        if window.is_null() {
+        ) as *mut ::core::ffi::c_uchar);
+        if window.is_none() {
             Some((*source).zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 (*source).opaque,
@@ -2615,10 +2622,10 @@ pub unsafe extern "C" fn inflateCopy(
     (*copy).lencode = (*state).lencode;
     (*copy).distcode = (*state).distcode;
     (*copy).next = (*state).next;
-    if !window.is_null() {
+    if let Some(window) = window {
         crate::stdlib::memcpy(
-            window as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
+            window.as_ptr() as *mut ::core::ffi::c_void,
+            (*state).window.expect("history exists").as_ptr() as *const ::core::ffi::c_void,
             (*state).whave as crate::__stddef_size_t_h::size_t,
         );
     }
