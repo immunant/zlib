@@ -3136,7 +3136,10 @@ pub unsafe extern "C" fn inflate_table_ffi(
     let mut table_cursor = 0;
     let result = inflate_table_safe(type_0, lens, table, &mut table_cursor, &mut *bits, work);
     if result == 0 {
-        *table_out = table_start.add(table_cursor);
+        let table_tail = table
+            .get_mut(table_cursor..)
+            .expect("successful table build keeps cursor in bounds");
+        *table_out = table_tail.as_mut_ptr();
     }
     result
 }
