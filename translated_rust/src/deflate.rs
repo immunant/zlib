@@ -53,7 +53,7 @@ pub type tree_desc = crate::src::deflate::tree_desc_s;
 pub struct tree_desc_s {
     pub dyn_tree: *mut crate::src::deflate::ct_data,
     pub max_code: ::core::ffi::c_int,
-    pub stat_desc: *const crate::src::deflate::static_tree_desc,
+    pub stat_desc_kind: ::core::ffi::c_int,
 }
 
 pub type Pos = crate::zutil_h::ush;
@@ -1014,15 +1014,8 @@ pub unsafe extern "C" fn deflateReset_ffi(
 ) -> ::core::ffi::c_int {
     deflateReset(strm)
 }
-pub unsafe extern "C" fn deflateSetHeader(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
-) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    (*(*strm).state).gzhead = head;
-    return crate::zlib_h::Z_OK;
+fn deflate_set_header_allowed(state: &crate::src::deflate::deflate_state) -> bool {
+    state.wrap == 2 as ::core::ffi::c_int
 }
 #[export_name = "deflateSetHeader"]
 
@@ -1030,7 +1023,15 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    deflateSetHeader(strm, head)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    if !deflate_set_header_allowed(state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    state.gzhead = head;
+    return crate::zlib_h::Z_OK;
 }
 pub fn deflatePending(
     state: &crate::src::deflate::deflate_state,
@@ -1368,7 +1369,9 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
 ) -> crate::stdlib::z_size_t {
     deflateBound_z(strm, sourceLen)
 }
-pub unsafe extern "C" fn deflateBound(
+#[export_name = "deflateBound"]
+
+pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
@@ -1379,14 +1382,6 @@ pub unsafe extern "C" fn deflateBound(
     } else {
         bound as crate::stdlib::uLong
     };
-}
-#[export_name = "deflateBound"]
-
-pub unsafe extern "C" fn deflateBound_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut sourceLen: crate::stdlib::uLong,
-) -> crate::stdlib::uLong {
-    deflateBound(strm, sourceLen)
 }
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,

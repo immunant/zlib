@@ -20,7 +20,9 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe extern "C" fn gzclose(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzclose"]
+
+pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -32,9 +34,4 @@ pub unsafe extern "C" fn gzclose(mut file: crate::zlib_h::gzFile) -> ::core::ffi
     } else {
         crate::src::gzwrite::gzclose_w(file as *mut crate::zlib_h::gzFile_s)
     };
-}
-#[export_name = "gzclose"]
-
-pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose(file)
 }
