@@ -102,21 +102,11 @@ pub unsafe fn inflateBackInit_(
     }
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc_ffi
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
+        (*strm).zalloc = Some(crate::src::zutil::zcalloc_ffi);
         (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
     if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
-            crate::src::zutil::zcfree_ffi
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
+        (*strm).zfree = Some(crate::src::zutil::zcfree_ffi);
     }
     state = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(

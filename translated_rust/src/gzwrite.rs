@@ -468,7 +468,7 @@ unsafe extern "C" fn gz_comp(
                 return -1 as ::core::ffi::c_int;
             }
             (*strm).avail_in = gz_comp_remaining_direct_input((*strm).avail_in, writ);
-            (*strm).next_in = (*strm).next_in.offset(writ as isize);
+            (*strm).next_in = (*strm).next_in.wrapping_add(writ as usize);
         }
         return 0 as ::core::ffi::c_int;
     }

@@ -3690,7 +3690,7 @@ unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
 unsafe extern "C" fn gen_codes(
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
-    mut bl_count: *mut crate::zutil_h::ushf,
+    bl_count: &[crate::zutil_h::ush; 16],
 ) {
     let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
     let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
@@ -3699,7 +3699,7 @@ unsafe extern "C" fn gen_codes(
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
         code = code.wrapping_add(
-            *bl_count.offset((bits - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_uint
+            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint
         ) << 1 as ::core::ffi::c_int;
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;
@@ -3995,11 +3995,7 @@ unsafe extern "C" fn build_tree(
     (*s).heap_max -= 1;
     (*s).heap[(*s).heap_max as usize] = (*s).heap[SMALLEST as usize];
     gen_bitlen(s, desc);
-    gen_codes(
-        tree,
-        max_code,
-        &raw mut (*s).bl_count as *mut crate::zutil_h::ushf,
-    );
+    gen_codes(tree, max_code, &(*s).bl_count);
 }
 
 unsafe extern "C" fn scan_tree(
