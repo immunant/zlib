@@ -3509,60 +3509,42 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
 ) {
     _tr_flush_block(s, buf, stored_len, last)
 }
-pub unsafe extern "C" fn _tr_tally(
-    mut s: *mut crate::src::deflate::deflate_state,
+pub unsafe fn _tr_tally(
+    s: &mut crate::src::deflate::deflate_state,
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let sym_buf = (*s).pending_buf.offset((*s).sym_buf as isize);
-    let c2rust_fresh0 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *sym_buf.offset(c2rust_fresh0 as isize) =
-        dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-    let c2rust_fresh1 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *sym_buf.offset(c2rust_fresh1 as isize) =
-        (dist >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch as crate::zutil_h::uchf;
-    let c2rust_fresh2 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *sym_buf.offset(c2rust_fresh2 as isize) =
-        lc as crate::zutil_h::uch as crate::zutil_h::uchf;
+    // A symbol is either one literal byte or a match whose length-minus-three
+    // fits in one byte.  Deflate distances are at most 32 KiB; checking here
+    // also keeps direct FFI callers from indexing the fixed coding tables
+    // outside their declared ranges.
+    if lc > 255 || dist > 32 * 1024 {
+        return 1;
+    }
+    if !s.put_symbol(dist, lc) {
+        return 1;
+    }
     if dist == 0 as ::core::ffi::c_uint {
-        (*s).dyn_ltree[lc as usize].fc.freq = (*s).dyn_ltree[lc as usize].fc.freq.wrapping_add(1);
+        let tree = &mut s.dyn_ltree[lc as usize];
+        unsafe { tree.fc.freq = tree.fc.freq.wrapping_add(1) };
     } else {
-        (*s).matches = (*s).matches.wrapping_add(1);
+        s.matches = s.matches.wrapping_add(1);
         dist = dist.wrapping_sub(1);
-        (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
-            + crate::src::deflate::LITERALS
-            + 1 as ::core::ffi::c_int) as usize]
-            .fc
-            .freq = (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize]
+        let tree = &mut s.dyn_ltree[(crate::src::trees::_length_code[lc as usize]
             as ::core::ffi::c_int
             + crate::src::deflate::LITERALS
-            + 1 as ::core::ffi::c_int) as usize]
-            .fc
-            .freq
-            .wrapping_add(1);
-        (*s).dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
+            + 1 as ::core::ffi::c_int) as usize];
+        unsafe { tree.fc.freq = tree.fc.freq.wrapping_add(1) };
+        let tree = &mut s.dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
             crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
         } else {
             crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
                 .wrapping_add(dist >> 7 as ::core::ffi::c_int)
                 as usize] as ::core::ffi::c_int
-        }) as usize]
-            .fc
-            .freq = (*s).dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
-            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
-        } else {
-            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
-                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
-                as usize] as ::core::ffi::c_int
-        }) as usize]
-            .fc
-            .freq
-            .wrapping_add(1);
+        }) as usize];
+        unsafe { tree.fc.freq = tree.fc.freq.wrapping_add(1) };
     }
-    return ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+    (s.sym_next == s.sym_end) as ::core::ffi::c_int
 }
 #[export_name = "_tr_tally"]
 
@@ -3571,5 +3553,8 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
+    let Some(s) = s.as_mut() else {
+        return 1;
+    };
     _tr_tally(s, dist, lc)
 }

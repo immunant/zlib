@@ -192,6 +192,44 @@ impl internal_state {
         pending[index] = byte;
         self.pending = self.pending.wrapping_add(1);
     }
+
+    /// Record one literal or match descriptor in the three-byte symbol
+    /// overlay.  The overlay deliberately shares `pending_buf`, so validate
+    /// both the logical symbol limit and the backing allocation before
+    /// temporarily viewing that allocation as a slice.
+    #[inline]
+    pub fn put_symbol(&mut self, dist: crate::stdlib::uInt, lc: crate::stdlib::uInt) -> bool {
+        let Ok(len) = usize::try_from(self.pending_buf_size) else {
+            return false;
+        };
+        let Ok(next) = usize::try_from(self.sym_next) else {
+            return false;
+        };
+        let Ok(sym_end) = usize::try_from(self.sym_end) else {
+            return false;
+        };
+        let Some(next_end) = next.checked_add(3) else {
+            return false;
+        };
+        let Some(start) = self.sym_buf.checked_add(next) else {
+            return false;
+        };
+        let Some(end) = start.checked_add(3) else {
+            return false;
+        };
+        if self.pending_buf.is_null() || next_end > sym_end || end > len {
+            return false;
+        }
+
+        let pending = unsafe { core::slice::from_raw_parts_mut(self.pending_buf, len) };
+        pending[start..end].copy_from_slice(&[
+            dist as crate::zutil_h::uch as crate::zutil_h::uchf,
+            (dist >> 8) as crate::zutil_h::uch as crate::zutil_h::uchf,
+            lc as crate::zutil_h::uch as crate::zutil_h::uchf,
+        ]);
+        self.sym_next = next_end as crate::stdlib::uInt;
+        true
+    }
 }
 
 #[derive(Clone)]
