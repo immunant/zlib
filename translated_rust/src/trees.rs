@@ -4467,8 +4467,6 @@ fn gen_codes_state(
     true
 }
 
-fn tr_static_init() {}
-
 fn reset_block(s: &mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
@@ -4493,20 +4491,21 @@ fn reset_block(s: &mut crate::src::deflate::deflate_state) {
     s.sym_next = s.matches;
 }
 
-pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
-    tr_static_init();
-    (*s).l_desc.stat_desc = Some(&static_l_desc);
-    (*s).d_desc.stat_desc = Some(&static_d_desc);
-    (*s).bl_desc.stat_desc = Some(&static_bl_desc);
-    (*s).bi_buf = 0 as crate::zutil_h::ush;
-    (*s).bi_valid = 0 as ::core::ffi::c_int;
-    (*s).bi_used = 0 as ::core::ffi::c_int;
-    reset_block(&mut *s);
+pub fn tr_init_state(s: &mut crate::src::deflate::deflate_state) {
+    s.l_desc.stat_desc = Some(&static_l_desc);
+    s.d_desc.stat_desc = Some(&static_d_desc);
+    s.bl_desc.stat_desc = Some(&static_bl_desc);
+    s.bi_buf = 0 as crate::zutil_h::ush;
+    s.bi_valid = 0 as ::core::ffi::c_int;
+    s.bi_used = 0 as ::core::ffi::c_int;
+    reset_block(s);
 }
 #[export_name = "_tr_init"]
 
 pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_init(s)
+    if let Some(s) = s.as_mut() {
+        tr_init_state(s);
+    }
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 

@@ -157,7 +157,6 @@ pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::_tr_flush_block;
-pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::stdlib::charf;
@@ -1083,17 +1082,18 @@ pub unsafe extern "C" fn deflateResetKeep(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     (*strm).data_type = crate::zlib_h::Z_UNKNOWN;
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    (*s).pending = 0 as crate::zutil_h::ulg;
-    (*s).pending_out = (*s).pending_buf;
-    if (*s).wrap < 0 as ::core::ffi::c_int {
-        (*s).wrap = -(*s).wrap;
+    let state = &mut *s;
+    state.pending = 0 as crate::zutil_h::ulg;
+    state.pending_out = state.pending_buf;
+    if state.wrap < 0 as ::core::ffi::c_int {
+        state.wrap = -state.wrap;
     }
-    (*s).status = if (*s).wrap == 2 as ::core::ffi::c_int {
+    state.status = if state.wrap == 2 as ::core::ffi::c_int {
         crate::src::deflate::GZIP_STATE
     } else {
         crate::src::deflate::INIT_STATE
     };
-    (*strm).adler = if (*s).wrap == 2 as ::core::ffi::c_int {
+    (*strm).adler = if state.wrap == 2 as ::core::ffi::c_int {
         crate::src::crc32::crc32(
             0 as crate::stdlib::uLong,
             ::core::ptr::null::<crate::stdlib::Bytef>(),
@@ -1106,8 +1106,8 @@ pub unsafe extern "C" fn deflateResetKeep(
             0 as crate::stdlib::uInt,
         )
     };
-    (*s).last_flush = -2 as ::core::ffi::c_int;
-    crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
+    state.last_flush = -2 as ::core::ffi::c_int;
+    crate::src::trees::tr_init_state(state);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateResetKeep"]
