@@ -181,8 +181,8 @@ enum AllocationRequest {
     Calloc { items: size_t, size: size_t },
 }
 
-fn allocation_byte_count(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> size_t {
-    items.wrapping_mul(size) as size_t
+fn allocation_byte_count(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> Option<size_t> {
+    items.checked_mul(size).map(|bytes| bytes as size_t)
 }
 
 fn allocation_uses_malloc(uint_size: usize) -> bool {
@@ -193,18 +193,22 @@ fn allocation_request_for_uint_size(
     uint_size: usize,
     items: ::core::ffi::c_uint,
     size: ::core::ffi::c_uint,
-) -> AllocationRequest {
+) -> Option<AllocationRequest> {
+    let bytes = allocation_byte_count(items, size)?;
     if allocation_uses_malloc(uint_size) {
-        AllocationRequest::Malloc(allocation_byte_count(items, size))
+        Some(AllocationRequest::Malloc(bytes))
     } else {
-        AllocationRequest::Calloc {
+        Some(AllocationRequest::Calloc {
             items: items as size_t,
             size: size as size_t,
-        }
+        })
     }
 }
 
-fn allocation_request(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> AllocationRequest {
+fn allocation_request(
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> Option<AllocationRequest> {
     allocation_request_for_uint_size(::core::mem::size_of::<crate::stdlib::uInt>(), items, size)
 }
 
@@ -215,8 +219,9 @@ pub unsafe extern "C" fn zcalloc_ffi(
     size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
     match allocation_request(items, size) {
-        AllocationRequest::Malloc(bytes) => crate::stdlib::malloc(bytes),
-        AllocationRequest::Calloc { items, size } => crate::stdlib::calloc(items, size),
+        Some(AllocationRequest::Malloc(bytes)) => crate::stdlib::malloc(bytes),
+        Some(AllocationRequest::Calloc { items, size }) => crate::stdlib::calloc(items, size),
+        None => ::core::ptr::null_mut(),
     }
 }
 
@@ -230,7 +235,7 @@ mod tests {
     use super::{
         allocation_byte_count, allocation_request, allocation_request_for_uint_size,
         allocation_uses_malloc, compile_flags_for_sizes, error_message, error_message_index,
-        has_error_message_index, size_class, size_flag, size_t, z_errmsg, z_errmsg_index,
+        has_error_message_index, size_class, size_flag, z_errmsg, z_errmsg_index,
         zlib_compile_flags, zlib_version, AllocationRequest, ErrorMessageKind, EMPTY_ERROR,
     };
 
@@ -352,11 +357,13 @@ mod tests {
     }
 
     #[test]
-    fn allocation_byte_count_preserves_c_uint_wrapping() {
-        assert_eq!(
-            allocation_byte_count(::core::ffi::c_uint::MAX, 2),
-            ::core::ffi::c_uint::MAX.wrapping_mul(2) as size_t
-        );
+    fn allocation_byte_count_rejects_c_uint_overflow() {
+        assert_eq!(allocation_byte_count(::core::ffi::c_uint::MAX, 2), None);
+    }
+
+    #[test]
+    fn allocation_byte_count_preserves_representable_request_sizes() {
+        assert_eq!(allocation_byte_count(3, 4), Some(12));
     }
 
     #[test]
@@ -370,22 +377,30 @@ mod tests {
     #[test]
     fn allocation_request_preserves_the_platform_choice() {
         match allocation_request(3, 4) {
-            AllocationRequest::Malloc(bytes) => assert_eq!(bytes, 12),
-            AllocationRequest::Calloc { items, size } => {
+            Some(AllocationRequest::Malloc(bytes)) => assert_eq!(bytes, 12),
+            Some(AllocationRequest::Calloc { items, size }) => {
                 assert_eq!(items, 3);
                 assert_eq!(size, 4);
             }
+            None => panic!("representable allocation request must not overflow"),
         }
     }
 
     #[test]
     fn allocation_request_uses_calloc_for_two_byte_uints() {
         match allocation_request_for_uint_size(2, 3, 4) {
-            AllocationRequest::Malloc(_) => panic!("two-byte uInt must use calloc"),
-            AllocationRequest::Calloc { items, size } => {
+            Some(AllocationRequest::Malloc(_)) => panic!("two-byte uInt must use calloc"),
+            Some(AllocationRequest::Calloc { items, size }) => {
                 assert_eq!(items, 3);
                 assert_eq!(size, 4);
             }
+            None => panic!("representable allocation request must not overflow"),
         }
+    }
+
+    #[test]
+    fn allocation_request_rejects_overflow_before_selecting_an_allocator() {
+        assert!(allocation_request(::core::ffi::c_uint::MAX, 2).is_none());
+        assert!(allocation_request_for_uint_size(2, ::core::ffi::c_uint::MAX, 2).is_none());
     }
 }
