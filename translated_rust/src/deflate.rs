@@ -2970,6 +2970,32 @@ fn gzip_header_crc_pending_range(
     Some(usize::try_from(begin).ok()?..usize::try_from(end).ok()?)
 }
 
+/// Append one bounded portion of a gzip extra field to pending storage.
+///
+/// The extra field has an explicit length in the public gzip header, unlike
+/// the NUL-terminated name and comment fields.  Once the exported deflate
+/// wrapper has established those two short-lived slices, this copy needs no
+/// raw pointer arithmetic or foreign `memcpy`.  Validate both ranges before
+/// mutating pending storage so malformed cursor metadata cannot leave a
+/// partially copied header behind.
+fn gzip_extra_copy_chunk(
+    pending_buffer: &mut [crate::stdlib::Bytef],
+    pending: crate::zutil_h::ulg,
+    extra: &[crate::stdlib::Bytef],
+    extra_index: crate::zutil_h::ulg,
+    count: crate::zutil_h::ulg,
+) -> Option<crate::zutil_h::ulg> {
+    let pending_start = usize::try_from(pending).ok()?;
+    let extra_start = usize::try_from(extra_index).ok()?;
+    let count = usize::try_from(count).ok()?;
+    let pending_end = pending_start.checked_add(count)?;
+    let extra_end = extra_start.checked_add(count)?;
+    let destination = pending_buffer.get_mut(pending_start..pending_end)?;
+    let source = extra.get(extra_start..extra_end)?;
+    destination.copy_from_slice(source);
+    crate::zutil_h::ulg::try_from(pending_end).ok()
+}
+
 fn pending_buffer_needs_flush(
     pending: crate::zutil_h::ulg,
     required: crate::zutil_h::ulg,
@@ -3325,20 +3351,29 @@ pub unsafe extern "C" fn deflate_ffi(
     }
     if (*s).status == crate::src::deflate::EXTRA_STATE {
         if !(*(*s).gzhead).extra.is_null() {
+            let extra_len = ((*(*s).gzhead).extra_len & 0xffff as crate::stdlib::uInt) as usize;
+            // `gzhead` is a caller-provided ABI record.  Its non-null extra
+            // pointer and explicit 16-bit length establish this short-lived
+            // FFI-boundary view; the pending copy itself stays in the safe
+            // helper below.
+            let extra = core::slice::from_raw_parts((*(*s).gzhead).extra, extra_len);
             let mut beg: crate::zutil_h::ulg = (*s).pending;
             let mut left: crate::zutil_h::ulg =
                 (((*(*s).gzhead).extra_len & 0xffff as crate::stdlib::uInt) as crate::zutil_h::ulg)
                     .wrapping_sub((*s).gzindex);
             while pending_buffer_needs_flush((*s).pending, left, (*s).pending_buf_size) {
-                let mut copy: crate::zutil_h::ulg =
+                let copy: crate::zutil_h::ulg =
                     (*s).pending_buf_size.wrapping_sub((*s).pending);
-                crate::stdlib::memcpy(
-                    (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-                    (*(*s).gzhead).extra.offset((*s).gzindex as isize)
-                        as *const ::core::ffi::c_void,
-                    copy as crate::__stddef_size_t_h::size_t,
+                let pending = core::slice::from_raw_parts_mut(
+                    (*s).pending_buf,
+                    (*s).pending_buf_size as usize,
                 );
-                (*s).pending = (*s).pending_buf_size;
+                let Some(next_pending) =
+                    gzip_extra_copy_chunk(pending, (*s).pending, extra, (*s).gzindex, copy)
+                else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                (*s).pending = next_pending;
                 (*strm).adler = gzip_header_crc_pending(
                     (*strm).adler,
                     (*(*s).gzhead).hcrc,
@@ -3355,12 +3390,16 @@ pub unsafe extern "C" fn deflate_ffi(
                 beg = 0 as crate::zutil_h::ulg;
                 left = left.wrapping_sub(copy);
             }
-            crate::stdlib::memcpy(
-                (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-                (*(*s).gzhead).extra.offset((*s).gzindex as isize) as *const ::core::ffi::c_void,
-                left as crate::__stddef_size_t_h::size_t,
+            let pending = core::slice::from_raw_parts_mut(
+                (*s).pending_buf,
+                (*s).pending_buf_size as usize,
             );
-            (*s).pending = (*s).pending.wrapping_add(left);
+            let Some(next_pending) =
+                gzip_extra_copy_chunk(pending, (*s).pending, extra, (*s).gzindex, left)
+            else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            (*s).pending = next_pending;
             (*strm).adler = gzip_header_crc_pending(
                 (*strm).adler,
                 (*(*s).gzhead).hcrc,
@@ -5100,7 +5139,7 @@ mod tests {
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
         fill_window_state_after_slide, fill_window_zero_range, drain_pending, flush_pending_core,
-        gzip_default_header_bytes, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
+        gzip_default_header_bytes, gzip_default_xfl, gzip_extra_copy_chunk, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_bytes, gzip_header_crc_pending_range, gzip_custom_header_bytes,
         gzip_trailer_bytes,
         lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
@@ -6496,6 +6535,27 @@ mod tests {
         let layout = pending_storage_layout(2);
         assert_eq!(pending_storage_copy_plan(layout, 7, 2, 0), None);
         assert_eq!(pending_storage_copy_plan(layout, 0, 0, 7), None);
+    }
+
+    #[test]
+    fn gzip_extra_copy_chunk_moves_only_the_requested_checked_ranges() {
+        let mut pending = [0xaa; 8];
+        let extra = *b"abcdef";
+
+        assert_eq!(gzip_extra_copy_chunk(&mut pending, 2, &extra, 1, 3), Some(5));
+        assert_eq!(pending, [0xaa, 0xaa, b'b', b'c', b'd', 0xaa, 0xaa, 0xaa]);
+    }
+
+    #[test]
+    fn gzip_extra_copy_chunk_rejects_invalid_ranges_without_mutation() {
+        let mut pending = [0xaa; 4];
+        let original = pending;
+        let extra = *b"abc";
+
+        assert_eq!(gzip_extra_copy_chunk(&mut pending, 3, &extra, 0, 2), None);
+        assert_eq!(pending, original);
+        assert_eq!(gzip_extra_copy_chunk(&mut pending, 0, &extra, 2, 2), None);
+        assert_eq!(pending, original);
     }
 
     #[test]
