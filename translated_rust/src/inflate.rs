@@ -2956,13 +2956,16 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        copy as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if !(*state).window.is_null() {
+        if (*state).whave > (*state).wsize {
+            Some((*source).zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                (*source).opaque,
+                copy as crate::stdlib::voidpf,
+            );
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
         window = Some((*source).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*source).opaque,
@@ -2978,16 +2981,10 @@ pub unsafe extern "C" fn inflateCopy_ffi(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    crate::stdlib::memcpy(
-        copy as *mut ::core::ffi::c_void,
-        state as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
+    // Both ABI records are `Copy`; assigning them avoids treating their
+    // typed layouts as unstructured C byte buffers at this boundary.
+    *dest = *source;
+    *copy = *state;
     (*copy).strm = dest;
     if (*state).lencode
         >= &raw mut (*state).codes as *mut crate::src::inftrees::code
@@ -3019,11 +3016,10 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     .unwrap_or(0);
     (*copy).next = copy_codes.wrapping_add(next);
     if !window.is_null() {
-        crate::stdlib::memcpy(
-            window as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).whave as crate::__stddef_size_t_h::size_t,
-        );
+        let length = (*state).whave as usize;
+        let source_window = ::core::slice::from_raw_parts((*state).window, length);
+        let copied_window = ::core::slice::from_raw_parts_mut(window, length);
+        copied_window.copy_from_slice(source_window);
     }
     (*copy).window = window;
     (*dest).state = copy as *mut crate::src::deflate::internal_state;
