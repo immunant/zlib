@@ -434,32 +434,30 @@ impl InflateBackDecoderState<'_> {
     }
 }
 
-pub unsafe extern "C" fn inflateBack(
-    mut strm: crate::zlib_h::z_streamp,
-    mut in_0: crate::zlib_h::in_func,
-    mut in_desc: *mut ::core::ffi::c_void,
-    mut out: crate::zlib_h::out_func,
-    mut out_desc: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
-    let mut state_ptr: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut have: ::core::ffi::c_uint = 0;
+struct InflateBackDecodeResult {
+    status: ::core::ffi::c_int,
+    message: Option<&'static [u8]>,
+}
+
+// The callback decoder owns only pointer-free state and bounded caller borrows.
+// Raw ABI cursor projection and diagnostic publication stay in inflateBack().
+fn inflate_back_decode<InputVisitor, OutputVisitor>(
+    state: &mut InflateBackDecoderState<'_>,
+    input: &mut InflateBackInput<InputVisitor>,
+    output: &mut InflateBackOutput<'_, OutputVisitor>,
+) -> InflateBackDecodeResult
+where
+    InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
+    OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
+{
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
-        op: 0,
-        bits: 0,
-        val: 0,
-    };
-    let mut last: crate::src::inftrees::code = crate::src::inftrees::code {
-        op: 0,
-        bits: 0,
-        val: 0,
-    };
+    let mut here = crate::src::inftrees::code { op: 0, bits: 0, val: 0 };
+    let mut last = crate::src::inftrees::code { op: 0, bits: 0, val: 0 };
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
+    let mut message: Option<&'static [u8]> = None;
     static order: [::core::ffi::c_ushort; 19] = [
         16 as ::core::ffi::c_ushort,
         17 as ::core::ffi::c_ushort,
@@ -481,79 +479,6 @@ pub unsafe extern "C" fn inflateBack(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // Keep the two ABI projections at this boundary. The decoder below uses
-    // scoped Rust borrows; only the callback cursors remain raw.
-    let strm = &mut *strm;
-    state_ptr = strm.state as *mut crate::src::inflate::inflate_state;
-    if state_ptr.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let raw_state = &mut *state_ptr;
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    raw_state.mode = crate::src::inflate::TYPE;
-    raw_state.last = 0 as ::core::ffi::c_int;
-    raw_state.whave = 0 as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    have = (if !next.is_null() {
-        (*strm).avail_in
-    } else {
-        0 as crate::stdlib::uInt
-    }) as ::core::ffi::c_uint;
-    hold = 0 as ::core::ffi::c_ulong;
-    bits = 0 as ::core::ffi::c_uint;
-    let window = ::core::slice::from_raw_parts_mut(
-        raw_state.window.expect("inflateBack window").as_ptr(),
-        raw_state.wsize as usize,
-    );
-    let mut state = InflateBackDecoderState {
-        mode: raw_state.mode,
-        last: raw_state.last,
-        wsize: raw_state.wsize,
-        whave: raw_state.whave,
-        wnext: raw_state.wnext,
-        length: raw_state.length,
-        offset: raw_state.offset,
-        extra: raw_state.extra,
-        lencode: raw_state.lencode,
-        distcode: raw_state.distcode,
-        lenbits: raw_state.lenbits,
-        distbits: raw_state.distbits,
-        ncode: raw_state.ncode,
-        nlen: raw_state.nlen,
-        ndist: raw_state.ndist,
-        have: raw_state.have,
-        next: raw_state.next,
-        lens: &mut raw_state.lens,
-        work: &mut raw_state.work,
-        codes: &mut raw_state.codes,
-        sane: raw_state.sane,
-    };
-    let mut output = InflateBackOutput::new(window, |bytes| {
-        out.expect("non-null function pointer")(
-            out_desc,
-            bytes.as_ptr().cast_mut(),
-            bytes.len() as u32,
-        )
-    });
-    let mut input = InflateBackInput::new(|consume| {
-        if have == 0 {
-            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-            if have == 0 {
-                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                return;
-            }
-        }
-        // `have` is the callback's promised bound for this cursor.  The
-        // visitor returns exactly the consumed prefix, which is then the only
-        // portion reflected in the raw cursor published on return.
-        let bytes = ::core::slice::from_raw_parts(next, have as usize);
-        let used = consume(bytes).min(bytes.len());
-        next = next.wrapping_add(used);
-        have = have.wrapping_sub(used as ::core::ffi::c_uint);
-    });
     '_inf_leave: loop {
         match state.mode as ::core::ffi::c_uint {
             16191 => {
@@ -597,9 +522,7 @@ pub unsafe extern "C" fn inflateBack(
                             state.mode = crate::src::inflate::TABLE;
                         }
                         _ => {
-                            (*strm).msg = b"invalid block type\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
+                            message = Some(b"invalid block type\0");
                             state.mode = crate::src::inflate::BAD;
                         }
                     }
@@ -622,9 +545,7 @@ pub unsafe extern "C" fn inflateBack(
                 if hold & 0xffff as ::core::ffi::c_ulong
                     != hold >> 16 as ::core::ffi::c_int ^ 0xffff as ::core::ffi::c_ulong
                 {
-                    (*strm).msg = b"invalid stored block lengths\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
+                    message = Some(b"invalid stored block lengths\0");
                     state.mode = crate::src::inflate::BAD;
                     continue;
                 } else {
@@ -689,9 +610,7 @@ pub unsafe extern "C" fn inflateBack(
                 if state.nlen > 286 as ::core::ffi::c_uint
                     || state.ndist > 30 as ::core::ffi::c_uint
                 {
-                    (*strm).msg = b"too many length or distance symbols\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
+                    message = Some(b"too many length or distance symbols\0");
                     state.mode = crate::src::inflate::BAD;
                     continue;
                 } else {
@@ -748,9 +667,7 @@ pub unsafe extern "C" fn inflateBack(
                         status
                     };
                     if ret != 0 {
-                        (*strm).msg = b"invalid code lengths set\0".as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
+                        message = Some(b"invalid code lengths set\0");
                         state.mode = crate::src::inflate::BAD;
                         continue;
                     } else {
@@ -800,9 +717,7 @@ pub unsafe extern "C" fn inflateBack(
                                     hold >>= here.bits as ::core::ffi::c_int;
                                     bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
                                     if state.have == 0 as ::core::ffi::c_uint {
-                                        (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                            as *const ::core::ffi::c_char
-                                            as *mut ::core::ffi::c_char;
+                                        message = Some(b"invalid bit length repeat\0");
                                         state.mode = crate::src::inflate::BAD;
                                         break;
                                     } else {
@@ -881,9 +796,7 @@ pub unsafe extern "C" fn inflateBack(
                                 if state.have.wrapping_add(copy)
                                     > state.nlen.wrapping_add(state.ndist)
                                 {
-                                    (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                        as *const ::core::ffi::c_char
-                                        as *mut ::core::ffi::c_char;
+                                    message = Some(b"invalid bit length repeat\0");
                                     state.mode = crate::src::inflate::BAD;
                                     break;
                                 } else {
@@ -908,9 +821,7 @@ pub unsafe extern "C" fn inflateBack(
                         }
                         if state.lens[256 as usize] as ::core::ffi::c_int == 0 as ::core::ffi::c_int
                         {
-                            (*strm).msg = b"invalid code -- missing end-of-block\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
+                            message = Some(b"invalid code -- missing end-of-block\0");
                             state.mode = crate::src::inflate::BAD;
                             continue;
                         } else {
@@ -942,9 +853,7 @@ pub unsafe extern "C" fn inflateBack(
                                 status
                             };
                             if ret != 0 {
-                                (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
-                                    as *const ::core::ffi::c_char
-                                    as *mut ::core::ffi::c_char;
+                                message = Some(b"invalid literal/lengths set\0");
                                 state.mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
@@ -980,9 +889,7 @@ pub unsafe extern "C" fn inflateBack(
                                     status
                                 };
                                 if ret != 0 {
-                                    (*strm).msg = b"invalid distances set\0".as_ptr()
-                                        as *const ::core::ffi::c_char
-                                        as *mut ::core::ffi::c_char;
+                                    message = Some(b"invalid distances set\0");
                                     state.mode = crate::src::inflate::BAD;
                                     continue;
                                 } else {
@@ -1054,15 +961,11 @@ pub unsafe extern "C" fn inflateBack(
                 crate::src::inffast::FastExit::Continue => {}
                 crate::src::inffast::FastExit::Type => state.mode = crate::src::inflate::TYPE,
                 crate::src::inffast::FastExit::InvalidDistance => {
-                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
+                    message = Some(b"invalid distance too far back\0");
                     state.mode = crate::src::inflate::BAD;
                 }
                 crate::src::inffast::FastExit::InvalidCode => {
-                    (*strm).msg = b"invalid literal/length or distance code\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
+                    message = Some(b"invalid literal/length or distance code\0");
                     state.mode = crate::src::inflate::BAD;
                 }
             }
@@ -1141,9 +1044,7 @@ pub unsafe extern "C" fn inflateBack(
             } else if here.op as ::core::ffi::c_int & 32 as ::core::ffi::c_int != 0 {
                 state.mode = crate::src::inflate::TYPE;
             } else if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                (*strm).msg = b"invalid literal/length code\0".as_ptr()
-                    as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
+                message = Some(b"invalid literal/length code\0");
                 state.mode = crate::src::inflate::BAD;
             } else {
                 state.extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
@@ -1221,8 +1122,7 @@ pub unsafe extern "C" fn inflateBack(
                 hold >>= here.bits as ::core::ffi::c_int;
                 bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
                 if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                    (*strm).msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
+                    message = Some(b"invalid distance code\0");
                     state.mode = crate::src::inflate::BAD;
                 } else {
                     state.offset = here.val as ::core::ffi::c_uint;
@@ -1251,9 +1151,7 @@ pub unsafe extern "C" fn inflateBack(
                             0 as ::core::ffi::c_uint
                         })
                     {
-                        (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
+                        message = Some(b"invalid distance too far back\0");
                         state.mode = crate::src::inflate::BAD;
                     } else {
                         loop {
@@ -1287,10 +1185,86 @@ pub unsafe extern "C" fn inflateBack(
     if output.written() != 0 && !output.flush() && ret == crate::zlib_h::Z_STREAM_END {
         ret = crate::zlib_h::Z_BUF_ERROR;
     }
-    // Return the decoder's scalar progress to the opaque state only after the
-    // pointer-free view releases its table borrows.  The caller window and
-    // registered-header handles never enter the view, so they stay at the
-    // ABI boundary unchanged.
+    InflateBackDecodeResult {
+        status: ret,
+        message,
+    }
+}
+
+pub unsafe extern "C" fn inflateBack(
+    mut strm: crate::zlib_h::z_streamp,
+    mut in_0: crate::zlib_h::in_func,
+    mut in_desc: *mut ::core::ffi::c_void,
+    mut out: crate::zlib_h::out_func,
+    mut out_desc: *mut ::core::ffi::c_void,
+) -> ::core::ffi::c_int {
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // This is the complete ABI projection boundary. The decoder below sees
+    // only bounded input/output facades and a pointer-free state view.
+    let strm = &mut *strm;
+    let state_ptr = strm.state as *mut crate::src::inflate::inflate_state;
+    if state_ptr.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let raw_state = &mut *state_ptr;
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    raw_state.mode = crate::src::inflate::TYPE;
+    raw_state.last = 0;
+    raw_state.whave = 0;
+    let mut next = strm.next_in as *mut ::core::ffi::c_uchar;
+    let mut have = if next.is_null() { 0 } else { strm.avail_in as ::core::ffi::c_uint };
+    let window = ::core::slice::from_raw_parts_mut(
+        raw_state.window.expect("inflateBack window").as_ptr(),
+        raw_state.wsize as usize,
+    );
+    let mut state = InflateBackDecoderState {
+        mode: raw_state.mode,
+        last: raw_state.last,
+        wsize: raw_state.wsize,
+        whave: raw_state.whave,
+        wnext: raw_state.wnext,
+        length: raw_state.length,
+        offset: raw_state.offset,
+        extra: raw_state.extra,
+        lencode: raw_state.lencode,
+        distcode: raw_state.distcode,
+        lenbits: raw_state.lenbits,
+        distbits: raw_state.distbits,
+        ncode: raw_state.ncode,
+        nlen: raw_state.nlen,
+        ndist: raw_state.ndist,
+        have: raw_state.have,
+        next: raw_state.next,
+        lens: &mut raw_state.lens,
+        work: &mut raw_state.work,
+        codes: &mut raw_state.codes,
+        sane: raw_state.sane,
+    };
+    let mut output = InflateBackOutput::new(window, |bytes| {
+        out.expect("non-null function pointer")(
+            out_desc,
+            bytes.as_ptr().cast_mut(),
+            bytes.len() as u32,
+        )
+    });
+    let mut input = InflateBackInput::new(|consume| {
+        if have == 0 {
+            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+            if have == 0 {
+                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                return;
+            }
+        }
+        // The visitor returns exactly the consumed prefix, which is then the
+        // only portion reflected in the raw cursor published on return.
+        let bytes = ::core::slice::from_raw_parts(next, have as usize);
+        let used = consume(bytes).min(bytes.len());
+        next = next.wrapping_add(used);
+        have = have.wrapping_sub(used as ::core::ffi::c_uint);
+    });
+    let result = inflate_back_decode(&mut state, &mut input, &mut output);
     let final_state = state.scalars();
     drop(state);
     raw_state.mode = final_state.mode;
@@ -1309,12 +1283,16 @@ pub unsafe extern "C" fn inflateBack(
     raw_state.ndist = final_state.ndist;
     raw_state.have = final_state.have;
     raw_state.next = final_state.next;
-    // End the call-scoped input facade before publishing its raw cursor back
-    // to the ABI stream.
+    // Release callback/window borrows before publishing ABI cursor and
+    // diagnostic pointers.
+    drop(output);
     drop(input);
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = have as crate::stdlib::uInt;
-    return ret;
+    if let Some(message) = result.message {
+        strm.msg = message.as_ptr().cast_mut().cast();
+    }
+    strm.next_in = next as *mut crate::stdlib::Bytef;
+    strm.avail_in = have as crate::stdlib::uInt;
+    result.status
 }
 #[export_name = "inflateBack"]
 
