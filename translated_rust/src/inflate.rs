@@ -559,14 +559,6 @@ fn inflate_prime_impl(
     return crate::zlib_h::Z_OK;
 }
 
-pub unsafe fn inflatePrime(
-    state: &mut crate::src::inflate::inflate_state,
-    bits: ::core::ffi::c_int,
-    value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflate_prime_impl(state.mode, &mut state.hold, &mut state.bits, bits, value)
-}
-
 unsafe fn inflate_prime_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     bits: ::core::ffi::c_int,
