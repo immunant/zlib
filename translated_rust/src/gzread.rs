@@ -63,6 +63,103 @@ struct GzLoadResult {
     failed: bool,
 }
 
+// Read-side failures need their C error string allocated at an exported ABI
+// boundary.  The existing `state_corrupt` field is unused by C and retains
+// the handle layout, so use it as a short-lived tag until that boundary
+// consumes it.  `out_pending` is write-only for read handles and carries an
+// errno when needed.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzReadDeferredError {
+    StateCorrupt = 1,
+    Errno = 2,
+    LookMemory = 3,
+    UnexpectedEof = 4,
+    InternalInflate = 5,
+    InflateMemory = 6,
+    Data = 7,
+    InflateData = 8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzReadDeferredMessage {
+    Literal(&'static [u8]),
+    Errno(::core::ffi::c_int),
+    Inflate,
+}
+
+fn gz_read_deferred_error_from_tag(tag: ::core::ffi::c_int) -> Option<GzReadDeferredError> {
+    match tag {
+        1 => Some(GzReadDeferredError::StateCorrupt),
+        2 => Some(GzReadDeferredError::Errno),
+        3 => Some(GzReadDeferredError::LookMemory),
+        4 => Some(GzReadDeferredError::UnexpectedEof),
+        5 => Some(GzReadDeferredError::InternalInflate),
+        6 => Some(GzReadDeferredError::InflateMemory),
+        7 => Some(GzReadDeferredError::Data),
+        8 => Some(GzReadDeferredError::InflateData),
+        _ => None,
+    }
+}
+
+fn gz_read_deferred_error_code(error: GzReadDeferredError) -> ::core::ffi::c_int {
+    match error {
+        GzReadDeferredError::StateCorrupt | GzReadDeferredError::InternalInflate => {
+            crate::zlib_h::Z_STREAM_ERROR
+        }
+        GzReadDeferredError::Errno => crate::zlib_h::Z_ERRNO,
+        GzReadDeferredError::LookMemory | GzReadDeferredError::InflateMemory => {
+            crate::zlib_h::Z_MEM_ERROR
+        }
+        GzReadDeferredError::UnexpectedEof => crate::zlib_h::Z_BUF_ERROR,
+        GzReadDeferredError::Data | GzReadDeferredError::InflateData => crate::zlib_h::Z_DATA_ERROR,
+    }
+}
+
+fn gz_read_deferred_error_message(
+    error: GzReadDeferredError,
+    errno: ::core::ffi::c_int,
+) -> GzReadDeferredMessage {
+    match error {
+        GzReadDeferredError::StateCorrupt => GzReadDeferredMessage::Literal(b"state corrupt\0"),
+        GzReadDeferredError::Errno => GzReadDeferredMessage::Errno(errno),
+        GzReadDeferredError::LookMemory | GzReadDeferredError::InflateMemory => {
+            GzReadDeferredMessage::Literal(b"out of memory\0")
+        }
+        GzReadDeferredError::UnexpectedEof => {
+            GzReadDeferredMessage::Literal(b"unexpected end of file\0")
+        }
+        GzReadDeferredError::InternalInflate => {
+            GzReadDeferredMessage::Literal(b"internal error: inflate stream corrupt\0")
+        }
+        GzReadDeferredError::Data => GzReadDeferredMessage::Literal(b"compressed data error\0"),
+        GzReadDeferredError::InflateData => GzReadDeferredMessage::Inflate,
+    }
+}
+
+fn gz_defer_read_error(
+    state: &mut crate::gzguts_h::gz_state,
+    error: GzReadDeferredError,
+    errno: Option<::core::ffi::c_int>,
+) {
+    state.err = gz_read_deferred_error_code(error);
+    state.state_corrupt = error as ::core::ffi::c_int;
+    if let Some(errno) = errno {
+        state.out_pending = errno as crate::stdlib::uInt;
+    }
+    if state.err != crate::zlib_h::Z_BUF_ERROR && state.again == 0 {
+        state.x.have = 0;
+    }
+}
+
+fn gz_take_deferred_read_error(
+    state: &mut crate::gzguts_h::gz_state,
+) -> Option<(GzReadDeferredError, ::core::ffi::c_int)> {
+    let error = gz_read_deferred_error_from_tag(state.state_corrupt)?;
+    state.state_corrupt = 0;
+    Some((error, state.out_pending as ::core::ffi::c_int))
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum GzLoadTransition {
     Error {
@@ -1048,13 +1145,7 @@ fn gz_load(
             failed: false,
         },
         Err(error) => {
-            unsafe {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(error.errno),
-                );
-            }
+            gz_defer_read_error(state, GzReadDeferredError::Errno, Some(error.errno));
             GzLoadResult {
                 have: error.have,
                 failed: true,
@@ -1260,12 +1351,8 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             unsafe {
                 crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
                 crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-                );
             }
+            gz_defer_read_error(state, GzReadDeferredError::LookMemory, None);
             return -1 as ::core::ffi::c_int;
         }
         state.size = state.want;
@@ -1288,13 +1375,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
             }
             state.size = 0 as ::core::ffi::c_uint;
-            unsafe {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-            }
+            gz_defer_read_error(state, GzReadDeferredError::LookMemory, None);
             return -1 as ::core::ffi::c_int;
         }
     }
@@ -1559,13 +1640,7 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             GzDecompInputAction::UnexpectedEof => {
                 if gz_decomp_reports_unexpected_eof(state.again) {
-                    unsafe {
-                        crate::src::gzlib::gz_error(
-                            state as *mut crate::gzguts_h::gz_state,
-                            crate::zlib_h::Z_BUF_ERROR,
-                            b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                    }
+                    gz_defer_read_error(state, GzReadDeferredError::UnexpectedEof, None);
                 }
                 break;
             }
@@ -1584,24 +1659,11 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.junk = gz_decomp_junk_after_output(state.junk, decision.clear_junk);
         match decision.action {
             GzDecompAction::InternalError => {
-                unsafe {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        b"internal error: inflate stream corrupt\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                    );
-                }
+                gz_defer_read_error(state, GzReadDeferredError::InternalInflate, None);
                 break;
             }
             GzDecompAction::MemoryError => {
-                unsafe {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_MEM_ERROR,
-                        b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                }
+                gz_defer_read_error(state, GzReadDeferredError::InflateMemory, None);
                 break;
             }
             GzDecompAction::TrailingJunk => {
@@ -1616,22 +1678,12 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 break;
             }
             GzDecompAction::DataError => {
-                let message =
-                    match gz_decomp_data_error_message(stream_state.inflate_message_present) {
-                        GzDecompDataErrorMessage::Generic => {
-                            b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                        }
-                        GzDecompDataErrorMessage::Inflate => {
-                            state.strm.msg as *const ::core::ffi::c_char
-                        }
-                    };
-                unsafe {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_DATA_ERROR,
-                        message,
-                    );
-                }
+                let error = match gz_decomp_data_error_message(stream_state.inflate_message_present)
+                {
+                    GzDecompDataErrorMessage::Generic => GzReadDeferredError::Data,
+                    GzDecompDataErrorMessage::Inflate => GzReadDeferredError::InflateData,
+                };
+                gz_defer_read_error(state, error, None);
                 break;
             }
             GzDecompAction::Stop => break,
@@ -1704,13 +1756,7 @@ fn gz_fetch_apply_state_corrupt(
 }
 
 fn gz_fetch_note_state_corrupt(state: &mut crate::gzguts_h::gz_state) {
-    gz_fetch_apply_state_corrupt(&mut state.x.have, &mut state.err, &mut state.state_corrupt);
-}
-
-fn gz_take_state_corrupt(state: &mut crate::gzguts_h::gz_state) -> bool {
-    let was_state_corrupt = state.state_corrupt != 0;
-    state.state_corrupt = 0;
-    was_state_corrupt
+    gz_defer_read_error(state, GzReadDeferredError::StateCorrupt, None);
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -2103,6 +2149,55 @@ macro_rules! gz_skip {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_read_error_preserves_errno_and_clears_its_tag_on_take() {
+        let mut state: crate::gzguts_h::gz_state = unsafe { core::mem::zeroed() };
+        state.x.have = 7;
+
+        gz_defer_read_error(&mut state, GzReadDeferredError::Errno, Some(123));
+
+        assert_eq!(state.err, crate::zlib_h::Z_ERRNO);
+        assert_eq!(state.state_corrupt, GzReadDeferredError::Errno as i32);
+        assert_eq!(state.out_pending, 123);
+        assert_eq!(state.x.have, 0);
+        assert_eq!(
+            gz_take_deferred_read_error(&mut state),
+            Some((GzReadDeferredError::Errno, 123))
+        );
+        assert_eq!(state.state_corrupt, 0);
+    }
+
+    #[test]
+    fn deferred_read_error_maps_all_supported_tags_and_messages() {
+        let cases = [
+            (GzReadDeferredError::StateCorrupt, crate::zlib_h::Z_STREAM_ERROR),
+            (GzReadDeferredError::Errno, crate::zlib_h::Z_ERRNO),
+            (GzReadDeferredError::LookMemory, crate::zlib_h::Z_MEM_ERROR),
+            (GzReadDeferredError::UnexpectedEof, crate::zlib_h::Z_BUF_ERROR),
+            (GzReadDeferredError::InternalInflate, crate::zlib_h::Z_STREAM_ERROR),
+            (GzReadDeferredError::InflateMemory, crate::zlib_h::Z_MEM_ERROR),
+            (GzReadDeferredError::Data, crate::zlib_h::Z_DATA_ERROR),
+            (GzReadDeferredError::InflateData, crate::zlib_h::Z_DATA_ERROR),
+        ];
+
+        for (error, code) in cases {
+            assert_eq!(
+                gz_read_deferred_error_from_tag(error as i32),
+                Some(error)
+            );
+            assert_eq!(gz_read_deferred_error_code(error), code);
+        }
+        assert_eq!(gz_read_deferred_error_from_tag(0), None);
+        assert_eq!(
+            gz_read_deferred_error_message(GzReadDeferredError::Errno, 123),
+            GzReadDeferredMessage::Errno(123)
+        );
+        assert_eq!(
+            gz_read_deferred_error_message(GzReadDeferredError::InflateData, 0),
+            GzReadDeferredMessage::Inflate
+        );
+    }
 
     #[test]
     fn state_corrupt_transition_clears_buffer_and_defers_error_reporting() {
@@ -4548,12 +4643,17 @@ pub unsafe extern "C" fn gzread_ffi(
         return -1 as ::core::ffi::c_int;
     };
     len = gz_read(&mut *state, buf, request_len) as ::core::ffi::c_uint;
-    if gz_take_state_corrupt(&mut *state) {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+    if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+        let (code, message) = (
+            gz_read_deferred_error_code(error),
+            gz_read_deferred_error_message(error, errno),
         );
+        let message = match message {
+            GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+            GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+            GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+        };
+        crate::src::gzlib::gz_error(state, code, message);
     }
     match gzread_outcome(len, (*state).err, (*state).again) {
         GzreadOutcome::Read(read) => read,
@@ -4605,12 +4705,17 @@ pub unsafe extern "C" fn gzfread_ffi(
         GzFreadAction::ReturnZero => 0 as crate::stdlib::z_size_t,
         GzFreadAction::Read => gz_fread_items_read(size, gz_read(&mut *state, buf, len)),
     };
-    if gz_take_state_corrupt(&mut *state) {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+    if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+        let (code, message) = (
+            gz_read_deferred_error_code(error),
+            gz_read_deferred_error_message(error, errno),
         );
+        let message = match message {
+            GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+            GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+            GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+        };
+        crate::src::gzlib::gz_error(state, code, message);
     }
     read
 }
@@ -4651,12 +4756,17 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
         &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
         1 as crate::stdlib::z_size_t,
     );
-    if gz_take_state_corrupt(state_ref) {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+    if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+        let (code, message) = (
+            gz_read_deferred_error_code(error),
+            gz_read_deferred_error_message(error, errno),
         );
+        let message = match message {
+            GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+            GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+            GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+        };
+        crate::src::gzlib::gz_error(state, code, message);
     }
     gzgetc_read_result(read, buf[0 as ::core::ffi::c_int as usize])
 }
@@ -4684,6 +4794,18 @@ pub unsafe extern "C" fn gzungetc_ffi(
     if gz_read_needs_look(crate::gzguts_h::GZ_READ, (*state).how, (*state).x.have) {
         gz_look(&mut *state);
     }
+    if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+        let (code, message) = (
+            gz_read_deferred_error_code(error),
+            gz_read_deferred_error_message(error, errno),
+        );
+        let message = match message {
+            GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+            GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+            GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+        };
+        crate::src::gzlib::gz_error(state, code, message);
+    }
     if !gz_read_error_is_recoverable((*state).err, (*state).again) {
         return -1 as ::core::ffi::c_int;
     }
@@ -4694,6 +4816,18 @@ pub unsafe extern "C" fn gzungetc_ffi(
     );
     let state_ref = &mut *state;
     if gz_read_has_pending_skip(state_ref.skip) && gz_skip!(state_ref) {
+        if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+            let (code, message) = (
+                gz_read_deferred_error_code(error),
+                gz_read_deferred_error_message(error, errno),
+            );
+            let message = match message {
+                GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+                GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+                GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+            };
+            crate::src::gzlib::gz_error(state, code, message);
+        }
         return -1 as ::core::ffi::c_int;
     }
     if !gz_ungetc_accepts_byte(c) {
@@ -4767,12 +4901,17 @@ pub unsafe extern "C" fn gzgets_ffi(
     );
     let state_ref = &mut *state;
     if gz_read_has_pending_skip(state_ref.skip) && gz_skip!(state_ref) {
-        if gz_take_state_corrupt(state_ref) {
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+        if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+            let (code, message) = (
+                gz_read_deferred_error_code(error),
+                gz_read_deferred_error_message(error, errno),
             );
+            let message = match message {
+                GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+                GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+                GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+            };
+            crate::src::gzlib::gz_error(state, code, message);
         }
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
@@ -4822,12 +4961,17 @@ pub unsafe extern "C" fn gzgets_ffi(
             }
         }
     }
-    if gz_take_state_corrupt(state_ref) {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+    if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+        let (code, message) = (
+            gz_read_deferred_error_code(error),
+            gz_read_deferred_error_message(error, errno),
         );
+        let message = match message {
+            GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+            GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+            GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+        };
+        crate::src::gzlib::gz_error(state, code, message);
     }
     if !gzgets_copied_any(initial_left, left) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -4846,6 +4990,18 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     if gz_read_needs_look((*state).mode, (*state).how, (*state).x.have) {
         gz_look(&mut *state);
     }
+    if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+        let (code, message) = (
+            gz_read_deferred_error_code(error),
+            gz_read_deferred_error_message(error, errno),
+        );
+        let message = match message {
+            GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+            GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+            GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+        };
+        crate::src::gzlib::gz_error(state, code, message);
+    }
     gzdirect_result((*state).direct)
 }
 #[export_name = "gzclose_r"]
@@ -4862,6 +5018,20 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     state = file as crate::gzguts_h::gz_statep;
     if !gz_is_read_mode((*state).mode) {
         return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // An inflate-data error can borrow `strm.msg`; report it before ending
+    // the stream and releasing its storage.
+    if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
+        let (code, message) = (
+            gz_read_deferred_error_code(error),
+            gz_read_deferred_error_message(error, errno),
+        );
+        let message = match message {
+            GzReadDeferredMessage::Literal(message) => message.as_ptr().cast(),
+            GzReadDeferredMessage::Errno(errno) => crate::stdlib::strerror(errno),
+            GzReadDeferredMessage::Inflate => (*state).strm.msg.cast_const(),
+        };
+        crate::src::gzlib::gz_error(state, code, message);
     }
     if (*state).size != 0 {
         crate::src::inflate::inflateEnd_ffi(

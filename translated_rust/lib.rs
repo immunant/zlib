@@ -58,8 +58,8 @@ pub mod gzguts_h {
         pub reset: ::core::ffi::c_int,
         pub skip: crate::stdlib::off64_t,
         pub err: ::core::ffi::c_int,
-        /// Defers state-corrupt error-string allocation to an exported gzip
-        /// entry point, keeping the internal fetch state machine safe.
+        /// Encodes a deferred gzip-read error until an exported entry point
+        /// can allocate and install its C error string.
         pub state_corrupt: ::core::ffi::c_int,
         pub msg: *mut ::core::ffi::c_char,
         pub strm: crate::zlib_h::z_stream,
