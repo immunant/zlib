@@ -330,6 +330,30 @@ fn gzflush_is_valid(flush: ::core::ffi::c_int) -> bool {
     (crate::zlib_h::Z_NO_FLUSH..=crate::zlib_h::Z_FINISH).contains(&flush)
 }
 
+/// Validate the scalar gzip-writer state needed by `gzsetparams`, without
+/// borrowing the opaque handle or touching the compressor.  A pending retry
+/// is permitted to match zlib's existing write-side admission rule.
+fn gzsetparams_state_is_valid(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    direct: ::core::ffi::c_int,
+) -> bool {
+    mode == crate::gzguts_h::GZ_WRITE && (err == crate::zlib_h::Z_OK || again != 0) && direct == 0
+}
+
+/// Decide whether a parameter update has work to do.  Keeping this separate
+/// from the handle adapter avoids observing or changing state before the
+/// existing no-op return.
+fn gzsetparams_needs_update(
+    current_level: ::core::ffi::c_int,
+    current_strategy: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> bool {
+    level != current_level || strategy != current_strategy
+}
+
 unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
@@ -681,10 +705,7 @@ pub unsafe extern "C" fn gzsetparams(
     }
     state = file as crate::gzguts_h::gz_statep;
     strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-        || (*state).direct != 0
-    {
+    if !gzsetparams_state_is_valid((*state).mode, (*state).err, (*state).again, (*state).direct) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_error(
@@ -692,7 +713,7 @@ pub unsafe extern "C" fn gzsetparams(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if level == (*state).level && strategy == (*state).strategy {
+    if !gzsetparams_needs_update((*state).level, (*state).strategy, level, strategy) {
         return crate::zlib_h::Z_OK;
     }
     if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
