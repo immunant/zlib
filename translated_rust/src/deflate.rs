@@ -4116,13 +4116,17 @@ fn deflate_stored(
     }
 }
 
-unsafe fn deflate_fast(
+fn deflate_fast(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut hash_head: crate::src::deflate::IPos = 0;
-    let mut bflush: ::core::ffi::c_int = 0;
-    loop {
+    // The fast loop still needs the legacy state, window, hash, symbol, and
+    // pending-buffer cursor lends. Keep that compatibility boundary explicit
+    // so ordinary deflate dispatch does not inherit an unsafe requirement.
+    unsafe {
+        let mut hash_head: crate::src::deflate::IPos = 0;
+        let mut bflush: ::core::ffi::c_int = 0;
+        loop {
         let needs_input = {
             let state = &mut *s;
             state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
@@ -4416,7 +4420,8 @@ unsafe fn deflate_fast(
             return result;
         }
     }
-    return block_done;
+        return block_done;
+    }
 }
 
 unsafe fn deflate_slow(
