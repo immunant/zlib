@@ -340,6 +340,25 @@ fn clear_hash_table(table: &mut [crate::src::deflate::Posf]) {
     table.fill(NIL as crate::src::deflate::Posf);
 }
 
+fn slide_window_bytes(
+    window: &mut [crate::stdlib::Bytef],
+    wsize: crate::stdlib::uInt,
+    more: ::core::ffi::c_uint,
+) {
+    let start = wsize as usize;
+    let count = wsize.wrapping_sub(more) as usize;
+    window.copy_within(start..start + count, 0);
+}
+
+fn clear_window_bytes(
+    window: &mut [crate::stdlib::Bytef],
+    start: crate::zutil_h::ulg,
+    len: crate::zutil_h::ulg,
+) {
+    let start = start as usize;
+    window[start..start + len as usize].fill(0);
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let wsize = (*s).w_size;
     // `head` and `prev` are allocated at these exact element counts in
@@ -421,11 +440,10 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
             )
         {
-            crate::stdlib::memcpy(
-                (*s).window as *mut ::core::ffi::c_void,
-                (*s).window.offset(wsize as isize) as *const ::core::ffi::c_void,
-                wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
-            );
+            // `window` is allocated with exactly `window_size` bytes in
+            // `deflateInit2_()` and `deflateCopy()`.
+            let window = ::core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
+            slide_window_bytes(window, wsize, more);
             (*s).match_start = (*s).match_start.wrapping_sub(wsize);
             (*s).strstart = (*s).strstart.wrapping_sub(wsize);
             (*s).block_start -= wsize as ::core::ffi::c_long;
@@ -493,11 +511,8 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             if init > crate::src::deflate::WIN_INIT as crate::zutil_h::ulg {
                 init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
             }
-            crate::stdlib::memset(
-                (*s).window.offset(curr as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-            );
+            let window = ::core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
+            clear_window_bytes(window, curr, init);
             (*s).high_water = curr.wrapping_add(init);
         } else if (*s).high_water
             < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
@@ -508,11 +523,8 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             if init > (*s).window_size.wrapping_sub((*s).high_water) {
                 init = (*s).window_size.wrapping_sub((*s).high_water);
             }
-            crate::stdlib::memset(
-                (*s).window.offset((*s).high_water as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-            );
+            let window = ::core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
+            clear_window_bytes(window, (*s).high_water, init);
             (*s).high_water = (*s).high_water.wrapping_add(init);
         }
     }
