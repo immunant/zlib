@@ -618,9 +618,9 @@ fn read_buf_bytes(
     read_buf_checksum(checksum, wrap, output)
 }
 
-// The fill operation has no need to retain the ABI stream or state.  Keep
-// their raw storage projection in `fill_window()` and let this core operate
-// solely on bounded allocations and scalar cursors.
+// The fill operation has no need to retain the ABI stream or state.  The
+// active strategy adapters project their bounded allocations and cursors,
+// then use this core directly.
 struct DeflateInputCursor<'a> {
     input: &'a [crate::stdlib::Bytef],
     consumed: usize,
@@ -741,58 +741,6 @@ fn fill_window_from_views(state: &mut FillWindowState<'_>, input: &mut DeflateIn
     }
 }
 
-unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
-    // All allocation and ABI-stream projections are concentrated here.  The
-    // safe core below only observes bounded slices and scalar cursors.
-    let state = &mut *s;
-    let stream = &mut *state.strm.as_ptr();
-    let input = ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize);
-    let window = ::core::slice::from_raw_parts_mut(
-        state.window.expect("initialized window").as_ptr(),
-        state.window_size as usize,
-    );
-    let prev = ::core::slice::from_raw_parts_mut(
-        state.prev.expect("initialized prev table").as_ptr(),
-        state.w_size as usize,
-    );
-    let head = ::core::slice::from_raw_parts_mut(
-        state.head.expect("initialized head table").as_ptr(),
-        state.hash_size as usize,
-    );
-    let mut input = DeflateInputCursor {
-        input,
-        consumed: 0,
-        checksum: stream.adler,
-        total_in: stream.total_in,
-    };
-    fill_window_from_views(
-        &mut FillWindowState {
-            window,
-            prev,
-            head,
-            w_size: state.w_size,
-            hash_shift: state.hash_shift,
-            hash_mask: state.hash_mask,
-            w_mask: state.w_mask,
-            wrap: state.wrap,
-            lookahead: &mut state.lookahead,
-            strstart: &mut state.strstart,
-            match_start: &mut state.match_start,
-            block_start: &mut state.block_start,
-            insert: &mut state.insert,
-            slid: &mut state.slid,
-            ins_h: &mut state.ins_h,
-            high_water: &mut state.high_water,
-        },
-        &mut input,
-    );
-    stream.next_in = input.input[input.consumed..].as_ptr().cast_mut();
-    stream.avail_in = stream
-        .avail_in
-        .wrapping_sub(input.consumed as crate::stdlib::uInt);
-    stream.adler = input.checksum;
-    stream.total_in = input.total_in;
-}
 #[export_name = "deflateInit_"]
 
 pub unsafe extern "C" fn deflateInit__ffi(
@@ -4053,8 +4001,8 @@ fn deflate_fast_from_views(
                 break;
             }
         }
-        // `fill_window()` is the only operation in this iteration that can
-        // change the window.  Keep one bounded read view for the remainder
+        // The bounded refill above is the only operation in this iteration
+        // that can change the window. Keep one read view for the remainder
         // of the match/flush work, then drop it before the next refill.
         let window = &*state.window;
         hash_head = NIL as crate::src::deflate::IPos;
@@ -4489,8 +4437,8 @@ fn deflate_slow_from_views(
             }
         }
         hash_head = NIL as crate::src::deflate::IPos;
-        // `fill_window()` above has established the initialized extent for
-        // this iteration. Reuse one bounded read view for both hashing and a
+        // The bounded refill above established the initialized extent for
+        // this iteration. Reuse one read view for both hashing and a
         // possible delayed literal instead of rebuilding raw views for each.
         let window = &*state.window;
         // The insertion step does not inspect the previous match fields, so
@@ -4862,8 +4810,8 @@ unsafe extern "C" fn deflate_slow(
 }
 
 // Find a repeated-byte match using offsets into the fully allocated sliding
-// window.  `fill_window()` maintains the initialized window extent; the ABI
-// caller only projects that allocation to a slice for this bounded kernel.
+// window. The bounded refill maintains the initialized extent for this
+// slice-based kernel.
 fn rle_match_length(
     window: &[crate::stdlib::Bytef],
     strstart: usize,
