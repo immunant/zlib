@@ -239,6 +239,51 @@ fn inflate_fast_copy_output_match(
     true
 }
 
+/// Copy the prefix of a match that precedes the current output span from the
+/// circular history window.  The remaining bytes, if any, are then supplied
+/// by `inflate_fast_copy_output_match()` from newly produced output.  Keeping
+/// the circular cursor arithmetic here makes both history sources follow the
+/// same checked rules without aliasing the output window as an immutable
+/// slice in inflateBack mode.
+fn inflate_fast_copy_history_prefix(
+    history: &InflateFastHistory<'_>,
+    output: &mut [u8],
+    output_at: &mut usize,
+    wsize: usize,
+    wnext: usize,
+    back: usize,
+    len: usize,
+) -> Option<usize> {
+    if wsize == 0 || wnext >= wsize || back == 0 || back > wsize || *output_at > output.len() {
+        return None;
+    }
+    let history_len = match history {
+        InflateFastHistory::Separate(window) => window.len(),
+        InflateFastHistory::Output => output.len(),
+    };
+    if history_len < wsize {
+        return None;
+    }
+
+    let window_end = wnext.checked_add(wsize)?;
+    let mut from = window_end.checked_sub(back)? % wsize;
+    let take = back.min(len);
+    for _ in 0..take {
+        let byte = match history {
+            InflateFastHistory::Separate(window) => window.get(from).copied(),
+            InflateFastHistory::Output => output.get(from).copied(),
+        }?;
+        let slot = output.get_mut(*output_at)?;
+        *slot = byte;
+        from = match from.checked_add(1)? {
+            next if next == wsize => 0,
+            next => next,
+        };
+        *output_at = output_at.checked_add(1)?;
+    }
+    len.checked_sub(take)
+}
+
 /// Decode the fast-path portion of a deflate stream using only bounded
 /// buffers.  The ABI adapter owns construction of these views and commits the
 /// resulting cursors, so this core cannot retain or dereference foreign
@@ -446,39 +491,20 @@ pub(crate) fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastP
                         error = Some(17);
                         break 'fast;
                     }
-                    let Some(window_end) = wnext.checked_add(wsize) else {
+                    let Some(remaining) = inflate_fast_copy_history_prefix(
+                        &history,
+                        output,
+                        &mut output_at,
+                        wsize,
+                        wnext,
+                        back,
+                        len,
+                    ) else {
                         mode = Some(crate::src::inflate::BAD);
                         error = Some(17);
                         break 'fast;
                     };
-                    let Some(mut from) = window_end.checked_sub(back).map(|index| index % wsize)
-                    else {
-                        mode = Some(crate::src::inflate::BAD);
-                        error = Some(17);
-                        break 'fast;
-                    };
-                    let take = back.min(len);
-                    for _ in 0..take {
-                        let byte = match &history {
-                            InflateFastHistory::Separate(window) => window.get(from).copied(),
-                            InflateFastHistory::Output => output.get(from).copied(),
-                        };
-                        let Some(byte) = byte else {
-                            mode = Some(crate::src::inflate::BAD);
-                            error = Some(17);
-                            break 'fast;
-                        };
-                        let Some(slot) = output.get_mut(output_at) else {
-                            break 'fast;
-                        };
-                        *slot = byte;
-                        from += 1;
-                        if from == wsize {
-                            from = 0;
-                        }
-                        output_at += 1;
-                    }
-                    len -= take;
+                    len = remaining;
                 }
                 if !inflate_fast_copy_output_match(output, &mut output_at, dist, len) {
                     mode = Some(crate::src::inflate::BAD);
