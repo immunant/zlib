@@ -278,7 +278,10 @@ pub mod stdlib {
             __size: crate::__stddef_size_t_h::size_t,
         ) -> *mut ::core::ffi::c_void;
 
-        pub fn free(__ptr: *mut ::core::ffi::c_void);
+        // `free` neither reads Rust-managed memory nor imposes an additional
+        // Rust-side precondition. zlib's allocator adapters retain ownership
+        // validation at their call sites.
+        pub safe fn free(__ptr: *mut ::core::ffi::c_void);
         pub fn memcpy(
             __dest: *mut ::core::ffi::c_void,
             __src: *const ::core::ffi::c_void,

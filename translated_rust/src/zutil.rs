@@ -93,14 +93,10 @@ pub unsafe extern "C" fn zcalloc_ffi(
     zcalloc(opaque, items, size)
 }
 // The exported wrapper owns the foreign-call boundary. This implementation
-// adapter only forwards the configured allocation pointer to C's matching
-// deallocator.
+// adapter only forwards the allocation pointer whose ownership its callers
+// already validated to C's matching deallocator.
 pub extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
-    // SAFETY: callers provide the allocation pointer originally returned by
-    // the matching allocator, as required by zlib's allocator callback ABI.
-    unsafe {
-        crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
-    }
+    crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
 }
 #[export_name = "zcfree"]
 
