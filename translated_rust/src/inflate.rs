@@ -1575,6 +1575,40 @@ impl InflateStreamResult {
     }
 }
 
+// Scalar controls and dictionary operations need only the pointer-free normal
+// decoder payload.  Resolve those requests before the ABI adapter selects a
+// cursor, header registration, callback-back window, or callback teardown.
+// Requests that do need one of those boundary resources are returned intact
+// for the adapter to handle at its existing projection point.
+fn inflate_normal_request<'request>(
+    normal: &mut InflateNormalState,
+    request: InflateStreamRequest<'request>,
+) -> Result<InflateStreamResult, InflateStreamRequest<'request>> {
+    match request {
+        InflateStreamRequest::Scalar(action) => {
+            let mut owner = InflateNormalStateOwner::new(normal);
+            Ok(InflateStreamResult::Scalar(inflate_normal_scalar(
+                &mut owner, action,
+            )))
+        }
+        InflateStreamRequest::Dictionary {
+            dictionary,
+            dict_length,
+        } => Ok(InflateStreamResult::Status(inflate_get_dictionary(
+            normal,
+            dictionary,
+            dict_length,
+        ))),
+        InflateStreamRequest::SetDictionary(dictionary) => {
+            let mut owner = InflateNormalStateOwner::new(normal);
+            Ok(InflateStreamResult::Status(inflateSetDictionary(
+                &mut owner, dictionary,
+            )))
+        }
+        request => Err(request),
+    }
+}
+
 // One normal-inflate dispatch owns every value the decoder is allowed to
 // observe: the resumable Rust state, bounded caller cursors, the scoped
 // header-output facade, and scalar stream accounting.  It deliberately does
@@ -3307,25 +3341,10 @@ pub(crate) unsafe fn inflate_from_stream(
             }
         };
     };
-    if let InflateStreamRequest::Scalar(action) = request {
-        let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
-        return InflateStreamResult::Scalar(inflate_normal_scalar(&mut owner, action));
+    let request = match inflate_normal_request(&mut state.decoder.normal, request) {
+        Ok(result) => return result,
+        Err(request) => request,
     };
-    if let InflateStreamRequest::Dictionary {
-        dictionary,
-        dict_length,
-    } = request
-    {
-        return InflateStreamResult::Status(inflate_get_dictionary(
-            &state.decoder.normal,
-            dictionary,
-            dict_length,
-        ));
-    }
-    if let InflateStreamRequest::SetDictionary(dictionary) = request {
-        let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
-        return InflateStreamResult::Status(inflateSetDictionary(&mut owner, dictionary));
-    }
     if let InflateStreamRequest::Header = request {
         if state.decoder.normal.wrap & 2 == 0 {
             return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
