@@ -471,29 +471,32 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         if (*s).lookahead.wrapping_add((*s).insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
-            let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
-            (*s).ins_h = *(*s).window.offset(str as isize) as crate::stdlib::uInt;
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s)
-                    .window
-                    .offset(str.wrapping_add(1 as crate::stdlib::uInt) as isize)
+            let state = &mut *s;
+            let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
+            // These are the exact capacities allocated by `deflateInit2_()`
+            // and `deflateCopy()`. Keep the raw views local to this update,
+            // rather than repeatedly indexing through the raw cursors.
+            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+            let prev = ::core::slice::from_raw_parts_mut(state.prev, wsize as usize);
+            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+            state.ins_h = window[str as usize] as crate::stdlib::uInt;
+            state.ins_h = (state.ins_h << state.hash_shift
+                ^ window[str.wrapping_add(1 as crate::stdlib::uInt) as usize]
                     as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            while (*s).insert != 0 {
-                (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                    ^ *(*s).window.offset(
-                        str.wrapping_add(3 as crate::stdlib::uInt)
-                            .wrapping_sub(1 as crate::stdlib::uInt)
-                            as isize,
-                    ) as crate::stdlib::uInt)
-                    & (*s).hash_mask;
-                *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                    *(*s).head.offset((*s).ins_h as isize);
-                *(*s).head.offset((*s).ins_h as isize) =
+                & state.hash_mask;
+            while state.insert != 0 {
+                state.ins_h = (state.ins_h << state.hash_shift
+                    ^ window[str
+                        .wrapping_add(3 as crate::stdlib::uInt)
+                        .wrapping_sub(1 as crate::stdlib::uInt)
+                        as usize] as crate::stdlib::uInt)
+                    & state.hash_mask;
+                prev[(str & state.w_mask) as usize] = head[state.ins_h as usize];
+                head[state.ins_h as usize] =
                     str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 str = str.wrapping_add(1);
-                (*s).insert = (*s).insert.wrapping_sub(1);
-                if (*s).lookahead.wrapping_add((*s).insert)
+                state.insert = state.insert.wrapping_sub(1);
+                if state.lookahead.wrapping_add(state.insert)
                     < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
                 {
                     break;
