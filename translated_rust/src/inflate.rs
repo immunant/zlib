@@ -225,17 +225,6 @@ fn inflate_state_is_valid(
         && state.mode >= crate::src::inflate::HEAD
         && state.mode <= crate::src::inflate::SYNC
 }
-pub unsafe extern "C" fn inflateResetKeep(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
-    inflate_reset_keep(strm, state)
-}
-
 fn inflate_reset_keep(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
@@ -278,7 +267,16 @@ fn inflate_reset(
 pub unsafe extern "C" fn inflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateResetKeep(strm)
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: `inflateStateCheck` established that `strm` and its state are
+    // live, mutually associated objects. The reset operation itself only
+    // needs these bound references.
+    inflate_reset_keep(
+        unsafe { &mut *strm },
+        unsafe { &mut *((*strm).state as *mut crate::src::inflate::inflate_state) },
+    )
 }
 pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if inflateStateCheck(strm) != 0 {
