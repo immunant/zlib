@@ -2984,36 +2984,45 @@ fn send_tree(
     }
 }
 
-unsafe extern "C" fn build_bl_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
+fn build_bl_tree(
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    l_max_code: ::core::ffi::c_int,
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    d_max_code: ::core::ffi::c_int,
+    bl_tree: &mut [crate::src::deflate::ct_data_s; 39],
+    bl_desc: &mut crate::src::deflate::tree_desc_s,
+    heap: &mut [::core::ffi::c_int; crate::src::deflate::HEAP_SIZE as usize],
+    heap_len: &mut ::core::ffi::c_int,
+    heap_max: &mut ::core::ffi::c_int,
+    depth: &mut [crate::zutil_h::uch; crate::src::deflate::HEAP_SIZE as usize],
+    bl_count: &mut [crate::zutil_h::ush; 16],
+    opt_len: &mut crate::zutil_h::ulg,
+    static_len: &mut crate::zutil_h::ulg,
 ) -> ::core::ffi::c_int {
     let mut max_blindex: ::core::ffi::c_int = 0;
-    let state = &mut *s;
-    let l_max_code = state.l_desc.max_code;
-    scan_tree_lengths(&mut state.dyn_ltree, l_max_code, &mut state.bl_tree);
-    let d_max_code = state.d_desc.max_code;
-    scan_tree_lengths(&mut state.dyn_dtree, d_max_code, &mut state.bl_tree);
+    scan_tree_lengths(dyn_ltree, l_max_code, bl_tree);
+    scan_tree_lengths(dyn_dtree, d_max_code, bl_tree);
     build_tree(
-        &mut state.bl_tree,
-        &mut state.bl_desc,
-        &mut state.heap,
-        &mut state.heap_len,
-        &mut state.heap_max,
-        &mut state.depth,
-        &mut state.bl_count,
-        &mut state.opt_len,
-        &mut state.static_len,
+        bl_tree,
+        bl_desc,
+        heap,
+        heap_len,
+        heap_max,
+        depth,
+        bl_count,
+        opt_len,
+        static_len,
     );
     max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
     while max_blindex >= 3 as ::core::ffi::c_int {
-        if (*s).bl_tree[bl_order[max_blindex as usize] as usize].dl as ::core::ffi::c_int
+        if bl_tree[bl_order[max_blindex as usize] as usize].dl as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
         {
             break;
         }
         max_blindex -= 1;
     }
-    (*s).opt_len = (*s).opt_len.wrapping_add(
+    *opt_len = opt_len.wrapping_add(
         (3 as crate::zutil_h::ulg)
             .wrapping_mul(
                 (max_blindex as crate::zutil_h::ulg).wrapping_add(1 as crate::zutil_h::ulg),
@@ -3476,43 +3485,55 @@ pub unsafe extern "C" fn _tr_flush_block(
         if (*(*s).strm).data_type == crate::zlib_h::Z_UNKNOWN {
             (*(*s).strm).data_type = detect_data_type_impl(&(*s).dyn_ltree);
         }
-        {
-            let state = &mut *s;
-            build_tree(
-                &mut state.dyn_ltree,
-                &mut state.l_desc,
-                &mut state.heap,
-                &mut state.heap_len,
-                &mut state.heap_max,
-                &mut state.depth,
-                &mut state.bl_count,
-                &mut state.opt_len,
-                &mut state.static_len,
-            );
-            build_tree(
-                &mut state.dyn_dtree,
-                &mut state.d_desc,
-                &mut state.heap,
-                &mut state.heap_len,
-                &mut state.heap_max,
-                &mut state.depth,
-                &mut state.bl_count,
-                &mut state.opt_len,
-                &mut state.static_len,
-            );
-        }
-        max_blindex = build_bl_tree(s);
-        opt_lenb = (*s)
+        let state = &mut *s;
+        build_tree(
+            &mut state.dyn_ltree,
+            &mut state.l_desc,
+            &mut state.heap,
+            &mut state.heap_len,
+            &mut state.heap_max,
+            &mut state.depth,
+            &mut state.bl_count,
+            &mut state.opt_len,
+            &mut state.static_len,
+        );
+        build_tree(
+            &mut state.dyn_dtree,
+            &mut state.d_desc,
+            &mut state.heap,
+            &mut state.heap_len,
+            &mut state.heap_max,
+            &mut state.depth,
+            &mut state.bl_count,
+            &mut state.opt_len,
+            &mut state.static_len,
+        );
+        max_blindex = build_bl_tree(
+            &mut state.dyn_ltree,
+            state.l_desc.max_code,
+            &mut state.dyn_dtree,
+            state.d_desc.max_code,
+            &mut state.bl_tree,
+            &mut state.bl_desc,
+            &mut state.heap,
+            &mut state.heap_len,
+            &mut state.heap_max,
+            &mut state.depth,
+            &mut state.bl_count,
+            &mut state.opt_len,
+            &mut state.static_len,
+        );
+        opt_lenb = state
             .opt_len
             .wrapping_add(3 as crate::zutil_h::ulg)
             .wrapping_add(7 as crate::zutil_h::ulg)
             >> 3 as ::core::ffi::c_int;
-        static_lenb = (*s)
+        static_lenb = state
             .static_len
             .wrapping_add(3 as crate::zutil_h::ulg)
             .wrapping_add(7 as crate::zutil_h::ulg)
             >> 3 as ::core::ffi::c_int;
-        if static_lenb <= opt_lenb || (*s).strategy == crate::zlib_h::Z_FIXED {
+        if static_lenb <= opt_lenb || state.strategy == crate::zlib_h::Z_FIXED {
             opt_lenb = static_lenb;
         }
     } else {
