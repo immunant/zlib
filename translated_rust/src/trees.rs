@@ -4295,31 +4295,42 @@ unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).bi_valid = 0 as ::core::ffi::c_int;
 }
 
+fn gen_next_codes(
+    bl_count: &[crate::zutil_h::ush; crate::src::deflate::MAX_BITS as usize + 1],
+) -> [crate::zutil_h::ush; crate::src::deflate::MAX_BITS as usize + 1] {
+    let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
+    let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
+    let mut bits = 1usize;
+    while bits <= crate::src::deflate::MAX_BITS as usize {
+        code = code.wrapping_add(
+            bl_count[bits - 1] as ::core::ffi::c_uint
+        ) << 1 as ::core::ffi::c_int;
+        next_code[bits] = code as crate::zutil_h::ush;
+        bits += 1;
+    }
+    next_code
+}
+
 unsafe extern "C" fn gen_codes(
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
     mut bl_count: *mut crate::zutil_h::ushf,
 ) {
-    let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
-    let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
-    let mut bits: ::core::ffi::c_int = 0;
-    let mut n: ::core::ffi::c_int = 0;
-    bits = 1 as ::core::ffi::c_int;
-    while bits <= crate::src::deflate::MAX_BITS {
-        code = code.wrapping_add(
-            *bl_count.offset((bits - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_uint
-        ) << 1 as ::core::ffi::c_int;
-        next_code[bits as usize] = code as crate::zutil_h::ush;
+    let mut counts: [crate::zutil_h::ush; 16] = [0; 16];
+    let mut bits = 0usize;
+    while bits <= crate::src::deflate::MAX_BITS as usize {
+        counts[bits] = *bl_count.offset(bits as isize);
         bits += 1;
     }
-    n = 0 as ::core::ffi::c_int;
+    let mut next_code = gen_next_codes(&counts);
+    let mut n = 0 as ::core::ffi::c_int;
     while n <= max_code {
-        let mut len: ::core::ffi::c_int = (*tree.offset(n as isize)).dl.len as ::core::ffi::c_int;
+        let len = (*tree.offset(n as isize)).dl.len as ::core::ffi::c_int;
         if len != 0 as ::core::ffi::c_int {
-            let c2rust_fresh57 = next_code[len as usize];
+            let code = next_code[len as usize];
             next_code[len as usize] = next_code[len as usize].wrapping_add(1);
             (*tree.offset(n as isize)).fc.code =
-                bi_reverse(c2rust_fresh57 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
+                bi_reverse(code as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
         n += 1;
     }
