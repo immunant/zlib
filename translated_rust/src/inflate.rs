@@ -1513,10 +1513,13 @@ pub unsafe extern "C" fn inflate(
                                                                         {
                                                                             break '_inf_leave;
                                                                         }
-                                                                        crate::stdlib::memcpy(
-                                                                            put as *mut ::core::ffi::c_void,
-                                                                            next as *const ::core::ffi::c_void,
-                                                                            copy as crate::__stddef_size_t_h::size_t,
+                                                                        // This is the translated C `memcpy` path.
+                                                                        // Input and output are distinct non-overlapping
+                                                                        // caller ranges by inflate's existing contract.
+                                                                        ::core::ptr::copy_nonoverlapping(
+                                                                            next,
+                                                                            put,
+                                                                            copy as usize,
                                                                         );
                                                                         have =
                                                                             have.wrapping_sub(copy);
@@ -1892,10 +1895,12 @@ pub unsafe extern "C" fn inflate(
                                                     len < (*(*state).head).extra_max
                                                 }
                                             {
-                                                crate::stdlib::memcpy(
-                                                    (*(*state).head).extra.offset(len as isize)
-                                                        as *mut ::core::ffi::c_void,
-                                                    next as *const ::core::ffi::c_void,
+                                                // The caller input and the separately registered
+                                                // header-extra buffer have the original C memcpy
+                                                // non-overlap contract.
+                                                ::core::ptr::copy_nonoverlapping(
+                                                    next,
+                                                    (*(*state).head).extra.add(len as usize),
                                                     (if len.wrapping_add(copy)
                                                         > (*(*state).head).extra_max
                                                     {
@@ -1904,8 +1909,7 @@ pub unsafe extern "C" fn inflate(
                                                             .wrapping_sub(len)
                                                     } else {
                                                         copy
-                                                    })
-                                                        as crate::__stddef_size_t_h::size_t,
+                                                    }) as usize,
                                                 );
                                             }
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -2356,17 +2360,18 @@ pub unsafe extern "C" fn inflateGetDictionary(
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).whave != 0 && !dictionary.is_null() {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*state).window.expect("history exists").as_ptr().offset((*state).wnext as isize) as *const ::core::ffi::c_void,
-            (*state).whave.wrapping_sub((*state).wnext) as crate::__stddef_size_t_h::size_t,
+        let window = (*state).window.expect("history exists").as_ptr();
+        // The caller dictionary buffer and internal history allocation are
+        // distinct, as required by the translated C memcpy operations.
+        ::core::ptr::copy_nonoverlapping(
+            window.add((*state).wnext as usize),
+            dictionary,
+            (*state).whave.wrapping_sub((*state).wnext) as usize,
         );
-        crate::stdlib::memcpy(
-            dictionary
-                .offset((*state).whave as isize)
-                .offset(-((*state).wnext as isize)) as *mut ::core::ffi::c_void,
-            (*state).window.expect("history exists").as_ptr() as *const ::core::ffi::c_void,
-            (*state).wnext as crate::__stddef_size_t_h::size_t,
+        ::core::ptr::copy_nonoverlapping(
+            window,
+            dictionary.add((*state).whave.wrapping_sub((*state).wnext) as usize),
+            (*state).wnext as usize,
         );
     }
     if !dictLength.is_null() {
@@ -2624,25 +2629,19 @@ pub unsafe extern "C" fn inflateCopy(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    crate::stdlib::memcpy(
-        copy as *mut ::core::ffi::c_void,
-        state as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
+    // `dest` and `source`, and their separately allocated states, are
+    // distinct by inflateCopy's existing C contract.
+    ::core::ptr::copy_nonoverlapping(source, dest, 1);
+    ::core::ptr::copy_nonoverlapping(state, copy, 1);
     (*copy).stream_identity = dest.addr();
     (*copy).lencode = (*state).lencode;
     (*copy).distcode = (*state).distcode;
     (*copy).next = (*state).next;
     if let Some(window) = window {
-        crate::stdlib::memcpy(
-            window.as_ptr() as *mut ::core::ffi::c_void,
-            (*state).window.expect("history exists").as_ptr() as *const ::core::ffi::c_void,
-            (*state).whave as crate::__stddef_size_t_h::size_t,
+        ::core::ptr::copy_nonoverlapping(
+            (*state).window.expect("history exists").as_ptr(),
+            window.as_ptr(),
+            (*state).whave as usize,
         );
     }
     (*copy).window = window;
