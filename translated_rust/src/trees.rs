@@ -4426,23 +4426,6 @@ unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
     );
 }
 
-unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
-    if s.is_null() || (*s).pending_buf.is_null() {
-        return;
-    }
-    let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
-        return;
-    };
-    let pending_buf = ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len);
-    let _ = bi_windup_state(
-        pending_buf,
-        &mut (*s).pending,
-        &mut (*s).bi_buf,
-        &mut (*s).bi_valid,
-        &mut (*s).bi_used,
-    );
-}
-
 fn gen_next_codes(
     bl_count: &[crate::zutil_h::ush; crate::src::deflate::MAX_BITS as usize + 1],
 ) -> [crate::zutil_h::ush; crate::src::deflate::MAX_BITS as usize + 1] {
@@ -4528,6 +4511,7 @@ fn reset_block(s: &mut crate::src::deflate::deflate_state) {
 unsafe extern "C" fn init_block(s: *mut crate::src::deflate::deflate_state) {
     reset_block(&mut *s);
 }
+
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
     tr_static_init();
     (*s).l_desc.dyn_tree = &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
@@ -4913,42 +4897,46 @@ fn build_tree_state(
     Some(max_code)
 }
 
-unsafe extern "C" fn build_tree(
-    s: *mut crate::src::deflate::deflate_state,
-    desc: *mut crate::src::deflate::tree_desc,
-) {
-    if s.is_null() || desc.is_null() {
-        return;
-    }
-    let state = &mut *s;
-    let desc = &mut *desc;
-    let tree = desc.dyn_tree;
-    let Some(stat_desc) = desc.stat_desc else {
-        return;
+fn build_l_tree_state(s: &mut crate::src::deflate::deflate_state) -> bool {
+    let Some(stat_desc) = s.l_desc.stat_desc else {
+        return false;
     };
-    let Ok(elems) = usize::try_from(stat_desc.elems) else {
-        return;
-    };
-    let Some(tree_len) = elems.checked_mul(2).and_then(|len| len.checked_add(1)) else {
-        return;
-    };
-    if tree.is_null() {
-        return;
-    }
-    let tree = ::core::slice::from_raw_parts_mut(tree, tree_len);
-    if let Some(max_code) = build_tree_state(
-        tree,
+    let Some(max_code) = build_tree_state(
+        &mut s.dyn_ltree,
         stat_desc,
-        &mut state.heap,
-        &mut state.heap_len,
-        &mut state.heap_max,
-        &mut state.depth,
-        &mut state.bl_count,
-        &mut state.opt_len,
-        &mut state.static_len,
-    ) {
-        desc.max_code = max_code;
-    }
+        &mut s.heap,
+        &mut s.heap_len,
+        &mut s.heap_max,
+        &mut s.depth,
+        &mut s.bl_count,
+        &mut s.opt_len,
+        &mut s.static_len,
+    ) else {
+        return false;
+    };
+    s.l_desc.max_code = max_code;
+    true
+}
+
+fn build_d_tree_state(s: &mut crate::src::deflate::deflate_state) -> bool {
+    let Some(stat_desc) = s.d_desc.stat_desc else {
+        return false;
+    };
+    let Some(max_code) = build_tree_state(
+        &mut s.dyn_dtree,
+        stat_desc,
+        &mut s.heap,
+        &mut s.heap_len,
+        &mut s.heap_max,
+        &mut s.depth,
+        &mut s.bl_count,
+        &mut s.opt_len,
+        &mut s.static_len,
+    ) else {
+        return false;
+    };
+    s.d_desc.max_code = max_code;
+    true
 }
 
 fn scan_tree_state(
@@ -5212,15 +5200,6 @@ fn build_bl_tree_state(s: &mut crate::src::deflate::deflate_state) -> Option<::c
     finish_bl_tree_state(&s.bl_tree, &mut s.opt_len)
 }
 
-unsafe extern "C" fn build_bl_tree(
-    s: *mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
-    if s.is_null() {
-        return 0;
-    }
-    build_bl_tree_state(&mut *s).unwrap_or(0)
-}
-
 fn send_all_trees_header_state(
     pending_buf: &mut [crate::stdlib::Byte],
     pending: &mut crate::zutil_h::ulg,
@@ -5281,60 +5260,6 @@ fn send_all_trees_header_state(
     true
 }
 
-unsafe extern "C" fn send_all_trees(
-    s: *mut crate::src::deflate::deflate_state,
-    lcodes: ::core::ffi::c_int,
-    dcodes: ::core::ffi::c_int,
-    blcodes: ::core::ffi::c_int,
-) {
-    if s.is_null() {
-        return;
-    }
-    let state = &mut *s;
-    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-        return;
-    };
-    if pending_len != 0 && state.pending_buf.is_null() {
-        return;
-    }
-    let pending_buf = if pending_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-    };
-    if !send_all_trees_header_state(
-        pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-        &state.bl_tree,
-        lcodes,
-        dcodes,
-        blcodes,
-    ) {
-        return;
-    }
-    if !send_tree_state(
-        pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-        &state.bl_tree,
-        &state.dyn_ltree,
-        lcodes - 1 as ::core::ffi::c_int,
-    ) {
-        return;
-    }
-    let _ = send_tree_state(
-        pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-        &state.bl_tree,
-        &state.dyn_dtree,
-        dcodes - 1 as ::core::ffi::c_int,
-    );
-}
 pub unsafe extern "C" fn _tr_stored_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
@@ -5525,42 +5450,31 @@ fn compress_block_state(
     )
 }
 
-unsafe extern "C" fn compress_block(
-    s: *mut crate::src::deflate::deflate_state,
-    ltree: *const crate::src::deflate::ct_data,
-    dtree: *const crate::src::deflate::ct_data,
-) {
-    if s.is_null() || ltree.is_null() || dtree.is_null() {
-        return;
-    }
-    let state = &mut *s;
-    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-        return;
-    };
-    let Ok(symbol_capacity) = usize::try_from(state.lit_bufsize) else {
-        return;
-    };
-    let symbol_len = state.sym_next as usize;
-    if state.pending_buf.is_null()
-        || pending_len < symbol_capacity
-        || symbol_len > pending_len - symbol_capacity
+fn compress_block_from_state(
+    pending_and_symbols: &mut [crate::stdlib::Byte],
+    symbol_capacity: usize,
+    symbol_len: usize,
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    ltree: &[crate::src::deflate::ct_data],
+    dtree: &[crate::src::deflate::ct_data],
+) -> bool {
+    if symbol_capacity > pending_and_symbols.len()
+        || symbol_len > pending_and_symbols.len() - symbol_capacity
     {
-        return;
+        return false;
     }
-    let pending_and_symbols = ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len);
     let (pending_buf, symbol_storage) = pending_and_symbols.split_at_mut(symbol_capacity);
-    let symbols = &symbol_storage[..symbol_len];
-    let ltree = ::core::slice::from_raw_parts(ltree, crate::src::deflate::L_CODES as usize);
-    let dtree = ::core::slice::from_raw_parts(dtree, crate::src::deflate::D_CODES as usize);
-    let _ = compress_block_state(
+    compress_block_state(
         pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-        symbols,
+        pending,
+        bi_buf,
+        bi_valid,
+        &symbol_storage[..symbol_len],
         ltree,
         dtree,
-    );
+    )
 }
 
 fn detect_data_type(tree: &[crate::src::deflate::ct_data]) -> ::core::ffi::c_int {
@@ -5594,129 +5508,179 @@ fn detect_data_type(tree: &[crate::src::deflate::ct_data]) -> ::core::ffi::c_int
     }
     return crate::zlib_h::Z_BINARY;
 }
+
+fn tr_flush_block_state(
+    state: &mut crate::src::deflate::deflate_state,
+    data_type: &mut ::core::ffi::c_int,
+    pending_and_symbols: &mut [crate::stdlib::Byte],
+    stored: Option<&[crate::stdlib::Byte]>,
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
+) -> bool {
+    let Ok(symbol_capacity) = usize::try_from(state.lit_bufsize) else {
+        return false;
+    };
+    let Ok(symbol_len) = usize::try_from(state.sym_next) else {
+        return false;
+    };
+    let mut opt_lenb;
+    let static_lenb;
+    let mut max_blindex = 0;
+
+    if state.level > 0 {
+        if *data_type == crate::zlib_h::Z_UNKNOWN {
+            *data_type = detect_data_type(&state.dyn_ltree);
+        }
+        if !build_l_tree_state(state) || !build_d_tree_state(state) {
+            return false;
+        }
+        let Some(max_code) = build_bl_tree_state(state) else {
+            return false;
+        };
+        max_blindex = max_code;
+        opt_lenb = state.opt_len.wrapping_add(10) >> 3;
+        static_lenb = state.static_len.wrapping_add(10) >> 3;
+        if static_lenb <= opt_lenb || state.strategy == crate::zlib_h::Z_FIXED {
+            opt_lenb = static_lenb;
+        }
+    } else {
+        static_lenb = stored_len.wrapping_add(5);
+        opt_lenb = static_lenb;
+    }
+
+    if stored_len.wrapping_add(4) <= opt_lenb {
+        let Some(stored) = stored else {
+            return false;
+        };
+        if !tr_stored_block_state(
+            pending_and_symbols,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+            stored,
+            last,
+        ) {
+            return false;
+        }
+    } else if static_lenb == opt_lenb {
+        if !send_bits_state(
+            pending_and_symbols,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            2 + last,
+            3,
+        ) || !compress_block_from_state(
+            pending_and_symbols,
+            symbol_capacity,
+            symbol_len,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &static_ltree,
+            &static_dtree,
+        ) {
+            return false;
+        }
+    } else {
+        if !send_bits_state(
+            pending_and_symbols,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            4 + last,
+            3,
+        ) || !send_all_trees_header_state(
+            pending_and_symbols,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &state.bl_tree,
+            state.l_desc.max_code + 1,
+            state.d_desc.max_code + 1,
+            max_blindex + 1,
+        ) || !send_tree_state(
+            pending_and_symbols,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &state.bl_tree,
+            &state.dyn_ltree,
+            state.l_desc.max_code,
+        ) || !send_tree_state(
+            pending_and_symbols,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &state.bl_tree,
+            &state.dyn_dtree,
+            state.d_desc.max_code,
+        ) || !compress_block_from_state(
+            pending_and_symbols,
+            symbol_capacity,
+            symbol_len,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &state.dyn_ltree,
+            &state.dyn_dtree,
+        ) {
+            return false;
+        }
+    }
+    reset_block(state);
+    last == 0
+        || bi_windup_state(
+            pending_and_symbols,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+        )
+}
+
 pub unsafe extern "C" fn _tr_flush_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    let mut opt_lenb: crate::zutil_h::ulg = 0;
-    let mut static_lenb: crate::zutil_h::ulg = 0;
-    let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    if (*s).level > 0 as ::core::ffi::c_int {
-        let strm = (*s).strm;
-        if (*strm).data_type == crate::zlib_h::Z_UNKNOWN {
-            (*strm).data_type = detect_data_type(&(*s).dyn_ltree);
-        }
-        build_tree(
-            s,
-            &raw mut (*s).l_desc as *mut crate::src::deflate::tree_desc,
-        );
-        build_tree(
-            s,
-            &raw mut (*s).d_desc as *mut crate::src::deflate::tree_desc,
-        );
-        max_blindex = build_bl_tree(s);
-        opt_lenb = (*s)
-            .opt_len
-            .wrapping_add(3 as crate::zutil_h::ulg)
-            .wrapping_add(7 as crate::zutil_h::ulg)
-            >> 3 as ::core::ffi::c_int;
-        static_lenb = (*s)
-            .static_len
-            .wrapping_add(3 as crate::zutil_h::ulg)
-            .wrapping_add(7 as crate::zutil_h::ulg)
-            >> 3 as ::core::ffi::c_int;
-        if static_lenb <= opt_lenb || (*s).strategy == crate::zlib_h::Z_FIXED {
-            opt_lenb = static_lenb;
-        }
+    if s.is_null() {
+        return;
+    }
+    let state = &mut *s;
+    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+        return;
+    };
+    let Ok(stored_len_usize) = usize::try_from(stored_len) else {
+        return;
+    };
+    let strm = state.strm;
+    if (pending_len != 0 && state.pending_buf.is_null()) || strm.is_null() {
+        return;
+    }
+    let pending_and_symbols = if pending_len == 0 {
+        &mut []
     } else {
-        static_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
-        opt_lenb = static_lenb;
-    }
-    if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
-        _tr_stored_block(s, buf, stored_len, last);
-    } else if static_lenb == opt_lenb {
-        let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-        if (*s).bi_valid > crate::src::deflate::Buf_size - len {
-            let mut val: ::core::ffi::c_int =
-                ((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                as crate::zutil_h::ush;
-            let c2rust_fresh3 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh3 as isize) = ((*s).bi_buf as ::core::ffi::c_int
-                & 0xff as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            let c2rust_fresh4 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh4 as isize) = ((*s).bi_buf as ::core::ffi::c_int
-                >> 8 as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
-                >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                as crate::zutil_h::ush;
-            (*s).bi_valid += len - crate::src::deflate::Buf_size;
-        } else {
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | ((((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last)
-                    as crate::zutil_h::ush as ::core::ffi::c_int)
-                    << (*s).bi_valid) as crate::zutil_h::ush;
-            (*s).bi_valid += len;
-        }
-        compress_block(
-            s,
-            &raw const static_ltree as *const crate::src::deflate::ct_data,
-            &raw const static_dtree as *const crate::src::deflate::ct_data,
-        );
+        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+    };
+    let stored = if buf.is_null() {
+        None
     } else {
-        let mut len_0: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-        if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
-            let mut val_0: ::core::ffi::c_int =
-                ((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                as crate::zutil_h::ush;
-            let c2rust_fresh5 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh5 as isize) = ((*s).bi_buf as ::core::ffi::c_int
-                & 0xff as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            let c2rust_fresh6 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh6 as isize) = ((*s).bi_buf as ::core::ffi::c_int
-                >> 8 as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            (*s).bi_buf = (val_0 as crate::zutil_h::ush as ::core::ffi::c_int
-                >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                as crate::zutil_h::ush;
-            (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
-        } else {
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | ((((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last)
-                    as crate::zutil_h::ush as ::core::ffi::c_int)
-                    << (*s).bi_valid) as crate::zutil_h::ush;
-            (*s).bi_valid += len_0;
-        }
-        send_all_trees(
-            s,
-            (*s).l_desc.max_code + 1 as ::core::ffi::c_int,
-            (*s).d_desc.max_code + 1 as ::core::ffi::c_int,
-            max_blindex + 1 as ::core::ffi::c_int,
-        );
-        compress_block(
-            s,
-            &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-            &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-        );
-    }
-    init_block(s);
-    if last != 0 {
-        bi_windup(s);
-    }
+        Some(::core::slice::from_raw_parts(
+            buf as *const crate::stdlib::Byte,
+            stored_len_usize,
+        ))
+    };
+    let _ = tr_flush_block_state(
+        state,
+        &mut (*strm).data_type,
+        pending_and_symbols,
+        stored,
+        stored_len,
+        last,
+    );
 }
 #[export_name = "_tr_flush_block"]
 
