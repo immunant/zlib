@@ -527,6 +527,7 @@ enum GzGetcOutcome {
 // an ABI-shaped state.
 enum GzReadAbiRequest {
     Bytes,
+    Unget(::core::ffi::c_int),
     Items {
         size: crate::stdlib::z_size_t,
         nitems: crate::stdlib::z_size_t,
@@ -535,6 +536,7 @@ enum GzReadAbiRequest {
 
 enum GzReadAbiResult {
     Bytes(::core::ffi::c_int),
+    Unget(::core::ffi::c_int),
     Items(crate::stdlib::z_size_t),
 }
 
@@ -542,14 +544,21 @@ impl GzReadAbiResult {
     fn bytes(self) -> ::core::ffi::c_int {
         match self {
             Self::Bytes(result) => result,
-            Self::Items(_) => unreachable!(),
+            Self::Unget(_) | Self::Items(_) => unreachable!(),
         }
     }
 
     fn items(self) -> crate::stdlib::z_size_t {
         match self {
             Self::Items(result) => result,
-            Self::Bytes(_) => unreachable!(),
+            Self::Bytes(_) | Self::Unget(_) => unreachable!(),
+        }
+    }
+
+    fn unget(self) -> ::core::ffi::c_int {
+        match self {
+            Self::Unget(result) => result,
+            Self::Bytes(_) | Self::Items(_) => unreachable!(),
         }
     }
 }
@@ -573,7 +582,7 @@ struct GzReadDispatch<'a> {
     junk: &'a mut ::core::ffi::c_int,
     again: &'a mut ::core::ffi::c_int,
     message: &'a mut Option<Box<[u8]>>,
-    fd: &'a rustix::fd::OwnedFd,
+    fd: Option<&'a rustix::fd::OwnedFd>,
     path: Option<&'a [u8]>,
     avail_in: &'a mut crate::stdlib::uInt,
     avail_out: &'a mut crate::stdlib::uInt,
@@ -582,6 +591,17 @@ struct GzReadDispatch<'a> {
 }
 
 impl GzReadDispatch<'_> {
+    fn begin(&mut self, request: &GzReadRequest, read: &mut GzReadState) -> bool {
+        let mut error = crate::src::gzlib::GzErrorState {
+            message: &mut *self.message,
+            error: &mut read.err,
+            buffered: &mut read.have,
+            again: *self.again,
+            path: self.path,
+        };
+        request.begin(&mut error)
+    }
+
     // Move the owned buffer transaction and its scalar snapshot into the
     // action facade.  No ABI pointer is consulted to validate the output
     // cursor: the owned cursor is the authoritative proof of that range.
@@ -635,13 +655,35 @@ impl GzReadDispatch<'_> {
         destination: &mut [u8],
     ) -> GzReadStep {
         self.project_from_read(read);
-        let step = if !self.output_cursor_is_valid() {
+        let step = if !self.output_cursor_is_valid() || self.fd.is_none() {
             GzReadStep {
                 count: 0,
                 failed: true,
             }
         } else {
+            let fd = self.fd.expect("checked gzip descriptor");
             match action {
+                GzReadAction::Look => GzReadStep {
+                    count: 0,
+                    failed: gz_look(&mut GzFetchOwner::new(
+                        self.buffers,
+                        self.want,
+                        self.direct,
+                        self.junk,
+                        self.how,
+                        self.again,
+                        self.eof,
+                        self.err,
+                        self.message,
+                        self.have,
+                        fd,
+                        self.path,
+                        self.avail_in,
+                        self.avail_out,
+                        self.total_in,
+                        self.total_out,
+                    )) == -1,
+                },
                 GzReadAction::Fetch => GzReadStep {
                     count: 0,
                     failed: gz_fetch_from_state(&mut GzFetchOwner::new(
@@ -655,7 +697,7 @@ impl GzReadDispatch<'_> {
                         self.err,
                         self.message,
                         self.have,
-                        self.fd,
+                        fd,
                         self.path,
                         self.avail_in,
                         self.avail_out,
@@ -664,7 +706,7 @@ impl GzReadDispatch<'_> {
                     )) == -1,
                 },
                 GzReadAction::Copy => match gz_copy_load_into(
-                    self.fd,
+                    fd,
                     destination,
                     GzLoadTarget {
                         again: self.again,
@@ -697,7 +739,7 @@ impl GzReadDispatch<'_> {
                         self.err,
                         self.message,
                         self.have,
-                        self.fd,
+                        fd,
                         self.path,
                         self.avail_in,
                         self.avail_out,
@@ -713,6 +755,7 @@ impl GzReadDispatch<'_> {
 }
 
 enum GzReadAction {
+    Look,
     Fetch,
     Copy,
     Decompress,
@@ -1576,6 +1619,106 @@ unsafe fn gzread_from_state(
         state.strm.total_out = owner.total_out;
         return GzReadAbiResult::Items(result);
     }
+    if let GzReadAbiRequest::Unget(c) = request {
+        let mut read = GzReadState {
+            buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+            have: state.x.have,
+            pos: state.x.pos,
+            skip: state.skip,
+            how: state.how,
+            eof: state.eof,
+            past: state.past,
+            err: state.err,
+            avail_in: state.strm.avail_in,
+        };
+        let mode = state.mode;
+        let again = state.again;
+        let path = state.path.as_deref();
+        let mut dispatch = GzReadDispatch {
+            buffers: &mut state.buffers,
+            have: &mut state.x.have,
+            pos: &mut state.x.pos,
+            skip: &mut state.skip,
+            how: &mut state.how,
+            eof: &mut state.eof,
+            past: &mut state.past,
+            err: &mut state.err,
+            want: state.want,
+            direct: &mut state.direct,
+            junk: &mut state.junk,
+            again: &mut state.again,
+            message: &mut state.msg,
+            fd: state.fd.as_ref(),
+            path,
+            avail_in: &mut state.strm.avail_in,
+            avail_out: &mut state.strm.avail_out,
+            total_in: &mut state.strm.total_in,
+            total_out: &mut state.strm.total_out,
+        };
+        let outcome = match gzungetc_begin(&mut read, mode, again, |action, read| {
+            !dispatch.dispatch(action, read, &mut []).failed
+        }) {
+            Some(request) => {
+                let accepted = dispatch.begin(&request, &mut read);
+                if accepted {
+                    gzungetc(c, &mut read, |action, read| {
+                        !dispatch.dispatch(action, read, &mut []).failed
+                    })
+                } else {
+                    GzUngetOutcome::Result(-1)
+                }
+            }
+            None => GzUngetOutcome::Result(-1),
+        };
+        dispatch.project_from_read(&mut read);
+        drop(dispatch);
+        state.x.have = read.have;
+        state.x.pos = read.pos;
+        state.skip = read.skip;
+        state.how = read.how;
+        state.eof = read.eof;
+        state.past = read.past;
+        state.err = read.err;
+        state.strm.avail_in = read.avail_in;
+        let published = match state
+            .buffers
+            .output_cursor()
+            .map(|cursor| (cursor.start(), cursor.have()))
+        {
+            Some((start, have)) if have == state.x.have => state
+                .buffers
+                .output
+                .as_deref_mut()
+                .and_then(|buffer| buffer.get_mut(start..))
+                .map(|buffer| {
+                    state.x.next = buffer.as_mut_ptr();
+                })
+                .is_some(),
+            None if state.x.have == 0 => {
+                state.x.next = ::core::ptr::null_mut();
+                true
+            }
+            _ => false,
+        };
+        if !published {
+            return GzReadAbiResult::Unget(-1);
+        }
+        return GzReadAbiResult::Unget(match outcome {
+            GzUngetOutcome::Result(result) => result,
+            GzUngetOutcome::OutOfRoom => {
+                crate::src::gzlib::gz_set_error(
+                    &mut state.msg,
+                    &mut state.err,
+                    &mut state.x.have,
+                    state.again,
+                    state.path.as_deref(),
+                    crate::zlib_h::Z_DATA_ERROR,
+                    Some(b"out of room to push characters"),
+                );
+                -1
+            }
+        });
+    }
     let request = GzReadRequest::new(state.mode, state.err, state.again);
     let mut error = crate::src::gzlib::GzErrorState {
         message: &mut state.msg,
@@ -1621,7 +1764,7 @@ unsafe fn gzread_from_state(
             junk: &mut state.junk,
             again: &mut state.again,
             message: &mut state.msg,
-            fd: state.fd.as_ref().expect("gzip state has an open file"),
+            fd: Some(state.fd.as_ref().expect("gzip state has an open file")),
             path: state.path.as_deref(),
             avail_in: &mut state.strm.avail_in,
             avail_out: &mut state.strm.avail_out,
@@ -1715,7 +1858,7 @@ fn gzread_owner(owner: &mut GzReadOwner, output: &mut [u8]) -> ::core::ffi::c_ui
             junk: &mut owner.junk,
             again: &mut owner.again,
             message: &mut owner.message,
-            fd: &owner.fd,
+            fd: Some(&owner.fd),
             path: owner.path.as_deref(),
             avail_in: &mut owner.avail_in,
             avail_out: &mut owner.avail_out,
@@ -1954,86 +2097,58 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     };
     gzgetc(state)
 }
-unsafe fn gzungetc(
-    mut c: ::core::ffi::c_int,
-    state: &mut crate::gzguts_h::gz_state,
-) -> ::core::ffi::c_int {
-    if state.mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
+// The unget byte policy is wholly owned by the buffered read facade.  LOOK
+// classification and refills are requested through the supplied action
+// visitor; that visitor is the only part that needs the ABI gzip state.
+enum GzUngetOutcome {
+    Result(::core::ffi::c_int),
+    OutOfRoom,
+}
+
+fn gzungetc_begin(
+    state: &mut GzReadState,
+    mode: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    mut dispatch: impl FnMut(GzReadAction, &mut GzReadState) -> bool,
+) -> Option<GzReadRequest> {
+    if mode != crate::gzguts_h::GZ_READ {
+        return None;
     }
-    if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
-        gz_look(&mut GzFetchOwner::new(
-            &mut state.buffers,
-            state.want,
-            &mut state.direct,
-            &mut state.junk,
-            &mut state.how,
-            &mut state.again,
-            &mut state.eof,
-            &mut state.err,
-            &mut state.msg,
-            &mut state.x.have,
-            state.fd.as_ref().expect("gzip state has an open file"),
-            state.path.as_deref(),
-            &mut state.strm.avail_in,
-            &mut state.strm.avail_out,
-            &mut state.strm.total_in,
-            &mut state.strm.total_out,
-        ));
+    if state.how == crate::gzguts_h::LOOK && state.have == 0 {
+        let _ = dispatch(GzReadAction::Look, state);
     }
-    let request = GzReadRequest::new(state.mode, state.err, state.again);
-    let mut error = crate::src::gzlib::GzErrorState {
-        message: &mut state.msg,
-        error: &mut state.err,
-        buffered: &mut state.x.have,
-        again: state.again,
-        path: state.path.as_deref(),
-    };
-    if !request.begin(&mut error) {
-        return -1 as ::core::ffi::c_int;
-    }
-    drop(error);
+    Some(GzReadRequest::new(mode, state.err, again))
+}
+
+fn gzungetc(
+    c: ::core::ffi::c_int,
+    state: &mut GzReadState,
+    mut dispatch: impl FnMut(GzReadAction, &mut GzReadState) -> bool,
+) -> GzUngetOutcome {
     if state.skip != 0 {
         loop {
-            let cursor = if state.x.have == 0 {
+            let cursor = if state.have == 0 {
                 0
             } else {
                 let Some(cursor) = state.buffers.output_cursor().map(|cursor| cursor.start())
                 else {
-                    return -1;
+                    return GzUngetOutcome::Result(-1);
                 };
                 cursor
             };
             let mut skip = GzSkipState {
                 buffer: state.buffers.output.as_deref(),
                 cursor,
-                have: state.x.have,
-                pos: state.x.pos,
+                have: state.have,
+                pos: state.pos,
                 skip: state.skip,
                 eof: state.eof,
-                avail_in: state.strm.avail_in,
+                avail_in: state.avail_in,
             };
             match gz_skip_step(&mut skip) {
                 Ok(GzSkipStep::Fetch) => {
-                    if gz_fetch_from_state(&mut GzFetchOwner::new(
-                        &mut state.buffers,
-                        state.want,
-                        &mut state.direct,
-                        &mut state.junk,
-                        &mut state.how,
-                        &mut state.again,
-                        &mut state.eof,
-                        &mut state.err,
-                        &mut state.msg,
-                        &mut state.x.have,
-                        state.fd.as_ref().expect("gzip state has an open file"),
-                        state.path.as_deref(),
-                        &mut state.strm.avail_in,
-                        &mut state.strm.avail_out,
-                        &mut state.strm.total_in,
-                        &mut state.strm.total_out,
-                    )) == -1 as ::core::ffi::c_int {
-                        return -1;
+                    if !dispatch(GzReadAction::Fetch, state) {
+                        return GzUngetOutcome::Result(-1);
                     }
                 }
                 Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
@@ -2044,7 +2159,7 @@ unsafe fn gzungetc(
                     drop(skip);
                     if have != 0 {
                         let Some(buffer) = state.buffers.output.as_deref() else {
-                            return -1;
+                            return GzUngetOutcome::Result(-1);
                         };
                         let Some(cursor) =
                             crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(
@@ -2053,52 +2168,42 @@ unsafe fn gzungetc(
                                 have,
                             )
                         else {
-                            return -1;
+                            return GzUngetOutcome::Result(-1);
                         };
-                        state.x.next = buffer.as_ptr().wrapping_add(cursor_index).cast_mut();
                         state.buffers.set_output_cursor(cursor);
                     } else {
                         state.buffers.clear_output_cursor();
                     }
-                    state.x.have = have;
-                    state.x.pos = pos;
+                    state.have = have;
+                    state.pos = pos;
                     state.skip = skip_remaining;
                     if matches!(step, GzSkipStep::Done) {
                         break;
                     }
                 }
-                Err(()) => return -1,
+                Err(()) => return GzUngetOutcome::Result(-1),
             }
         }
     }
     if c < 0 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
+        return GzUngetOutcome::Result(-1);
     }
-    if state.x.have != 0 && state.x.have == state.buffers.size << 1 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_set_error(
-            &mut state.msg,
-            &mut state.err,
-            &mut state.x.have,
-            state.again,
-            state.path.as_deref(),
-            crate::zlib_h::Z_DATA_ERROR,
-            Some(b"out of room to push characters"),
-        );
-        return -1 as ::core::ffi::c_int;
+    if state.have != 0 && state.have == state.buffers.size << 1 as ::core::ffi::c_int {
+        return GzUngetOutcome::OutOfRoom;
     }
     let size = state.buffers.size as usize;
     let Some(capacity) = size.checked_mul(2) else {
-        return -1 as ::core::ffi::c_int;
+        return GzUngetOutcome::Result(-1);
     };
     let existing_cursor = state
         .buffers
         .output_cursor()
         .map(|cursor| (cursor.start(), cursor.have()));
     let Some(buffer) = state.buffers.output.as_deref_mut() else {
-        return -1;
+        return GzUngetOutcome::Result(-1);
     };
     let Some(buffer) = buffer.get_mut(..capacity) else {
-        return -1;
+        return GzUngetOutcome::Result(-1);
     };
     let Some(mut cursor) = existing_cursor
         .map(|(start, have)| {
@@ -2106,17 +2211,16 @@ unsafe fn gzungetc(
         })
         .unwrap_or_else(|| crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(buffer, 0, 0))
     else {
-        return -1;
+        return GzUngetOutcome::Result(-1);
     };
     if cursor.prepend(buffer, c as ::core::ffi::c_uchar).is_none() {
-        return -1 as ::core::ffi::c_int;
+        return GzUngetOutcome::Result(-1);
     }
-    state.x.have = cursor.have();
-    state.x.next = buffer.as_mut_ptr().wrapping_add(cursor.start());
+    state.have = cursor.have();
     state.buffers.set_output_cursor(cursor);
-    state.x.pos -= 1;
+    state.pos -= 1;
     state.past = 0 as ::core::ffi::c_int;
-    return c;
+    GzUngetOutcome::Result(c)
 }
 #[export_name = "gzungetc"]
 
@@ -2127,7 +2231,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    gzungetc(c, state)
+    gzread_from_state(state, &mut [], GzReadAbiRequest::Unget(c)).unget()
 }
 fn gzgets(
     state: &mut GzReadState,
@@ -2408,9 +2512,7 @@ fn gzdirect_from_state(owner: GzDirectOwner<'_>) -> ::core::ffi::c_int {
 // Keep the ABI-shaped gzip handle at this projection boundary.  Once its
 // disjoint scalar and owned-buffer fields have been borrowed, the direct
 // query itself receives only the pointer-free owner above.
-unsafe fn gzdirect_from_abi_state(
-    state: &mut crate::gzguts_h::gz_state,
-) -> ::core::ffi::c_int {
+unsafe fn gzdirect_from_abi_state(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let crate::gzguts_h::gz_state {
         x,
         mode,
