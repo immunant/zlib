@@ -2749,7 +2749,6 @@ pub mod inffixed_h {
             val: 0 as ::core::ffi::c_ushort,
         },
     ];
-    
 }
 
 pub use crate::__stddef_null_h::NULL;
@@ -3148,8 +3147,8 @@ pub unsafe extern "C" fn inflate_table(
             here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.val = *work.offset(sym as isize);
         } else if *work.offset(sym as isize) as ::core::ffi::c_uint >= match_0 {
-            let index = (*work.offset(sym as isize) as ::core::ffi::c_uint)
-                .wrapping_sub(match_0) as usize;
+            let index =
+                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as usize;
             here.op = extra[index] as ::core::ffi::c_uchar;
             here.val = base[index];
         } else {

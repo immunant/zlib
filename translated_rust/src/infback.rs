@@ -929,13 +929,13 @@ pub unsafe extern "C" fn inflateBack(
                         bits = bits.wrapping_sub((*state).extra);
                     }
                     if (*state).offset
-                        > (*state).wsize.wrapping_sub(
-                            if (*state).whave < (*state).wsize {
+                        > (*state)
+                            .wsize
+                            .wrapping_sub(if (*state).whave < (*state).wsize {
                                 left
                             } else {
                                 0 as ::core::ffi::c_uint
-                            } ,
-                        )
+                            })
                     {
                         (*strm).msg = b"invalid distance too far back\0".as_ptr()
                             as *const ::core::ffi::c_char

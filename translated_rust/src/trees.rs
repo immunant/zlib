@@ -3391,12 +3391,6 @@ pub mod trees_h {
         16384 as ::core::ffi::c_int,
         24576 as ::core::ffi::c_int,
     ];
-
-    
-    
-    
-    
-    
 }
 pub use crate::__stddef_size_t_h::size_t;
 pub use crate::src::deflate::ct_data;
@@ -3578,32 +3572,29 @@ static mut bl_order: [crate::zutil_h::uch; 19] = [
     15 as crate::zutil_h::uch,
 ];
 
-static static_l_desc: crate::src::deflate::static_tree_desc =
-    static_tree_desc_s {
-        static_tree: Some(&static_ltree),
-        extra_bits: &extra_lbits,
-        extra_base: crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int,
-        elems: crate::src::deflate::L_CODES,
-        max_length: crate::src::deflate::MAX_BITS,
-    };
+static static_l_desc: crate::src::deflate::static_tree_desc = static_tree_desc_s {
+    static_tree: Some(&static_ltree),
+    extra_bits: &extra_lbits,
+    extra_base: crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int,
+    elems: crate::src::deflate::L_CODES,
+    max_length: crate::src::deflate::MAX_BITS,
+};
 
-static static_d_desc: crate::src::deflate::static_tree_desc =
-    static_tree_desc_s {
-        static_tree: Some(&static_dtree),
-        extra_bits: &extra_dbits,
-        extra_base: 0 as ::core::ffi::c_int,
-        elems: crate::src::deflate::D_CODES,
-        max_length: crate::src::deflate::MAX_BITS,
-    };
+static static_d_desc: crate::src::deflate::static_tree_desc = static_tree_desc_s {
+    static_tree: Some(&static_dtree),
+    extra_bits: &extra_dbits,
+    extra_base: 0 as ::core::ffi::c_int,
+    elems: crate::src::deflate::D_CODES,
+    max_length: crate::src::deflate::MAX_BITS,
+};
 
-static static_bl_desc: crate::src::deflate::static_tree_desc =
-    static_tree_desc_s {
-        static_tree: None,
-        extra_bits: &extra_blbits,
-        extra_base: 0 as ::core::ffi::c_int,
-        elems: crate::src::deflate::BL_CODES,
-        max_length: MAX_BL_BITS,
-    };
+static static_bl_desc: crate::src::deflate::static_tree_desc = static_tree_desc_s {
+    static_tree: None,
+    extra_bits: &extra_blbits,
+    extra_base: 0 as ::core::ffi::c_int,
+    elems: crate::src::deflate::BL_CODES,
+    max_length: MAX_BL_BITS,
+};
 
 fn static_desc(kind: u8) -> &'static crate::src::deflate::static_tree_desc {
     match kind {
@@ -3801,15 +3792,18 @@ unsafe extern "C" fn gen_bitlen(
                 &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
                     as *mut crate::src::deflate::ct_data
             }
-            _ => &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
-                as *mut crate::src::deflate::ct_data,
+            _ => {
+                &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
+                    as *mut crate::src::deflate::ct_data
+            }
         }
     };
     let mut max_code: ::core::ffi::c_int = (*desc).max_code;
     let stat_desc = static_desc(tree_kind);
-    let mut stree: *const crate::src::deflate::ct_data = stat_desc
-        .static_tree
-        .map_or(::core::ptr::null(), <[crate::src::deflate::ct_data]>::as_ptr);
+    let mut stree: *const crate::src::deflate::ct_data = stat_desc.static_tree.map_or(
+        ::core::ptr::null(),
+        <[crate::src::deflate::ct_data]>::as_ptr,
+    );
     let mut extra: *const crate::stdlib::intf = stat_desc.extra_bits.as_ptr();
     let mut base: ::core::ffi::c_int = stat_desc.extra_base;
     let mut max_length: ::core::ffi::c_int = stat_desc.max_length;
@@ -3923,14 +3917,17 @@ unsafe extern "C" fn build_tree(
                 &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
                     as *mut crate::src::deflate::ct_data
             }
-            _ => &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
-                as *mut crate::src::deflate::ct_data,
+            _ => {
+                &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
+                    as *mut crate::src::deflate::ct_data
+            }
         }
     };
     let stat_desc = static_desc(tree_kind);
-    let mut stree: *const crate::src::deflate::ct_data = stat_desc
-        .static_tree
-        .map_or(::core::ptr::null(), <[crate::src::deflate::ct_data]>::as_ptr);
+    let mut stree: *const crate::src::deflate::ct_data = stat_desc.static_tree.map_or(
+        ::core::ptr::null(),
+        <[crate::src::deflate::ct_data]>::as_ptr,
+    );
     let mut elems: ::core::ffi::c_int = stat_desc.elems;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;

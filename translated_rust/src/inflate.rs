@@ -1811,7 +1811,10 @@ pub unsafe extern "C" fn inflate(
                                                 (*state).check = crate::src::crc32::crc32(
                                                     (*state).check as crate::stdlib::uLong,
                                                     unsafe {
-                                                        ::core::slice::from_raw_parts(next, copy as usize)
+                                                        ::core::slice::from_raw_parts(
+                                                            next,
+                                                            copy as usize,
+                                                        )
                                                     },
                                                 )
                                                     as ::core::ffi::c_ulong;
@@ -1884,7 +1887,9 @@ pub unsafe extern "C" fn inflate(
                                 {
                                     (*state).check = crate::src::crc32::crc32(
                                         (*state).check as crate::stdlib::uLong,
-                                        unsafe { ::core::slice::from_raw_parts(next, copy as usize) },
+                                        unsafe {
+                                            ::core::slice::from_raw_parts(next, copy as usize)
+                                        },
                                     )
                                         as ::core::ffi::c_ulong;
                                 }
@@ -2069,8 +2074,8 @@ pub unsafe extern "C" fn inflate(
                     (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
                 (*(*state).head).done = 1 as ::core::ffi::c_int;
             }
-            (*state).check = crate::src::crc32::crc32(0 as crate::stdlib::uLong, &[])
-                as ::core::ffi::c_ulong;
+            (*state).check =
+                crate::src::crc32::crc32(0 as crate::stdlib::uLong, &[]) as ::core::ffi::c_ulong;
             (*strm).adler = (*state).check as crate::stdlib::uLong;
             (*state).mode = crate::src::inflate::TYPE;
             continue '_inf_leave;
@@ -2158,15 +2163,12 @@ pub unsafe extern "C" fn inflate(
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
         (*state).check = (if (*state).flags != 0 {
-            crate::src::crc32::crc32(
-                (*state).check as crate::stdlib::uLong,
-                unsafe {
-                    ::core::slice::from_raw_parts(
-                        (*strm).next_out.offset(-(out as isize)),
-                        out as usize,
-                    )
-                },
-            )
+            crate::src::crc32::crc32((*state).check as crate::stdlib::uLong, unsafe {
+                ::core::slice::from_raw_parts(
+                    (*strm).next_out.offset(-(out as isize)),
+                    out as usize,
+                )
+            })
         } else {
             crate::src::adler32::adler32(
                 (*state).check as crate::stdlib::uLong,

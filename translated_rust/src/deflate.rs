@@ -274,6 +274,103 @@ pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
 pub use crate::src::zutil::zcfree;
+
+/// Borrowed stream storage for safe callers of the legacy deflate engine.
+///
+/// The engine still uses the ABI stream internally, but this facade retains
+/// both buffers for its entire lifetime. Callers can only vary the available
+/// portions of those buffers, so the pointers held by the engine cannot
+/// outlive the slices from which they were made.
+pub struct DeflateSession<'input, 'output> {
+    stream: crate::zlib_h::z_stream,
+    input: &'input [crate::stdlib::Bytef],
+    output: &'output mut [crate::stdlib::Bytef],
+    initialized: bool,
+}
+
+impl<'input, 'output> DeflateSession<'input, 'output> {
+    pub fn new(
+        input: &'input [crate::stdlib::Bytef],
+        output: &'output mut [crate::stdlib::Bytef],
+        level: ::core::ffi::c_int,
+    ) -> Result<Self, ::core::ffi::c_int> {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+        let status = unsafe {
+            deflateInit_(
+                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+                level,
+                crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+            )
+        };
+        if status != crate::zlib_h::Z_OK {
+            return Err(status);
+        }
+        stream.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
+        stream.next_out = output.as_mut_ptr();
+        Ok(Self {
+            stream,
+            input,
+            output,
+            initialized: true,
+        })
+    }
+
+    pub fn set_avail_in(&mut self, avail_in: crate::stdlib::uInt) {
+        let remaining = self
+            .input
+            .len()
+            .saturating_sub(self.stream.total_in as usize)
+            .min(crate::stdlib::uInt::MAX as usize) as crate::stdlib::uInt;
+        self.stream.avail_in = avail_in.min(remaining);
+    }
+
+    pub fn set_avail_out(&mut self, avail_out: crate::stdlib::uInt) {
+        let remaining = self
+            .output
+            .len()
+            .saturating_sub(self.stream.total_out as usize)
+            .min(crate::stdlib::uInt::MAX as usize) as crate::stdlib::uInt;
+        self.stream.avail_out = avail_out.min(remaining);
+    }
+
+    pub fn avail_in(&self) -> crate::stdlib::uInt {
+        self.stream.avail_in
+    }
+
+    pub fn avail_out(&self) -> crate::stdlib::uInt {
+        self.stream.avail_out
+    }
+
+    pub fn deflate(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
+        unsafe { deflate(&raw mut self.stream as *mut _, flush) }
+    }
+}
+
+impl Drop for DeflateSession<'_, '_> {
+    fn drop(&mut self) {
+        if self.initialized {
+            unsafe {
+                deflateEnd(&raw mut self.stream as *mut _);
+            }
+        }
+    }
+}
 pub use crate::stdlib::charf;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;

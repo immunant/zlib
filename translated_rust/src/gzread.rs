@@ -441,11 +441,8 @@ unsafe fn gz_read_impl(
                 if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                     break 's_140;
                 }
-                if state.how == crate::gzguts_h::LOOK
-                    || n < state.size << 1 as ::core::ffi::c_int
-                {
-                    if gz_fetch(state as *mut crate::gzguts_h::gz_state)
-                        == -1 as ::core::ffi::c_int
+                if state.how == crate::gzguts_h::LOOK || n < state.size << 1 as ::core::ffi::c_int {
+                    if gz_fetch(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
                         && state.x.have == 0 as ::core::ffi::c_uint
                     {
                         err = -1 as ::core::ffi::c_int;

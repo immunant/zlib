@@ -29,72 +29,37 @@ pub fn compress2_z(
     source: &[crate::stdlib::Bytef],
     level: ::core::ffi::c_int,
 ) -> (::core::ffi::c_int, crate::stdlib::z_size_t) {
-    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
-        next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_in: 0,
-        total_in: 0,
-        next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_out: 0,
-        total_out: 0,
-        msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
-        zalloc: None,
-        zfree: None,
-        opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
-        data_type: 0,
-        adler: 0,
-        reserved: 0,
-    };
     let mut err: ::core::ffi::c_int;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left = dest.len() as crate::stdlib::z_size_t;
     let dest_capacity = left;
     let mut source_left = source.len() as crate::stdlib::z_size_t;
-    stream.zalloc = None;
-    stream.zfree = None;
-    stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    err = unsafe {
-        crate::src::deflate::deflateInit_(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            level,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        )
+    let mut stream = match crate::src::deflate::DeflateSession::new(source, dest, level) {
+        Ok(stream) => stream,
+        Err(status) => return (status, 0),
     };
-    if err != crate::zlib_h::Z_OK {
-        return (err, 0);
-    }
-    stream.next_out = dest.as_mut_ptr();
-    stream.avail_out = 0 as crate::stdlib::uInt;
-    stream.next_in = source.as_ptr() as *mut crate::stdlib::Bytef;
-    stream.avail_in = 0 as crate::stdlib::uInt;
     loop {
-        if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
+        if stream.avail_out() == 0 as crate::stdlib::uInt {
+            stream.set_avail_out(if left > max as crate::stdlib::z_size_t {
                 max
             } else {
                 left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
+            });
+            left = left.wrapping_sub(stream.avail_out() as crate::stdlib::z_size_t);
         }
-        if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if source_left > max as crate::stdlib::z_size_t {
+        if stream.avail_in() == 0 as crate::stdlib::uInt {
+            stream.set_avail_in(if source_left > max as crate::stdlib::z_size_t {
                 max
             } else {
                 source_left as crate::stdlib::uInt
-            };
-            source_left = source_left.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
+            });
+            source_left = source_left.wrapping_sub(stream.avail_in() as crate::stdlib::z_size_t);
         }
-        err = unsafe {
-            crate::src::deflate::deflate(
-                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-                if source_left != 0 {
-                    crate::zlib_h::Z_NO_FLUSH
-                } else {
-                    crate::zlib_h::Z_FINISH
-                },
-            )
-        };
+        err = stream.deflate(if source_left != 0 {
+            crate::zlib_h::Z_NO_FLUSH
+        } else {
+            crate::zlib_h::Z_FINISH
+        });
         if err != crate::zlib_h::Z_OK {
             break;
         }
@@ -104,12 +69,7 @@ pub fn compress2_z(
     // the write-only destination slice that the stream consumed.
     let written = dest_capacity
         .wrapping_sub(left)
-        .wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
-    unsafe {
-        crate::src::deflate::deflateEnd(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
-    }
+        .wrapping_sub(stream.avail_out() as crate::stdlib::z_size_t);
     if err == crate::zlib_h::Z_STREAM_END {
         (crate::zlib_h::Z_OK, written)
     } else {

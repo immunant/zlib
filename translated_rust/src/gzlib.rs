@@ -189,10 +189,7 @@ fn gz_open_file(
         }
     }
     options.mode(0o666).custom_flags(
-        oflag
-            & (crate::stdlib::O_CLOEXEC
-                | crate::stdlib::O_LARGEFILE
-                | crate::stdlib::O_NONBLOCK),
+        oflag & (crate::stdlib::O_CLOEXEC | crate::stdlib::O_LARGEFILE | crate::stdlib::O_NONBLOCK),
     );
     options
         .open(std::ffi::OsStr::from_bytes(path.to_bytes()))
