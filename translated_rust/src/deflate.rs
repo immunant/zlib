@@ -3274,6 +3274,42 @@ unsafe extern "C" fn deflate_stored(
     }) as block_state;
 }
 
+fn insert_hash(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+    prev: &mut [crate::src::deflate::Posf],
+    head: &mut [crate::src::deflate::Posf],
+) -> Option<crate::src::deflate::IPos> {
+    let hash_byte_index = state
+        .strstart
+        .checked_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt - 1)?
+        as usize;
+    let hash_byte = *window.get(hash_byte_index)? as crate::stdlib::uInt;
+    state.ins_h = ((state.ins_h << state.hash_shift) ^ hash_byte) & state.hash_mask;
+    let hash_index = state.ins_h as usize;
+    let prev_index = (state.strstart & state.w_mask) as usize;
+    let previous = *head.get(hash_index)?;
+    *prev.get_mut(prev_index)? = previous;
+    *head.get_mut(hash_index)? = state.strstart as crate::src::deflate::Posf;
+    Some(previous as crate::src::deflate::IPos)
+}
+
+fn seed_hash(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+) -> bool {
+    let Some(first) = window.get(state.strstart as usize) else {
+        return false;
+    };
+    let Some(second) = window.get(state.strstart.wrapping_add(1) as usize) else {
+        return false;
+    };
+    state.ins_h = *first as crate::stdlib::uInt;
+    state.ins_h = ((state.ins_h << state.hash_shift) ^ *second as crate::stdlib::uInt)
+        & state.hash_mask;
+    true
+}
+
 unsafe extern "C" fn deflate_fast(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3294,17 +3330,14 @@ unsafe extern "C" fn deflate_fast(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                    (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                ) as isize) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                as crate::src::deflate::IPos;
-            *(*s).head.offset((*s).ins_h as isize) =
-                (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+            let state = &mut *s;
+            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+            let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+            let Some(inserted) = insert_hash(state, window, prev, head) else {
+                return need_more;
+            };
+            hash_head = inserted;
         }
         if hash_head != NIL as crate::src::deflate::IPos
             && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
@@ -3340,18 +3373,14 @@ unsafe extern "C" fn deflate_fast(
                 (*s).match_length = (*s).match_length.wrapping_sub(1);
                 loop {
                     (*s).strstart = (*s).strstart.wrapping_add(1);
-                    (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                        ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                            (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int)
-                                as crate::stdlib::uInt,
-                        ) as isize) as crate::stdlib::uInt)
-                        & (*s).hash_mask;
-                    *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                        *(*s).head.offset((*s).ins_h as isize);
-                    hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                        as crate::src::deflate::IPos;
-                    *(*s).head.offset((*s).ins_h as isize) =
-                        (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                    let state = &mut *s;
+                    let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+                    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+                    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+                    let Some(inserted) = insert_hash(state, window, prev, head) else {
+                        return need_more;
+                    };
+                    hash_head = inserted;
                     (*s).match_length = (*s).match_length.wrapping_sub(1);
                     if (*s).match_length == 0 as crate::stdlib::uInt {
                         break;
@@ -3361,13 +3390,11 @@ unsafe extern "C" fn deflate_fast(
             } else {
                 (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
                 (*s).match_length = 0 as crate::stdlib::uInt;
-                (*s).ins_h = *(*s).window.offset((*s).strstart as isize) as crate::stdlib::uInt;
-                (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                    ^ *(*s)
-                        .window
-                        .offset((*s).strstart.wrapping_add(1 as crate::stdlib::uInt) as isize)
-                        as crate::stdlib::uInt)
-                    & (*s).hash_mask;
+                let state = &mut *s;
+                let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+                if !seed_hash(state, window) {
+                    return need_more;
+                }
             }
         } else {
             let mut cc: crate::zutil_h::uch =
@@ -3487,17 +3514,14 @@ unsafe extern "C" fn deflate_slow(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                    (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                ) as isize) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                as crate::src::deflate::IPos;
-            *(*s).head.offset((*s).ins_h as isize) =
-                (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+            let state = &mut *s;
+            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+            let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+            let Some(inserted) = insert_hash(state, window, prev, head) else {
+                return need_more;
+            };
+            hash_head = inserted;
         }
         (*s).prev_length = (*s).match_length;
         (*s).prev_match = (*s).match_start as crate::src::deflate::IPos;
@@ -3555,18 +3579,19 @@ unsafe extern "C" fn deflate_slow(
             loop {
                 (*s).strstart = (*s).strstart.wrapping_add(1);
                 if (*s).strstart <= max_insert {
-                    (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                        ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                            (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int)
-                                as crate::stdlib::uInt,
-                        ) as isize) as crate::stdlib::uInt)
-                        & (*s).hash_mask;
-                    *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                        *(*s).head.offset((*s).ins_h as isize);
-                    hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                        as crate::src::deflate::IPos;
-                    *(*s).head.offset((*s).ins_h as isize) =
-                        (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                    let state = &mut *s;
+                    let window =
+                        ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+                    let prev =
+                        ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+                    let head = ::core::slice::from_raw_parts_mut(
+                        state.head,
+                        state.hash_size as usize,
+                    );
+                    let Some(inserted) = insert_hash(state, window, prev, head) else {
+                        return need_more;
+                    };
+                    hash_head = inserted;
                 }
                 (*s).prev_length = (*s).prev_length.wrapping_sub(1);
                 if (*s).prev_length == 0 as crate::stdlib::uInt {
