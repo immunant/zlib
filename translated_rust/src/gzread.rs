@@ -926,24 +926,32 @@ pub fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
     };
 }
+
+// Keep the null-handle result policy with the reference-based operation, so
+// the ABI entries below only bind their opaque C handle.
+fn gzgetc_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    state.map_or(-1, gzgetc)
+}
 #[export_name = "gzgetc"]
 
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    gzgetc(&mut *(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
+    gzgetc_dispatch(state)
 }
 pub fn gzgetc_(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     gzgetc(state)
 }
+
+fn gzgetc__dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    state.map_or(-1, gzgetc_)
+}
 #[export_name = "gzgetc_"]
 
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    gzgetc_(&mut *(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
+    gzgetc__dispatch(state)
 }
 // Classify the push-back request before the ABI adapter binds the output
 // allocation. In particular, a failed initial `gz_look()` must not make the
@@ -1120,13 +1128,16 @@ fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     return (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
 }
+
+fn gzdirect_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    state.map_or(0, gzdirect)
+}
 #[export_name = "gzdirect"]
 
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return 0 as ::core::ffi::c_int;
-    }
-    gzdirect(&mut *(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
+    gzdirect_dispatch(state)
 }
 
 // Closing a read stream has a small state-only tail after its raw inflater,
@@ -1176,11 +1187,14 @@ pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         err
     };
 }
+
+fn gzclose_r_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    state.map_or(crate::zlib_h::Z_STREAM_ERROR, gzclose_r)
+}
 #[export_name = "gzclose_r"]
 
 pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    gzclose_r(&mut *(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
+    gzclose_r_dispatch(state)
 }

@@ -1572,13 +1572,16 @@ fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     );
     gz_rewind_result(state, position)
 }
+
+fn gzrewind_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    state.map_or(-1, gzrewind)
+}
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    gzrewind(&mut *(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
+    gzrewind_dispatch(state)
 }
 
 // Keep seek arithmetic and all state transitions reference-bound.  Descriptor
@@ -1699,6 +1702,14 @@ fn gzseek64(
         GzSeekPlan::Finish { offset } => gz_seek_finish(state, offset),
     }
 }
+
+fn gzseek64_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    offset: crate::stdlib::off64_t,
+    whence: ::core::ffi::c_int,
+) -> crate::stdlib::off64_t {
+    state.map_or(-1, |state| gzseek64(state, offset, whence))
+}
 #[export_name = "gzseek64"]
 
 pub unsafe extern "C" fn gzseek64_ffi(
@@ -1706,10 +1717,9 @@ pub unsafe extern "C" fn gzseek64_ffi(
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    if file.is_null() {
-        return -1 as crate::stdlib::off64_t;
-    }
-    gzseek64(&mut *(file as crate::gzguts_h::gz_statep), offset, whence)
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
+    gzseek64_dispatch(state, offset, whence)
 }
 
 fn gzseek(
@@ -1724,6 +1734,14 @@ fn gzseek(
         -1 as crate::stdlib::off_t
     }
 }
+
+fn gzseek_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    offset: crate::stdlib::off_t,
+    whence: ::core::ffi::c_int,
+) -> crate::stdlib::off_t {
+    state.map_or(-1, |state| gzseek(state, offset, whence))
+}
 #[export_name = "gzseek"]
 
 pub unsafe extern "C" fn gzseek_ffi(
@@ -1731,10 +1749,9 @@ pub unsafe extern "C" fn gzseek_ffi(
     mut offset: crate::stdlib::off_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
-    if file.is_null() {
-        return -1 as crate::stdlib::off_t;
-    }
-    gzseek(&mut *(file as crate::gzguts_h::gz_statep), offset, whence)
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
+    gzseek_dispatch(state, offset, whence)
 }
 fn gztell64(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
     if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
@@ -1749,13 +1766,16 @@ fn gztell64(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
             state.skip
         })
 }
+
+fn gztell64_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off64_t {
+    state.map_or(-1, gztell64)
+}
 #[export_name = "gztell64"]
 
 pub unsafe extern "C" fn gztell64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    if file.is_null() {
-        return -1 as crate::stdlib::off64_t;
-    }
-    gztell64(&*(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_ref() };
+    gztell64_dispatch(state)
 }
 fn gztell(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
     let ret = gztell64(state);
@@ -1765,13 +1785,16 @@ fn gztell(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
         -1 as crate::stdlib::off_t
     }
 }
+
+fn gztell_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off_t {
+    state.map_or(-1, gztell)
+}
 #[export_name = "gztell"]
 
 pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    if file.is_null() {
-        return -1 as crate::stdlib::off_t;
-    }
-    gztell(&*(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_ref() };
+    gztell_dispatch(state)
 }
 // Offset queries observe gzip state while asking the descriptor for its
 // current position. The descriptor query itself has no memory precondition.
@@ -1791,13 +1814,16 @@ fn gzoffset64(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
     }
     gz_offset_after_descriptor(state, offset)
 }
+
+fn gzoffset64_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off64_t {
+    state.map_or(-1, gzoffset64)
+}
 #[export_name = "gzoffset64"]
 
 pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    if file.is_null() {
-        return -1 as crate::stdlib::off64_t;
-    }
-    gzoffset64(&*(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_ref() };
+    gzoffset64_dispatch(state)
 }
 fn gzoffset(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
     let ret = gzoffset64(state);
@@ -1807,13 +1833,16 @@ fn gzoffset(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
         -1 as crate::stdlib::off_t
     }
 }
+
+fn gzoffset_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off_t {
+    state.map_or(-1, gzoffset)
+}
 #[export_name = "gzoffset"]
 
 pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    if file.is_null() {
-        return -1 as crate::stdlib::off_t;
-    }
-    gzoffset(&*(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_ref() };
+    gzoffset_dispatch(state)
 }
 fn gzeof(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
@@ -1827,13 +1856,16 @@ fn gzeof(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         0 as ::core::ffi::c_int
     }
 }
+
+fn gzeof_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    state.map_or(0, gzeof)
+}
 #[export_name = "gzeof"]
 
 pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return 0 as ::core::ffi::c_int;
-    }
-    gzeof(&*(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_ref() };
+    gzeof_dispatch(state)
 }
 // Error querying reads the bound gzip state and optionally writes only the
 // caller's separate error-number output. Keep the state side immutable.
@@ -1857,6 +1889,7 @@ fn gzerror(
         state.msg as *const ::core::ffi::c_char
     };
 }
+
 #[export_name = "gzerror"]
 
 pub unsafe extern "C" fn gzerror_ffi(
@@ -1875,6 +1908,12 @@ pub(crate) fn gzclearerr(state: &mut crate::gzguts_h::gz_state) {
     gz_error(state, crate::zlib_h::Z_OK, None);
 }
 
+fn gzclearerr_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) {
+    if let Some(state) = state {
+        gzclearerr(state);
+    }
+}
+
 // Ordinary read operations clear the owned error record, but unlike the
 // public `gzclearerr()` API they must retain EOF observation.  Reuse the
 // established error-record boundary and restore just the two read markers
@@ -1890,10 +1929,9 @@ pub(crate) fn gz_clear_read_error(state: &mut crate::gzguts_h::gz_state) {
 #[export_name = "gzclearerr"]
 
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
-    if file.is_null() {
-        return;
-    }
-    gzclearerr(&mut *(file as crate::gzguts_h::gz_statep))
+    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
+    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
+    gzclearerr_dispatch(state)
 }
 
 // Clearing a gzip error only changes already-bound state.  Keep the message
