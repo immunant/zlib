@@ -59,6 +59,10 @@ pub mod gzguts_h {
         // pass bounded Rust slices to `Read::read` instead of handing a raw
         // buffer to libc.
         pub read_file: Option<std::fs::File>,
+        // The reader uses flate2's safe streaming gzip API.  This is separate
+        // from `strm`, which is retained for the public zlib stream ABI and
+        // the translated implementation used by other entry points.
+        pub gzip_inflater: Option<flate2::Decompress>,
         // `gz_state` is opaque at the C ABI boundary.  Keep the text it owns
         // in Rust containers instead of separately allocated C buffers.
         pub path: std::ffi::CString,

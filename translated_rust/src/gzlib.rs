@@ -129,6 +129,7 @@ unsafe extern "C" fn gz_open(
         fd: -1,
         write_file: None,
         read_file: None,
+        gzip_inflater: None,
         path: std::ffi::CString::default(),
         size: 0,
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
