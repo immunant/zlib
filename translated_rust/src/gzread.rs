@@ -889,7 +889,7 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
     state.path = None;
     state.msg = None;
     ret = crate::stdlib::close(state.fd);
-    crate::stdlib::free(state_ptr as *mut ::core::ffi::c_void);
+    drop(Vec::from_raw_parts(state_ptr, 1, 1));
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
