@@ -59,7 +59,7 @@ fn gz_read_fd(
     rustix::io::read(fd, buffer).map_err(std::io::Error::from)
 }
 
-unsafe fn gz_load(
+fn gz_load_impl(
     state: &mut crate::gzguts_h::gz_state,
     buffer: GzLoadBuffer<'_>,
 ) -> Result<usize, ()> {
@@ -119,7 +119,14 @@ unsafe fn gz_load(
     Ok(have)
 }
 
-unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+unsafe fn gz_load(
+    state: &mut crate::gzguts_h::gz_state,
+    buffer: GzLoadBuffer<'_>,
+) -> Result<usize, ()> {
+    gz_load_impl(state, buffer)
+}
+
+fn gz_avail_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
     }
@@ -145,7 +152,7 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
         if available != 0 && input_start != 0 {
             input.copy_within(input_start..input_start + available, 0);
         }
-        let got = gz_load(state, GzLoadBuffer::Slice(&mut input[available..]));
+        let got = gz_load_impl(state, GzLoadBuffer::Slice(&mut input[available..]));
         state.in_0 = input;
         let got = match got {
             Ok(got) => got,
@@ -155,6 +162,10 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
         state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
     }
     return 0 as ::core::ffi::c_int;
+}
+
+unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    gz_avail_impl(state)
 }
 
 unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -209,13 +220,13 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
-        crate::src::inflate::inflateReset(&mut state.strm);
+        crate::src::inflate::inflate_reset_gzip(&mut state.strm);
         state.how = crate::gzguts_h::GZIP;
         state.junk = (state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
         state.direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    if gz_avail(state) == -1 as ::core::ffi::c_int {
+    if gz_avail_impl(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if state.strm.avail_in == 0 as crate::stdlib::uInt
@@ -239,7 +250,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     let input = &state.in_0[input_start..input_start + input_len];
     if input.len() > 3 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32 {
-        crate::src::inflate::inflateReset(&mut state.strm);
+        crate::src::inflate::inflate_reset_gzip(&mut state.strm);
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
         state.direct = 0 as ::core::ffi::c_int;
@@ -269,7 +280,7 @@ unsafe fn gz_decomp(
     let had = state.strm.avail_out as ::core::ffi::c_uint;
     loop {
         if state.strm.avail_in == 0 as crate::stdlib::uInt
-            && gz_avail(state) == -1 as ::core::ffi::c_int
+            && gz_avail_impl(state) == -1 as ::core::ffi::c_int
         {
             ret = state.err;
             break;
@@ -393,7 +404,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 }
             }
             crate::gzguts_h::COPY => {
-                state.x.have = match gz_load(state, GzLoadBuffer::Output) {
+                state.x.have = match gz_load_impl(state, GzLoadBuffer::Output) {
                     Ok(got) => got as ::core::ffi::c_uint,
                     Err(()) => return -1 as ::core::ffi::c_int,
                 };
@@ -541,7 +552,7 @@ unsafe fn gz_read_impl(
                     }
                     break 's_28;
                 } else if state.how == crate::gzguts_h::COPY {
-                    match gz_load(state, GzLoadBuffer::Slice(&mut buf[out..out + n as usize])) {
+                    match gz_load_impl(state, GzLoadBuffer::Slice(&mut buf[out..out + n as usize])) {
                         Ok(got) => n = got as ::core::ffi::c_uint,
                         Err(()) => err = -1 as ::core::ffi::c_int,
                     }

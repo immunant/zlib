@@ -321,6 +321,20 @@ fn inflate_reset_impl(
     inflate_reset_keep_impl(strm, state)
 }
 
+/// Reset an already-initialized inflate stream held by an internal owner.
+///
+/// The gzip reader owns the stream for the duration of the call, so it can
+/// borrow the ABI carrier directly.  Keep the one unavoidable state-pointer
+/// conversion here, after checking it, instead of making each caller invoke
+/// the raw-pointer API.
+pub(crate) fn inflate_reset_gzip(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    let state = strm.state as *mut crate::src::inflate::inflate_state;
+    let Some(state) = (unsafe { state.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_reset_impl(strm, state)
+}
+
 pub unsafe extern "C" fn inflateReset(
     strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
