@@ -433,32 +433,32 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut n: ::core::ffi::c_uint = 0;
     loop {
-        if (*state).x.have != 0 {
+        if state.x.have != 0 {
             n = if ::core::mem::size_of::<::core::ffi::c_int>()
                 == ::core::mem::size_of::<crate::stdlib::off64_t>()
-                && (*state).x.have > crate::src::gzlib::gz_intmax()
-                || (*state).x.have as crate::stdlib::off64_t > (*state).skip
+                && state.x.have > crate::src::gzlib::gz_intmax()
+                || state.x.have as crate::stdlib::off64_t > state.skip
             {
-                (*state).skip as ::core::ffi::c_uint
+                state.skip as ::core::ffi::c_uint
             } else {
-                (*state).x.have
+                state.x.have
             };
-            (*state).x.have = (*state).x.have.wrapping_sub(n);
-            (*state).x.next = (*state).x.next.wrapping_add(n as usize);
-            (*state).x.pos += n as crate::stdlib::off64_t;
-            (*state).skip -= n as crate::stdlib::off64_t;
+            state.x.have = state.x.have.wrapping_sub(n);
+            state.x.next = state.x.next.wrapping_add(n as usize);
+            state.x.pos += n as crate::stdlib::off64_t;
+            state.skip -= n as crate::stdlib::off64_t;
         } else {
-            if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
+            if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
             if gz_fetch(state) == -1 as ::core::ffi::c_int {
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if (*state).skip == 0 {
+        if state.skip == 0 {
             break;
         }
     }
@@ -477,7 +477,7 @@ unsafe fn gz_read(
         return 0 as crate::stdlib::z_size_t;
     }
     if state.skip != 0
-        && gz_skip(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
+        && gz_skip(state) == -1 as ::core::ffi::c_int
     {
         return 0 as crate::stdlib::z_size_t;
     }
