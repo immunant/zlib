@@ -467,6 +467,36 @@ fn gzgetc_buffer_commit_state(state: &mut crate::gzguts_h::gz_state) -> bool {
     true
 }
 
+/// Calculate a `gzfread` byte request with the same wrapping multiplication
+/// and overflow rejection as the C API.  This deliberately reports a zero
+/// request separately from an invalid overflowing request.
+fn gzfread_request_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<crate::stdlib::z_size_t> {
+    let len = nitems.wrapping_mul(size);
+    if size == 0 || len.wrapping_div(size) == nitems {
+        Some(len)
+    } else {
+        None
+    }
+}
+
+/// Convert a completed `gz_read` byte count into complete `gzfread` items.
+/// A zero byte request is a successful zero-item operation and never divides
+/// by a zero item size.
+fn gzfread_completed_items(
+    request_len: crate::stdlib::z_size_t,
+    size: crate::stdlib::z_size_t,
+    read_len: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    if request_len == 0 {
+        0
+    } else {
+        read_len.wrapping_div(size)
+    }
+}
+
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut n: ::core::ffi::c_uint = 0;
     loop {
@@ -653,20 +683,16 @@ pub unsafe extern "C" fn gzfread(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
+    let Some(request_len) = gzfread_request_len(size, nitems) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
         );
         return 0 as crate::stdlib::z_size_t;
-    }
-    return if len != 0 {
-        gz_read(state, buf, len).wrapping_div(size)
-    } else {
-        0 as crate::stdlib::z_size_t
     };
+    len = request_len;
+    return gzfread_completed_items(len, size, gz_read(state, buf, len));
 }
 #[export_name = "gzfread"]
 
