@@ -1485,6 +1485,10 @@ pub unsafe extern "C" fn deflatePrime_ffi(
 pub(crate) fn deflateParams(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::deflate::deflate_state,
+    hash_tables: Option<(
+        &mut [crate::src::deflate::Posf],
+        &mut [crate::src::deflate::Posf],
+    )>,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -1525,20 +1529,14 @@ pub(crate) fn deflateParams(
     }
     if state.level != level {
         if state.level == 0 as ::core::ffi::c_int && state.matches != 0 as crate::stdlib::uInt {
+            let Some((head, prev)) = hash_tables else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
             if state.matches == 1 as crate::stdlib::uInt {
-                let head = unsafe {
-                    ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
-                };
-                let prev = unsafe {
-                    ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize)
-                };
                 if !slide_hash(state, head, prev) {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
             } else {
-                let head = unsafe {
-                    ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
-                };
                 let Some((last, rest)) = head.split_last_mut() else {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
@@ -1576,7 +1574,15 @@ pub unsafe extern "C" fn deflateParams_ffi(
     let Some(state) = (strm.state as *mut crate::src::deflate::deflate_state).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateParams(strm, state, level, strategy)
+    let hash_tables = if state.head.is_null() || state.prev.is_null() {
+        None
+    } else {
+        Some((
+            ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize),
+            ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize),
+        ))
+    };
+    deflateParams(strm, state, hash_tables, level, strategy)
 }
 fn deflate_tune(
     state: &mut crate::src::deflate::deflate_state,
