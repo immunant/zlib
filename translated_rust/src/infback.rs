@@ -152,7 +152,7 @@ fn initialize_allocated_inflate_back_state(
         |strm, state| {
             state.allocator_provenance = allocator_provenance;
             initialize_inflate_back_state(state, window_bits);
-            state.window = ::core::ptr::NonNull::new(window.as_mut_ptr());
+            crate::src::inflate::bind_inflate_back_window(state, window);
             strm.state =
                 ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
             crate::zlib_h::Z_OK
