@@ -584,11 +584,17 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         }
     }
 }
+pub enum DeflateInitMode {
+    Zlib,
+    Gzip { strategy: ::core::ffi::c_int },
+}
+
 pub fn deflateInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut level: ::core::ffi::c_int,
     version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
+    mode: DeflateInitMode,
 ) -> ::core::ffi::c_int {
     let Some(version) = version else {
         return crate::zlib_h::Z_VERSION_ERROR;
@@ -601,16 +607,24 @@ pub fn deflateInit_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // The safe inputs above establish the version and stream invariants that
-    // the translated initializer still expects as raw arguments.
+    let (window_bits, mem_level, strategy) = match mode {
+        DeflateInitMode::Zlib => (
+            crate::stdlib::MAX_WBITS,
+            crate::zutil_h::DEF_MEM_LEVEL,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+        ),
+        DeflateInitMode::Gzip { strategy } => (15 + 16, 8, strategy),
+    };
+    // The safe inputs above establish the version, stream, and wrapper-mode
+    // invariants that the translated initializer still expects as raw arguments.
     unsafe {
         deflateInit2_(
             strm,
             level,
             crate::zlib_h::Z_DEFLATED,
-            crate::stdlib::MAX_WBITS,
-            crate::zutil_h::DEF_MEM_LEVEL,
-            crate::zlib_h::Z_DEFAULT_STRATEGY,
+            window_bits,
+            mem_level,
+            strategy,
             ::core::ptr::from_ref(version),
             stream_size,
         )
@@ -624,7 +638,13 @@ pub unsafe extern "C" fn deflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateInit_(strm.as_mut(), level, version.as_ref(), stream_size)
+    deflateInit_(
+        strm.as_mut(),
+        level,
+        version.as_ref(),
+        stream_size,
+        DeflateInitMode::Zlib,
+    )
 }
 pub unsafe extern "C" fn deflateInit2_(
     mut strm: crate::zlib_h::z_streamp,

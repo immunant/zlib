@@ -378,10 +378,16 @@ pub unsafe extern "C" fn inflateInit2__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit2_(strm, windowBits, version, stream_size)
 }
+pub enum InflateInitMode {
+    Zlib,
+    Gzip,
+}
+
 pub fn inflateInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
     version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
+    mode: InflateInitMode,
 ) -> ::core::ffi::c_int {
     let Some(version) = version else {
         return crate::zlib_h::Z_VERSION_ERROR;
@@ -394,12 +400,16 @@ pub fn inflateInit_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // The safe inputs above establish the version and stream invariants that
+    let window_bits = match mode {
+        InflateInitMode::Zlib => crate::zutil_h::DEF_WBITS,
+        InflateInitMode::Gzip => 15 + 16,
+    };
+    // The safe inputs above establish the version, stream, and wrapper-mode invariants that
     // the translated initializer still expects as raw arguments.
     unsafe {
         inflateInit2_(
             strm,
-            crate::zutil_h::DEF_WBITS,
+            window_bits,
             ::core::ptr::from_ref(version),
             stream_size,
         )
@@ -412,7 +422,12 @@ pub unsafe extern "C" fn inflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit_(strm.as_mut(), version.as_ref(), stream_size)
+    inflateInit_(
+        strm.as_mut(),
+        version.as_ref(),
+        stream_size,
+        InflateInitMode::Zlib,
+    )
 }
 fn inflate_prime(
     state: &mut crate::src::inflate::inflate_state,

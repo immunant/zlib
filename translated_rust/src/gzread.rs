@@ -233,14 +233,12 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         state.strm.avail_in = 0 as crate::stdlib::uInt;
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        if unsafe {
-            crate::src::inflate::inflateInit2_(
-                &mut state.strm as *mut crate::zlib_h::z_stream_s,
-                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-                crate::zlib_h::ZLIB_VERSION.as_ptr(),
-                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-            )
-        } != crate::zlib_h::Z_OK
+        if crate::src::inflate::inflateInit_(
+            Some(&mut state.strm),
+            Some(&crate::zlib_h::ZLIB_VERSION[0]),
+            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+            crate::src::inflate::InflateInitMode::Gzip,
+        ) != crate::zlib_h::Z_OK
         {
             unsafe {
                 ::core::mem::ManuallyDrop::drop(&mut state.out);
