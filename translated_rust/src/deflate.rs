@@ -1650,6 +1650,30 @@ fn flush_pending_state(
     Some((len, *pending == 0))
 }
 
+fn set_stored_block_length_state(
+    pending_buf: &mut [crate::stdlib::Byte],
+    pending: crate::zutil_h::ulg,
+    len: ::core::ffi::c_uint,
+) -> bool {
+    let Some(start) = pending
+        .checked_sub(4)
+        .and_then(|start| usize::try_from(start).ok())
+    else {
+        return false;
+    };
+    let Some(end) = start.checked_add(4) else {
+        return false;
+    };
+    let Some(bytes) = pending_buf.get_mut(start..end) else {
+        return false;
+    };
+    bytes[0] = len as crate::stdlib::Bytef;
+    bytes[1] = (len >> 8) as crate::stdlib::Bytef;
+    bytes[2] = !len as crate::stdlib::Bytef;
+    bytes[3] = (!len >> 8) as crate::stdlib::Bytef;
+    true
+}
+
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
@@ -2587,22 +2611,20 @@ unsafe extern "C" fn deflate_stored(
             0 as crate::zutil_h::ulg,
             last,
         );
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            !len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+        let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+            return need_more;
+        };
+        if pending_len != 0 && (*s).pending_buf.is_null() {
+            return need_more;
+        }
+        let pending_buf = if pending_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+        };
+        if !set_stored_block_length_state(pending_buf, (*s).pending, len) {
+            return need_more;
+        }
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {
