@@ -198,12 +198,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.next_in as *const u8,
         state.strm.avail_in as usize,
     );
-    if input.len() > 3
-        && input[0] == 31
-        && input[1] == 139
-        && input[2] == 8
-        && input[3] < 32
-    {
+    if input.len() > 3 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32 {
         crate::src::inflate::inflateReset(&mut state.strm);
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
@@ -402,8 +397,7 @@ unsafe fn gz_read_impl(
     let mut err: ::core::ffi::c_int = 0;
     let mut len = buf.len();
     let mut out = 0usize;
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int
-    {
+    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -438,10 +432,7 @@ unsafe fn gz_read_impl(
                     }
                     break 's_28;
                 } else if state.how == crate::gzguts_h::COPY {
-                    match gz_load(
-                        state,
-                        GzLoadBuffer::Slice(&mut buf[out..out + n as usize]),
-                    ) {
+                    match gz_load(state, GzLoadBuffer::Slice(&mut buf[out..out + n as usize])) {
                         Ok(got) => n = got as ::core::ffi::c_uint,
                         Err(()) => err = -1 as ::core::ffi::c_int,
                     }

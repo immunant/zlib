@@ -428,7 +428,9 @@ pub unsafe extern "C" fn inflateBack(
                         &raw mut state.lenbits,
                         &raw mut state.work as *mut ::core::ffi::c_ushort,
                     );
-                    state.next = table.addr().wrapping_sub((&raw mut state.codes as *mut crate::src::inftrees::code).addr()) / ::core::mem::size_of::<crate::src::inftrees::code>();
+                    state.next = table.addr().wrapping_sub(
+                        (&raw mut state.codes as *mut crate::src::inftrees::code).addr(),
+                    ) / ::core::mem::size_of::<crate::src::inftrees::code>();
                     if ret != 0 {
                         set_back_error(strm, b"invalid code lengths set\0");
                         state.mode = crate::src::inflate::BAD;
@@ -626,8 +628,7 @@ pub unsafe extern "C" fn inflateBack(
                         {
                             continue;
                         }
-                        if state.lens[256 as usize] as ::core::ffi::c_int
-                            == 0 as ::core::ffi::c_int
+                        if state.lens[256 as usize] as ::core::ffi::c_int == 0 as ::core::ffi::c_int
                         {
                             set_back_error(strm, b"invalid code -- missing end-of-block\0");
                             state.mode = crate::src::inflate::BAD;
@@ -645,7 +646,9 @@ pub unsafe extern "C" fn inflateBack(
                                 &raw mut state.lenbits,
                                 &raw mut state.work as *mut ::core::ffi::c_ushort,
                             );
-                            state.next = table.addr().wrapping_sub((&raw mut state.codes as *mut crate::src::inftrees::code).addr()) / ::core::mem::size_of::<crate::src::inftrees::code>();
+                            state.next = table.addr().wrapping_sub(
+                                (&raw mut state.codes as *mut crate::src::inftrees::code).addr(),
+                            ) / ::core::mem::size_of::<crate::src::inftrees::code>();
                             if ret != 0 {
                                 set_back_error(strm, b"invalid literal/lengths set\0");
                                 state.mode = crate::src::inflate::BAD;
@@ -654,7 +657,9 @@ pub unsafe extern "C" fn inflateBack(
                                 {
                                     let state_ref = &mut *state;
                                     state_ref.distcode =
-                                        crate::src::inflate::distance_table::Dynamic(state_ref.next);
+                                        crate::src::inflate::distance_table::Dynamic(
+                                            state_ref.next,
+                                        );
                                 }
                                 state.distbits = 6 as ::core::ffi::c_uint;
                                 ret = crate::src::inftrees::inflate_table(
@@ -662,11 +667,15 @@ pub unsafe extern "C" fn inflateBack(
                                     (&raw mut state.lens as *mut ::core::ffi::c_ushort)
                                         .offset(state.nlen as isize),
                                     state.ndist,
-                                &raw mut table,
+                                    &raw mut table,
                                     &raw mut state.distbits,
                                     &raw mut state.work as *mut ::core::ffi::c_ushort,
                                 );
-                                state.next = table.addr().wrapping_sub((&raw mut state.codes as *mut crate::src::inftrees::code).addr()) / ::core::mem::size_of::<crate::src::inftrees::code>();
+                                state.next = table.addr().wrapping_sub(
+                                    (&raw mut state.codes as *mut crate::src::inftrees::code)
+                                        .addr(),
+                                ) / ::core::mem::size_of::<crate::src::inftrees::code>(
+                                );
                                 if ret != 0 {
                                     set_back_error(strm, b"invalid distances set\0");
                                     state.mode = crate::src::inflate::BAD;
@@ -700,10 +709,7 @@ pub unsafe extern "C" fn inflateBack(
             strm.avail_in = have as crate::stdlib::uInt;
             state.hold = hold;
             state.bits = bits;
-            crate::src::inffast::inflate_fast(
-                strm as *mut crate::zlib_h::z_stream_s,
-                state.wsize,
-            );
+            crate::src::inffast::inflate_fast(strm as *mut crate::zlib_h::z_stream_s, state.wsize);
             put = strm.next_out as *mut ::core::ffi::c_uchar;
             left = strm.avail_out as ::core::ffi::c_uint;
             next = strm.next_in as *mut ::core::ffi::c_uchar;
@@ -923,13 +929,11 @@ pub unsafe extern "C" fn inflateBack(
                         bits = bits.wrapping_sub(state.extra);
                     }
                     if state.offset
-                        > state
-                            .wsize
-                            .wrapping_sub(if state.whave < state.wsize {
-                                left
-                            } else {
-                                0 as ::core::ffi::c_uint
-                            })
+                        > state.wsize.wrapping_sub(if state.whave < state.wsize {
+                            left
+                        } else {
+                            0 as ::core::ffi::c_uint
+                        })
                     {
                         set_back_error(strm, b"invalid distance too far back\0");
                         state.mode = crate::src::inflate::BAD;

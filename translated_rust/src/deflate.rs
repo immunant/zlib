@@ -1604,8 +1604,7 @@ pub unsafe extern "C" fn deflate(
             .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
-    if (*s).status == crate::src::deflate::FINISH_STATE
-        && strm.avail_in != 0 as crate::stdlib::uInt
+    if (*s).status == crate::src::deflate::FINISH_STATE && strm.avail_in != 0 as crate::stdlib::uInt
     {
         strm.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
@@ -2075,19 +2074,19 @@ pub unsafe extern "C" fn deflate(
             (strm.adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
         let c2rust_fresh26 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh26 as isize) =
-            (strm.adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
+        *(*s).pending_buf.offset(c2rust_fresh26 as isize) = (strm.adler >> 8 as ::core::ffi::c_int
+            & 0xff as crate::stdlib::uLong)
+            as crate::stdlib::Byte;
         let c2rust_fresh27 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh27 as isize) =
-            (strm.adler >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
+        *(*s).pending_buf.offset(c2rust_fresh27 as isize) = (strm.adler >> 16 as ::core::ffi::c_int
+            & 0xff as crate::stdlib::uLong)
+            as crate::stdlib::Byte;
         let c2rust_fresh28 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh28 as isize) =
-            (strm.adler >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
+        *(*s).pending_buf.offset(c2rust_fresh28 as isize) = (strm.adler >> 24 as ::core::ffi::c_int
+            & 0xff as crate::stdlib::uLong)
+            as crate::stdlib::Byte;
         let c2rust_fresh29 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
         *(*s).pending_buf.offset(c2rust_fresh29 as isize) =

@@ -2343,10 +2343,7 @@ fn static_desc(kind: u8) -> &'static crate::src::deflate::static_tree_desc {
     }
 }
 
-fn bi_reverse(
-    mut code: ::core::ffi::c_uint,
-    mut len: ::core::ffi::c_int,
-) -> ::core::ffi::c_uint {
+fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     let mut res: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     loop {
         res |= code & 1 as ::core::ffi::c_uint;
@@ -2538,10 +2535,9 @@ unsafe extern "C" fn gen_bitlen(
     };
     let mut max_code: ::core::ffi::c_int = (*desc).max_code;
     let stat_desc = static_desc(tree_kind);
-    let mut stree: *const trees_h::StaticCtData = stat_desc.static_tree.map_or(
-        ::core::ptr::null(),
-        <[trees_h::StaticCtData]>::as_ptr,
-    );
+    let mut stree: *const trees_h::StaticCtData = stat_desc
+        .static_tree
+        .map_or(::core::ptr::null(), <[trees_h::StaticCtData]>::as_ptr);
     let mut extra: *const crate::stdlib::intf = stat_desc.extra_bits.as_ptr();
     let mut base: ::core::ffi::c_int = stat_desc.extra_base;
     let mut max_length: ::core::ffi::c_int = stat_desc.max_length;
@@ -2662,10 +2658,9 @@ unsafe extern "C" fn build_tree(
         }
     };
     let stat_desc = static_desc(tree_kind);
-    let mut stree: *const trees_h::StaticCtData = stat_desc.static_tree.map_or(
-        ::core::ptr::null(),
-        <[trees_h::StaticCtData]>::as_ptr,
-    );
+    let mut stree: *const trees_h::StaticCtData = stat_desc
+        .static_tree
+        .map_or(::core::ptr::null(), <[trees_h::StaticCtData]>::as_ptr);
     let mut elems: ::core::ffi::c_int = stat_desc.elems;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
@@ -2843,7 +2838,11 @@ fn send_bits(
 #[inline]
 fn send_code(s: &mut crate::src::deflate::deflate_state, symbol: usize) {
     let entry = &s.bl_tree[symbol];
-    send_bits(s, entry.code() as ::core::ffi::c_int, entry.len() as ::core::ffi::c_int);
+    send_bits(
+        s,
+        entry.code() as ::core::ffi::c_int,
+        entry.len() as ::core::ffi::c_int,
+    );
 }
 
 unsafe fn send_tree(
@@ -3172,8 +3171,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
     }
     let mut len_0: ::core::ffi::c_int = static_ltree[256 as usize].len as ::core::ffi::c_int;
     if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
-        let mut val_0: ::core::ffi::c_int =
-            static_ltree[256 as usize].code as ::core::ffi::c_int;
+        let mut val_0: ::core::ffi::c_int = static_ltree[256 as usize].code as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;

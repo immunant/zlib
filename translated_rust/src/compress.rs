@@ -76,7 +76,10 @@ pub fn compress2_z(
     if !write_compress_byte(dest, &mut written, (header >> 8) as crate::stdlib::Bytef)
         || !write_compress_byte(dest, &mut written, header as crate::stdlib::Bytef)
     {
-        return (crate::zlib_h::Z_BUF_ERROR, written as crate::stdlib::z_size_t);
+        return (
+            crate::zlib_h::Z_BUF_ERROR,
+            written as crate::stdlib::z_size_t,
+        );
     }
 
     let block_count = source.len().max(1).div_ceil(65_535);
@@ -90,7 +93,10 @@ pub fn compress2_z(
             || !write_compress_byte(dest, &mut written, (!len >> 8) as crate::stdlib::Bytef)
             || !write_compress_slice(dest, &mut written, block)
         {
-            return (crate::zlib_h::Z_BUF_ERROR, written as crate::stdlib::z_size_t);
+            return (
+                crate::zlib_h::Z_BUF_ERROR,
+                written as crate::stdlib::z_size_t,
+            );
         }
     }
     if source.is_empty()
@@ -100,7 +106,10 @@ pub fn compress2_z(
             || !write_compress_byte(dest, &mut written, 0xff)
             || !write_compress_byte(dest, &mut written, 0xff))
     {
-        return (crate::zlib_h::Z_BUF_ERROR, written as crate::stdlib::z_size_t);
+        return (
+            crate::zlib_h::Z_BUF_ERROR,
+            written as crate::stdlib::z_size_t,
+        );
     }
 
     let adler = crate::src::adler32::adler32_z(1, source) as u32;
@@ -109,7 +118,10 @@ pub fn compress2_z(
         || !write_compress_byte(dest, &mut written, (adler >> 8) as crate::stdlib::Bytef)
         || !write_compress_byte(dest, &mut written, adler as crate::stdlib::Bytef)
     {
-        return (crate::zlib_h::Z_BUF_ERROR, written as crate::stdlib::z_size_t);
+        return (
+            crate::zlib_h::Z_BUF_ERROR,
+            written as crate::stdlib::z_size_t,
+        );
     }
     (crate::zlib_h::Z_OK, written as crate::stdlib::z_size_t)
 }

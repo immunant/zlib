@@ -1114,7 +1114,9 @@ pub unsafe extern "C" fn inflate(
                                                                                             (*state).lens[ORDER[c2rust_fresh16 as usize] as usize] = 0
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
-                                                                                        (*state).next = 0;
+                                                                                        (*state)
+                                                                                            .next =
+                                                                                            0;
                                                                                         let mut table = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                                                                                         (*state).distcode = crate::src::inflate::distance_table::Dynamic(0);
                                                                                         (*state).lencode = table as *const crate::src::inftrees::code;

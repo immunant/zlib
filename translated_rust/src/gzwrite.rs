@@ -220,13 +220,13 @@ unsafe fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*strm).avail_in != 0
-        && gz_comp(&mut *state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+    let state = &mut *state;
+    if state.strm.avail_in != 0
+        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -234,31 +234,29 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     loop {
         n = if ::core::mem::size_of::<::core::ffi::c_int>()
             == ::core::mem::size_of::<crate::stdlib::off64_t>()
-            && (*state).size > crate::src::gzlib::gz_intmax()
-            || (*state).size as crate::stdlib::off64_t > (*state).skip
+            && state.size > crate::src::gzlib::gz_intmax()
+            || state.size as crate::stdlib::off64_t > state.skip
         {
-            (*state).skip as ::core::ffi::c_uint
+            state.skip as ::core::ffi::c_uint
         } else {
-            (*state).size
+            state.size
         };
         if first != 0 {
-            crate::stdlib::memset(
-                (*state).in_0 as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                n as crate::__stddef_size_t_h::size_t,
-            );
+            // `gz_init` allocates at least `state.size` bytes for `in_0` before
+            // `size` becomes non-zero, and `n` is bounded by that size above.
+            ::core::slice::from_raw_parts_mut(state.in_0, n as usize).fill(0);
             first = 0 as ::core::ffi::c_int;
         }
-        (*strm).avail_in = n as crate::stdlib::uInt;
-        (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
-        ret = gz_comp(&mut *state, crate::zlib_h::Z_NO_FLUSH);
-        n = n.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-        (*state).x.pos += n as crate::stdlib::off64_t;
-        (*state).skip -= n as crate::stdlib::off64_t;
+        state.strm.avail_in = n as crate::stdlib::uInt;
+        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+        n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
+        state.x.pos += n as crate::stdlib::off64_t;
+        state.skip -= n as crate::stdlib::off64_t;
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
-        if (*state).skip == 0 {
+        if state.skip == 0 {
             break;
         }
     }
