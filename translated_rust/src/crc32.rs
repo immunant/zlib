@@ -4966,6 +4966,23 @@ mod tests {
     const WORLD_CRC: crate::stdlib::uLong = 0x3a77_1143;
     const HELLO_WORLD_CRC: crate::stdlib::uLong = 0x0d4a_1185;
 
+    fn reference_crc32(crc: crate::stdlib::uLong, bytes: &[u8]) -> crate::stdlib::uLong {
+        let mut state = !(crc as u32);
+
+        for &byte in bytes {
+            state ^= byte as u32;
+            for _ in 0..8 {
+                state = if state & 1 == 0 {
+                    state >> 1
+                } else {
+                    (state >> 1) ^ POLY
+                };
+            }
+        }
+
+        (!state) as crate::stdlib::uLong
+    }
+
     #[test]
     fn ffi_empty_non_null_input_avoids_a_raw_slice() {
         let pointer = core::ptr::NonNull::<u8>::dangling().as_ptr();
@@ -5064,6 +5081,34 @@ mod tests {
         for split in [0, 1, 7, 8, input.len()] {
             let incremental = crc32_z(crc32_z(0, &input[..split]), &input[split..]);
             assert_eq!(incremental, expected, "split at byte {split}");
+        }
+    }
+
+    #[test]
+    fn safe_and_ffi_updates_match_at_every_byte_offset() {
+        let seed = 0x1234_5678;
+        let input = b"alignment-independent crc checksum";
+        let expected = reference_crc32(seed, input);
+
+        for offset in 0..8 {
+            let mut storage = vec![0u8; offset];
+            storage.extend_from_slice(input);
+            let aligned_input = &storage[offset..];
+            let pointer = storage.as_ptr().wrapping_add(offset);
+
+            assert_eq!(crc32_z(seed, aligned_input), expected, "offset {offset}");
+            assert_eq!(
+                unsafe { super::crc32_z_ffi(seed, pointer, input.len()) },
+                expected,
+                "z-size FFI offset {offset}"
+            );
+            assert_eq!(
+                unsafe {
+                    super::crc32_ffi(seed, pointer, input.len() as crate::stdlib::uInt)
+                },
+                expected,
+                "uInt FFI offset {offset}"
+            );
         }
     }
 

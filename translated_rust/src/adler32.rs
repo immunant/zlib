@@ -267,6 +267,32 @@ mod tests {
     }
 
     #[test]
+    fn safe_and_ffi_updates_match_at_every_byte_offset() {
+        let seed = 0x1234_5678 as uLong;
+        let input = b"alignment-independent adler checksum";
+        let expected = reference_adler32(seed, input);
+
+        for offset in 0..8 {
+            let mut storage = vec![0u8; offset];
+            storage.extend_from_slice(input);
+            let aligned_input = &storage[offset..];
+            let pointer = storage.as_ptr().wrapping_add(offset);
+
+            assert_eq!(adler32_z(seed, aligned_input), expected, "offset {offset}");
+            assert_eq!(
+                unsafe { adler32_z_ffi(seed, pointer, input.len()) },
+                expected,
+                "z-size FFI offset {offset}"
+            );
+            assert_eq!(
+                unsafe { adler32_ffi(seed, pointer, input.len() as uInt) },
+                expected,
+                "uInt FFI offset {offset}"
+            );
+        }
+    }
+
+    #[test]
     fn reduces_combine_sums_across_conditional_boundaries() {
         assert_eq!(
             reduce_combine_sums(BASE_U64 - 1, BASE_U64 - 1),

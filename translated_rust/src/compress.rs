@@ -58,6 +58,25 @@ struct CompressResult {
     dest_len: usize,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct LegacyCompressLengths {
+    dest: crate::stdlib::z_size_t,
+    source: crate::stdlib::z_size_t,
+}
+
+impl LegacyCompressLengths {
+    fn from_legacy(dest: crate::stdlib::uLongf, source: crate::stdlib::uLong) -> Self {
+        Self {
+            dest: dest as crate::stdlib::z_size_t,
+            source: source as crate::stdlib::z_size_t,
+        }
+    }
+
+    fn destination_from_z(dest: crate::stdlib::z_size_t) -> crate::stdlib::uLongf {
+        dest as crate::stdlib::uLongf
+    }
+}
+
 fn finish_compress(status: ::core::ffi::c_int, dest_len: usize) -> CompressResult {
     CompressResult {
         status: if status == crate::zlib_h::Z_STREAM_END {
@@ -266,15 +285,10 @@ pub unsafe extern "C" fn compress2_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
-    let mut got = *destLen as crate::stdlib::z_size_t;
-    let status = compress2_z_ffi(
-        dest,
-        &mut got,
-        source,
-        sourceLen as crate::stdlib::z_size_t,
-        level,
-    );
-    *destLen = got as crate::stdlib::uLongf;
+    let lengths = LegacyCompressLengths::from_legacy(*destLen, sourceLen);
+    let mut got = lengths.dest;
+    let status = compress2_z_ffi(dest, &mut got, source, lengths.source, level);
+    *destLen = LegacyCompressLengths::destination_from_z(got);
     status
 }
 
@@ -326,7 +340,8 @@ pub extern "C" fn compressBound_ffi(sourceLen: crate::stdlib::uLong) -> crate::s
 mod tests {
     use super::{
         compress_bound, compress_bound_z_impl, finish_compress, next_compress_chunk,
-        plan_compress2_buffers, CompressBufferPlan, CompressProgress, MAX_CHUNK,
+        plan_compress2_buffers, CompressBufferPlan, CompressProgress, LegacyCompressLengths,
+        MAX_CHUNK,
     };
 
     #[test]
@@ -484,6 +499,17 @@ mod tests {
                 status: crate::zlib_h::Z_STREAM_ERROR,
                 dest_len: 3,
             }
+        );
+    }
+
+    #[test]
+    fn legacy_lengths_preserve_the_wrapper_cast_sequence() {
+        let lengths = LegacyCompressLengths::from_legacy(7, 11);
+        assert_eq!(lengths.dest, 7);
+        assert_eq!(lengths.source, 11);
+        assert_eq!(
+            LegacyCompressLengths::destination_from_z(crate::stdlib::z_size_t::MAX),
+            crate::stdlib::z_size_t::MAX as crate::stdlib::uLongf,
         );
     }
 
