@@ -1063,6 +1063,31 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     return 0 as ::core::ffi::c_int;
 }
+
+/// Check the portion of a deflate stream that can be inspected without
+/// following its state link.  Parameter updates use this before borrowing the
+/// state, leaving the raw link crossing confined to the caller.
+fn deflate_params_stream_is_valid(strm: &crate::zlib_h::z_stream_s) -> bool {
+    strm.zalloc.is_some() && strm.zfree.is_some() && !strm.state.is_null()
+}
+
+/// Validate a deflate state after its already-checked link has been borrowed.
+/// Keeping the state-machine rules here makes the parameter-update path
+/// independent of the raw-pointer-based general stream checker.
+fn deflate_params_state_is_valid(
+    strm: &crate::zlib_h::z_stream_s,
+    s: &crate::src::deflate::deflate_state,
+) -> bool {
+    s.strm == core::ptr::from_ref(strm).cast_mut()
+        && (s.status == crate::src::deflate::INIT_STATE
+            || s.status == crate::src::deflate::GZIP_STATE
+            || s.status == crate::src::deflate::EXTRA_STATE
+            || s.status == crate::src::deflate::NAME_STATE
+            || s.status == crate::src::deflate::COMMENT_STATE
+            || s.status == crate::src::deflate::HCRC_STATE
+            || s.status == crate::src::deflate::BUSY_STATE
+            || s.status == crate::src::deflate::FINISH_STATE)
+}
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
@@ -1429,13 +1454,16 @@ pub unsafe fn deflateParams(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // Check the stream's raw state link before turning it into a Rust borrow.
-    // The link is maintained by the allocation lifecycle and is the only
-    // remaining raw boundary this parameter update needs to cross.
-    if deflateStateCheck(strm as *mut crate::zlib_h::z_stream_s) != 0 {
+    // Validate the stream before crossing its raw state link.  The link is
+    // maintained by the allocation lifecycle and is the only remaining raw
+    // boundary this parameter update needs to cross.
+    if !deflate_params_stream_is_valid(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    if !deflate_params_state_is_valid(strm, s) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
