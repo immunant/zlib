@@ -172,11 +172,27 @@ pub fn gzdopen(
     file: std::fs::File,
     mode: &std::ffi::CStr,
 ) -> Option<Box<crate::gzguts_h::gz_state>> {
+    let mode = parse_gz_mode(mode)?;
     use std::os::fd::AsRawFd as _;
 
-    let mode = parse_gz_mode(mode)?;
-    let path = std::ffi::CString::new(format!("<fd:{}>", file.as_raw_fd())).ok()?;
+    let path = std::ffi::CString::new(format!("<fd:{}>", file.as_raw_fd()))
+        .expect("a formatted file descriptor contains no NUL");
     Some(gzopen_with_file(path, mode, file))
+}
+
+/// Apply gzdopen's mode-controlled descriptor flags through Rustix's safe
+/// file-descriptor operations.  Just as zlib does, failures are ignored.
+fn configure_gzdopen_file(file: &std::fs::File, mode: &GzOpenMode) {
+    if mode.nonblocking {
+        if let Ok(flags) = rustix::fs::fcntl_getfl(file) {
+            let _ = rustix::fs::fcntl_setfl(file, flags | rustix::fs::OFlags::NONBLOCK);
+        }
+    }
+    if mode.close_on_exec {
+        if let Ok(flags) = rustix::io::fcntl_getfd(file) {
+            let _ = rustix::io::fcntl_setfd(file, flags | rustix::io::FdFlags::CLOEXEC);
+        }
+    }
 }
 #[export_name = "gzdopen"]
 
@@ -193,25 +209,8 @@ pub unsafe extern "C" fn gzdopen_ffi(
     let Some(settings) = parse_gz_mode(mode) else {
         return ::core::ptr::null_mut();
     };
-    if settings.nonblocking {
-        unsafe {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFL,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
-            );
-        }
-    }
-    if settings.close_on_exec {
-        unsafe {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFD,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
-            );
-        }
-    }
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    configure_gzdopen_file(&file, &settings);
     let Some(state) = gzdopen(file, mode) else {
         return ::core::ptr::null_mut();
     };
