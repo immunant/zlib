@@ -119,99 +119,17 @@ pub unsafe extern "C" fn inflateBackInit_(
     if strm.is_null() || window.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // Keep the ABI stream projection at the allocation boundary.  All
-    // subsequent setup uses this scoped Rust borrow, rather than repeatedly
-    // dereferencing the caller's raw stream pointer.
+    // Keep the ABI stream projection at the shared callback allocation
+    // boundary. The back-mode payload is pointer-free until that boundary
+    // publishes it into the callback-owned opaque record.
     let strm = &mut *strm;
-    let stream_identity = ::core::ptr::from_mut(strm).addr();
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
-        strm.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if strm.zfree.is_none() {
-        strm.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
-    let state = Some(strm.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        strm.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    strm.state = Some(
-        ::core::ptr::NonNull::new(state)
-            .expect("checked state allocation")
-            .cast(),
-    );
-    // Back-mode state uses the same allocation/release contract as normal
-    // inflate.  Publish one fully initialized value into the callback-owned
-    // allocation, whose returned bytes need not have been initialized. Keep
-    // this construction at its sole raw publication site: a separate unsafe
-    // constructor added an unsafe call and an unsafe function without making
-    // the callback window any safer.
-    ::core::ptr::write(
-        state,
-        crate::src::inflate::inflate_state {
-            stream_identity,
-            head: None,
-            back_window: Some(crate::src::inflate::InflateBackWindow::new()),
-            decoder: crate::src::inflate::InflateOwnedDecoder::from_normal(
-                crate::src::inflate::InflateNormalState {
-                    mode: crate::src::inflate::TYPE,
-                    last: 0,
-                    wrap: 0,
-                    havedict: 0,
-                    flags: 0,
-                    dmax: 32768,
-                    check: 0,
-                    total: 0,
-                    wbits: plan.wbits,
-                    wsize: plan.wsize,
-                    whave: 0,
-                    wnext: 0,
-                    owned_window: None,
-                    hold: 0,
-                    bits: 0,
-                    length: 0,
-                    offset: 0,
-                    extra: 0,
-                    lencode: crate::src::inflate::CodeTableRef::Dynamic(0),
-                    distcode: crate::src::inflate::CodeTableRef::Dynamic(0),
-                    lenbits: 0,
-                    distbits: 0,
-                    ncode: 0,
-                    nlen: 0,
-                    ndist: 0,
-                    have: 0,
-                    next: 0,
-                    lens: [0; 320],
-                    work: [0; 288],
-                    codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
-                        op: 0,
-                        bits: 0,
-                        val: 0,
-                    }),
-                    sane: 1,
-                    back: 0,
-                    was: 0,
-                },
-            ),
+    crate::src::inflate::inflate_publish_callback_owner(
+        strm,
+        crate::src::inflate::InflateCallbackInitRequest::Back {
+            wbits: plan.wbits,
+            wsize: plan.wsize,
         },
-    );
-    return crate::zlib_h::Z_OK;
+    )
 }
 #[export_name = "inflateBackInit_"]
 

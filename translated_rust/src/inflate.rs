@@ -612,13 +612,69 @@ impl InflateInitOwner {
     }
 }
 
+// Both normal and callback-back initialization allocate the same opaque
+// record through the stream callbacks.  Keep the payload selection
+// pointer-free so that transaction remains the sole raw allocation and
+// publication boundary.
+pub(crate) enum InflateCallbackInitRequest {
+    Normal {
+        window_bits: ::core::ffi::c_int,
+    },
+    Back {
+        wbits: ::core::ffi::c_uint,
+        wsize: ::core::ffi::c_uint,
+    },
+}
+
+enum InflateCallbackInitUpdate {
+    Normal(InflateResetUpdate),
+    Back,
+}
+
+struct InflateCallbackInitOwner {
+    normal: InflateNormalState,
+    back_window: Option<InflateBackWindow>,
+    update: Result<InflateCallbackInitUpdate, ::core::ffi::c_int>,
+}
+
+impl InflateCallbackInitRequest {
+    // This is intentionally called only after callback allocation.  In
+    // particular, a bad normal window-bit request must still have the
+    // allocation-and-matching-release lifecycle required by zlib.
+    fn after_callback_allocation(self) -> InflateCallbackInitOwner {
+        match self {
+            Self::Normal { window_bits } => {
+                let owner = InflateInitOwner::new(window_bits);
+                InflateCallbackInitOwner {
+                    normal: owner.normal,
+                    back_window: None,
+                    update: owner.reset.map(InflateCallbackInitUpdate::Normal),
+                }
+            }
+            Self::Back { wbits, wsize } => {
+                let mut normal = initial_inflate_normal_state();
+                normal.mode = crate::src::inflate::TYPE;
+                normal.dmax = 32768;
+                normal.wbits = wbits;
+                normal.wsize = wsize;
+                normal.back = 0;
+                InflateCallbackInitOwner {
+                    normal,
+                    back_window: Some(InflateBackWindow::new()),
+                    update: Ok(InflateCallbackInitUpdate::Back),
+                }
+            }
+        }
+    }
+}
+
 // This is the one callback-paired initialization transaction.  It keeps the
 // allocator result's provenance at the boundary until exactly one complete
 // state publication or matching zfree.  The owner it receives contains no
 // callback handle, stream pointer, or foreign registration.
-unsafe fn inflate_publish_callback_owner(
+pub(crate) unsafe fn inflate_publish_callback_owner(
     strm: &mut crate::zlib_h::z_stream_s,
-    window_bits: ::core::ffi::c_int,
+    request: InflateCallbackInitRequest,
 ) -> ::core::ffi::c_int {
     // Keep the caller's stream projection at the allocator boundary. The
     // callback-owned state is published only after it has been fully
@@ -658,7 +714,11 @@ unsafe fn inflate_publish_callback_owner(
     // Preserve the callback ordering: allocation comes first, then the
     // pointer-free initialization plan is built and published as one value.
     // A failing plan therefore still has a matching callback release below.
-    let owner = InflateInitOwner::new(window_bits);
+    let InflateCallbackInitOwner {
+        normal,
+        back_window,
+        update,
+    } = request.after_callback_allocation();
     // Publish one complete value into the callback-owned allocation.  Writing
     // fields piecemeal here would briefly treat uninitialized callback bytes
     // as Rust fields with drop glue.
@@ -667,12 +727,12 @@ unsafe fn inflate_publish_callback_owner(
         crate::src::inflate::inflate_state {
             stream_identity: ::core::ptr::from_mut(strm).addr(),
             head: None,
-            back_window: None,
-            decoder: InflateOwnedDecoder::from_normal(owner.normal),
+            back_window,
+            decoder: InflateOwnedDecoder::from_normal(normal),
         },
     );
     strm.state = Some(state.cast());
-    let update = match owner.reset {
+    let update = match update {
         Ok(update) => update,
         Err(status) => {
             Some(strm.zfree.expect("non-null function pointer"))
@@ -681,12 +741,14 @@ unsafe fn inflate_publish_callback_owner(
             return status;
         }
     };
-    strm.total_out = 0;
-    strm.total_in = strm.total_out;
-    strm.msg = ::core::ptr::null_mut();
-    strm.data_type = 0;
-    if let Some(adler) = update.adler {
-        strm.adler = adler;
+    if let InflateCallbackInitUpdate::Normal(update) = update {
+        strm.total_out = 0;
+        strm.total_in = strm.total_out;
+        strm.msg = ::core::ptr::null_mut();
+        strm.data_type = 0;
+        if let Some(adler) = update.adler {
+            strm.adler = adler;
+        }
     }
     crate::zlib_h::Z_OK
 }
@@ -868,7 +930,12 @@ pub unsafe extern "C" fn inflateInit2_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_publish_callback_owner(strm, windowBits)
+    inflate_publish_callback_owner(
+        strm,
+        InflateCallbackInitRequest::Normal {
+            window_bits: windowBits,
+        },
+    )
 }
 #[export_name = "inflateInit2_"]
 
