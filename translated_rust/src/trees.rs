@@ -3588,41 +3588,41 @@ pub(crate) fn tr_flush_block_impl(
     );
 }
 
-pub unsafe fn tr_flush_block_from_raw(
-    s: *mut crate::src::deflate::deflate_state,
-    buf: *mut crate::stdlib::charf,
+/// Resolve the legacy block address against the state-owned window before
+/// flushing it. The exported wrapper converts the raw pointer to an address;
+/// this implementation never dereferences or retains that pointer.
+fn tr_flush_block_from_address(
+    s: &mut crate::src::deflate::deflate_state,
+    buf_address: Option<usize>,
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
-    let Some(s) = (unsafe { s.as_mut() }) else {
-        return;
-    };
-    let buf = if buf.is_null() {
-        None
-    } else {
+    let buf = if let Some(buf_address) = buf_address {
         let Some(len) = usize::try_from(stored_len).ok() else {
             return;
         };
         if len == 0 {
             Some(Vec::new())
         } else {
-        let Some(window) = s.window.as_deref() else {
-            return;
-        };
-        let Some(offset) = buf.addr().checked_sub(window.as_ptr().addr()) else {
-            return;
-        };
-        let Some(end) = offset.checked_add(len) else {
-            return;
-        };
-        let Ok(window_len) = usize::try_from(s.window_size) else {
-            return;
-        };
-        if end > window_len || end > window.len() {
-            return;
+            let Some(window) = s.window.as_deref() else {
+                return;
+            };
+            let Some(offset) = buf_address.checked_sub(window.as_ptr().addr()) else {
+                return;
+            };
+            let Some(end) = offset.checked_add(len) else {
+                return;
+            };
+            let Ok(window_len) = usize::try_from(s.window_size) else {
+                return;
+            };
+            if end > window_len || end > window.len() {
+                return;
+            }
+            Some(window[offset..end].to_vec())
         }
-        Some(window[offset..end].to_vec())
-        }
+    } else {
+        None
     };
     // This legacy state-only ABI helper has no stream argument.  Ordinary
     // compression passes the stream explicitly; here only block generation
@@ -3638,7 +3638,10 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
-    unsafe { tr_flush_block_from_raw(s, buf, stored_len, last) };
+    let Some(s) = s.as_mut() else {
+        return;
+    };
+    tr_flush_block_from_address(s, (!buf.is_null()).then_some(buf.addr()), stored_len, last);
 }
 pub fn _tr_tally(
     s: &mut crate::src::deflate::deflate_state,

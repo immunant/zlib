@@ -595,7 +595,6 @@ pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits;
-pub use crate::src::trees::tr_flush_block_from_raw as _tr_flush_block;
 pub use crate::src::trees::_tr_stored_block_ffi as _tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
