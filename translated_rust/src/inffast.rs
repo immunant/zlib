@@ -171,7 +171,7 @@ impl<'input, 'output, 'state> InflateFastStreamFacade<'input, 'output, 'state> {
     }
 
     pub(crate) fn decode(self) -> InflateFastStreamUpdate {
-        InflateFastStreamUpdate::from_completion(inflate_fast_from_abi_boundary(self.request))
+        inflate_fast_from_stream(self)
     }
 }
 
@@ -397,12 +397,11 @@ pub(crate) fn inflate_fast_from_views(
     completion.result
 }
 
-// The ABI projection is deliberately separate from the pointer-free fast
-// dispatch: every decoder invocation below owns only bounded slices and a
-// pointer-free state snapshot.  The shared state projection validates the
-// opaque association and ties the state borrow to this stream borrow before
-// any cursor is exposed.
-pub(crate) unsafe fn inflate_fast_from_stream(
+// The only raw stream/state and cursor projection for the direct ABI entry
+// point.  The decoder/publication seam below receives an owned bounded
+// facade, so the future pointer-free inflate stream owner can replace this
+// adapter without reopening the fast decoder or its cursor accounting.
+pub(crate) unsafe fn inflate_fast_from_abi_stream(
     stream: &mut crate::zlib_h::z_stream_s,
     start: ::core::ffi::c_uint,
 ) {
@@ -446,7 +445,7 @@ pub(crate) unsafe fn inflate_fast_from_stream(
     let Some(facade) = facade else {
         return;
     };
-    let update = facade.decode();
+    let update = inflate_fast_from_stream(facade);
     strm.next_in = strm.next_in.wrapping_add(update.input_used);
     strm.avail_in = update.input_remaining as crate::stdlib::uInt;
     strm.next_out = output_start.wrapping_add(update.output_used);
@@ -473,19 +472,19 @@ pub(crate) unsafe fn inflate_fast_from_stream(
     }
 }
 
-// This is the pointer-free ABI facade used after a stream projection has
-// formed bounded input/output views.  Keeping the dispatch separate means
-// cursor construction and publication cannot leak into decoder callers.
-pub(crate) fn inflate_fast_from_abi_boundary(
-    request: InflateFastRequest<'_, '_, '_>,
-) -> InflateFastCompletion {
-    request.run()
+// This consumes the whole bounded stream request before its completion is
+// published by the ABI adapter.  Its signature intentionally contains no ABI
+// stream or raw cursor, making it the one reusable fast decoder seam.
+pub(crate) fn inflate_fast_from_stream(
+    facade: InflateFastStreamFacade<'_, '_, '_>,
+) -> InflateFastStreamUpdate {
+    InflateFastStreamUpdate::from_completion(facade.request.run())
 }
 
 // The normal inflate owner also dispatches directly through the same
 // pointer-free request/completion seam.
 pub(crate) fn inflate_fast(request: InflateFastRequest<'_, '_, '_>) -> InflateFastCompletion {
-    inflate_fast_from_abi_boundary(request)
+    request.run()
 }
 
 #[export_name = "inflate_fast"]
@@ -496,5 +495,5 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     let Some(stream) = strm.as_mut() else {
         return;
     };
-    inflate_fast_from_stream(stream, start)
+    inflate_fast_from_abi_stream(stream, start)
 }
