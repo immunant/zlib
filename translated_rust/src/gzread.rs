@@ -514,6 +514,7 @@ enum GzFreadOutcome {
 // an ABI-shaped state.
 enum GzReadAbiRequest {
     Bytes,
+    Gets,
     Unget(::core::ffi::c_int),
     Items {
         size: crate::stdlib::z_size_t,
@@ -523,6 +524,7 @@ enum GzReadAbiRequest {
 
 enum GzReadAbiResult {
     Bytes(::core::ffi::c_int),
+    Gets(bool),
     Unget(::core::ffi::c_int),
     Items(crate::stdlib::z_size_t),
 }
@@ -531,14 +533,14 @@ impl GzReadAbiResult {
     fn bytes(self) -> ::core::ffi::c_int {
         match self {
             Self::Bytes(result) => result,
-            Self::Unget(_) | Self::Items(_) => unreachable!(),
+            Self::Gets(_) | Self::Unget(_) | Self::Items(_) => unreachable!(),
         }
     }
 
     fn items(self) -> crate::stdlib::z_size_t {
         match self {
             Self::Items(result) => result,
-            Self::Bytes(_) | Self::Unget(_) => unreachable!(),
+            Self::Bytes(_) | Self::Gets(_) | Self::Unget(_) => unreachable!(),
         }
     }
 
@@ -549,14 +551,21 @@ impl GzReadAbiResult {
         match self {
             Self::Items(1) => byte as ::core::ffi::c_int,
             Self::Items(_) => -1,
-            Self::Bytes(_) | Self::Unget(_) => unreachable!(),
+            Self::Bytes(_) | Self::Gets(_) | Self::Unget(_) => unreachable!(),
         }
     }
 
     fn unget(self) -> ::core::ffi::c_int {
         match self {
             Self::Unget(result) => result,
-            Self::Bytes(_) | Self::Items(_) => unreachable!(),
+            Self::Bytes(_) | Self::Gets(_) | Self::Items(_) => unreachable!(),
+        }
+    }
+
+    fn gets(self) -> bool {
+        match self {
+            Self::Gets(result) => result,
+            Self::Bytes(_) | Self::Unget(_) | Self::Items(_) => unreachable!(),
         }
     }
 }
@@ -1717,6 +1726,139 @@ unsafe fn gzread_from_state(
             }
         });
     }
+    if matches!(request, GzReadAbiRequest::Gets) {
+        if output.is_empty() {
+            return GzReadAbiResult::Gets(false);
+        }
+        let request = GzReadRequest::new(state.mode, state.err, state.again);
+        let mut error = crate::src::gzlib::GzErrorState {
+            message: &mut state.msg,
+            error: &mut state.err,
+            buffered: &mut state.x.have,
+            again: state.again,
+            path: state.path.as_deref(),
+        };
+        if !request.begin(&mut error) {
+            return GzReadAbiResult::Gets(false);
+        }
+        drop(error);
+        let mut read = GzReadState {
+            buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+            have: state.x.have,
+            pos: state.x.pos,
+            skip: state.skip,
+            how: state.how,
+            eof: state.eof,
+            past: state.past,
+            err: state.err,
+            avail_in: state.strm.avail_in,
+        };
+        let result = gzgets(&mut read, output, |read| {
+            state.buffers =
+                ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
+            state.x.have = read.have;
+            state.x.pos = read.pos;
+            state.skip = read.skip;
+            state.how = read.how;
+            state.eof = read.eof;
+            state.past = read.past;
+            state.err = read.err;
+            state.strm.avail_in = read.avail_in;
+            let cursor = state
+                .buffers
+                .output_cursor()
+                .map(|cursor| (cursor.start(), cursor.have()));
+            match cursor {
+                Some((start, have)) if have == state.x.have => {
+                    let Some(output) = state.buffers.output.as_deref_mut() else {
+                        read.buffers = ::core::mem::replace(
+                            &mut state.buffers,
+                            crate::gzguts_h::GzBuffers::empty(),
+                        );
+                        return Err(());
+                    };
+                    let Some(output) = output.get_mut(start..) else {
+                        read.buffers = ::core::mem::replace(
+                            &mut state.buffers,
+                            crate::gzguts_h::GzBuffers::empty(),
+                        );
+                        return Err(());
+                    };
+                    state.x.next = output.as_mut_ptr();
+                }
+                None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
+                _ => {
+                    read.buffers = ::core::mem::replace(
+                        &mut state.buffers,
+                        crate::gzguts_h::GzBuffers::empty(),
+                    );
+                    return Err(());
+                }
+            }
+            let fetched = gz_fetch_from_state(&mut GzFetchOwner::new(
+                &mut state.buffers,
+                state.want,
+                &mut state.direct,
+                &mut state.junk,
+                &mut state.how,
+                &mut state.again,
+                &mut state.eof,
+                &mut state.err,
+                &mut state.msg,
+                &mut state.x.have,
+                state.fd.as_ref().expect("gzip state has an open file"),
+                state.path.as_deref(),
+                &mut state.strm.avail_in,
+                &mut state.strm.avail_out,
+                &mut state.strm.total_in,
+                &mut state.strm.total_out,
+            ));
+            read.buffers =
+                ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
+            read.have = state.x.have;
+            read.pos = state.x.pos;
+            read.skip = state.skip;
+            read.how = state.how;
+            read.eof = state.eof;
+            read.past = state.past;
+            read.err = state.err;
+            read.avail_in = state.strm.avail_in;
+            if fetched == -1 {
+                Err(())
+            } else {
+                Ok(())
+            }
+        });
+        state.buffers =
+            ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
+        state.x.have = read.have;
+        state.x.pos = read.pos;
+        state.skip = read.skip;
+        state.how = read.how;
+        state.eof = read.eof;
+        state.past = read.past;
+        state.err = read.err;
+        state.strm.avail_in = read.avail_in;
+        let published = match state
+            .buffers
+            .output_cursor()
+            .map(|cursor| (cursor.start(), cursor.have()))
+        {
+            Some((start, have)) if have == state.x.have => state
+                .buffers
+                .output
+                .as_deref_mut()
+                .and_then(|output| output.get_mut(start..))
+                .map(|output| state.x.next = output.as_mut_ptr())
+                .is_some(),
+            None if state.x.have == 0 => {
+                state.x.next = ::core::ptr::null_mut();
+                true
+            }
+            _ => false,
+        };
+        return GzReadAbiResult::Gets(result && published);
+    }
     let request = GzReadRequest::new(state.mode, state.err, state.again);
     let mut error = crate::src::gzlib::GzErrorState {
         message: &mut state.msg,
@@ -2227,146 +2369,6 @@ fn gzgets(
     true
 }
 
-// This is the only bridge between the pointer-free `gzgets` facade and the
-// existing embedded-codec state.  It transfers the owned buffer transaction
-// to the ABI state for one fetch, then snapshots the scalar result back into
-// the facade before the core resumes.
-unsafe fn gzgets_from_state(
-    state: &mut crate::gzguts_h::gz_state,
-    output: &mut [u8],
-) -> *mut ::core::ffi::c_char {
-    if output.is_empty() {
-        return ::core::ptr::null_mut();
-    }
-    let request = GzReadRequest::new(state.mode, state.err, state.again);
-    let mut error = crate::src::gzlib::GzErrorState {
-        message: &mut state.msg,
-        error: &mut state.err,
-        buffered: &mut state.x.have,
-        again: state.again,
-        path: state.path.as_deref(),
-    };
-    if !request.begin(&mut error) {
-        return ::core::ptr::null_mut();
-    }
-    drop(error);
-    let mut read = GzReadState {
-        buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
-        have: state.x.have,
-        pos: state.x.pos,
-        skip: state.skip,
-        how: state.how,
-        eof: state.eof,
-        past: state.past,
-        err: state.err,
-        avail_in: state.strm.avail_in,
-    };
-    let result = gzgets(&mut read, output, |read| {
-        state.buffers =
-            ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
-        state.x.have = read.have;
-        state.x.pos = read.pos;
-        state.skip = read.skip;
-        state.how = read.how;
-        state.eof = read.eof;
-        state.past = read.past;
-        state.err = read.err;
-        state.strm.avail_in = read.avail_in;
-        let cursor = state
-            .buffers
-            .output_cursor()
-            .map(|cursor| (cursor.start(), cursor.have()));
-        match cursor {
-            Some((start, have)) if have == state.x.have => {
-                let Some(output) = state.buffers.output.as_deref_mut() else {
-                    read.buffers = ::core::mem::replace(
-                        &mut state.buffers,
-                        crate::gzguts_h::GzBuffers::empty(),
-                    );
-                    return Err(());
-                };
-                let Some(output) = output.get_mut(start..) else {
-                    read.buffers = ::core::mem::replace(
-                        &mut state.buffers,
-                        crate::gzguts_h::GzBuffers::empty(),
-                    );
-                    return Err(());
-                };
-                state.x.next = output.as_mut_ptr();
-            }
-            None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
-            _ => {
-                read.buffers =
-                    ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
-                return Err(());
-            }
-        }
-        let fetched = gz_fetch_from_state(&mut GzFetchOwner::new(
-            &mut state.buffers,
-            state.want,
-            &mut state.direct,
-            &mut state.junk,
-            &mut state.how,
-            &mut state.again,
-            &mut state.eof,
-            &mut state.err,
-            &mut state.msg,
-            &mut state.x.have,
-            state.fd.as_ref().expect("gzip state has an open file"),
-            state.path.as_deref(),
-            &mut state.strm.avail_in,
-            &mut state.strm.avail_out,
-            &mut state.strm.total_in,
-            &mut state.strm.total_out,
-        ));
-        read.buffers =
-            ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
-        read.have = state.x.have;
-        read.pos = state.x.pos;
-        read.skip = state.skip;
-        read.how = state.how;
-        read.eof = state.eof;
-        read.past = state.past;
-        read.err = state.err;
-        read.avail_in = state.strm.avail_in;
-        if fetched == -1 {
-            Err(())
-        } else {
-            Ok(())
-        }
-    });
-    state.buffers = ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
-    state.x.have = read.have;
-    state.x.pos = read.pos;
-    state.skip = read.skip;
-    state.how = read.how;
-    state.eof = read.eof;
-    state.past = read.past;
-    state.err = read.err;
-    state.strm.avail_in = read.avail_in;
-    let cursor = state
-        .buffers
-        .output_cursor()
-        .map(|cursor| (cursor.start(), cursor.have()));
-    match cursor {
-        Some((start, have)) if have == state.x.have => {
-            let Some(output) = state.buffers.output.as_deref_mut() else {
-                return ::core::ptr::null_mut();
-            };
-            let Some(output) = output.get_mut(start..) else {
-                return ::core::ptr::null_mut();
-            };
-            state.x.next = output.as_mut_ptr();
-        }
-        None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
-        _ => return ::core::ptr::null_mut(),
-    }
-    if result {
-        output.as_mut_ptr().cast()
-    } else {
-        ::core::ptr::null_mut()
-    }
-}
 #[export_name = "gzgets"]
 
 pub unsafe extern "C" fn gzgets_ffi(
@@ -2378,13 +2380,17 @@ pub unsafe extern "C" fn gzgets_ffi(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     // The opaque handle is checked and borrowed at the ABI boundary.  The
-    // implementation receives only that validated state plus the bounded
-    // caller output, so its read/LOOK transitions remain out of this wrapper.
+    // shared read adapter retains the state projection and its LOOK/fetch
+    // transitions; this wrapper only supplies the bounded caller output.
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     };
     let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize);
-    gzgets_from_state(state, output)
+    if gzread_from_state(state, output, GzReadAbiRequest::Gets).gets() {
+        output.as_mut_ptr().cast()
+    } else {
+        ::core::ptr::null_mut()
+    }
 }
 fn gzdirect_from_state(owner: GzDirectOwner<'_>) -> ::core::ffi::c_int {
     gzdirect(owner)
