@@ -2728,15 +2728,25 @@ unsafe fn build_tree_impl(s: &mut crate::src::deflate::deflate_state, tree_kind:
     gen_codes(selected_tree(s, tree_kind), max_code, &bl_count);
 }
 
-unsafe extern "C" fn scan_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
+fn scan_tree(
+    bl_tree: &mut [crate::src::deflate::ct_data],
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
 ) {
+    let Ok(max_code) = usize::try_from(max_code) else {
+        return;
+    };
+    let Some(sentinel) = max_code.checked_add(1) else {
+        return;
+    };
+    if sentinel >= tree.len() {
+        return;
+    }
+
     let mut n: ::core::ffi::c_int = 0;
     let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
-    let mut nextlen: ::core::ffi::c_int = (*tree.offset(0 as isize)).dl.len as ::core::ffi::c_int;
+    let mut nextlen: ::core::ffi::c_int = tree[0].len() as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
     let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
@@ -2744,35 +2754,34 @@ unsafe extern "C" fn scan_tree(
         max_count = 138 as ::core::ffi::c_int;
         min_count = 3 as ::core::ffi::c_int;
     }
-    (*tree.offset((max_code + 1 as ::core::ffi::c_int) as isize))
-        .dl
-        .len = 0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
+    tree[sentinel].set_len(0xffff as ::core::ffi::c_int as crate::zutil_h::ush);
     n = 0 as ::core::ffi::c_int;
-    while n <= max_code {
+    while (n as usize) <= max_code {
         curlen = nextlen;
-        nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize))
-            .dl
-            .len as ::core::ffi::c_int;
+        nextlen = tree[n as usize + 1].len() as ::core::ffi::c_int;
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
-                (*s).bl_tree[curlen as usize].fc.freq = ((*s).bl_tree[curlen as usize].fc.freq
-                    as ::core::ffi::c_int
-                    + count as crate::zutil_h::ush as ::core::ffi::c_int)
-                    as crate::zutil_h::ush;
+                if let Some(entry) = bl_tree.get_mut(curlen as usize) {
+                    entry.fc.freq = entry.freq().wrapping_add(count as crate::zutil_h::ush);
+                }
             } else if curlen != 0 as ::core::ffi::c_int {
                 if curlen != prevlen {
-                    (*s).bl_tree[curlen as usize].fc.freq =
-                        (*s).bl_tree[curlen as usize].fc.freq.wrapping_add(1);
+                    if let Some(entry) = bl_tree.get_mut(curlen as usize) {
+                        entry.fc.freq = entry.freq().wrapping_add(1);
+                    }
                 }
-                (*s).bl_tree[REP_3_6 as usize].fc.freq =
-                    (*s).bl_tree[REP_3_6 as usize].fc.freq.wrapping_add(1);
+                if let Some(entry) = bl_tree.get_mut(REP_3_6 as usize) {
+                    entry.fc.freq = entry.freq().wrapping_add(1);
+                }
             } else if count <= 10 as ::core::ffi::c_int {
-                (*s).bl_tree[REPZ_3_10 as usize].fc.freq =
-                    (*s).bl_tree[REPZ_3_10 as usize].fc.freq.wrapping_add(1);
+                if let Some(entry) = bl_tree.get_mut(REPZ_3_10 as usize) {
+                    entry.fc.freq = entry.freq().wrapping_add(1);
+                }
             } else {
-                (*s).bl_tree[REPZ_11_138 as usize].fc.freq =
-                    (*s).bl_tree[REPZ_11_138 as usize].fc.freq.wrapping_add(1);
+                if let Some(entry) = bl_tree.get_mut(REPZ_11_138 as usize) {
+                    entry.fc.freq = entry.freq().wrapping_add(1);
+                }
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
@@ -2890,29 +2899,22 @@ unsafe extern "C" fn build_bl_tree(
     mut s: *mut crate::src::deflate::deflate_state,
 ) -> ::core::ffi::c_int {
     let mut max_blindex: ::core::ffi::c_int = 0;
-    scan_tree(
-        s,
-        &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
-        (*s).l_desc.max_code,
-    );
-    scan_tree(
-        s,
-        &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
-        (*s).d_desc.max_code,
-    );
-    build_tree(&mut *s, crate::src::deflate::STATIC_TREE_BIT_LENGTH);
+    let s = &mut *s;
+    let l_max_code = s.l_desc.max_code;
+    scan_tree(&mut s.bl_tree, &mut s.dyn_ltree, l_max_code);
+    let d_max_code = s.d_desc.max_code;
+    scan_tree(&mut s.bl_tree, &mut s.dyn_dtree, d_max_code);
+    build_tree(s, crate::src::deflate::STATIC_TREE_BIT_LENGTH);
     max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
     while max_blindex >= 3 as ::core::ffi::c_int {
-        if (*s).bl_tree[bl_order[max_blindex as usize] as usize].dl.len as ::core::ffi::c_int
+        if s.bl_tree[bl_order[max_blindex as usize] as usize].len() as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
         {
             break;
         }
         max_blindex -= 1;
     }
-    (*s).opt_len = (*s).opt_len.wrapping_add(
+    s.opt_len = s.opt_len.wrapping_add(
         (3 as crate::zutil_h::ulg)
             .wrapping_mul(
                 (max_blindex as crate::zutil_h::ulg).wrapping_add(1 as crate::zutil_h::ulg),
