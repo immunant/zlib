@@ -96,6 +96,10 @@ fn subtable_index(entry: code, hold: ::core::ffi::c_ulong) -> usize {
         + (hold & bit_mask(entry.op as ::core::ffi::c_uint) as ::core::ffi::c_ulong) as usize
 }
 
+fn table_index(hold: ::core::ffi::c_ulong, mask: ::core::ffi::c_uint) -> usize {
+    (hold & mask as ::core::ffi::c_ulong) as usize
+}
+
 fn unread_input_state(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -270,7 +274,7 @@ pub unsafe extern "C" fn inflate_fast(
             input_remaining = input_remaining_after_read(input_remaining);
             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh1);
         }
-        here = lcode.wrapping_add((hold & lmask as ::core::ffi::c_ulong) as usize);
+        here = lcode.wrapping_add(table_index(hold, lmask));
         loop {
             op = (*here).bits as ::core::ffi::c_uint;
             (hold, bits) = consume_bits(hold, bits, op);
@@ -306,7 +310,7 @@ pub unsafe extern "C" fn inflate_fast(
                         input_remaining = input_remaining_after_read(input_remaining);
                         (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh5);
                     }
-                    here = dcode.wrapping_add((hold & dmask as ::core::ffi::c_ulong) as usize);
+                    here = dcode.wrapping_add(table_index(hold, dmask));
                     c2rust_current_block_141 = 3217834059723038609;
                     break;
                 }
@@ -588,7 +592,7 @@ mod tests {
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_dist_action, fast_litlen_action, fast_match_uses_window,
         fast_window_distance_is_invalid, input_bytes_needed, input_remaining_after_read, low_bits,
-        output_cursor_after_write, subtable_index, unread_input_state, window_match_start,
+        output_cursor_after_write, subtable_index, table_index, unread_input_state, window_match_start,
         FastDistAction, FastLitLenAction,
     };
 
@@ -676,6 +680,16 @@ mod tests {
             val: ::core::ffi::c_ushort::MAX,
         };
         assert_eq!(subtable_index(entry, ::core::ffi::c_ulong::MAX), 98_302);
+    }
+
+    #[test]
+    fn table_index_selects_only_masked_low_bits() {
+        assert_eq!(table_index(0b1101_1011, 0b1_1111), 27);
+        assert_eq!(table_index(::core::ffi::c_ulong::MAX, 0), 0);
+        assert_eq!(
+            table_index(::core::ffi::c_ulong::MAX, ::core::ffi::c_uint::MAX),
+            ::core::ffi::c_uint::MAX as usize,
+        );
     }
 
     #[test]

@@ -1886,44 +1886,44 @@ pub unsafe extern "C" fn deflate(
         (*strm).adler = 0 as crate::stdlib::uLong;
         let c2rust_fresh0 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh0 as isize) =
+        *(*s).pending_buf.wrapping_add(c2rust_fresh0 as usize) =
             31 as ::core::ffi::c_int as crate::stdlib::Bytef;
         let c2rust_fresh1 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh1 as isize) =
+        *(*s).pending_buf.wrapping_add(c2rust_fresh1 as usize) =
             139 as ::core::ffi::c_int as crate::stdlib::Bytef;
         let c2rust_fresh2 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh2 as isize) =
+        *(*s).pending_buf.wrapping_add(c2rust_fresh2 as usize) =
             8 as ::core::ffi::c_int as crate::stdlib::Bytef;
         if (*s).gzhead.is_null() {
             let c2rust_fresh3 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh3 as isize) =
+            *(*s).pending_buf.wrapping_add(c2rust_fresh3 as usize) =
                 0 as ::core::ffi::c_int as crate::stdlib::Bytef;
             let c2rust_fresh4 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh4 as isize) =
+            *(*s).pending_buf.wrapping_add(c2rust_fresh4 as usize) =
                 0 as ::core::ffi::c_int as crate::stdlib::Bytef;
             let c2rust_fresh5 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh5 as isize) =
+            *(*s).pending_buf.wrapping_add(c2rust_fresh5 as usize) =
                 0 as ::core::ffi::c_int as crate::stdlib::Bytef;
             let c2rust_fresh6 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh6 as isize) =
+            *(*s).pending_buf.wrapping_add(c2rust_fresh6 as usize) =
                 0 as ::core::ffi::c_int as crate::stdlib::Bytef;
             let c2rust_fresh7 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh7 as isize) =
+            *(*s).pending_buf.wrapping_add(c2rust_fresh7 as usize) =
                 0 as ::core::ffi::c_int as crate::stdlib::Bytef;
             let c2rust_fresh8 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh8 as isize) =
+            *(*s).pending_buf.wrapping_add(c2rust_fresh8 as usize) =
                 gzip_default_xfl((*s).level, (*s).strategy);
             let c2rust_fresh9 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh9 as isize) =
+            *(*s).pending_buf.wrapping_add(c2rust_fresh9 as usize) =
                 3 as ::core::ffi::c_int as crate::stdlib::Bytef;
             (*s).status = crate::src::deflate::BUSY_STATE;
             flush_pending(strm);

@@ -1059,19 +1059,29 @@ fn gz_fetch_should_continue(
     have == 0 && (eof == 0 || avail_in != 0)
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct GzSkipProgress {
+    remaining_have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    remaining_skip: crate::stdlib::off64_t,
+    consumed: ::core::ffi::c_uint,
+}
+
 fn gz_skip_progress(
     have: ::core::ffi::c_uint,
     pos: crate::stdlib::off64_t,
     skip: crate::stdlib::off64_t,
     intmax: ::core::ffi::c_uint,
-) -> (
-    ::core::ffi::c_uint,
-    crate::stdlib::off64_t,
-    crate::stdlib::off64_t,
-    ::core::ffi::c_uint,
-) {
+) -> GzSkipProgress {
     let n = gz_skip_len(have, skip, intmax);
     gz_skip_consume_progress(have, pos, skip, n)
+}
+
+fn gz_skip_remaining(
+    skip: crate::stdlib::off64_t,
+    consumed: ::core::ffi::c_uint,
+) -> crate::stdlib::off64_t {
+    skip.wrapping_sub(consumed as crate::stdlib::off64_t)
 }
 
 fn gz_skip_consume_progress(
@@ -1079,18 +1089,13 @@ fn gz_skip_consume_progress(
     pos: crate::stdlib::off64_t,
     skip: crate::stdlib::off64_t,
     n: ::core::ffi::c_uint,
-) -> (
-    ::core::ffi::c_uint,
-    crate::stdlib::off64_t,
-    crate::stdlib::off64_t,
-    ::core::ffi::c_uint,
-) {
-    (
-        have.wrapping_sub(n),
-        gz_cursor_advance(pos, n),
-        skip - n as crate::stdlib::off64_t,
-        n,
-    )
+) -> GzSkipProgress {
+    GzSkipProgress {
+        remaining_have: have.wrapping_sub(n),
+        pos: gz_cursor_advance(pos, n),
+        remaining_skip: gz_skip_remaining(skip, n),
+        consumed: n,
+    }
 }
 
 fn gz_skip_is_limited_by_remaining(
@@ -1140,12 +1145,11 @@ fn gz_skip_should_continue(skip: crate::stdlib::off64_t) -> bool {
 }
 
 fn gz_skip_consume_buffered(state: &mut crate::gzguts_h::gz_state, n: ::core::ffi::c_uint) {
-    let (have, pos, skip, consumed) =
-        gz_skip_consume_progress(state.x.have, state.x.pos, state.skip, n);
-    state.x.have = have;
-    state.x.pos = pos;
-    state.skip = skip;
-    state.x.next = state.x.next.wrapping_add(consumed as usize);
+    let progress = gz_skip_consume_progress(state.x.have, state.x.pos, state.skip, n);
+    state.x.have = progress.remaining_have;
+    state.x.pos = progress.pos;
+    state.skip = progress.remaining_skip;
+    state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
 }
 
 fn gzgets_copy_len(
@@ -2137,14 +2141,36 @@ mod tests {
 
     #[test]
     fn gz_skip_progress_updates_buffered_state_and_cursor() {
-        assert_eq!(gz_skip_progress(10, 42, 3, 5), (7, 45, 0, 3));
+        assert_eq!(
+            gz_skip_progress(10, 42, 3, 5),
+            GzSkipProgress {
+                remaining_have: 7,
+                pos: 45,
+                remaining_skip: 0,
+                consumed: 3,
+            }
+        );
     }
 
     #[test]
     fn gz_skip_progress_wraps_signed_position_at_boundary() {
         assert_eq!(
             gz_skip_progress(1, crate::stdlib::off64_t::MAX, 1, ::core::ffi::c_uint::MAX),
-            (0, crate::stdlib::off64_t::MIN, 0, 1)
+            GzSkipProgress {
+                remaining_have: 0,
+                pos: crate::stdlib::off64_t::MIN,
+                remaining_skip: 0,
+                consumed: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_skip_remaining_preserves_signed_wrapping() {
+        assert_eq!(gz_skip_remaining(3, 1), 2);
+        assert_eq!(
+            gz_skip_remaining(crate::stdlib::off64_t::MIN, 1),
+            crate::stdlib::off64_t::MAX
         );
     }
 
