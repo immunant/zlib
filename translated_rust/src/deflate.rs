@@ -133,7 +133,11 @@ pub struct internal_state {
     pub heap_len: ::core::ffi::c_int,
     pub heap_max: ::core::ffi::c_int,
     pub depth: [crate::zutil_h::uch; 573],
-    pub sym_buf: *mut crate::zutil_h::uchf,
+    /// Byte offset of the symbol triplets within `pending_buf`.
+    ///
+    /// The triplets temporally overlay the pending-byte allocation, so this
+    /// must remain an index rather than an interior raw pointer.
+    pub sym_buf_offset: usize,
     pub lit_bufsize: crate::stdlib::uInt,
     pub sym_next: crate::stdlib::uInt,
     pub sym_end: crate::stdlib::uInt,
@@ -211,7 +215,7 @@ impl internal_state {
             heap_len: 0,
             heap_max: 0,
             depth: [0; 573],
-            sym_buf: ::core::ptr::null_mut(),
+            sym_buf_offset: 0,
             lit_bufsize: 0,
             sym_next: 0,
             sym_end: 0,
@@ -1619,8 +1623,7 @@ pub unsafe extern "C" fn deflateInit2_(
         deflateEnd_ffi(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf =
-        (*s).pending_buf.wrapping_add(pending_layout.symbol_offset) as *mut crate::zutil_h::uchf;
+    (*s).sym_buf_offset = pending_layout.symbol_offset;
     (*s).sym_end = pending_layout.symbol_flush_threshold;
     (*s).level = level;
     (*s).strategy = strategy;
@@ -3704,9 +3707,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         deflateEnd_ffi(dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*ds).sym_buf = (*ds)
-        .pending_buf
-        .wrapping_add(pending_layout.symbol_offset) as *mut crate::zutil_h::uchf;
+    (*ds).sym_buf_offset = pending_layout.symbol_offset;
     return crate::zlib_h::Z_OK;
 }
 fn longest_match_limit(
@@ -4251,6 +4252,7 @@ unsafe extern "C" fn deflate_fast(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
+    let symbol_base = (*s).pending_buf.wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -4281,16 +4283,16 @@ unsafe extern "C" fn deflate_fast(
                 deflate_fast_match_codes((*s).match_length, (*s).strstart, (*s).match_start);
             let c2rust_fresh47 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh47 as isize) =
+            *symbol_base.wrapping_add(c2rust_fresh47 as usize) =
                 dist as crate::zutil_h::uch as crate::zutil_h::uchf;
             let c2rust_fresh48 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh48 as isize) =
+            *symbol_base.wrapping_add(c2rust_fresh48 as usize) =
                 (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
                     as crate::zutil_h::uchf;
             let c2rust_fresh49 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh49 as isize) = len as crate::zutil_h::uchf;
+            *symbol_base.wrapping_add(c2rust_fresh49 as usize) = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
             (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
@@ -4356,9 +4358,9 @@ unsafe extern "C" fn deflate_fast(
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
             let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
             (*s).sym_next = next;
-            *(*s).sym_buf.offset(cursors[0] as isize) = 0 as crate::zutil_h::uchf;
-            *(*s).sym_buf.offset(cursors[1] as isize) = 0 as crate::zutil_h::uchf;
-            *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
+            *symbol_base.wrapping_add(cursors[0] as usize) = 0 as crate::zutil_h::uchf;
+            *symbol_base.wrapping_add(cursors[1] as usize) = 0 as crate::zutil_h::uchf;
+            *symbol_base.wrapping_add(cursors[2] as usize) = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc.value =
                 (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
@@ -4469,6 +4471,7 @@ unsafe extern "C" fn deflate_slow(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
+    let symbol_base = (*s).pending_buf.wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -4524,16 +4527,16 @@ unsafe extern "C" fn deflate_slow(
                 as crate::zutil_h::ush;
             let c2rust_fresh36 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh36 as isize) =
+            *symbol_base.wrapping_add(c2rust_fresh36 as usize) =
                 dist as crate::zutil_h::uch as crate::zutil_h::uchf;
             let c2rust_fresh37 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh37 as isize) =
+            *symbol_base.wrapping_add(c2rust_fresh37 as usize) =
                 (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
                     as crate::zutil_h::uchf;
             let c2rust_fresh38 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh38 as isize) = len as crate::zutil_h::uchf;
+            *symbol_base.wrapping_add(c2rust_fresh38 as usize) = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
             (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
@@ -4614,9 +4617,9 @@ unsafe extern "C" fn deflate_slow(
                 as crate::zutil_h::uch;
             let tally = deflate_literal_tally_plan(cc, (*s).sym_next);
             (*s).sym_next = tally.next_sym;
-            *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
-            *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
-            *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+            *symbol_base.wrapping_add(tally.cursors[0] as usize) = tally.symbol_bytes[0];
+            *symbol_base.wrapping_add(tally.cursors[1] as usize) = tally.symbol_bytes[1];
+            *symbol_base.wrapping_add(tally.cursors[2] as usize) = tally.symbol_bytes[2];
             (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
                 [tally.literal_tree_index]
                 .fc
@@ -4658,9 +4661,9 @@ unsafe extern "C" fn deflate_slow(
             as crate::zutil_h::uch;
         let tally = deflate_literal_tally_plan(cc_0, (*s).sym_next);
         (*s).sym_next = tally.next_sym;
-        *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
-        *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
-        *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+        *symbol_base.wrapping_add(tally.cursors[0] as usize) = tally.symbol_bytes[0];
+        *symbol_base.wrapping_add(tally.cursors[1] as usize) = tally.symbol_bytes[1];
+        *symbol_base.wrapping_add(tally.cursors[2] as usize) = tally.symbol_bytes[2];
         (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
             [tally.literal_tree_index]
             .fc
@@ -4721,6 +4724,7 @@ unsafe fn deflate_rle(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
+    let symbol_base = (*s).pending_buf.wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
@@ -4774,9 +4778,9 @@ unsafe fn deflate_rle(
             DeflateRleTallyPlan::MatchWithoutCount => {
                 let tally = deflate_rle_match_tally_plan((*s).match_length, (*s).sym_next);
                 (*s).sym_next = tally.next_sym;
-                *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
-                *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
-                *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+                *symbol_base.wrapping_add(tally.cursors[0] as usize) = tally.symbol_bytes[0];
+                *symbol_base.wrapping_add(tally.cursors[1] as usize) = tally.symbol_bytes[1];
+                *symbol_base.wrapping_add(tally.cursors[2] as usize) = tally.symbol_bytes[2];
                 (*s).dyn_ltree[tally.length_tree_index].fc.value = (*s).dyn_ltree
                     [tally.length_tree_index]
                     .fc
@@ -4800,9 +4804,9 @@ unsafe fn deflate_rle(
                     *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
                 let tally = deflate_literal_tally_plan(literal, (*s).sym_next);
                 (*s).sym_next = tally.next_sym;
-                *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
-                *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
-                *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+                *symbol_base.wrapping_add(tally.cursors[0] as usize) = tally.symbol_bytes[0];
+                *symbol_base.wrapping_add(tally.cursors[1] as usize) = tally.symbol_bytes[1];
+                *symbol_base.wrapping_add(tally.cursors[2] as usize) = tally.symbol_bytes[2];
                 (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
                     [tally.literal_tree_index]
                     .fc
@@ -5036,7 +5040,7 @@ mod tests {
         assert!(state.window.is_null());
         assert!(state.prev.is_null());
         assert!(state.head.is_null());
-        assert!(state.sym_buf.is_null());
+        assert_eq!(state.sym_buf_offset, 0);
         assert_eq!(state.status, 0);
         assert_eq!(state.pending_out_offset, 0);
         assert_eq!(state.window_size, 0);
