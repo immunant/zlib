@@ -692,6 +692,25 @@ fn inflate_back_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
     }
 }
 
+// Once the allocation has been bound, initializing the rest of an
+// inflateBack state is ordinary reference-bound state setup. Keeping this
+// separate leaves the allocation callback and caller-window binding in
+// `inflateBackInit_`'s narrow implementation boundary.
+fn inflate_back_init_state(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    config: InflateBackStateConfig,
+) {
+    strm.state = state as *mut crate::src::inflate::inflate_state
+        as *mut crate::src::deflate::internal_state;
+    state.dmax = config.dmax;
+    state.wbits = config.wbits;
+    state.wsize = config.wsize;
+    state.wnext = 0;
+    state.whave = 0;
+    state.sane = 1;
+}
+
 pub unsafe fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -722,14 +741,9 @@ pub unsafe fn inflateBackInit_(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    strm_ref.state = state as *mut crate::src::deflate::internal_state;
-    (*state).dmax = config.dmax;
-    (*state).wbits = config.wbits;
-    (*state).wsize = config.wsize;
-    (*state).window = window;
-    (*state).wnext = 0 as ::core::ffi::c_uint;
-    (*state).whave = 0 as ::core::ffi::c_uint;
-    (*state).sane = 1 as ::core::ffi::c_int;
+    let state_ref = &mut *state;
+    state_ref.window = window;
+    inflate_back_init_state(strm_ref, state_ref, config);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackInit_"]
