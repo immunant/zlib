@@ -2483,6 +2483,15 @@ fn longest_match_bytes(
     ::core::cmp::min(best_len as crate::stdlib::uInt, state.lookahead)
 }
 
+fn update_hash(
+    ins_h: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    next: crate::stdlib::Bytef,
+) -> crate::stdlib::uInt {
+    (ins_h << hash_shift ^ next as crate::stdlib::uInt) & hash_mask
+}
+
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
 fn stored_block_length_bytes(output: &mut [crate::stdlib::Bytef], len: ::core::ffi::c_uint) {
@@ -2767,17 +2776,20 @@ unsafe extern "C" fn deflate_fast(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                    (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                ) as isize) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                as crate::src::deflate::IPos;
-            *(*s).head.offset((*s).ins_h as isize) =
-                (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+            let state = &mut *s;
+            let strstart = state.strstart;
+            let next = *state.window.offset(
+                strstart.wrapping_add(
+                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                        as crate::stdlib::uInt,
+                ) as isize,
+            );
+            state.ins_h = update_hash(state.ins_h, state.hash_shift, state.hash_mask, next);
+            let previous = *state.head.offset(state.ins_h as isize);
+            *state.prev.offset((strstart & state.w_mask) as isize) = previous;
+            hash_head = previous as crate::src::deflate::IPos;
+            *state.head.offset(state.ins_h as isize) =
+                strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
         }
         if hash_head != NIL as crate::src::deflate::IPos
             && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
@@ -2800,18 +2812,20 @@ unsafe extern "C" fn deflate_fast(
                 (*s).match_length = (*s).match_length.wrapping_sub(1);
                 loop {
                     (*s).strstart = (*s).strstart.wrapping_add(1);
-                    (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                        ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                            (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int)
+                    let state = &mut *s;
+                    let strstart = state.strstart;
+                    let next = *state.window.offset(
+                        strstart.wrapping_add(
+                            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
                                 as crate::stdlib::uInt,
-                        ) as isize) as crate::stdlib::uInt)
-                        & (*s).hash_mask;
-                    *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                        *(*s).head.offset((*s).ins_h as isize);
-                    hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                        as crate::src::deflate::IPos;
-                    *(*s).head.offset((*s).ins_h as isize) =
-                        (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                        ) as isize,
+                    );
+                    state.ins_h = update_hash(state.ins_h, state.hash_shift, state.hash_mask, next);
+                    let previous = *state.head.offset(state.ins_h as isize);
+                    *state.prev.offset((strstart & state.w_mask) as isize) = previous;
+                    hash_head = previous as crate::src::deflate::IPos;
+                    *state.head.offset(state.ins_h as isize) =
+                        strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
                     (*s).match_length = (*s).match_length.wrapping_sub(1);
                     if (*s).match_length == 0 as crate::stdlib::uInt {
                         break;
@@ -2937,17 +2951,20 @@ unsafe extern "C" fn deflate_slow(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                    (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                ) as isize) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                as crate::src::deflate::IPos;
-            *(*s).head.offset((*s).ins_h as isize) =
-                (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+            let state = &mut *s;
+            let strstart = state.strstart;
+            let next = *state.window.offset(
+                strstart.wrapping_add(
+                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                        as crate::stdlib::uInt,
+                ) as isize,
+            );
+            state.ins_h = update_hash(state.ins_h, state.hash_shift, state.hash_mask, next);
+            let previous = *state.head.offset(state.ins_h as isize);
+            *state.prev.offset((strstart & state.w_mask) as isize) = previous;
+            hash_head = previous as crate::src::deflate::IPos;
+            *state.head.offset(state.ins_h as isize) =
+                strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
         }
         (*s).prev_length = (*s).match_length;
         (*s).prev_match = (*s).match_start as crate::src::deflate::IPos;
@@ -2992,18 +3009,20 @@ unsafe extern "C" fn deflate_slow(
             loop {
                 (*s).strstart = (*s).strstart.wrapping_add(1);
                 if (*s).strstart <= max_insert {
-                    (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                        ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                            (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int)
+                    let state = &mut *s;
+                    let strstart = state.strstart;
+                    let next = *state.window.offset(
+                        strstart.wrapping_add(
+                            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
                                 as crate::stdlib::uInt,
-                        ) as isize) as crate::stdlib::uInt)
-                        & (*s).hash_mask;
-                    *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                        *(*s).head.offset((*s).ins_h as isize);
-                    hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                        as crate::src::deflate::IPos;
-                    *(*s).head.offset((*s).ins_h as isize) =
-                        (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                        ) as isize,
+                    );
+                    state.ins_h = update_hash(state.ins_h, state.hash_shift, state.hash_mask, next);
+                    let previous = *state.head.offset(state.ins_h as isize);
+                    *state.prev.offset((strstart & state.w_mask) as isize) = previous;
+                    hash_head = previous as crate::src::deflate::IPos;
+                    *state.head.offset(state.ins_h as isize) =
+                        strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 }
                 (*s).prev_length = (*s).prev_length.wrapping_sub(1);
                 if (*s).prev_length == 0 as crate::stdlib::uInt {
@@ -3179,10 +3198,10 @@ unsafe extern "C" fn deflate_rle(
             }
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
+        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             && (*s).strstart > 0 as crate::stdlib::uInt
         {
-            let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
             (*s).match_length = rle_match_length(window, (*s).strstart, (*s).lookahead);
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
@@ -3195,8 +3214,7 @@ unsafe extern "C" fn deflate_rle(
             (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
             (*s).match_length = 0 as crate::stdlib::uInt;
         } else {
-            let mut cc: crate::zutil_h::uch =
-                *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
+            let mut cc: crate::zutil_h::uch = window[(*s).strstart as usize] as crate::zutil_h::uch;
             bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
