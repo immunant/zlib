@@ -1221,7 +1221,7 @@ where
     }
 }
 
-fn inflateBack<InputVisitor, OutputVisitor>(
+fn inflate_back_dispatch<InputVisitor, OutputVisitor>(
     invocation: &mut InflateBackInvocation<'_, InputVisitor, OutputVisitor>,
 ) -> (InflateBackDecodeResult, InflateBackDecoderScalars)
 where
@@ -1235,18 +1235,19 @@ where
 // decoder work: after assembling a pointer-free invocation owner, it calls
 // `inflateBack()` and only writes the completed scalar/cursor state back to
 // the caller's stream.
-unsafe fn inflate_back_from_abi(
+pub unsafe extern "C" fn inflateBack(
     strm: &mut crate::zlib_h::z_stream_s,
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    let state_ptr = strm.state as *mut crate::src::inflate::inflate_state;
-    if state_ptr.is_null() {
+    // Keep this state borrow tied to the stream for the entire invocation.
+    // In particular, the borrowed tables and caller window cannot outlive
+    // either the stream association check or the callback-backed state.
+    let Some((strm, raw_state)) = crate::src::inflate::inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let raw_state = &mut *state_ptr;
+    };
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     raw_state.mode = crate::src::inflate::TYPE;
     raw_state.last = 0;
@@ -1311,7 +1312,7 @@ unsafe fn inflate_back_from_abi(
         input,
         output,
     };
-    let (result, final_state) = inflateBack(&mut invocation);
+    let (result, final_state) = inflate_back_dispatch(&mut invocation);
     // Release callback/window borrows before writing either the backing state
     // or the ABI stream.  The completion above carries only scalar state.
     drop(invocation);
@@ -1350,7 +1351,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_back_from_abi(strm, in_0, in_desc, out, out_desc)
+    inflateBack(strm, in_0, in_desc, out, out_desc)
 }
 #[export_name = "inflateBackEnd"]
 
