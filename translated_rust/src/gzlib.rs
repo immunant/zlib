@@ -282,6 +282,46 @@ struct GzResetFields {
     avail_in: crate::stdlib::uInt,
 }
 
+// The reset transition deliberately excludes the ABI cursors themselves.
+// Keeping this view pointer-free lets the state-machine update live in safe
+// code while the opaque-handle projection remains at the boundary.
+struct GzResetState {
+    mode: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    past: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    junk: ::core::ffi::c_int,
+    reset: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+    err: ::core::ffi::c_int,
+    msg: Option<Box<[u8]>>,
+    pos: crate::stdlib::off64_t,
+    avail_in: crate::stdlib::uInt,
+}
+
+impl GzResetState {
+    fn apply_reset(&mut self) {
+        let fields = gz_reset_fields(self.mode);
+        self.have = fields.have;
+        if let Some(read) = fields.read {
+            self.eof = read.eof;
+            self.past = read.past;
+            self.how = read.how;
+            self.junk = read.junk;
+        }
+        if let Some(reset) = fields.reset {
+            self.reset = reset;
+        }
+        self.again = fields.again;
+        self.skip = fields.skip;
+        gz_clear_error(&mut self.msg, &mut self.err);
+        self.pos = fields.pos;
+        self.avail_in = fields.avail_in;
+    }
+}
+
 fn gz_reset_fields(mode: ::core::ffi::c_int) -> GzResetFields {
     let read = mode == crate::gzguts_h::GZ_READ;
     GzResetFields {
@@ -345,22 +385,34 @@ fn parse_gz_open_mode(mode: &[u8]) -> Option<GzOpenMode> {
 
 unsafe fn gz_reset(state: crate::gzguts_h::gz_statep) {
     let state = &mut *state;
-    let fields = gz_reset_fields(state.mode);
-    state.x.have = fields.have;
-    if let Some(read) = fields.read {
-        state.eof = read.eof;
-        state.past = read.past;
-        state.how = read.how;
-        state.junk = read.junk;
-    }
-    if let Some(reset) = fields.reset {
-        state.reset = reset;
-    }
-    state.again = fields.again;
-    state.skip = fields.skip;
-    gz_clear_error(&mut state.msg, &mut state.err);
-    state.x.pos = fields.pos;
-    state.strm.avail_in = fields.avail_in;
+    let mut reset = GzResetState {
+        mode: state.mode,
+        have: state.x.have,
+        eof: state.eof,
+        past: state.past,
+        how: state.how,
+        junk: state.junk,
+        reset: state.reset,
+        again: state.again,
+        skip: state.skip,
+        err: state.err,
+        msg: state.msg.take(),
+        pos: state.x.pos,
+        avail_in: state.strm.avail_in,
+    };
+    reset.apply_reset();
+    state.x.have = reset.have;
+    state.eof = reset.eof;
+    state.past = reset.past;
+    state.how = reset.how;
+    state.junk = reset.junk;
+    state.reset = reset.reset;
+    state.again = reset.again;
+    state.skip = reset.skip;
+    state.err = reset.err;
+    state.msg = reset.msg;
+    state.x.pos = reset.pos;
+    state.strm.avail_in = reset.avail_in;
 }
 
 unsafe extern "C" fn gz_open(
