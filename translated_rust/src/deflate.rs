@@ -359,25 +359,35 @@ fn read_buf_checksum(
     }
 }
 
+fn read_buf_bytes(
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    checksum: crate::stdlib::uLong,
+    wrap: ::core::ffi::c_int,
+) -> crate::stdlib::uLong {
+    output.copy_from_slice(input);
+    read_buf_checksum(checksum, wrap, output)
+}
+
 unsafe extern "C" fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let mut len: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
+    let stream = &mut *strm;
+    let mut len: ::core::ffi::c_uint = stream.avail_in as ::core::ffi::c_uint;
     if len > size {
         len = size;
     }
     if len == 0 as ::core::ffi::c_uint {
         return 0 as ::core::ffi::c_uint;
     }
-    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    let input = ::core::slice::from_raw_parts((*strm).next_in, len as usize);
+    stream.avail_in = stream.avail_in.wrapping_sub(len);
+    let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
     let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
-    output.copy_from_slice(input);
-    (*strm).adler = read_buf_checksum((*strm).adler, (*(*strm).state).wrap, output);
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
-    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
+    stream.adler = read_buf_bytes(input, output, stream.adler, (*stream.state).wrap);
+    stream.next_in = stream.next_in.offset(len as isize);
+    stream.total_in = stream.total_in.wrapping_add(len as crate::stdlib::uLong);
     return len;
 }
 
@@ -1424,18 +1434,29 @@ pub unsafe extern "C" fn deflateBound_ffi(
 ) -> crate::stdlib::uLong {
     deflateBound(strm, sourceLen)
 }
+
+fn put_short_msb_bytes(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    value: crate::stdlib::uInt,
+) {
+    let start = *pending as usize;
+    let Some(bytes) = pending_buf.get_mut(start..start.saturating_add(2)) else {
+        return;
+    };
+    bytes[0] = (value >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
+    bytes[1] = (value & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+    *pending = pending.wrapping_add(2);
+}
+
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,
     mut b: crate::stdlib::uInt,
 ) {
-    let c2rust_fresh33 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh33 as isize) =
-        (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
-    let c2rust_fresh34 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh34 as isize) =
-        (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+    let state = &mut *s;
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    put_short_msb_bytes(pending_buf, &mut state.pending, b);
 }
 
 fn flush_pending_bytes(
