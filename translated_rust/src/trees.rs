@@ -2965,6 +2965,19 @@ unsafe extern "C" fn build_tree(
     }
 }
 
+fn tree_run_limits(
+    curlen: Option<::core::ffi::c_int>,
+    nextlen: ::core::ffi::c_int,
+) -> (::core::ffi::c_int, ::core::ffi::c_int) {
+    if nextlen == 0 as ::core::ffi::c_int {
+        (138 as ::core::ffi::c_int, 3 as ::core::ffi::c_int)
+    } else if curlen == Some(nextlen) {
+        (6 as ::core::ffi::c_int, 3 as ::core::ffi::c_int)
+    } else {
+        (7 as ::core::ffi::c_int, 4 as ::core::ffi::c_int)
+    }
+}
+
 fn scan_tree(
     bl_tree: &mut [crate::src::deflate::ct_data; 39],
     tree: &mut [crate::src::deflate::ct_data],
@@ -2976,12 +2989,7 @@ fn scan_tree(
     let mut nextlen: ::core::ffi::c_int =
         tree[0 as ::core::ffi::c_int as usize].dad as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
-    let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-    if nextlen == 0 as ::core::ffi::c_int {
-        max_count = 138 as ::core::ffi::c_int;
-        min_count = 3 as ::core::ffi::c_int;
-    }
+    let (mut max_count, mut min_count) = tree_run_limits(None, nextlen);
     tree[(max_code + 1 as ::core::ffi::c_int) as usize].dad =
         0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
     n = 0 as ::core::ffi::c_int;
@@ -3008,16 +3016,7 @@ fn scan_tree(
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
-            if nextlen == 0 as ::core::ffi::c_int {
-                max_count = 138 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else if curlen == nextlen {
-                max_count = 6 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else {
-                max_count = 7 as ::core::ffi::c_int;
-                min_count = 4 as ::core::ffi::c_int;
-            }
+            (max_count, min_count) = tree_run_limits(Some(curlen), nextlen);
         }
         n += 1;
     }
@@ -3059,12 +3058,7 @@ unsafe extern "C" fn send_tree(
     let mut nextlen: ::core::ffi::c_int =
         (*tree.offset(0 as ::core::ffi::c_int as isize)).dad as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
-    let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-    if nextlen == 0 as ::core::ffi::c_int {
-        max_count = 138 as ::core::ffi::c_int;
-        min_count = 3 as ::core::ffi::c_int;
-    }
+    let (mut max_count, mut min_count) = tree_run_limits(None, nextlen);
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
@@ -3319,16 +3313,7 @@ unsafe extern "C" fn send_tree(
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
-            if nextlen == 0 as ::core::ffi::c_int {
-                max_count = 138 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else if curlen == nextlen {
-                max_count = 6 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else {
-                max_count = 7 as ::core::ffi::c_int;
-                min_count = 4 as ::core::ffi::c_int;
-            }
+            (max_count, min_count) = tree_run_limits(Some(curlen), nextlen);
         }
         n += 1;
     }

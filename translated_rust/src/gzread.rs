@@ -6,7 +6,7 @@ pub use crate::gzguts_h::COPY;
 pub use crate::gzguts_h::GZIP;
 pub use crate::gzguts_h::GZ_READ;
 pub use crate::gzguts_h::LOOK;
-pub use crate::src::gzlib::gz_consume_buffered_read;
+pub use crate::src::gzlib::gz_consume_buffered_read_cursor;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_io_chunk_limit;
@@ -483,8 +483,9 @@ fn gz_record_decompressed_output(state: &mut crate::gzguts_h::gz_state, had: ::c
 }
 
 fn gz_consume_skip_buffer(state: &mut crate::gzguts_h::gz_state) {
-    let n = gz_consume_buffered_read(&mut state.x.have, &mut state.x.pos, &mut state.skip);
-    state.x.next = state.x.next.wrapping_add(n as usize);
+    let mut skip = state.skip;
+    gz_consume_buffered_read_cursor(state, &mut skip);
+    state.skip = skip;
 }
 
 fn gz_advance_buffered_read_cursor(

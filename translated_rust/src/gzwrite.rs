@@ -273,10 +273,7 @@ unsafe extern "C" fn gz_write(
                 (*state).strm.next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
             }
             have = gz_buffered_input_used(&*state);
-            copy = (*state).size.wrapping_sub(have);
-            if copy as crate::stdlib::z_size_t > len {
-                copy = len as ::core::ffi::c_uint;
-            }
+            copy = gz_buffered_write_copy_len((*state).size, have, len);
             crate::stdlib::memcpy(
                 (*state).in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
@@ -363,6 +360,19 @@ fn gz_buffered_input_used(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_u
     (state.strm.next_in as usize)
         .wrapping_add(state.strm.avail_in as usize)
         .wrapping_sub(state.in_0 as usize) as ::core::ffi::c_uint
+}
+
+fn gz_buffered_write_copy_len(
+    size: crate::stdlib::uInt,
+    used: crate::stdlib::uInt,
+    len: crate::stdlib::z_size_t,
+) -> crate::stdlib::uInt {
+    let space = size.wrapping_sub(used);
+    if space as crate::stdlib::z_size_t > len {
+        len as crate::stdlib::uInt
+    } else {
+        space
+    }
 }
 
 fn gz_pending_output_chunk(

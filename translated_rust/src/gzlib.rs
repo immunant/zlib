@@ -379,6 +379,15 @@ pub fn gz_consume_buffered_read(
     n
 }
 
+pub fn gz_consume_buffered_read_cursor(
+    state: &mut crate::gzguts_h::gz_state,
+    amount: &mut crate::stdlib::off64_t,
+) -> crate::stdlib::uInt {
+    let n = gz_consume_buffered_read(&mut state.x.have, &mut state.x.pos, amount);
+    state.x.next = state.x.next.wrapping_add(n as usize);
+    n
+}
+
 pub fn gz_io_chunk_limit() -> ::core::ffi::c_uint {
     (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint)
@@ -429,7 +438,6 @@ pub unsafe extern "C" fn gzseek64_ffi(
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    let mut n: ::core::ffi::c_uint = 0;
     let mut ret: crate::stdlib::off64_t = 0;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
@@ -494,8 +502,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
         }
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
-        n = gz_consume_buffered_read(&mut (*state).x.have, &mut (*state).x.pos, &mut offset);
-        (*state).x.next = (*state).x.next.offset(n as isize);
+        gz_consume_buffered_read_cursor(&mut *state, &mut offset);
     }
     (*state).skip = offset;
     return (*state).x.pos + offset;
