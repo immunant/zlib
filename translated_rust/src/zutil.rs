@@ -22,13 +22,13 @@ pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
     b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
     b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
 ];
-pub unsafe extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
-    return crate::zlib_h::ZLIB_VERSION.as_ptr();
+pub fn zlibVersion() -> &'static [::core::ffi::c_char; 15] {
+    return &crate::zlib_h::ZLIB_VERSION;
 }
 #[export_name = "zlibVersion"]
 
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
-    zlibVersion()
+    zlibVersion().as_ptr()
 }
 pub fn zlibCompileFlags() -> crate::stdlib::uLong {
     let mut flags: crate::stdlib::uLong = 0;
@@ -106,17 +106,32 @@ pub fn zlibCompileFlags() -> crate::stdlib::uLong {
 pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
     zlibCompileFlags()
 }
-pub unsafe extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    return z_errmsg[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
+fn z_error_index(err: ::core::ffi::c_int) -> usize {
+    return (if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
         9 as ::core::ffi::c_int
     } else {
         2 as ::core::ffi::c_int - err
-    }) as usize];
+    }) as usize;
+}
+
+pub fn zError(err: ::core::ffi::c_int) -> &'static [u8] {
+    return match z_error_index(err) {
+        0 => b"need dictionary\0",
+        1 => b"stream end\0",
+        2 => b"\0",
+        3 => b"file error\0",
+        4 => b"stream error\0",
+        5 => b"data error\0",
+        6 => b"insufficient memory\0",
+        7 => b"buffer error\0",
+        8 => b"incompatible version\0",
+        _ => b"\0",
+    };
 }
 #[export_name = "zError"]
 
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    zError(err)
+    zError(err).as_ptr() as *const ::core::ffi::c_char
 }
 pub unsafe extern "C" fn zcalloc(
     mut _opaque: crate::stdlib::voidpf,
