@@ -466,7 +466,7 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
 }
 
 unsafe fn gz_read(
-    mut state: crate::gzguts_h::gz_statep,
+    state: &mut crate::gzguts_h::gz_state,
     output: &mut [u8],
 ) -> crate::stdlib::z_size_t {
     let mut got: crate::stdlib::z_size_t = 0;
@@ -476,7 +476,9 @@ unsafe fn gz_read(
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0
+        && gz_skip(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
+    {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -487,8 +489,7 @@ unsafe fn gz_read(
             n = len as ::core::ffi::c_uint;
         }
         's_28: {
-            if (*state).x.have != 0 {
-                let state = &mut *state;
+            if state.x.have != 0 {
                 if state.x.have < n {
                     n = state.x.have;
                 }
@@ -515,46 +516,46 @@ unsafe fn gz_read(
                     err = -1 as ::core::ffi::c_int;
                 }
             } else {
-                if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
+                if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                     break 's_140;
                 }
-                if (*state).how == crate::gzguts_h::LOOK
-                    || n < (*state).size << 1 as ::core::ffi::c_int
+                if state.how == crate::gzguts_h::LOOK
+                    || n < state.size << 1 as ::core::ffi::c_int
                 {
-                    if gz_fetch(state) == -1 as ::core::ffi::c_int
-                        && (*state).x.have == 0 as ::core::ffi::c_uint
+                    if gz_fetch(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
+                        && state.x.have == 0 as ::core::ffi::c_uint
                     {
                         err = -1 as ::core::ffi::c_int;
                     }
                     break 's_28;
-                } else if (*state).how == crate::gzguts_h::COPY {
+                } else if state.how == crate::gzguts_h::COPY {
                     let Some(destination) = output.get_mut(got as usize..got as usize + n as usize)
                     else {
                         return got;
                     };
-                    err = gz_load(state, destination, &mut n);
+                    err = gz_load(state as *mut crate::gzguts_h::gz_state, destination, &mut n);
                 } else {
                     let Some(destination) = output.get_mut(got as usize..got as usize + n as usize)
                     else {
                         return got;
                     };
-                    (*state).strm.avail_out = n as crate::stdlib::uInt;
-                    (*state).strm.next_out = destination.as_mut_ptr();
-                    err = gz_decomp(state);
-                    n = (*state).x.have;
-                    (*state).x.have = 0 as ::core::ffi::c_uint;
+                    state.strm.avail_out = n as crate::stdlib::uInt;
+                    state.strm.next_out = destination.as_mut_ptr();
+                    err = gz_decomp(state as *mut crate::gzguts_h::gz_state);
+                    n = state.x.have;
+                    state.x.have = 0 as ::core::ffi::c_uint;
                 }
             }
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             got = got.wrapping_add(n as crate::stdlib::z_size_t);
-            (*state).x.pos += n as crate::stdlib::off64_t;
+            state.x.pos += n as crate::stdlib::off64_t;
         }
         if !(len != 0 && err == 0) {
             break;
         }
     }
-    if len != 0 && (*state).eof != 0 {
-        (*state).past = 1 as ::core::ffi::c_int;
+    if len != 0 && state.eof != 0 {
+        state.past = 1 as ::core::ffi::c_int;
     }
     return got;
 }
