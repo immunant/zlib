@@ -2849,6 +2849,10 @@ fn table_capacity_for_type(type_0: crate::src::inftrees::codetype) -> Option<usi
     }
 }
 
+fn table_inputs_fit(codes: usize, work_len: usize, table_cursor: usize, table_len: usize) -> bool {
+    codes <= u16::MAX as usize && work_len >= codes && table_cursor <= table_len
+}
+
 fn table_usage_fits(type_0: CodeType, used: u32, table_start: usize, table_len: usize) -> bool {
     let within_type_capacity = match type_0 {
         CodeType::Codes => true,
@@ -2908,7 +2912,7 @@ pub fn inflate_table_safe(
     work: &mut [u16],
 ) -> ::core::ffi::c_int {
     let codes = lens.len();
-    if codes > u16::MAX as usize || work.len() < codes || *table_cursor > table.len() {
+    if !table_inputs_fit(codes, work.len(), *table_cursor, table.len()) {
         return 1;
     }
 
@@ -3178,6 +3182,14 @@ mod tests {
     #[test]
     fn table_capacity_for_type_rejects_unknown_table_kinds() {
         assert_eq!(table_capacity_for_type(3), None);
+    }
+
+    #[test]
+    fn table_inputs_fit_enforces_code_workspace_and_cursor_bounds() {
+        assert!(table_inputs_fit(u16::MAX as usize, u16::MAX as usize, 2, 2));
+        assert!(!table_inputs_fit(u16::MAX as usize + 1, usize::MAX, 0, 0));
+        assert!(!table_inputs_fit(2, 1, 0, 0));
+        assert!(!table_inputs_fit(0, 0, 3, 2));
     }
 
     #[test]

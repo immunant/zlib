@@ -290,6 +290,14 @@ fn gz_read_needs_look(
     mode == crate::gzguts_h::GZ_READ && how == crate::gzguts_h::LOOK && have == 0
 }
 
+fn gz_read_has_pending_skip(skip: crate::stdlib::off64_t) -> bool {
+    skip != 0
+}
+
+fn gzgets_request_has_capacity(len: ::core::ffi::c_int) -> bool {
+    len >= 1
+}
+
 enum GzUngetcBufferState {
     Empty,
     Full,
@@ -1559,6 +1567,20 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_has_pending_skip_requires_nonzero_skip() {
+        assert!(!gz_read_has_pending_skip(0));
+        assert!(gz_read_has_pending_skip(1));
+        assert!(gz_read_has_pending_skip(-1));
+    }
+
+    #[test]
+    fn gzgets_request_has_capacity_requires_space_for_a_terminator() {
+        assert!(!gzgets_request_has_capacity(-1));
+        assert!(!gzgets_request_has_capacity(0));
+        assert!(gzgets_request_has_capacity(1));
+    }
+
+    #[test]
     fn gz_read_marks_past_eof_only_for_unfilled_eof_requests() {
         assert!(gz_read_marks_past_eof(1, 1));
         assert!(!gz_read_marks_past_eof(0, 1));
@@ -1597,7 +1619,7 @@ unsafe extern "C" fn gz_read(
     if gz_read_request_is_empty(len) {
         return 0 as crate::stdlib::z_size_t;
     }
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if gz_read_has_pending_skip((*state).skip) && gz_skip(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -1826,7 +1848,7 @@ pub unsafe extern "C" fn gzungetc(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if gz_read_has_pending_skip((*state).skip) && gz_skip(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if c < 0 as ::core::ffi::c_int {
@@ -1892,7 +1914,7 @@ pub unsafe extern "C" fn gzgets(
     let mut eol: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
+    if file.is_null() || buf.is_null() || !gzgets_request_has_capacity(len) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -1904,7 +1926,7 @@ pub unsafe extern "C" fn gzgets(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if gz_read_has_pending_skip((*state).skip) && gz_skip(state) == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
