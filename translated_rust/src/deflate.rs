@@ -1363,6 +1363,19 @@ struct DeflateBoundGzipHeader {
     hcrc: ::core::ffi::c_int,
 }
 
+// Once a stream has been bound, the bound calculation needs only this
+// value snapshot. Keep the state-only projection out of the raw stream and
+// optional-header adapter below.
+fn deflate_bound_state(state: &crate::src::deflate::deflate_state) -> DeflateBoundState {
+    DeflateBoundState {
+        wrap: state.wrap,
+        strstart: state.strstart,
+        w_bits: state.w_bits,
+        hash_bits: state.hash_bits,
+        level: state.level,
+    }
+}
+
 fn deflate_bound_z(
     source_len: crate::stdlib::z_size_t,
     state: Option<DeflateBoundState>,
@@ -1485,6 +1498,17 @@ fn deflate_bound_gzip_header(
     }
 }
 
+// The numeric bound is defined solely by a bound deflater state and its
+// already-decoded gzip-header lengths. The raw adapter retains the C-pointer
+// conversions needed to obtain those inputs.
+fn deflate_bound_from_state(
+    source_len: crate::stdlib::z_size_t,
+    state: Option<&crate::src::deflate::deflate_state>,
+    gzip_header: Option<DeflateBoundGzipHeader>,
+) -> crate::stdlib::z_size_t {
+    deflate_bound_z(source_len, state.map(deflate_bound_state), gzip_header)
+}
+
 pub unsafe extern "C" fn deflateBound_z(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
@@ -1513,18 +1537,9 @@ pub unsafe extern "C" fn deflateBound_z(
             };
             Some(deflate_bound_gzip_header(header, name, comment))
         };
-        (
-            Some(DeflateBoundState {
-                wrap: state.wrap,
-                strstart: state.strstart,
-                w_bits: state.w_bits,
-                hash_bits: state.hash_bits,
-                level: state.level,
-            }),
-            gzip_header,
-        )
+        (Some(state), gzip_header)
     };
-    deflate_bound_z(sourceLen, state, gzip_header)
+    deflate_bound_from_state(sourceLen, state, gzip_header)
 }
 #[export_name = "deflateBound_z"]
 
