@@ -1820,6 +1820,19 @@ fn write_gzip_header_fields(
     state.pending = state.pending.wrapping_add(len as crate::zutil_h::ulg);
 }
 
+// The optional gzip header CRC is a fixed little-endian trailer. Serialize it
+// through the bound pending slice, keeping the state-machine branch free of
+// raw pending-buffer cursor writes.
+fn write_gzip_header_crc(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    checksum: crate::stdlib::uLong,
+) {
+    let pending = state.pending as usize;
+    pending_buf[pending..pending + 2].copy_from_slice(&(checksum as u16).to_le_bytes());
+    state.pending = state.pending.wrapping_add(2);
+}
+
 fn write_gzip_trailer(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -2296,15 +2309,13 @@ pub unsafe extern "C" fn deflate(
                     return crate::zlib_h::Z_OK;
                 }
             }
-            let c2rust_fresh23 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh23 as isize) =
-                ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-            let c2rust_fresh24 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh24 as isize) =
-                ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
+            let checksum = (*strm).adler;
+            let state = &mut *s;
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            write_gzip_header_crc(state, pending_buf, checksum);
             (*strm).adler = crate::src::crc32::crc32_buffer(0 as crate::stdlib::uLong, None);
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
