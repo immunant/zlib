@@ -20,9 +20,9 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
+pub use crate::src::inflate::inflate_ffi;
 pub use crate::src::inflate::inflateEnd_ffi;
-pub use crate::src::inflate::inflateInit2_;
+pub use crate::src::inflate::inflateInit2__ffi;
 pub use crate::src::inflate::inflateReset_ffi;
 
 pub use crate::stdlib::uInt;
@@ -184,7 +184,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*state).strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         (*state).strm.avail_in = 0 as crate::stdlib::uInt;
         (*state).strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        if crate::src::inflate::inflateInit2_(
+        if crate::src::inflate::inflateInit2__ffi(
             &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
             crate::zlib_h::ZLIB_VERSION.as_ptr(),
@@ -262,7 +262,7 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
             }
             break;
         } else {
-            ret = crate::src::inflate::inflate(
+            ret = crate::src::inflate::inflate_ffi(
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );

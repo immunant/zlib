@@ -1,7 +1,7 @@
 pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::deflate::deflate;
+pub use crate::src::deflate::deflate_ffi;
 pub use crate::src::deflate::deflateEnd_ffi;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
@@ -92,7 +92,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
         if stream.avail_in == 0 as crate::stdlib::uInt {
             stream.avail_in = compress_chunk(&mut sourceLen);
         }
-        err = crate::src::deflate::deflate(
+        err = crate::src::deflate::deflate_ffi(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
             if sourceLen != 0 {
                 crate::zlib_h::Z_NO_FLUSH

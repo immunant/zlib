@@ -16,7 +16,7 @@ pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
-pub use crate::src::deflate::deflate;
+pub use crate::src::deflate::deflate_ffi;
 pub use crate::src::deflate::deflateEnd_ffi;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflateReset_ffi;
@@ -198,7 +198,7 @@ unsafe extern "C" fn gz_comp(
             }
         }
         have = (*strm).avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
+        ret = crate::src::deflate::deflate_ffi(strm as *mut crate::zlib_h::z_stream_s, flush);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,

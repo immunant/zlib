@@ -2,7 +2,7 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
+pub use crate::src::inflate::inflate_ffi;
 pub use crate::src::inflate::inflateEnd_ffi;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -97,7 +97,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         if stream.avail_in == 0 as crate::stdlib::uInt {
             stream.avail_in = uncompress_chunk(&mut len);
         }
-        err = crate::src::inflate::inflate(
+        err = crate::src::inflate::inflate_ffi(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
             crate::zlib_h::Z_NO_FLUSH,
         );

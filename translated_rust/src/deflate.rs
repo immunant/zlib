@@ -1190,7 +1190,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if deflate_params_needs_flush(&*s, level, strategy) {
-        let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
+        let mut err: ::core::ffi::c_int = deflate_ffi(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
@@ -1433,7 +1433,8 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         (*s).pending_out = (*s).pending_buf;
     }
 }
-pub unsafe extern "C" fn deflate(
+#[export_name = "deflate"]
+pub unsafe extern "C" fn deflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -1978,14 +1979,6 @@ pub unsafe extern "C" fn deflate(
     } else {
         crate::zlib_h::Z_STREAM_END
     };
-}
-#[export_name = "deflate"]
-
-pub unsafe extern "C" fn deflate_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    deflate(strm, flush)
 }
 #[export_name = "deflateEnd"]
 
