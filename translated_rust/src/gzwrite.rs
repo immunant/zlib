@@ -636,7 +636,8 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     (*state).strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
-pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzclose_w"]
+pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
@@ -673,9 +674,4 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     }
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
     return ret;
-}
-#[export_name = "gzclose_w"]
-
-pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_w(file)
 }
