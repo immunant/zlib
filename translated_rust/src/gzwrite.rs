@@ -814,12 +814,12 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     let deflate_state = (state.strm.state as *mut crate::src::deflate::deflate_state)
         .as_mut()
         .map(|deflate_state| {
-            let hash_tables = if deflate_state.head.is_null() || deflate_state.prev.is_null() {
+            let hash_tables = if deflate_state.head.is_none() || deflate_state.prev.is_null() {
                 None
             } else {
                 Some((
                     ::core::slice::from_raw_parts_mut(
-                        deflate_state.head,
+                        deflate_state.head.expect("checked non-null head").as_ptr(),
                         deflate_state.hash_size as usize,
                     ),
                     ::core::slice::from_raw_parts_mut(

@@ -125,7 +125,10 @@ pub struct internal_state {
     pub window: *mut crate::stdlib::Bytef,
     pub window_size: crate::zutil_h::ulg,
     pub prev: *mut crate::src::deflate::Posf,
-    pub head: *mut crate::src::deflate::Posf,
+    // Nullable opaque allocation handle.  Only the callback-storage adapter
+    // turns it into a borrowed slice; implementation state never stores a
+    // raw pointer for this workspace.
+    pub head: Option<::core::ptr::NonNull<crate::src::deflate::Posf>>,
     pub ins_h: crate::stdlib::uInt,
     pub hash_size: crate::stdlib::uInt,
     pub hash_bits: crate::stdlib::uInt,
@@ -267,7 +270,7 @@ impl DeflateOwnedStorage {
         }
         state.window = self.window.as_mut_ptr();
         state.prev = self.prev.as_mut_ptr();
-        state.head = self.head.as_mut_ptr();
+        state.head = ::core::ptr::NonNull::new(self.head.as_mut_ptr());
         state.pending_buf = self.pending_buf.as_mut_ptr();
         true
     }
@@ -368,7 +371,7 @@ impl DeflateCopyLayout {
         let pending_capacity = usize::try_from(storage.pending_bytes()).ok()?;
         if state.window.is_null()
             || state.prev.is_null()
-            || state.head.is_null()
+            || state.head.is_none()
             || state.pending_buf.is_null()
             || usize::try_from(state.window_size).ok()? != window_capacity
             || usize::try_from(state.pending_buf_size).ok()? != pending_capacity
@@ -790,10 +793,13 @@ fn with_callback_deflate_storage<R>(
     }
     let head = if matches!(need, CallbackDeflateStorageNeed::PendingOnly) {
         None
+    } else if let Some(head) = state.head {
+        let mut head = ::core::ptr::NonNull::slice_from_raw_parts(head, state.hash_size as usize);
+        // The callback allocation was validated for this exact table size
+        // before this type-specific borrowing boundary.
+        Some(unsafe { head.as_mut() })
     } else {
-        (!state.head.is_null()).then(|| unsafe {
-            ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
-        })
+        None
     };
     let (window, prev) = match need {
         CallbackDeflateStorageNeed::HeadOnly | CallbackDeflateStorageNeed::PendingOnly => {
@@ -1133,7 +1139,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
         window: ::core::ptr::null_mut(),
         window_size: 0,
         prev: ::core::ptr::null_mut(),
-        head: ::core::ptr::null_mut(),
+        head: None,
         ins_h: 0,
         hash_size: 0,
         hash_bits: 0,
@@ -1251,12 +1257,13 @@ fn configure_allocated_deflate_state(
             storage.window_items,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
-        state.head = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            storage.hash_items,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
+        state.head =
+            ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                strm.opaque,
+                storage.hash_items,
+                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+            ) as *mut crate::src::deflate::Posf);
         state.pending_buf = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
@@ -1266,7 +1273,7 @@ fn configure_allocated_deflate_state(
     }
     if state.window.is_null()
         || state.prev.is_null()
-        || state.head.is_null()
+        || state.head.is_none()
         || state.pending_buf.is_null()
     {
         return Err(crate::zlib_h::Z_MEM_ERROR);
@@ -1619,12 +1626,15 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     if !deflate_stream_state_valid(Some(strm), Some(state)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.window.is_null() || state.head.is_null() || state.prev.is_null() {
+    if state.window.is_null() || state.head.is_none() || state.prev.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let dictionary = ::core::slice::from_raw_parts(dictionary, dictLength as usize);
     let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    let head = ::core::slice::from_raw_parts_mut(
+        state.head.expect("checked non-null head").as_ptr(),
+        state.hash_size as usize,
+    );
     let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
     deflate_set_dictionary(strm, state, dictionary, window, head, prev)
 }
@@ -1862,7 +1872,7 @@ pub(crate) fn deflate_reset_state(
     let Some(state) = state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !deflate_stream_state_valid(Some(stream), Some(state)) || state.head.is_null() {
+    if !deflate_stream_state_valid(Some(stream), Some(state)) || state.head.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // Fully default-allocated streams retain their hash table in an owned
@@ -2314,11 +2324,14 @@ pub unsafe extern "C" fn deflateParams_ffi(
             strm.avail_out as usize,
         ))
     };
-    let hash_tables = if state.head.is_null() || state.prev.is_null() {
+    let hash_tables = if state.head.is_none() || state.prev.is_null() {
         None
     } else {
         Some((
-            ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize),
+            ::core::slice::from_raw_parts_mut(
+                state.head.expect("checked non-null head").as_ptr(),
+                state.hash_size as usize,
+            ),
             ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize),
         ))
     };
@@ -3761,7 +3774,10 @@ fn deflate_end(
     } else {
         [
             state.pending_buf as crate::stdlib::voidpf,
-            state.head as crate::stdlib::voidpf,
+            match state.head {
+                Some(head) => head.cast().as_ptr(),
+                None => ::core::ptr::null_mut(),
+            },
             state.prev as crate::stdlib::voidpf,
             state.window as crate::stdlib::voidpf,
             stream.state as crate::stdlib::voidpf,
@@ -4003,7 +4019,7 @@ pub fn deflateCopy(
                     // cannot make its failure path free source-owned storage.
                     dest_state.window = ::core::ptr::null_mut();
                     dest_state.prev = ::core::ptr::null_mut();
-                    dest_state.head = ::core::ptr::null_mut();
+                    dest_state.head = None;
                     dest_state.pending_buf = ::core::ptr::null_mut();
                     deflateEnd(dest_stream);
                     return crate::zlib_h::Z_MEM_ERROR;
@@ -4024,12 +4040,15 @@ pub fn deflateCopy(
                 callback_copy_plan.prev.items,
                 callback_copy_plan.prev.item_size,
             ) as *mut crate::src::deflate::Posf;
-            dest_state.head = Some(dest_stream.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
+            dest_state.head = ::core::ptr::NonNull::new(Some(
+                dest_stream.zalloc.expect("non-null function pointer"),
+            )
+            .expect("non-null function pointer")(
                 dest_stream.opaque,
                 callback_copy_plan.head.items,
                 callback_copy_plan.head.item_size,
-            ) as *mut crate::src::deflate::Posf;
+            )
+                as *mut crate::src::deflate::Posf);
             dest_state.pending_buf = Some(dest_stream.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 dest_stream.opaque,
@@ -4039,7 +4058,7 @@ pub fn deflateCopy(
                 as *mut crate::stdlib::Bytef;
             if dest_state.window.is_null()
                 || dest_state.prev.is_null()
-                || dest_state.head.is_null()
+                || dest_state.head.is_none()
                 || dest_state.pending_buf.is_null()
             {
                 deflateEnd(dest_stream);
