@@ -119,15 +119,14 @@ pub mod zlib_h {
     };
 
     pub type alloc_func = Option<
-        unsafe extern "C" fn(
+        extern "C" fn(
             crate::stdlib::voidpf,
             crate::stdlib::uInt,
             crate::stdlib::uInt,
         ) -> crate::stdlib::voidpf,
     >;
 
-    pub type free_func =
-        Option<unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
+    pub type free_func = Option<extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 
@@ -253,7 +252,7 @@ pub mod zlib_h {
     }
 }
 pub mod stdlib {
-    extern "C" {
+    unsafe extern "C" {
         pub fn __errno_location() -> *mut ::core::ffi::c_int;
         pub fn fcntl(
             __fd: ::core::ffi::c_int,
@@ -272,14 +271,14 @@ pub mod stdlib {
             __format: *const ::core::ffi::c_char,
             ...
         ) -> ::core::ffi::c_int;
-        pub fn malloc(__size: crate::__stddef_size_t_h::size_t) -> *mut ::core::ffi::c_void;
+        pub safe fn malloc(__size: crate::__stddef_size_t_h::size_t) -> *mut ::core::ffi::c_void;
 
-        pub fn calloc(
+        pub safe fn calloc(
             __nmemb: crate::__stddef_size_t_h::size_t,
             __size: crate::__stddef_size_t_h::size_t,
         ) -> *mut ::core::ffi::c_void;
 
-        pub fn free(__ptr: *mut ::core::ffi::c_void);
+        pub safe fn free(__ptr: *mut ::core::ffi::c_void);
         pub fn memcpy(
             __dest: *mut ::core::ffi::c_void,
             __src: *const ::core::ffi::c_void,
