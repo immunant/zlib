@@ -219,30 +219,6 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
-unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let strm_ref = &*strm;
-    if strm_ref.zalloc.is_none() || strm_ref.zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let state = &*state;
-    if state.stream_identity != strm.addr()
-        || (state.mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || state.mode as ::core::ffi::c_uint
-            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        return 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
-}
-
 // Keep the state projection tied to the exclusive stream borrow.  Callers
 // first validate the raw ABI pointer with `as_mut()` and then use this helper
 // for the association check, so no projected state reference can outlive the
@@ -715,17 +691,19 @@ pub unsafe extern "C" fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if inflateStateCheck(strm) != 0
-        || (*strm).next_out.is_null()
-        || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some((strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if strm.next_out.is_null()
+        || strm.next_in.is_null() && strm.avail_in != 0 as crate::stdlib::uInt
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // The ABI state and stream have now passed their association and cursor
-    // checks. Keep the raw projection at this boundary; the decoder below
-    // works through ordinary Rust references.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    // checks; the decoder below works through ordinary Rust references.
     // Header registration belongs to this stream call. Project it once with
     // that scope so the decoder mutates a checked Rust reference rather than
     // repeatedly recovering it from the retained boundary handle.
@@ -2496,14 +2474,15 @@ pub unsafe extern "C" fn inflateGetDictionary(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
     // Keep the opaque-state projection scoped to the stream borrow.  The
     // caller output remains the only raw cursor below; the history copy is
     // wholly slice-based.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     if state.whave != 0 && !dictionary.is_null() {
         // The caller dictionary buffer and internal history allocation are
         // distinct, as required by the translated C memcpy operations. Form
@@ -2535,15 +2514,14 @@ pub unsafe extern "C" fn inflateSetDictionary(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut dictid: ::core::ffi::c_ulong = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let state = &mut *state;
+    };
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let dictionary = if dictLength == 0 {
         &[]
     } else {
@@ -2594,16 +2572,16 @@ pub unsafe extern "C" fn inflateGetHeader(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if state.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    (*state).head = ::core::ptr::NonNull::new(head);
+    state.head = ::core::ptr::NonNull::new(head);
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
@@ -2687,11 +2665,12 @@ fn inflate_sync_core(
 }
 
 pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm_ref) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let strm_ref = &mut *strm;
-    let state_ptr = strm_ref.state as *mut crate::src::inflate::inflate_state;
+    };
+    let Some((strm_ref, state)) = inflate_stream_and_state(strm_ref) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let input_len = strm_ref.avail_in as usize;
     let input = if input_len == 0 {
         &[][..]
@@ -2699,7 +2678,6 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
         ::core::slice::from_raw_parts(strm_ref.next_in, input_len)
     };
     let (flags, in_0, out) = {
-        let state = &mut *state_ptr;
         let sync_state = InflateSyncState {
             mode: state.mode,
             hold: state.hold,
@@ -2730,7 +2708,7 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     inflateReset(strm);
     strm_ref.total_in = in_0;
     strm_ref.total_out = out;
-    let state = &mut *state_ptr;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
     state.flags = flags;
     state.mode = crate::src::inflate::TYPE;
     return crate::zlib_h::Z_OK;
@@ -2772,102 +2750,110 @@ pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(source) != 0 || dest.is_null() {
+    if dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // `inflateStateCheck()` established the source state association.  C's
-    // API requires a distinct destination stream, so these scoped views do
-    // not alias.
     let dest_identity = dest.addr();
-    let source = &*source;
-    let dest = &mut *dest;
-    let state = &*(source.state as *const crate::src::inflate::inflate_state);
-    let copy = Some(source.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        source.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
-    let Some(copy) = ::core::ptr::NonNull::new(copy) else {
-        return crate::zlib_h::Z_MEM_ERROR;
-    };
-    // The ABI state has already been projected above.  Copy its ordinary
-    // fields directly here so the deep-copy operation does not need a
-    // separate unsafe helper carrying the raw-pointer-bearing state type.
-    let owned_window = match state.owned_window.as_deref() {
-        Some(source_window) => {
-            let Some(mut window) = allocate_inflate_window(source_window.len()) else {
-                Some(source.zfree.expect("non-null function pointer"))
-                    .expect("non-null function pointer")(
-                    source.opaque, copy.as_ptr().cast()
-                );
-                return crate::zlib_h::Z_MEM_ERROR;
-            };
-            window[..state.whave as usize].copy_from_slice(&source_window[..state.whave as usize]);
-            Some(window)
-        }
-        None => None,
-    };
-    let state_copy = inflate_state {
-        stream_identity: dest_identity,
-        mode: state.mode,
-        last: state.last,
-        wrap: state.wrap,
-        havedict: state.havedict,
-        flags: state.flags,
-        dmax: state.dmax,
-        check: state.check,
-        total: state.total,
-        head: state.head,
-        wbits: state.wbits,
-        wsize: state.wsize,
-        whave: state.whave,
-        wnext: state.wnext,
-        window: state.window,
-        owned_window,
-        hold: state.hold,
-        bits: state.bits,
-        length: state.length,
-        offset: state.offset,
-        extra: state.extra,
-        lencode: state.lencode,
-        distcode: state.distcode,
-        lenbits: state.lenbits,
-        distbits: state.distbits,
-        ncode: state.ncode,
-        nlen: state.nlen,
-        ndist: state.ndist,
-        have: state.have,
-        next: state.next,
-        lens: state.lens,
-        work: state.work,
-        codes: core::array::from_fn(|index| {
-            crate::src::inftrees::code::copied_from(&state.codes[index])
-        }),
-        sane: state.sane,
-        back: state.back,
-        was: state.was,
+    // Build the replacement before borrowing the destination.  This retains
+    // C's behavior even for a source/destination alias while all state
+    // access remains scoped to the checked source stream.
+    let (copy, state_copy, destination_stream) = {
+        let Some(source) = source.as_mut() else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let Some((source, state)) = inflate_stream_and_state(source) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let copy = Some(source.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            source.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state;
+        let Some(copy) = ::core::ptr::NonNull::new(copy) else {
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        // The ABI state has already been projected above.  Copy its ordinary
+        // fields directly here so the deep-copy operation does not need a
+        // separate unsafe helper carrying the raw-pointer-bearing state type.
+        let owned_window = match state.owned_window.as_deref() {
+            Some(source_window) => {
+                let Some(mut window) = allocate_inflate_window(source_window.len()) else {
+                    Some(source.zfree.expect("non-null function pointer"))
+                        .expect("non-null function pointer")(
+                        source.opaque, copy.as_ptr().cast()
+                    );
+                    return crate::zlib_h::Z_MEM_ERROR;
+                };
+                window[..state.whave as usize]
+                    .copy_from_slice(&source_window[..state.whave as usize]);
+                Some(window)
+            }
+            None => None,
+        };
+        let state_copy = inflate_state {
+            stream_identity: dest_identity,
+            mode: state.mode,
+            last: state.last,
+            wrap: state.wrap,
+            havedict: state.havedict,
+            flags: state.flags,
+            dmax: state.dmax,
+            check: state.check,
+            total: state.total,
+            head: state.head,
+            wbits: state.wbits,
+            wsize: state.wsize,
+            whave: state.whave,
+            wnext: state.wnext,
+            window: state.window,
+            owned_window,
+            hold: state.hold,
+            bits: state.bits,
+            length: state.length,
+            offset: state.offset,
+            extra: state.extra,
+            lencode: state.lencode,
+            distcode: state.distcode,
+            lenbits: state.lenbits,
+            distbits: state.distbits,
+            ncode: state.ncode,
+            nlen: state.nlen,
+            ndist: state.ndist,
+            have: state.have,
+            next: state.next,
+            lens: state.lens,
+            work: state.work,
+            codes: core::array::from_fn(|index| {
+                crate::src::inftrees::code::copied_from(&state.codes[index])
+            }),
+            sane: state.sane,
+            back: state.back,
+            was: state.was,
+        };
+        let destination_stream = crate::zlib_h::z_stream_s {
+            next_in: source.next_in,
+            avail_in: source.avail_in,
+            total_in: source.total_in,
+            next_out: source.next_out,
+            avail_out: source.avail_out,
+            total_out: source.total_out,
+            msg: source.msg,
+            state: copy.as_ptr().cast(),
+            zalloc: source.zalloc,
+            zfree: source.zfree,
+            opaque: source.opaque,
+            data_type: source.data_type,
+            adler: source.adler,
+            reserved: source.reserved,
+        };
+        (copy, state_copy, destination_stream)
     };
     // zalloc() returns uninitialized storage.  Publish a fully initialized
     // state in one write, then mirror the source stream exactly with only its
     // opaque state handle changed.
     copy.as_ptr().write(state_copy);
-    *dest = crate::zlib_h::z_stream_s {
-        next_in: source.next_in,
-        avail_in: source.avail_in,
-        total_in: source.total_in,
-        next_out: source.next_out,
-        avail_out: source.avail_out,
-        total_out: source.total_out,
-        msg: source.msg,
-        state: copy.as_ptr().cast(),
-        zalloc: source.zalloc,
-        zfree: source.zfree,
-        opaque: source.opaque,
-        data_type: source.data_type,
-        adler: source.adler,
-        reserved: source.reserved,
-    };
+    *dest = destination_stream;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateCopy"]
@@ -2888,10 +2874,12 @@ pub unsafe extern "C" fn inflateUndermine(
     mut strm: crate::zlib_h::z_streamp,
     _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    };
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflate_undermine_sane(&mut state.sane)
 }
 #[export_name = "inflateUndermine"]
@@ -2919,10 +2907,12 @@ pub unsafe extern "C" fn inflateValidate(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    };
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflate_validate_wrap(&mut state.wrap, check)
 }
 #[export_name = "inflateValidate"]
@@ -2952,10 +2942,12 @@ fn inflate_mark_value(
 }
 
 pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_long {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
-    }
-    let state = &*((*strm).state as *const crate::src::inflate::inflate_state);
+    };
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
+    };
     inflate_mark_value(state.back, state.mode, state.length, state.was)
 }
 #[export_name = "inflateMark"]
@@ -2973,10 +2965,12 @@ fn inflate_codes_used(next: usize) -> ::core::ffi::c_ulong {
 pub unsafe extern "C" fn inflateCodesUsed(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
-    }
-    let state = &*((*strm).state as *const crate::src::inflate::inflate_state);
+    };
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
+    };
     inflate_codes_used(state.next)
 }
 #[export_name = "inflateCodesUsed"]
