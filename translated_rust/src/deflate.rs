@@ -2356,46 +2356,65 @@ pub unsafe extern "C" fn deflatePrime_ffi(
 // in a slice/scalar core so the raw allocation views stay at the caller's
 // boundary.  `tables` is present exactly for the level-zero match history
 // case that needs it; the caller establishes those bounded views first.
-fn update_deflate_parameters(
-    current_level: &mut ::core::ffi::c_int,
-    current_strategy: &mut ::core::ffi::c_int,
-    matches: &mut crate::stdlib::uInt,
-    slid: &mut ::core::ffi::c_int,
-    max_lazy_match: &mut crate::stdlib::uInt,
-    good_match: &mut crate::stdlib::uInt,
-    nice_match: &mut ::core::ffi::c_int,
-    max_chain_length: &mut crate::stdlib::uInt,
-    level: ::core::ffi::c_int,
-    strategy: ::core::ffi::c_int,
+// This owner is the pointer-free half of a parameter transition.  The ABI
+// adapter constructs it only after projecting the callback-backed hash
+// tables; the eventual deflate storage owner can construct the same value
+// without reopening the ABI state.
+struct DeflateParameterOwner<'state> {
+    current_level: &'state mut ::core::ffi::c_int,
+    current_strategy: &'state mut ::core::ffi::c_int,
+    matches: &'state mut crate::stdlib::uInt,
+    slid: &'state mut ::core::ffi::c_int,
+    max_lazy_match: &'state mut crate::stdlib::uInt,
+    good_match: &'state mut crate::stdlib::uInt,
+    nice_match: &'state mut ::core::ffi::c_int,
+    max_chain_length: &'state mut crate::stdlib::uInt,
     w_size: crate::stdlib::uInt,
     tables: Option<(
-        &mut [crate::src::deflate::Posf],
-        Option<&mut [crate::src::deflate::Posf]>,
+        &'state mut [crate::src::deflate::Posf],
+        Option<&'state mut [crate::src::deflate::Posf]>,
     )>,
-) {
-    if *current_level != level {
-        if *current_level == 0 && *matches != 0 {
-            let (head, prev) = tables.expect("level-zero matches require hash tables");
-            if *matches == 1 {
-                slide_hash_table(head, w_size);
-                slide_hash_table(
-                    prev.expect("single level-zero match requires previous table"),
-                    w_size,
-                );
-                *slid = 1;
-            } else {
-                clear_hash_table(head);
-                *slid = 0;
+}
+
+impl DeflateParameterOwner<'_> {
+    fn update(self, level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) {
+        let Self {
+            current_level,
+            current_strategy,
+            matches,
+            slid,
+            max_lazy_match,
+            good_match,
+            nice_match,
+            max_chain_length,
+            w_size,
+            tables,
+        } = self;
+        if *current_level != level {
+            if *current_level == 0 && *matches != 0 {
+                let (head, prev) = tables.expect("level-zero matches require hash tables");
+                if *matches == 1 {
+                    slide_hash_table(head, w_size);
+                    slide_hash_table(
+                        prev.expect("single level-zero match requires previous table"),
+                        w_size,
+                    );
+                    *slid = 1;
+                } else {
+                    clear_hash_table(head);
+                    *slid = 0;
+                }
+                *matches = 0;
             }
-            *matches = 0;
+            *current_level = level;
+            *max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
+            *good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
+            *nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
+            *max_chain_length =
+                configuration_table[level as usize].max_chain as crate::stdlib::uInt;
         }
-        *current_level = level;
-        *max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        *good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        *nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        *max_chain_length = configuration_table[level as usize].max_chain as crate::stdlib::uInt;
+        *current_strategy = strategy;
     }
-    *current_strategy = strategy;
 }
 
 pub unsafe extern "C" fn deflateParams(
@@ -2465,20 +2484,19 @@ pub unsafe extern "C" fn deflateParams(
     } else {
         None
     };
-    update_deflate_parameters(
-        &mut state.level,
-        &mut state.strategy,
-        &mut state.matches,
-        &mut state.slid,
-        &mut state.max_lazy_match,
-        &mut state.good_match,
-        &mut state.nice_match,
-        &mut state.max_chain_length,
-        level,
-        strategy,
-        state.w_size,
+    DeflateParameterOwner {
+        current_level: &mut state.level,
+        current_strategy: &mut state.strategy,
+        matches: &mut state.matches,
+        slid: &mut state.slid,
+        max_lazy_match: &mut state.max_lazy_match,
+        good_match: &mut state.good_match,
+        nice_match: &mut state.nice_match,
+        max_chain_length: &mut state.max_chain_length,
+        w_size: state.w_size,
         tables,
-    );
+    }
+    .update(level, strategy);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateParams"]
