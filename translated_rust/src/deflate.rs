@@ -793,14 +793,14 @@ fn fill_window_write_span(
     (end <= window_len).then_some(start..end)
 }
 
-fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+fn fill_window(s: &mut crate::src::deflate::deflate_state) {
     unsafe {
         let mut n: ::core::ffi::c_uint = 0;
         let mut more: ::core::ffi::c_uint = 0;
         // This remains the transitional state/allocator boundary, but adopt the
         // validated state record once.  The bounded slice helpers below continue
         // to own all ordinary buffer manipulation.
-        let state = &mut *s;
+        let state = s;
         let wsize: crate::stdlib::uInt = state.w_size;
         loop {
             let (space, should_slide) =
@@ -1366,7 +1366,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
         strm_ref.avail_in = dictLength;
         strm_ref.next_in = dictionary as *mut crate::stdlib::Bytef;
     }
-    fill_window(s);
+    fill_window(&mut *s);
     while {
         let state_ref = &mut *s;
         state_ref.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -1407,7 +1407,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
         }
-        fill_window(s);
+        fill_window(&mut *s);
     }
     {
         let strm_ref = &mut *strm;
@@ -3072,20 +3072,22 @@ pub fn deflate(
                     && state.status != crate::src::deflate::FINISH_STATE
         };
         if should_compress {
-            let compressor = {
-                let state = &*s;
-                deflate_compressor_plan(state.level, state.strategy)
-            };
-            let Some(compressor) = compressor else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            let mut bstate: block_state = need_more;
-            bstate = match compressor {
-                DeflateCompressor::Stored => deflate_stored(s, flush),
-                DeflateCompressor::Huffman => deflate_huff(s, flush),
-                DeflateCompressor::Rle => deflate_rle(s, flush),
-                DeflateCompressor::Fast => deflate_fast(s, flush),
-                DeflateCompressor::Slow => deflate_slow(s, flush),
+            let mut bstate: block_state = {
+                // Reborrow the state once for both compressor selection and
+                // the selected private block encoder.  The encoders own their
+                // separate transitional buffer lends, so this does not extend
+                // an ABI borrow across a callback-capable operation.
+                let state = &mut *s;
+                let Some(compressor) = deflate_compressor_plan(state.level, state.strategy) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                match compressor {
+                    DeflateCompressor::Stored => deflate_stored(state, flush),
+                    DeflateCompressor::Huffman => deflate_huff(state, flush),
+                    DeflateCompressor::Rle => deflate_rle(state, flush),
+                    DeflateCompressor::Fast => deflate_fast(state, flush),
+                    DeflateCompressor::Slow => deflate_slow(state, flush),
+                }
             };
             if bstate as ::core::ffi::c_uint
                 == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -3943,7 +3945,7 @@ fn stored_block_window_slice(
 }
 
 fn deflate_stored(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // This transitional codec boundary still owns the compatibility-state
@@ -4197,7 +4199,7 @@ fn deflate_stored(
 }
 
 fn deflate_fast(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // The fast loop still needs the legacy state, window, hash, symbol, and
@@ -4505,7 +4507,7 @@ fn deflate_fast(
 }
 
 fn deflate_slow(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // Slow parsing still needs the legacy state, hash-table, symbol-buffer,
@@ -5190,7 +5192,7 @@ fn filtered_match_length(
 }
 
 fn deflate_rle(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // RLE parsing retains the same transitional callback-owned lends as the
@@ -5339,7 +5341,7 @@ fn deflate_rle(
 }
 
 fn deflate_huff(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // The Huffman-only loop still owns transitional raw state, window, and
