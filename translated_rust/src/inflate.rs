@@ -270,6 +270,28 @@ pub(crate) fn inflate_code_length_repeat_fits(
     have.wrapping_add(copy) <= nlen.wrapping_add(ndist)
 }
 
+pub(crate) struct InflateExtraBitsResult {
+    pub(crate) value: ::core::ffi::c_uint,
+    pub(crate) hold: ::core::ffi::c_ulong,
+    pub(crate) bits: ::core::ffi::c_uint,
+}
+
+pub(crate) fn inflate_apply_extra_bits(
+    value: ::core::ffi::c_uint,
+    extra: ::core::ffi::c_uint,
+    mut hold: ::core::ffi::c_ulong,
+    mut bits: ::core::ffi::c_uint,
+) -> InflateExtraBitsResult {
+    let value = value.wrapping_add(
+        hold as ::core::ffi::c_uint
+            & ((1 as ::core::ffi::c_uint) << extra).wrapping_sub(1 as ::core::ffi::c_uint),
+    );
+    hold >>= extra;
+    bits = bits.wrapping_sub(extra);
+
+    InflateExtraBitsResult { value, hold, bits }
+}
+
 pub(crate) fn inflate_has_end_of_block_code(lens: &[::core::ffi::c_ushort]) -> bool {
     lens.get(256 as usize)
         .copied()
@@ -1845,13 +1867,11 @@ pub unsafe extern "C" fn inflate_ffi(
                         hold = hold.wrapping_add((*c2rust_fresh26 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).length = (*state).length.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                    );
-                    hold >>= (*state).extra;
-                    bits = bits.wrapping_sub((*state).extra);
+                    let extra_bits =
+                        inflate_apply_extra_bits((*state).length, (*state).extra, hold, bits);
+                    (*state).length = extra_bits.value;
+                    hold = extra_bits.hold;
+                    bits = extra_bits.bits;
                     (*state).back = ((*state).back as ::core::ffi::c_uint)
                         .wrapping_add((*state).extra)
                         as ::core::ffi::c_int;
@@ -2030,13 +2050,11 @@ pub unsafe extern "C" fn inflate_ffi(
                         hold = hold.wrapping_add((*c2rust_fresh29 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).offset = (*state).offset.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                    );
-                    hold >>= (*state).extra;
-                    bits = bits.wrapping_sub((*state).extra);
+                    let extra_bits =
+                        inflate_apply_extra_bits((*state).offset, (*state).extra, hold, bits);
+                    (*state).offset = extra_bits.value;
+                    hold = extra_bits.hold;
+                    bits = extra_bits.bits;
                     (*state).back = ((*state).back as ::core::ffi::c_uint)
                         .wrapping_add((*state).extra)
                         as ::core::ffi::c_int;

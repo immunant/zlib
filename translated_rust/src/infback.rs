@@ -723,13 +723,15 @@ pub unsafe extern "C" fn inflateBack_ffi(
                         hold = hold.wrapping_add((*c2rust_fresh16 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).length = (*state).length.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
+                    let extra_bits = crate::src::inflate::inflate_apply_extra_bits(
+                        (*state).length,
+                        (*state).extra,
+                        hold,
+                        bits,
                     );
-                    hold >>= (*state).extra;
-                    bits = bits.wrapping_sub((*state).extra);
+                    (*state).length = extra_bits.value;
+                    hold = extra_bits.hold;
+                    bits = extra_bits.bits;
                 }
                 loop {
                     here = *(*state).distcode.offset(
@@ -822,13 +824,15 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                 .wrapping_add((*c2rust_fresh19 as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
-                        (*state).offset = (*state).offset.wrapping_add(
-                            hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint),
+                        let extra_bits = crate::src::inflate::inflate_apply_extra_bits(
+                            (*state).offset,
+                            (*state).extra,
+                            hold,
+                            bits,
                         );
-                        hold >>= (*state).extra;
-                        bits = bits.wrapping_sub((*state).extra);
+                        (*state).offset = extra_bits.value;
+                        hold = extra_bits.hold;
+                        bits = extra_bits.bits;
                     }
                     if (*state).offset
                         > (*state)

@@ -612,9 +612,7 @@ fn deflate_init2_config(
     strategy: ::core::ffi::c_int,
 ) -> Option<DeflateInit2Config> {
     let mut wrap = 1 as ::core::ffi::c_int;
-    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
-        level = 6 as ::core::ffi::c_int;
-    }
+    level = deflate_params_level(level);
     if window_bits < 0 as ::core::ffi::c_int {
         wrap = 0 as ::core::ffi::c_int;
         if window_bits < -15 as ::core::ffi::c_int {
