@@ -1411,6 +1411,49 @@ fn deflate_zlib_header(
     )
 }
 
+fn deflate_gzip_xflags(
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> crate::stdlib::Bytef {
+    if level == 9 as ::core::ffi::c_int {
+        2 as crate::stdlib::Bytef
+    } else if strategy >= 2 as ::core::ffi::c_int || level < 2 as ::core::ffi::c_int {
+        4 as crate::stdlib::Bytef
+    } else {
+        0 as crate::stdlib::Bytef
+    }
+}
+
+fn deflate_gzip_flags(
+    text: ::core::ffi::c_int,
+    hcrc: ::core::ffi::c_int,
+    has_extra: bool,
+    has_name: bool,
+    has_comment: bool,
+) -> crate::stdlib::Bytef {
+    ((if text != 0 {
+        1 as ::core::ffi::c_int
+    } else {
+        0 as ::core::ffi::c_int
+    }) + (if hcrc != 0 {
+        2 as ::core::ffi::c_int
+    } else {
+        0 as ::core::ffi::c_int
+    }) + (if has_extra {
+        4 as ::core::ffi::c_int
+    } else {
+        0 as ::core::ffi::c_int
+    }) + (if has_name {
+        8 as ::core::ffi::c_int
+    } else {
+        0 as ::core::ffi::c_int
+    }) + (if has_comment {
+        16 as ::core::ffi::c_int
+    } else {
+        0 as ::core::ffi::c_int
+    })) as crate::stdlib::Bytef
+}
+
 fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
     flush * 2 as ::core::ffi::c_int
         - if flush > crate::zlib_h::Z_FINISH {
@@ -1710,15 +1753,7 @@ pub unsafe extern "C" fn deflate_ffi(
             let c2rust_fresh8 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh8 as isize) =
-                (if (*s).level == 9 as ::core::ffi::c_int {
-                    2 as ::core::ffi::c_int
-                } else if (*s).strategy >= 2 as ::core::ffi::c_int
-                    || (*s).level < 2 as ::core::ffi::c_int
-                {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) as crate::stdlib::Bytef;
+                deflate_gzip_xflags((*s).level, (*s).strategy);
             let c2rust_fresh9 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh9 as isize) =
@@ -1732,28 +1767,13 @@ pub unsafe extern "C" fn deflate_ffi(
         } else {
             let c2rust_fresh10 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh10 as isize) =
-                ((if (*(*s).gzhead).text != 0 {
-                    1 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).hcrc != 0 {
-                    2 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).extra.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    4 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).name.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    8 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).comment.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    16 as ::core::ffi::c_int
-                })) as crate::stdlib::Bytef;
+            *(*s).pending_buf.offset(c2rust_fresh10 as isize) = deflate_gzip_flags(
+                (*(*s).gzhead).text,
+                (*(*s).gzhead).hcrc,
+                !(*(*s).gzhead).extra.is_null(),
+                !(*(*s).gzhead).name.is_null(),
+                !(*(*s).gzhead).comment.is_null(),
+            );
             let c2rust_fresh11 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh11 as isize) =
@@ -1776,15 +1796,7 @@ pub unsafe extern "C" fn deflate_ffi(
             let c2rust_fresh15 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh15 as isize) =
-                (if (*s).level == 9 as ::core::ffi::c_int {
-                    2 as ::core::ffi::c_int
-                } else if (*s).strategy >= 2 as ::core::ffi::c_int
-                    || (*s).level < 2 as ::core::ffi::c_int
-                {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) as crate::stdlib::Bytef;
+                deflate_gzip_xflags((*s).level, (*s).strategy);
             let c2rust_fresh16 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh16 as isize) =
