@@ -351,6 +351,33 @@ fn dynamic_code_length_repeat_fits(
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct DynamicCodeLengthRepeat {
+    base: ::core::ffi::c_uint,
+    extra_bits: ::core::ffi::c_uint,
+    repeats_previous: bool,
+}
+
+fn dynamic_code_length_repeat_spec(symbol: ::core::ffi::c_ushort) -> DynamicCodeLengthRepeat {
+    match symbol {
+        16 => DynamicCodeLengthRepeat {
+            base: 3,
+            extra_bits: 2,
+            repeats_previous: true,
+        },
+        17 => DynamicCodeLengthRepeat {
+            base: 3,
+            extra_bits: 3,
+            repeats_previous: false,
+        },
+        _ => DynamicCodeLengthRepeat {
+            base: 11,
+            extra_bits: 7,
+            repeats_previous: false,
+        },
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct InflateCopyProgress {
     pub copied: ::core::ffi::c_uint,
     pub remaining_input: ::core::ffi::c_uint,
@@ -1534,97 +1561,43 @@ pub unsafe extern "C" fn inflate(
                         (*state).have = (*state).have.wrapping_add(1);
                         (*state).lens[c2rust_fresh18 as usize] = here.val;
                     } else {
-                        if here.val as ::core::ffi::c_int == 16 as ::core::ffi::c_int {
-                            while bits
-                                < (here.bits as ::core::ffi::c_int + 2 as ::core::ffi::c_int)
-                                    as ::core::ffi::c_uint
-                            {
-                                if have == 0 as ::core::ffi::c_uint {
-                                    break 's_88;
-                                }
-                                have = have.wrapping_sub(1);
-                                let c2rust_fresh19 = next;
-                                next = next.wrapping_add(1);
-                                hold = hold.wrapping_add(
-                                    (*c2rust_fresh19 as ::core::ffi::c_ulong) << bits,
-                                );
-                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                        let repeat = dynamic_code_length_repeat_spec(here.val);
+                        while bits
+                            < (here.bits as ::core::ffi::c_uint).wrapping_add(repeat.extra_bits)
+                        {
+                            if have == 0 as ::core::ffi::c_uint {
+                                break 's_88;
                             }
-                            hold >>= here.bits as ::core::ffi::c_int;
-                            bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                            if (*state).have == 0 as ::core::ffi::c_uint {
-                                (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                    as *const ::core::ffi::c_char
-                                    as *mut ::core::ffi::c_char;
-                                (*state).mode = crate::src::inflate::BAD;
-                                break;
-                            } else {
-                                len = (*state).lens
-                                    [(*state).have.wrapping_sub(1 as ::core::ffi::c_uint) as usize]
-                                    as ::core::ffi::c_uint;
-                                copy = (3 as ::core::ffi::c_uint).wrapping_add(
-                                    hold as ::core::ffi::c_uint
-                                        & ((1 as ::core::ffi::c_uint) << 2 as ::core::ffi::c_int)
-                                            .wrapping_sub(1 as ::core::ffi::c_uint),
-                                );
-                                hold >>= 2 as ::core::ffi::c_int;
-                                bits = bits
-                                    .wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                            }
-                        } else if here.val as ::core::ffi::c_int == 17 as ::core::ffi::c_int {
-                            while bits
-                                < (here.bits as ::core::ffi::c_int + 3 as ::core::ffi::c_int)
-                                    as ::core::ffi::c_uint
-                            {
-                                if have == 0 as ::core::ffi::c_uint {
-                                    break 's_88;
-                                }
-                                have = have.wrapping_sub(1);
-                                let c2rust_fresh20 = next;
-                                next = next.wrapping_add(1);
-                                hold = hold.wrapping_add(
-                                    (*c2rust_fresh20 as ::core::ffi::c_ulong) << bits,
-                                );
-                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                            }
-                            hold >>= here.bits as ::core::ffi::c_int;
-                            bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                            len = 0 as ::core::ffi::c_uint;
-                            copy = (3 as ::core::ffi::c_uint).wrapping_add(
-                                hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint) << 3 as ::core::ffi::c_int)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint),
-                            );
-                            hold >>= 3 as ::core::ffi::c_int;
-                            bits =
-                                bits.wrapping_sub(3 as ::core::ffi::c_int as ::core::ffi::c_uint);
+                            have = have.wrapping_sub(1);
+                            let c2rust_fresh19 = next;
+                            next = next.wrapping_add(1);
+                            hold = hold
+                                .wrapping_add((*c2rust_fresh19 as ::core::ffi::c_ulong) << bits);
+                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                        }
+                        hold >>= here.bits as ::core::ffi::c_int;
+                        bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                        if repeat.repeats_previous && (*state).have == 0 as ::core::ffi::c_uint {
+                            (*strm).msg = b"invalid bit length repeat\0".as_ptr()
+                                as *const ::core::ffi::c_char
+                                as *mut ::core::ffi::c_char;
+                            (*state).mode = crate::src::inflate::BAD;
+                            break;
                         } else {
-                            while bits
-                                < (here.bits as ::core::ffi::c_int + 7 as ::core::ffi::c_int)
+                            len = if repeat.repeats_previous {
+                                (*state).lens
+                                    [(*state).have.wrapping_sub(1 as ::core::ffi::c_uint) as usize]
                                     as ::core::ffi::c_uint
-                            {
-                                if have == 0 as ::core::ffi::c_uint {
-                                    break 's_88;
-                                }
-                                have = have.wrapping_sub(1);
-                                let c2rust_fresh21 = next;
-                                next = next.wrapping_add(1);
-                                hold = hold.wrapping_add(
-                                    (*c2rust_fresh21 as ::core::ffi::c_ulong) << bits,
-                                );
-                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                            }
-                            hold >>= here.bits as ::core::ffi::c_int;
-                            bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                            len = 0 as ::core::ffi::c_uint;
-                            copy = (11 as ::core::ffi::c_uint).wrapping_add(
+                            } else {
+                                0 as ::core::ffi::c_uint
+                            };
+                            copy = repeat.base.wrapping_add(
                                 hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint) << 7 as ::core::ffi::c_int)
+                                    & ((1 as ::core::ffi::c_uint) << repeat.extra_bits)
                                         .wrapping_sub(1 as ::core::ffi::c_uint),
                             );
-                            hold >>= 7 as ::core::ffi::c_int;
-                            bits =
-                                bits.wrapping_sub(7 as ::core::ffi::c_int as ::core::ffi::c_uint);
+                            hold >>= repeat.extra_bits as ::core::ffi::c_int;
+                            bits = bits.wrapping_sub(repeat.extra_bits);
                         }
                         if !dynamic_code_length_repeat_fits(
                             (*state).have,
@@ -3009,24 +2982,25 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
-        dynamic_header_counts, gzip_extra_copy_bounds, inflateSyncPoint_ffi, inflate_block_header,
-        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
-        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
-        inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_gzip_flags,
-        inflate_gzip_flags_error, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
-        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
-        inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
-        inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
-        inflate_output_checksum, inflate_prime_update, inflate_reset2_discards_window,
-        inflate_reset2_params, inflate_should_update_window, inflate_state_check_impl,
-        inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
-        inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
-        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
-        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
-        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, update_window_core, window_allocation_failed,
-        window_allocation_request, window_needs_allocation, window_update_plan, InflateBlockKind,
+        dynamic_code_length_repeat_spec, dynamic_header_counts, gzip_extra_copy_bounds,
+        inflateSyncPoint_ffi, inflate_block_header, inflate_can_use_fast_path,
+        inflate_codes_used_offset_value, inflate_copy_match_from_output, inflate_copy_progress,
+        inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
+        inflate_get_dictionary_result, inflate_gzip_flags, inflate_gzip_flags_error,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name, inflate_header_crc_enabled,
+        inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
+        inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
+        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
+        inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
+        inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
+        inflate_state_is_usable, inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
+        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
+        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
+        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
+        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
+        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
+        update_window_core, window_allocation_failed, window_allocation_request,
+        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
         InflateCopyProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
         InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
         InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
@@ -3590,6 +3564,42 @@ mod tests {
             0,
             0,
         ));
+    }
+
+    #[test]
+    fn dynamic_code_length_repeat_spec_preserves_deflate_repeat_symbols() {
+        assert_eq!(
+            dynamic_code_length_repeat_spec(16),
+            DynamicCodeLengthRepeat {
+                base: 3,
+                extra_bits: 2,
+                repeats_previous: true,
+            }
+        );
+        assert_eq!(
+            dynamic_code_length_repeat_spec(17),
+            DynamicCodeLengthRepeat {
+                base: 3,
+                extra_bits: 3,
+                repeats_previous: false,
+            }
+        );
+        assert_eq!(
+            dynamic_code_length_repeat_spec(18),
+            DynamicCodeLengthRepeat {
+                base: 11,
+                extra_bits: 7,
+                repeats_previous: false,
+            }
+        );
+    }
+
+    #[test]
+    fn dynamic_code_length_repeat_spec_preserves_invalid_symbol_fallback() {
+        assert_eq!(
+            dynamic_code_length_repeat_spec(::core::ffi::c_ushort::MAX),
+            dynamic_code_length_repeat_spec(18)
+        );
     }
 
     #[test]
