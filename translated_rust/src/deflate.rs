@@ -1396,6 +1396,12 @@ pub unsafe fn deflateInit2_(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let storage = initialization.allocation.storage;
+    // This mirrors the ledger stored in the callback-allocated state.  It is
+    // deliberately pointer-free, so it can decide the post-allocation path
+    // without reopening that raw state solely to inspect completion.  The
+    // state copy is still published after every callback for re-entrant
+    // allocator observation.
+    let mut callback_owner = DeflateCallbackStorageOwner::new_state(storage);
     let s = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         stream.opaque,
@@ -1416,7 +1422,7 @@ pub unsafe fn deflateInit2_(
         pending_buf_size: initialization.initial_state.pending_buf_size,
         pending_out: initialization.initial_state.pending_out,
         pending: initialization.initial_state.pending,
-        callback_storage: DeflateCallbackStorageOwner::new_state(storage),
+        callback_storage: callback_owner,
         wrap: initialization.initial_state.wrap,
         gzhead: None,
         gzindex: initialization.initial_state.gzindex,
@@ -1497,8 +1503,9 @@ pub unsafe fn deflateInit2_(
         let allocated = !allocation.is_null();
         // Publish every callback result before requesting the next region:
         // custom allocators are permitted to inspect the stream re-entrantly.
-        // This projection stays at the allocation boundary; the scheduling and
-        // completion accounting above remain pointer-free.
+        // Keep publication at the callback boundary: a custom allocator can
+        // inspect the stream before the next request.  The lifecycle decision
+        // itself remains in the pointer-free owner above.
         let state = &mut *s.as_ptr();
         match slot {
             DeflateStorageSlot::Window => {
@@ -1515,8 +1522,17 @@ pub unsafe fn deflateInit2_(
             }
         }
         state.callback_storage.record_storage(*slot, allocated);
+        callback_owner.record_storage(*slot, allocated);
     });
-    let state = &mut *s.as_ptr();
+    // The same shared projection lends the completed hash table to the reset
+    // core.  Incomplete callback storage has no hash view, allowing the
+    // failure transaction to retain its original FINISH-state-before-free
+    // ordering without another raw state projection.
+    let Some((stream, state, mut callback_storage)) =
+        deflate_stream_and_state(stream, DeflateStorageProjection::Hash)
+    else {
+        unreachable!("freshly published deflate state must remain valid");
+    };
     state.data_type = crate::zlib_h::Z_UNKNOWN;
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = initialization.layout.lit_bufsize;
@@ -1525,7 +1541,7 @@ pub unsafe fn deflateInit2_(
         .byte_len()
         .expect("validated pending allocation geometry")
         as crate::zutil_h::ulg;
-    if !state.callback_storage.is_complete() {
+    if !callback_owner.is_complete() {
         state.status = crate::src::deflate::FINISH_STATE;
         stream.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
@@ -1556,10 +1572,10 @@ pub unsafe fn deflateInit2_(
     stream.total_in = 0;
     stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     stream.data_type = crate::zlib_h::Z_UNKNOWN;
-    let head = ::core::slice::from_raw_parts_mut(
-        state.head.expect("initialized head table").as_ptr(),
-        state.hash_size as usize,
-    );
+    let head = callback_storage
+        .head
+        .take()
+        .expect("complete callback storage has a hash-table view");
     stream.adler = reset_keep_core(
         &mut state.pending,
         &mut state.pending_out,
@@ -1738,13 +1754,20 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         DeflateStorageProjection::Hash => DeflateCallbackStorage {
             window: None,
             prev: None,
-            head: Some(::core::slice::from_raw_parts_mut(
-                state.head.expect("initialized head table").as_ptr(),
-                storage_layout
-                    .head
-                    .element_len::<crate::src::deflate::Posf>()
-                    .expect("validated head allocation geometry"),
-            )),
+            // A stream can be observed by an allocator callback while its
+            // initializer has published the state record but not every
+            // backing allocation.  Keep that incomplete lifecycle as an
+            // absent bounded view; normal full-reset callers still require
+            // the view below their completed-state boundary.
+            head: state.callback_storage.is_complete().then(|| {
+                ::core::slice::from_raw_parts_mut(
+                    state.head.expect("complete callback storage has a hash table").as_ptr(),
+                    storage_layout
+                        .head
+                        .element_len::<crate::src::deflate::Posf>()
+                        .expect("validated head allocation geometry"),
+                )
+            }),
             pending: None,
             cursors: None,
         },
