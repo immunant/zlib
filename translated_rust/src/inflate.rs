@@ -583,6 +583,82 @@ fn inflate_should_update_window(
                 || flush != crate::zlib_h::Z_FINISH)
 }
 
+#[derive(Copy, Clone)]
+struct InflateWindowCopy {
+    dst: ::core::ffi::c_uint,
+    src_back: ::core::ffi::c_uint,
+    len: ::core::ffi::c_uint,
+}
+
+#[derive(Copy, Clone)]
+struct InflateWindowUpdatePlan {
+    first: InflateWindowCopy,
+    second: Option<InflateWindowCopy>,
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+}
+
+fn inflate_window_update_plan(
+    wsize: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    copy: ::core::ffi::c_uint,
+) -> InflateWindowUpdatePlan {
+    if copy >= wsize {
+        return InflateWindowUpdatePlan {
+            first: InflateWindowCopy {
+                dst: 0 as ::core::ffi::c_uint,
+                src_back: wsize,
+                len: wsize,
+            },
+            second: None,
+            wnext: 0 as ::core::ffi::c_uint,
+            whave: wsize,
+        };
+    }
+
+    let mut first_len = wsize.wrapping_sub(wnext);
+    if first_len > copy {
+        first_len = copy;
+    }
+    let remaining = copy.wrapping_sub(first_len);
+    if remaining != 0 {
+        InflateWindowUpdatePlan {
+            first: InflateWindowCopy {
+                dst: wnext,
+                src_back: copy,
+                len: first_len,
+            },
+            second: Some(InflateWindowCopy {
+                dst: 0 as ::core::ffi::c_uint,
+                src_back: remaining,
+                len: remaining,
+            }),
+            wnext: remaining,
+            whave: wsize,
+        }
+    } else {
+        let mut next = wnext.wrapping_add(first_len);
+        if next == wsize {
+            next = 0 as ::core::ffi::c_uint;
+        }
+        InflateWindowUpdatePlan {
+            first: InflateWindowCopy {
+                dst: wnext,
+                src_back: copy,
+                len: first_len,
+            },
+            second: None,
+            wnext: next,
+            whave: if whave < wsize {
+                whave.wrapping_add(first_len)
+            } else {
+                whave
+            },
+        }
+    }
+}
+
 fn inflate_finish_return(
     ret: ::core::ffi::c_int,
     consumed: ::core::ffi::c_uint,
@@ -881,7 +957,6 @@ unsafe fn updatewindow(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut dist: ::core::ffi::c_uint = 0;
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).window.is_null() {
         (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
@@ -899,43 +974,21 @@ unsafe fn updatewindow(
         (*state).wnext = 0 as ::core::ffi::c_uint;
         (*state).whave = 0 as ::core::ffi::c_uint;
     }
-    if copy >= (*state).wsize {
+    let plan = inflate_window_update_plan((*state).wsize, (*state).wnext, (*state).whave, copy);
+    crate::stdlib::memcpy(
+        (*state).window.offset(plan.first.dst as isize) as *mut ::core::ffi::c_void,
+        end.offset(-(plan.first.src_back as isize)) as *const ::core::ffi::c_void,
+        plan.first.len as crate::__stddef_size_t_h::size_t,
+    );
+    if let Some(second) = plan.second {
         crate::stdlib::memcpy(
-            (*state).window as *mut ::core::ffi::c_void,
-            end.offset(-((*state).wsize as isize)) as *const ::core::ffi::c_void,
-            (*state).wsize as crate::__stddef_size_t_h::size_t,
+            (*state).window.offset(second.dst as isize) as *mut ::core::ffi::c_void,
+            end.offset(-(second.src_back as isize)) as *const ::core::ffi::c_void,
+            second.len as crate::__stddef_size_t_h::size_t,
         );
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = (*state).wsize;
-    } else {
-        dist = (*state).wsize.wrapping_sub((*state).wnext);
-        if dist > copy {
-            dist = copy;
-        }
-        crate::stdlib::memcpy(
-            (*state).window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
-            end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-            dist as crate::__stddef_size_t_h::size_t,
-        );
-        copy = copy.wrapping_sub(dist);
-        if copy != 0 {
-            crate::stdlib::memcpy(
-                (*state).window as *mut ::core::ffi::c_void,
-                end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
-            );
-            (*state).wnext = copy;
-            (*state).whave = (*state).wsize;
-        } else {
-            (*state).wnext = (*state).wnext.wrapping_add(dist);
-            if (*state).wnext == (*state).wsize {
-                (*state).wnext = 0 as ::core::ffi::c_uint;
-            }
-            if (*state).whave < (*state).wsize {
-                (*state).whave = (*state).whave.wrapping_add(dist);
-            }
-        }
     }
+    (*state).wnext = plan.wnext;
+    (*state).whave = plan.whave;
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "inflate"]
