@@ -402,6 +402,29 @@ fn gz_skip_buffer_commit_state(
     true
 }
 
+/// Limit a direct copy from already-buffered gzip output to the amount that
+/// is both requested and available.  The raw cursor is advanced separately at
+/// the boundary only after this preflight succeeds.
+fn gz_read_buffer_copy_plan(
+    requested: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    requested.min(have)
+}
+
+/// Commit a preflighted direct buffered read after its raw cursor has moved.
+/// The shared read loop records the logical position for every source path.
+fn gz_read_buffer_copy_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    copied: ::core::ffi::c_uint,
+) -> bool {
+    if copied > state.x.have {
+        return false;
+    }
+    state.x.have = state.x.have.wrapping_sub(copied);
+    true
+}
+
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut n: ::core::ffi::c_uint = 0;
     loop {
@@ -452,16 +475,16 @@ unsafe extern "C" fn gz_read(
         }
         's_28: {
             if (*state).x.have != 0 {
-                if (*state).x.have < n {
-                    n = (*state).x.have;
-                }
+                n = gz_read_buffer_copy_plan(n, (*state).x.have);
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
                     (*state).x.next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
                 (*state).x.next = (*state).x.next.offset(n as isize);
-                (*state).x.have = (*state).x.have.wrapping_sub(n);
+                if !gz_read_buffer_copy_commit_state(&mut *state, n) {
+                    return got;
+                }
                 if (*state).err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
                 }
