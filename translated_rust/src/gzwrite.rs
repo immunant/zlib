@@ -296,29 +296,30 @@ fn gz_write(
     }
     if buf.len() < state.size as crate::stdlib::z_size_t {
         loop {
-            let mut have: ::core::ffi::c_uint = 0;
-            let mut copy: ::core::ffi::c_uint = 0;
             if state.strm.avail_in == 0 as crate::stdlib::uInt {
                 state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
             }
-            have = unsafe {
-                state
-                    .strm
-                    .next_in
-                    .wrapping_add(state.strm.avail_in as usize)
-                    .offset_from(state.in_0) as ::core::ffi::c_uint
+            let have_len = (state.strm.next_in as usize)
+                .wrapping_sub(state.in_0 as usize)
+                .wrapping_add(state.strm.avail_in as usize);
+            let copy_len = (state.size as usize)
+                .wrapping_sub(have_len)
+                .min(buf.len());
+            let in_0 = unsafe {
+                ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
             };
-            copy = state.size.wrapping_sub(have);
-            if copy as crate::stdlib::z_size_t > buf.len() {
-                copy = buf.len() as ::core::ffi::c_uint;
-            }
-            unsafe {
-                crate::stdlib::memcpy(
-                    state.in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
-                    buf.as_ptr() as *const ::core::ffi::c_void,
-                    copy as crate::__stddef_size_t_h::size_t,
+            let Some(dest) = in_0.get_mut(have_len..have_len.wrapping_add(copy_len)) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
                 );
+                return 0 as crate::stdlib::z_size_t;
+            };
+            for (dest, source) in dest.iter_mut().zip(&buf[..copy_len]) {
+                *dest = *source;
             }
+            let copy = copy_len as ::core::ffi::c_uint;
             state.strm.avail_in = state.strm.avail_in.wrapping_add(copy);
             state.x.pos += copy as crate::stdlib::off64_t;
             buf = &buf[copy as usize..];
