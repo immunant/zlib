@@ -577,11 +577,7 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
         return -1 as ::core::ffi::c_int;
     }
     gz_reset_before_error(state_ref);
-    gz_error(
-        state_ref,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    gz_error_clear(state_ref, crate::zlib_h::Z_OK);
     gz_reset_after_error(state_ref);
     return 0 as ::core::ffi::c_int;
 }
@@ -627,11 +623,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
         gz_seek64_prepare_copy_seek(state_ref);
-        gz_error(
-            state_ref,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
+        gz_error_clear(state_ref, crate::zlib_h::Z_OK);
         return gz_seek64_finish_copy_seek(state_ref, offset);
     }
     if offset < 0 as crate::stdlib::off64_t {
@@ -651,11 +643,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
         gz_reset_before_error(state_ref);
-        gz_error(
-            state_ref,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
+        gz_error_clear(state_ref, crate::zlib_h::Z_OK);
         gz_reset_after_error(state_ref);
     }
     return gz_seek64_finish_deferred_skip(state_ref, &mut offset);
@@ -702,11 +690,7 @@ pub unsafe extern "C" fn gzseek_ffi(
             return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
         }
         gz_seek64_prepare_copy_seek(state_ref);
-        gz_error(
-            state_ref,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
+        gz_error_clear(state_ref, crate::zlib_h::Z_OK);
         ret = gz_seek64_finish_copy_seek(state_ref, offset);
         return if ret == ret {
             ret
@@ -731,11 +715,7 @@ pub unsafe extern "C" fn gzseek_ffi(
             return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
         }
         gz_reset_before_error(state_ref);
-        gz_error(
-            state_ref,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
+        gz_error_clear(state_ref, crate::zlib_h::Z_OK);
         gz_reset_after_error(state_ref);
     }
     ret = gz_seek64_finish_deferred_skip(state_ref, &mut offset);
@@ -915,11 +895,7 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
         return;
     }
     gzclearerr(state);
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    gz_error_clear(state, crate::zlib_h::Z_OK);
 }
 
 fn gz_error_message_capacity(
@@ -948,10 +924,10 @@ pub fn gz_error(
         state.x.have = 0 as ::core::ffi::c_uint;
     }
     state.err = err;
-    if msg.is_null() {
+    if err == crate::zlib_h::Z_MEM_ERROR {
         return;
     }
-    if err == crate::zlib_h::Z_MEM_ERROR {
+    if msg.is_null() {
         return;
     }
     let msg_capacity = unsafe {
@@ -977,6 +953,18 @@ pub fn gz_error(
     }
 }
 
+pub fn gz_error_clear(state: &mut crate::gzguts_h::gz_state, err: ::core::ffi::c_int) {
+    gz_error(state, err, ::core::ptr::null::<::core::ffi::c_char>());
+}
+
+pub fn gz_error_static(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    msg: &'static [u8],
+) {
+    gz_error(state, err, msg.as_ptr() as *const ::core::ffi::c_char);
+}
+
 pub(crate) fn gz_error_with_os_error(
     state: &mut crate::gzguts_h::gz_state,
     err: ::core::ffi::c_int,
@@ -985,11 +973,7 @@ pub(crate) fn gz_error_with_os_error(
     let message = ::std::io::Error::from_raw_os_error(errno).to_string();
     match ::std::ffi::CString::new(message) {
         Ok(message) => gz_error(state, err, message.as_ptr()),
-        Err(_) => gz_error(
-            state,
-            err,
-            b"unknown error\0".as_ptr() as *const ::core::ffi::c_char,
-        ),
+        Err(_) => gz_error_static(state, err, b"unknown error\0"),
     }
 }
 
