@@ -523,6 +523,38 @@ impl DeflateCallbackStorageOwner {
         Some(DeflateDictionaryStorage { window, prev, head })
     }
 
+    // Dispatch is the one C4 operation that needs every callback-backed
+    // region.  Consume the call-scoped projection into one complete,
+    // pointer-free view here, after checking both the lifecycle completion
+    // and the immutable callback geometry.  The stream boundary still forms
+    // the raw slices; the dispatch core cannot request a lone buffer.
+    fn dispatch_storage<'storage>(
+        &self,
+        storage: DeflateCallbackStorage<'storage>,
+    ) -> Option<DeflateDispatchStorage<'storage>> {
+        if !(self.window && self.prev && self.head && self.pending) {
+            return None;
+        }
+        let layout = self.storage;
+        let pending_buf = storage.pending?;
+        let window = storage.window?;
+        let prev = storage.prev?;
+        let head = storage.head?;
+        if pending_buf.len() != layout.pending.byte_len()?
+            || window.len() != layout.window.byte_len()?
+            || prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()?
+            || head.len() != layout.head.element_len::<crate::src::deflate::Posf>()?
+        {
+            return None;
+        }
+        Some(DeflateDispatchStorage {
+            pending_buf,
+            window,
+            prev,
+            head,
+        })
+    }
+
     // A deflate copy crosses two independently callback-paired allocation
     // lifecycles.  Verify their immutable request geometry before the ABI
     // boundary performs its bounded raw copies.  The pointer-free copy facade
@@ -4031,10 +4063,7 @@ struct DeflateDispatchStream<'input, 'output> {
 // provenance-carrying allocation handles remain in `internal_state` at the
 // stream adapter.
 struct DeflateDispatchState<'state> {
-    pending_buf: &'state mut [crate::stdlib::Bytef],
-    window: &'state mut [crate::stdlib::Bytef],
-    prev: &'state mut [crate::src::deflate::Posf],
-    head: &'state mut [crate::src::deflate::Posf],
+    storage: DeflateDispatchStorage<'state>,
     status: ::core::ffi::c_int,
     pending_buf_size: crate::zutil_h::ulg,
     pending_out: usize,
@@ -4087,6 +4116,17 @@ struct DeflateDispatchState<'state> {
     bi_used: ::core::ffi::c_int,
     high_water: crate::zutil_h::ulg,
     slid: ::core::ffi::c_int,
+}
+
+// The dispatch state owns this complete call-scoped view rather than four
+// independently optional projections.  It has no callback handle or raw
+// pointer, and can therefore be handed to the pointer-free deflate core as
+// one transaction.
+struct DeflateDispatchStorage<'state> {
+    pending_buf: &'state mut [crate::stdlib::Bytef],
+    window: &'state mut [crate::stdlib::Bytef],
+    prev: &'state mut [crate::src::deflate::Posf],
+    head: &'state mut [crate::src::deflate::Posf],
 }
 
 struct DeflateDispatch<'input, 'output, 'state> {
@@ -4232,7 +4272,7 @@ fn deflate(dispatch: &mut DeflateDispatch<'_, '_, '_>) -> ::core::ffi::c_int {
     let input = strm.input;
     let output = &mut *strm.output;
     let mut output_pos = strm.next_out;
-    let pending_buf = &mut *s.pending_buf;
+    let pending_buf = &mut *s.storage.pending_buf;
     old_flush = s.last_flush;
     s.last_flush = flush;
     if s.pending != 0 as crate::zutil_h::ulg {
@@ -4555,7 +4595,7 @@ fn deflate(dispatch: &mut DeflateDispatch<'_, '_, '_>) -> ::core::ffi::c_int {
             // callback-owned buffers once here, then keep the stored-block
             // policy entirely in the slice-based core.
             let output = &mut output[output_pos..];
-            let window = &mut *s.window;
+            let window = &mut *s.storage.window;
             let (result, input_pos, produced, total_in, total_out, adler) = {
                 let mut stored_stream = DeflateStoredStream {
                     input,
@@ -4622,9 +4662,9 @@ fn deflate(dispatch: &mut DeflateDispatch<'_, '_, '_>) -> ::core::ffi::c_int {
                 }
             };
             let output = &mut output[output_pos..];
-            let window = &mut *s.window;
-            let prev = &mut *s.prev;
-            let head = &mut *s.head;
+            let window = &mut *s.storage.window;
+            let prev = &mut *s.storage.prev;
+            let head = &mut *s.storage.head;
             let (result, progress) = {
                 let mut matched = DeflateFastState {
                     window,
@@ -4778,7 +4818,7 @@ fn deflate(dispatch: &mut DeflateDispatch<'_, '_, '_>) -> ::core::ffi::c_int {
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
                     // `head` has exactly `hash_size` elements from
                     // `deflateInit2_()` or `deflateCopy()`.
-                    let head = &mut *s.head;
+                    let head = &mut *s.storage.head;
                     clear_hash_table(head);
                     s.slid = 0 as ::core::ffi::c_int;
                     if s.lookahead == 0 as crate::stdlib::uInt {
@@ -4885,10 +4925,9 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
         ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
     };
     let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
-    let pending_buf = storage.pending.expect("dispatch pending-buffer projection");
-    let window = storage.window.expect("dispatch window projection");
-    let prev = storage.prev.expect("dispatch prev-table projection");
-    let head = storage.head.expect("dispatch hash-table projection");
+    let Some(storage) = state.callback_storage.dispatch_storage(storage) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let dispatch = DeflateDispatch {
         flush,
         stream: DeflateDispatchStream {
@@ -4905,10 +4944,7 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
             message: None,
         },
         state: DeflateDispatchState {
-            pending_buf,
-            window,
-            prev,
-            head,
+            storage,
             status: state.status,
             pending_buf_size: state.pending_buf_size,
             pending_out: state.pending_out,
