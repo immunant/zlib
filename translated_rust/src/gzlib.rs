@@ -247,6 +247,15 @@ pub(crate) struct GzEmbeddedDeflateCall<'input, 'output> {
     output: GzCodecOutputView<'output>,
 }
 
+// Keep the complete bounded request together with the scalar codec state it
+// will replace.  This is the write-side handoff boundary for a future
+// embedded-deflate owner: its ABI adapter can publish this one object, then
+// return the checked next state without reopening either gzip buffer cursor.
+pub(crate) struct GzEmbeddedDeflateDispatch<'input, 'output> {
+    state: GzEmbeddedDeflateState,
+    call: GzEmbeddedDeflateCall<'input, 'output>,
+}
+
 // Snapshot the scalar result immediately after the temporary ABI stream
 // projection.  Keeping it pointer-free mirrors the inflate-side result owner
 // and avoids a future deflate loop having to inspect advanced raw cursors.
@@ -747,6 +756,38 @@ impl<'input, 'output> GzEmbeddedDeflateCall<'input, 'output> {
             },
             progress,
         ))
+    }
+}
+
+impl<'input, 'output> GzEmbeddedDeflateDispatch<'input, 'output> {
+    pub(crate) fn new(
+        state: GzEmbeddedDeflateState,
+        call: GzEmbeddedDeflateCall<'input, 'output>,
+    ) -> Self {
+        Self { state, call }
+    }
+
+    pub(crate) fn input(&self) -> &'input [u8] {
+        self.call.input()
+    }
+
+    pub(crate) fn input_available(&self) -> crate::stdlib::uInt {
+        self.call.input_available()
+    }
+
+    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
+        self.call.output_available()
+    }
+
+    pub(crate) fn output_mut(&mut self) -> &mut [u8] {
+        self.call.output_mut()
+    }
+
+    pub(crate) fn finish(
+        self,
+        snapshot: GzEmbeddedDeflateResult,
+    ) -> Option<(GzEmbeddedDeflateState, GzEmbeddedDeflateProgress)> {
+        self.call.finish_state(self.state, snapshot)
     }
 }
 

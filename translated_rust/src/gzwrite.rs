@@ -439,17 +439,18 @@ unsafe fn gz_comp(
         else {
             return -1;
         };
-        let Some(mut call) =
+        let Some(call) =
             setup.call_at_output_cursor(input, input_available, output_cursor, output_available)
         else {
             return -1;
         };
+        let mut dispatch = crate::src::gzlib::GzEmbeddedDeflateDispatch::new(codec_state, call);
         let snapshot = {
             let strm = &mut state.strm;
-            strm.next_in = call.input().as_ptr().cast_mut();
-            strm.avail_in = call.input_available();
-            strm.next_out = call.output_mut().as_mut_ptr();
-            strm.avail_out = call.output_available();
+            strm.next_in = dispatch.input().as_ptr().cast_mut();
+            strm.avail_in = dispatch.input_available();
+            strm.next_out = dispatch.output_mut().as_mut_ptr();
+            strm.avail_out = dispatch.output_available();
             let result =
                 crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
             crate::src::gzlib::GzEmbeddedDeflateResult {
@@ -460,7 +461,7 @@ unsafe fn gz_comp(
                 total_out: strm.total_out,
             }
         };
-        let Some((codec_state, snapshot)) = call.finish_state(codec_state, snapshot) else {
+        let Some((codec_state, snapshot)) = dispatch.finish(snapshot) else {
             return -1;
         };
         ret = snapshot.result;
