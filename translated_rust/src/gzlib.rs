@@ -212,8 +212,10 @@ pub unsafe extern "C" fn gzdopen_ffi(
         }
     }
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
-    let path = std::ffi::CString::new(format!("<fd:{fd}>")).unwrap();
-    Box::into_raw(gzopen_with_file(path, settings, file)) as crate::zlib_h::gzFile
+    let Some(state) = gzdopen(file, mode) else {
+        return ::core::ptr::null_mut();
+    };
+    Box::into_raw(state) as crate::zlib_h::gzFile
 }
 /// Set the requested buffer size before any gzip I/O has started.
 pub fn gzbuffer(
