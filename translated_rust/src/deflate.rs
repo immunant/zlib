@@ -5271,22 +5271,40 @@ fn deflate_copy_from_abi(payload: DeflateCopyPayload) -> Option<DeflateCopyPrepa
     prepare_deflate_copy(payload)
 }
 
+// The callback boundary has already validated both complete storage views
+// against their immutable allocation layouts.  Copy only the ranges selected
+// by the pointer-free deep-copy plan, leaving allocation provenance and ABI
+// stream publication at that boundary.
+fn copy_deflate_storage_regions(
+    source: DeflateDispatchStorage<'_>,
+    destination: DeflateDispatchStorage<'_>,
+    layout: &DeflateCopyLayout,
+) {
+    destination.window[..layout.window_bytes]
+        .copy_from_slice(&source.window[..layout.window_bytes]);
+    destination.prev[..layout.prev_entries].copy_from_slice(&source.prev[..layout.prev_entries]);
+    destination.head[..layout.head_entries].copy_from_slice(&source.head[..layout.head_entries]);
+    if let Some(regions) = layout.pending.as_ref() {
+        destination.pending_buf[regions.queued.clone()]
+            .copy_from_slice(&source.pending_buf[regions.queued.clone()]);
+        destination.pending_buf[regions.symbols.clone()]
+            .copy_from_slice(&source.pending_buf[regions.symbols.clone()]);
+    }
+}
+
 // The C ABI still gives us callback-owned allocations and opaque stream
 // pointers.  Keep that projection out of `deflate_copy_from_abi()`: its safe
 // typed-slice core is also the path used by the eventual allocation owner.
 unsafe fn deflate_copy_from_abi_boundary(
     mut dest: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
-    source: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
+    mut source: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
 ) -> ::core::ffi::c_int {
-    let source = source.as_ref();
-    if source.zalloc.is_none() || source.zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(source_state) = source.state else {
+    let source = source.as_mut();
+    let Some((source, ss, source_storage)) =
+        deflate_stream_and_state(source, DeflateStorageProjection::Complete)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let source_state = source_state.cast::<crate::src::deflate::deflate_state>();
-    let ss = &*source_state.as_ptr();
     let dest = dest.as_mut();
     let payload = DeflateCopyPayload {
         data_type: source.data_type,
@@ -5496,52 +5514,27 @@ unsafe fn deflate_copy_from_abi_boundary(
         deflateEnd(::core::ptr::NonNull::from(dest));
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    // The two callback lifecycles now own all allocations.  Validate their
-    // immutable descriptors once, then keep raw storage access at this one
-    // boundary.  The five copies are the original logical deflate-copy
-    // regions; the pointer-free plan supplies every bounded extent and range.
+    // The two callback lifecycles now own all allocations. Validate their
+    // immutable descriptors once before the shared projection lends complete
+    // bounded storage views to the pointer-free copy core.
     assert!(ss
         .callback_storage
         .copy_geometry(&ds.callback_storage, &copy_layout));
-    ::core::ptr::copy_nonoverlapping(
-        ss.window.expect("initialized window").as_ptr(),
-        ds.window.expect("initialized window").as_ptr(),
-        copy_layout.window_bytes,
-    );
-    ::core::ptr::copy_nonoverlapping(
-        ss.prev.expect("initialized prev table").as_ptr(),
-        ds.prev.expect("initialized prev table").as_ptr(),
-        copy_layout.prev_entries,
-    );
-    ::core::ptr::copy_nonoverlapping(
-        ss.head.expect("initialized head table").as_ptr(),
-        ds.head.expect("initialized head table").as_ptr(),
-        copy_layout.head_entries,
-    );
-    if let Some(regions) = copy_layout.pending.as_ref() {
-        ::core::ptr::copy_nonoverlapping(
-            ss.pending_buf
-                .expect("initialized pending buffer")
-                .as_ptr()
-                .wrapping_add(regions.queued.start),
-            ds.pending_buf
-                .expect("initialized pending buffer")
-                .as_ptr()
-                .wrapping_add(regions.queued.start),
-            regions.queued.len(),
-        );
-        ::core::ptr::copy_nonoverlapping(
-            ss.pending_buf
-                .expect("initialized pending buffer")
-                .as_ptr()
-                .wrapping_add(regions.symbols.start),
-            ds.pending_buf
-                .expect("initialized pending buffer")
-                .as_ptr()
-                .wrapping_add(regions.symbols.start),
-            regions.symbols.len(),
-        );
-    }
+    let source_storage = ss
+        .callback_storage
+        .dispatch_storage(source_storage)
+        .expect("complete source copy storage projection");
+    let Some((_dest, ds, destination_storage)) =
+        deflate_stream_and_state(dest, DeflateStorageProjection::Complete)
+    else {
+        deflateEnd(::core::ptr::NonNull::from(dest));
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let destination_storage = ds
+        .callback_storage
+        .dispatch_storage(destination_storage)
+        .expect("complete destination copy storage projection");
+    copy_deflate_storage_regions(source_storage, destination_storage, &copy_layout);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
