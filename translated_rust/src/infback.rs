@@ -454,6 +454,81 @@ struct InflateBackCompletion {
     state: InflateBackDecoderScalars,
 }
 
+// Back-mode's decoder and caller window are both call-scoped, pointer-free
+// resources once the opaque inflate state has been projected. Keep their
+// setup and scalar write-back together in this owner so no decoder operation
+// needs to touch the raw-backed `inflate_state` directly.
+struct InflateBackStateOwner<'a> {
+    normal: &'a mut crate::src::inflate::InflateNormalState,
+    window: &'a mut crate::src::inflate::InflateBackWindow,
+}
+
+impl<'a> InflateBackStateOwner<'a> {
+    fn new(
+        normal: &'a mut crate::src::inflate::InflateNormalState,
+        window: &'a mut crate::src::inflate::InflateBackWindow,
+    ) -> Self {
+        Self { normal, window }
+    }
+
+    fn begin(&mut self) -> Option<(InflateBackDecoderState<'_>, &mut [u8])> {
+        let (normal, back_window) = (&mut *self.normal, &mut *self.window);
+        normal.mode = crate::src::inflate::TYPE;
+        normal.last = 0;
+        normal.whave = 0;
+        let window = back_window
+            .bytes
+            .as_mut()
+            .get_mut(..normal.wsize as usize)?;
+        Some((
+            InflateBackDecoderState {
+                mode: normal.mode,
+                last: normal.last,
+                wsize: normal.wsize,
+                whave: normal.whave,
+                wnext: normal.wnext,
+                length: normal.length,
+                offset: normal.offset,
+                extra: normal.extra,
+                lencode: normal.lencode,
+                distcode: normal.distcode,
+                lenbits: normal.lenbits,
+                distbits: normal.distbits,
+                ncode: normal.ncode,
+                nlen: normal.nlen,
+                ndist: normal.ndist,
+                have: normal.have,
+                next: normal.next,
+                lens: &mut normal.lens,
+                work: &mut normal.work,
+                codes: &mut normal.codes,
+                sane: normal.sane,
+            },
+            window,
+        ))
+    }
+
+    fn commit(&mut self, completion: InflateBackCompletion) -> InflateBackDecodeResult {
+        self.normal.mode = completion.state.mode;
+        self.normal.last = completion.state.last;
+        self.normal.whave = completion.state.whave;
+        self.normal.wnext = completion.state.wnext;
+        self.normal.length = completion.state.length;
+        self.normal.offset = completion.state.offset;
+        self.normal.extra = completion.state.extra;
+        self.normal.lencode = completion.state.lencode;
+        self.normal.distcode = completion.state.distcode;
+        self.normal.lenbits = completion.state.lenbits;
+        self.normal.distbits = completion.state.distbits;
+        self.normal.ncode = completion.state.ncode;
+        self.normal.nlen = completion.state.nlen;
+        self.normal.ndist = completion.state.ndist;
+        self.normal.have = completion.state.have;
+        self.normal.next = completion.state.next;
+        completion.result
+    }
+}
+
 // One callback-back operation owns all decoder-visible borrows.  In
 // particular, this keeps the implementation entry point free of the ABI
 // stream, callback descriptors, and caller-window address: the adapter only
@@ -1259,34 +1334,12 @@ where
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    raw_state.decoder.normal.mode = crate::src::inflate::TYPE;
-    raw_state.decoder.normal.last = 0;
-    raw_state.decoder.normal.whave = 0;
-    let back_window = raw_state.back_window.as_mut().expect("inflateBack window");
-    let window = &mut back_window.bytes.as_mut()[..raw_state.decoder.normal.wsize as usize];
-    let mut state = InflateBackDecoderState {
-        mode: raw_state.decoder.normal.mode,
-        last: raw_state.decoder.normal.last,
-        wsize: raw_state.decoder.normal.wsize,
-        whave: raw_state.decoder.normal.whave,
-        wnext: raw_state.decoder.normal.wnext,
-        length: raw_state.decoder.normal.length,
-        offset: raw_state.decoder.normal.offset,
-        extra: raw_state.decoder.normal.extra,
-        lencode: raw_state.decoder.normal.lencode,
-        distcode: raw_state.decoder.normal.distcode,
-        lenbits: raw_state.decoder.normal.lenbits,
-        distbits: raw_state.decoder.normal.distbits,
-        ncode: raw_state.decoder.normal.ncode,
-        nlen: raw_state.decoder.normal.nlen,
-        ndist: raw_state.decoder.normal.ndist,
-        have: raw_state.decoder.normal.have,
-        next: raw_state.decoder.normal.next,
-        lens: &mut raw_state.decoder.normal.lens,
-        work: &mut raw_state.decoder.normal.work,
-        codes: &mut raw_state.decoder.normal.codes,
-        sane: raw_state.decoder.normal.sane,
-    };
+    let (normal, back_window) = (
+        &mut raw_state.decoder.normal,
+        raw_state.back_window.as_mut().expect("inflateBack window"),
+    );
+    let mut owner = InflateBackStateOwner::new(normal, back_window);
+    let (state, window) = owner.begin().expect("inflateBack window geometry");
     let output = InflateBackOutput::new(window, output_visit);
     let input = InflateBackInput::new(input_visit);
     let mut invocation = InflateBackInvocation {
@@ -1298,26 +1351,11 @@ where
     // Release callback/window borrows before writing either the backing state
     // or the ABI stream.  The completion above carries only scalar state.
     drop(invocation);
-    raw_state.decoder.normal.mode = completion.state.mode;
-    raw_state.decoder.normal.last = completion.state.last;
-    raw_state.decoder.normal.whave = completion.state.whave;
-    raw_state.decoder.normal.wnext = completion.state.wnext;
-    raw_state.decoder.normal.length = completion.state.length;
-    raw_state.decoder.normal.offset = completion.state.offset;
-    raw_state.decoder.normal.extra = completion.state.extra;
-    raw_state.decoder.normal.lencode = completion.state.lencode;
-    raw_state.decoder.normal.distcode = completion.state.distcode;
-    raw_state.decoder.normal.lenbits = completion.state.lenbits;
-    raw_state.decoder.normal.distbits = completion.state.distbits;
-    raw_state.decoder.normal.ncode = completion.state.ncode;
-    raw_state.decoder.normal.nlen = completion.state.nlen;
-    raw_state.decoder.normal.ndist = completion.state.ndist;
-    raw_state.decoder.normal.have = completion.state.have;
-    raw_state.decoder.normal.next = completion.state.next;
-    if let Some(message) = completion.result.message {
+    let result = owner.commit(completion);
+    if let Some(message) = result.message {
         strm.msg = message.as_ptr().cast_mut().cast();
     }
-    completion.result.status
+    result.status
 }
 #[export_name = "inflateBack"]
 
