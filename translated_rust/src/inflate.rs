@@ -1760,27 +1760,85 @@ pub unsafe extern "C" fn inflate(
                                         if have >= 6 as ::core::ffi::c_uint
                                             && left >= 258 as ::core::ffi::c_uint
                                         {
-                                            (*strm).next_out = put as *mut crate::stdlib::Bytef;
-                                            (*strm).avail_out = left as crate::stdlib::uInt;
-                                            (*strm).next_in = next as *mut crate::stdlib::Bytef;
-                                            (*strm).avail_in = have as crate::stdlib::uInt;
-                                            (*state).hold = hold;
-                                            (*state).bits = bits;
-                                            crate::src::inffast::inflate_fast(
-                                                strm as *mut crate::zlib_h::z_stream_s,
-                                                out,
-                                            );
-                                            put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-                                            left = (*strm).avail_out as ::core::ffi::c_uint;
-                                            next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-                                            have = (*strm).avail_in as ::core::ffi::c_uint;
-                                            hold = (*state).hold;
-                                            bits = (*state).bits;
-                                            if (*state).mode as ::core::ffi::c_uint
+                                            // The enclosing decoder already owns bounded views
+                                            // of the current input and output chunks.  Keep the
+                                            // fast handoff within those views instead of
+                                            // republishing cursors through the legacy raw-stream
+                                            // adapter.
+                                            let input_start = in_0.wrapping_sub(have) as usize;
+                                            let input = &input[input_start..];
+                                            let output = &mut output[output_chunk_start
+                                                ..output_chunk_start + out as usize];
+                                            let written = out.wrapping_sub(left) as usize;
+                                            // Keep this short-lived projection local to the
+                                            // legacy state owner; the fast core itself receives
+                                            // no raw state or stream values.
+                                            let state = &mut *state;
+                                            let window = state.window.map(|window| {
+                                                ::core::slice::from_raw_parts(
+                                                    window.as_ptr(),
+                                                    state.wsize as usize,
+                                                )
+                                            });
+                                            let mut fast_state =
+                                                crate::src::inffast::InflateFastState {
+                                                    window,
+                                                    wsize: state.wsize as usize,
+                                                    whave: state.whave as usize,
+                                                    wnext: state.wnext as usize,
+                                                    hold,
+                                                    bits,
+                                                    lcode: state.lencode,
+                                                    dcode: state.distcode,
+                                                    lmask: (1u32 << state.lenbits) - 1,
+                                                    dmask: (1u32 << state.distbits) - 1,
+                                                    codes: &state.codes,
+                                                    sane: state.sane != 0,
+                                                };
+                                            let result =
+                                                crate::src::inffast::inflate_fast_from_views(
+                                                    input,
+                                                    output,
+                                                    written,
+                                                    &mut fast_state,
+                                                );
+                                            next = input.as_ptr().wrapping_add(result.input_used)
+                                                as *mut ::core::ffi::c_uchar;
+                                            have = input.len().wrapping_sub(result.input_used)
+                                                as ::core::ffi::c_uint;
+                                            put = output
+                                                .as_mut_ptr()
+                                                .wrapping_add(result.output_used);
+                                            left = output.len().wrapping_sub(result.output_used)
+                                                as ::core::ffi::c_uint;
+                                            hold = fast_state.hold;
+                                            bits = fast_state.bits;
+                                            match result.exit {
+                                                crate::src::inffast::FastExit::Continue => {}
+                                                crate::src::inffast::FastExit::Type => {
+                                                    state.mode = crate::src::inflate::TYPE;
+                                                }
+                                                crate::src::inffast::FastExit::InvalidDistance => {
+                                                    let strm = &mut *strm;
+                                                    strm.msg = INFLATE_ERROR_MESSAGES[17].as_ptr()
+                                                        as *const ::core::ffi::c_char
+                                                        as *mut ::core::ffi::c_char;
+                                                    state.mode = crate::src::inflate::BAD;
+                                                }
+                                                crate::src::inffast::FastExit::InvalidCode => {
+                                                    let strm = &mut *strm;
+                                                    strm.msg = b"invalid literal/length or distance code\0"
+                                                        .as_ptr()
+                                                        .cast_mut()
+                                                        .cast();
+                                                    state.mode = crate::src::inflate::BAD;
+                                                }
+                                            }
+                                            if state.mode as ::core::ffi::c_uint
                                                 == crate::src::inflate::TYPE as ::core::ffi::c_int
                                                     as ::core::ffi::c_uint
                                             {
-                                                (*state).back = -1 as ::core::ffi::c_int;
+                                                state.back = -1 as ::core::ffi::c_int;
                                             }
                                             continue '_inf_leave;
                                         } else {
