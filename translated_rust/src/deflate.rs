@@ -431,7 +431,10 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
     };
     let consumed = fill_window_bytes(state, stream, window, head, prev, input);
-    stream.next_in = stream.next_in.offset(consumed as isize);
+    // `consumed` is bounded by the input slice above. Advancing the cursor
+    // does not need `offset`'s in-bounds unsafe operation, and wrapping
+    // arithmetic also preserves the permitted null cursor for an empty input.
+    stream.next_in = stream.next_in.wrapping_add(consumed);
 }
 
 fn fill_window_bytes(
