@@ -184,6 +184,11 @@ pub(crate) fn dynamic_header_counts(low_14_bits: ::core::ffi::c_uint) -> Dynamic
     }
 }
 
+fn stored_block_lengths_are_valid(hold: crate::stdlib::uLong) -> bool {
+    hold & 0xffff as crate::stdlib::uLong
+        == hold >> 16 as ::core::ffi::c_int ^ 0xffff as crate::stdlib::uLong
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum InflatePrimeUpdate {
     Keep,
@@ -908,9 +913,7 @@ pub unsafe extern "C" fn inflate(
                     hold = hold.wrapping_add((*c2rust_fresh12 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if hold & 0xffff as ::core::ffi::c_ulong
-                    != hold >> 16 as ::core::ffi::c_int ^ 0xffff as ::core::ffi::c_ulong
-                {
+                if !stored_block_lengths_are_valid(hold) {
                     (*strm).msg = b"invalid stored block lengths\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
@@ -2647,11 +2650,10 @@ mod tests {
         apply_window_update, dynamic_header_counts, inflate_data_type_value,
         inflate_header_wrap_allows_capture, inflate_mark_value, inflate_mode_is_valid,
         inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
-        inflate_state_metadata_is_valid,
-        inflate_sync_point_value, inflate_sync_search_core, inflate_validate_wrap,
-        initial_window_metadata, syncsearch_safe, window_update_plan,
-        InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH,
-        STORED, SYNC, TYPE,
+        inflate_state_metadata_is_valid, inflate_sync_point_value, inflate_sync_search_core,
+        inflate_validate_wrap, initial_window_metadata, stored_block_lengths_are_valid,
+        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2680,6 +2682,14 @@ mod tests {
             crate::zlib_h::Z_FINISH,
             crate::zlib_h::Z_STREAM_END
         ));
+    }
+
+    #[test]
+    fn stored_block_lengths_require_complementary_nlen() {
+        assert!(stored_block_lengths_are_valid(0xedcb_1234));
+        assert!(stored_block_lengths_are_valid(0xffff_0000));
+        assert!(!stored_block_lengths_are_valid(0x1234_1234));
+        assert!(!stored_block_lengths_are_valid(0x0000_0001));
     }
 
     #[test]

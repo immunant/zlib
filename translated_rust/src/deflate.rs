@@ -1101,6 +1101,10 @@ pub unsafe extern "C" fn deflateUsed_ffi(
 ) -> ::core::ffi::c_int {
     deflateUsed(strm, bits)
 }
+fn deflate_prime_bits_valid(bits: ::core::ffi::c_int) -> bool {
+    bits >= 0 as ::core::ffi::c_int && bits <= 16 as ::core::ffi::c_int
+}
+
 pub unsafe extern "C" fn deflatePrime(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: ::core::ffi::c_int,
@@ -1113,8 +1117,7 @@ pub unsafe extern "C" fn deflatePrime(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if bits < 0 as ::core::ffi::c_int
-        || bits > 16 as ::core::ffi::c_int
+    if !deflate_prime_bits_valid(bits)
         || (*s).sym_buf
             < (*s).pending_out.offset(
                 (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
@@ -1568,16 +1571,16 @@ fn zlib_header(
     level: ::core::ffi::c_int,
     has_dictionary: bool,
 ) -> crate::stdlib::uInt {
-    let level_flags: crate::stdlib::uInt =
-        if strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || level < 2 {
-            0
-        } else if level < 6 {
-            1
-        } else if level == 6 {
-            2
-        } else {
-            3
-        };
+    let level_flags: crate::stdlib::uInt = if strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || level < 2
+    {
+        0
+    } else if level < 6 {
+        1
+    } else if level == 6 {
+        2
+    } else {
+        3
+    };
     let mut header = (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt)
         .wrapping_add(w_bits.wrapping_sub(8) << 4)
         << 8;
@@ -1685,12 +1688,7 @@ pub unsafe extern "C" fn deflate(
         (*s).status = crate::src::deflate::BUSY_STATE;
     }
     if (*s).status == crate::src::deflate::INIT_STATE {
-        let header = zlib_header(
-            (*s).w_bits,
-            (*s).strategy,
-            (*s).level,
-            (*s).strstart != 0,
-        );
+        let header = zlib_header((*s).w_bits, (*s).strategy, (*s).level, (*s).strstart != 0);
         putShortMSB(s, header);
         if (*s).strstart != 0 as crate::stdlib::uInt {
             putShortMSB(
@@ -3602,9 +3600,10 @@ unsafe extern "C" fn deflate_huff(
 #[cfg(test)]
 mod tests {
     use super::{
-        deflate_bound_lengths, deflate_copyright, deflate_version_matches, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, pending_output_len,
-        normalize_deflate_params, slide_hash_entry, zlib_header,
+        deflate_bound_lengths, deflate_copyright, deflate_prime_bits_valid,
+        deflate_version_matches, gzip_header_crc, gzip_header_crc_pending,
+        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
+        slide_hash_entry, zlib_header,
     };
 
     #[test]
@@ -3706,6 +3705,14 @@ mod tests {
         assert_eq!(pending_output_len(3, 5), 3);
         assert_eq!(pending_output_len(5, 5), 5);
         assert_eq!(pending_output_len(8, 5), 5);
+    }
+
+    #[test]
+    fn deflate_prime_bits_valid_accepts_the_supported_inclusive_range() {
+        assert!(!deflate_prime_bits_valid(-1));
+        assert!(deflate_prime_bits_valid(0));
+        assert!(deflate_prime_bits_valid(16));
+        assert!(!deflate_prime_bits_valid(17));
     }
 
     #[test]

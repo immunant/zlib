@@ -406,6 +406,18 @@ fn gz_look_needs_more_input(avail_in: crate::stdlib::uInt, again: ::core::ffi::c
     avail_in == 0 || again != 0 && avail_in < 4
 }
 
+enum GzLookGzipSource {
+    Forced,
+    Header,
+}
+
+fn gz_look_gzip_junk(source: GzLookGzipSource, junk: &mut ::core::ffi::c_int) {
+    *junk = match source {
+        GzLookGzipSource::Forced => (*junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int,
+        GzLookGzipSource::Header => 1 as ::core::ffi::c_int,
+    };
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GzLookAction {
     NeedMoreInput,
@@ -474,7 +486,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     if gz_look_forces_gzip((*state).direct, (*state).junk) {
         crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
         (*state).how = crate::gzguts_h::GZIP;
-        (*state).junk = ((*state).junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
+        gz_look_gzip_junk(GzLookGzipSource::Forced, &mut (*state).junk);
         (*state).direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
@@ -496,7 +508,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         GzLookAction::Gzip => {
             crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
             (*state).how = crate::gzguts_h::GZIP;
-            (*state).junk = 1 as ::core::ffi::c_int;
+            gz_look_gzip_junk(GzLookGzipSource::Header, &mut (*state).junk);
             (*state).direct = 0 as ::core::ffi::c_int;
             return 0 as ::core::ffi::c_int;
         }
@@ -898,6 +910,32 @@ mod tests {
             gz_decomp_input_action(true, 1),
             GzDecompInputAction::InputError
         );
+    }
+
+    #[test]
+    fn gz_look_gzip_junk_preserves_forced_lookup_state() {
+        let mut junk = -1;
+        gz_look_gzip_junk(GzLookGzipSource::Forced, &mut junk);
+        assert_eq!(junk, 0);
+
+        junk = 0;
+        gz_look_gzip_junk(GzLookGzipSource::Forced, &mut junk);
+        assert_eq!(junk, 1);
+
+        junk = 1;
+        gz_look_gzip_junk(GzLookGzipSource::Forced, &mut junk);
+        assert_eq!(junk, 1);
+    }
+
+    #[test]
+    fn gz_look_gzip_junk_marks_detected_headers_as_junk() {
+        let mut junk = -1;
+        gz_look_gzip_junk(GzLookGzipSource::Header, &mut junk);
+        assert_eq!(junk, 1);
+
+        junk = 0;
+        gz_look_gzip_junk(GzLookGzipSource::Header, &mut junk);
+        assert_eq!(junk, 1);
     }
 
     #[test]
