@@ -2652,6 +2652,12 @@ pub fn inflate(
                                                 copy = have;
                                             }
                                             if copy != 0 {
+                                                let Some(extra_input) = input.slice_at(
+                                                    next.addr(),
+                                                    copy as usize,
+                                                ) else {
+                                                    return crate::zlib_h::Z_STREAM_ERROR;
+                                                };
                                                 if let Some(head) = header.as_mut() {
                                                     if !head.extra.is_null()
                                                         && {
@@ -2661,29 +2667,28 @@ pub fn inflate(
                                                             len < head.extra_max
                                                         }
                                                     {
-                                                        crate::stdlib::memcpy(
-                                                            head.extra.wrapping_add(len as usize)
-                                                                as *mut ::core::ffi::c_void,
-                                                            next as *const ::core::ffi::c_void,
-                                                            (if len.wrapping_add(copy) > head.extra_max {
+                                                        let header_copy_len = (if len
+                                                            .wrapping_add(copy)
+                                                            > head.extra_max
+                                                        {
                                                                 (head.extra_max as ::core::ffi::c_uint)
                                                                     .wrapping_sub(len)
                                                             } else {
                                                                 copy
                                                             })
-                                                                as crate::__stddef_size_t_h::size_t,
+                                                            as usize;
+                                                        let header_extra = ::core::slice::from_raw_parts_mut(
+                                                            head.extra.wrapping_add(len as usize),
+                                                            header_copy_len,
+                                                        );
+                                                        header_extra.copy_from_slice(
+                                                            &extra_input[..header_copy_len],
                                                         );
                                                     }
                                                 }
                                                 if state.flags & 0x200 as ::core::ffi::c_int != 0
                                                     && state.wrap & 4 as ::core::ffi::c_int != 0
                                                 {
-                                                    let Some(extra_input) = input.slice_at(
-                                                        next.addr(),
-                                                        copy as usize,
-                                                    ) else {
-                                                        return crate::zlib_h::Z_STREAM_ERROR;
-                                                    };
                                                     state.check = crate::src::crc32::crc32(
                                                         state.check as crate::stdlib::uLong,
                                                         Some(extra_input),
