@@ -2654,7 +2654,7 @@ pub fn deflate(
         // This transitional dispatcher still uses raw cursors in its legacy
         // compression loop.  Validate and adopt the stream/state once at entry
         // rather than routing through the private raw state-check adapter.
-        let (s, invalid_stream_or_state) = {
+        let (s, pending, avail_in) = {
             let stream = &mut *strm;
             let state_ptr = stream.state as *mut crate::src::deflate::deflate_state;
             if state_ptr.is_null() {
@@ -2669,48 +2669,37 @@ pub fn deflate(
             ) {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
-            let invalid = stream.next_out.is_null()
+            if stream.next_out.is_null()
                 || stream.avail_in != 0 as crate::stdlib::uInt && stream.next_in.is_null()
                 || state.status == crate::src::deflate::FINISH_STATE
-                    && flush != crate::zlib_h::Z_FINISH;
-            (state_ptr, invalid)
-        };
-        if invalid_stream_or_state {
-            let stream = &mut *strm;
-            stream.msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+                    && flush != crate::zlib_h::Z_FINISH
             {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char;
-            return -2 as ::core::ffi::c_int;
-        }
-        let output_is_full = {
-            let stream = &*strm;
-            stream.avail_out == 0 as crate::stdlib::uInt
-        };
-        if output_is_full {
-            let stream = &mut *strm;
-            stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char;
-            return -5 as ::core::ffi::c_int;
-        }
-        let (pending, avail_in) = {
-            let stream = &*strm;
-            let state = &mut *s;
+                stream.msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
+                    < -6 as ::core::ffi::c_int
+                    || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+                {
+                    9 as ::core::ffi::c_int
+                } else {
+                    2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
+                }) as usize] as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char;
+                return -2 as ::core::ffi::c_int;
+            }
+            if stream.avail_out == 0 as crate::stdlib::uInt {
+                stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
+                    < -6 as ::core::ffi::c_int
+                    || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+                {
+                    9 as ::core::ffi::c_int
+                } else {
+                    2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
+                }) as usize] as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char;
+                return -5 as ::core::ffi::c_int;
+            }
             old_flush = state.last_flush;
             state.last_flush = flush;
-            (state.pending != 0, stream.avail_in)
+            (state_ptr, state.pending != 0, stream.avail_in)
         };
         if pending {
             if flush_pending(strm) == 0 as crate::stdlib::uInt {
