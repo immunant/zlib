@@ -1903,11 +1903,30 @@ impl Drop for DeflateCall<'_, '_, '_> {
 }
 
 impl DeflateParamsStream<'_> {
-    fn flush_block(&mut self) -> ::core::ffi::c_int {
-        // `deflate` owns the remaining ABI cursor conversions for a complete
-        // compression step.  This facade is intentionally the only
-        // parameter-update route into that implementation.
-        unsafe { deflate(self.stream, crate::zlib_h::Z_BLOCK) }
+    fn flush_block(
+        &mut self,
+        state: &mut crate::src::deflate::deflate_state,
+    ) -> ::core::ffi::c_int {
+        let input = if self.stream.avail_in == 0 {
+            Some(&[][..])
+        } else if self.stream.next_in.is_null() {
+            None
+        } else {
+            Some(unsafe {
+                core::slice::from_raw_parts(self.stream.next_in, self.stream.avail_in as usize)
+            })
+        };
+        let output = if self.stream.next_out.is_null() {
+            None
+        } else {
+            Some(unsafe {
+                core::slice::from_raw_parts_mut(
+                    self.stream.next_out,
+                    self.stream.avail_out as usize,
+                )
+            })
+        };
+        deflate_stream_impl(self.stream, Some(state), input, output, crate::zlib_h::Z_BLOCK)
     }
 }
 
@@ -2011,7 +2030,7 @@ pub unsafe fn deflateParams(
     if (strategy != s.strategy || func != configuration_table[level as usize].func)
         && s.last_flush != -2 as ::core::ffi::c_int
     {
-        let err = DeflateParamsStream { stream: strm }.flush_block();
+        let err = DeflateParamsStream { stream: strm }.flush_block(s);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
@@ -2978,33 +2997,37 @@ fn deflate_impl(
         crate::zlib_h::Z_STREAM_END
     };
 }
-/// Convert the ABI stream's raw state and cursor fields once, then run the
-/// codec against the bounded `DeflateCall` view.
-pub unsafe fn deflate(
+/// Run one codec step after the boundary has converted the ABI stream's raw
+/// state and cursor fields into bounded views.
+fn deflate_stream_impl(
     strm: &mut crate::zlib_h::z_stream_s,
+    state: Option<&mut crate::src::deflate::deflate_state>,
+    input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
     flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     if !deflate_params_stream_is_valid(strm) || flush > crate::zlib_h::Z_BLOCK || flush < 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *strm.state;
-    if strm.next_out.is_null()
-        || (strm.avail_in != 0 && strm.next_in.is_null())
-        || (state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH)
-    {
+    let Some(state) = state else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(input) = input else {
+        strm.msg = crate::src::zutil::z_errmsg[4].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(output) = output else {
+        strm.msg = crate::src::zutil::z_errmsg[4].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH {
         strm.msg = crate::src::zutil::z_errmsg[4].load(::core::sync::atomic::Ordering::Relaxed);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if strm.avail_out == 0 {
+    if output.is_empty() {
         strm.msg = crate::src::zutil::z_errmsg[7].load(::core::sync::atomic::Ordering::Relaxed);
         return crate::zlib_h::Z_BUF_ERROR;
     }
-    let input = if strm.avail_in == 0 {
-        &[]
-    } else {
-        core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-    };
-    let output = core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
     DeflateCall::new(strm, state, input, output).compress(flush)
 }
 
@@ -3017,7 +3040,26 @@ pub unsafe extern "C" fn deflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate(strm, flush)
+    let state = strm.state.as_mut();
+    let input = if strm.avail_in == 0 {
+        Some(&[][..])
+    } else if strm.next_in.is_null() {
+        None
+    } else {
+        Some(core::slice::from_raw_parts(
+            strm.next_in,
+            strm.avail_in as usize,
+        ))
+    };
+    let output = if strm.next_out.is_null() {
+        None
+    } else {
+        Some(core::slice::from_raw_parts_mut(
+            strm.next_out,
+            strm.avail_out as usize,
+        ))
+    };
+    deflate_stream_impl(strm, state, input, output, flush)
 }
 /// Tear down the owned portions of a validated deflate state.
 ///

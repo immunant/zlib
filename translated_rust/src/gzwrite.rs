@@ -11,7 +11,6 @@ pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
-pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::internal_state;
