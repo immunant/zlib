@@ -430,6 +430,32 @@ enum DeflateStorageSlot {
     Pending,
 }
 
+// Each allocator result must be installed before the next callback: custom
+// allocators can inspect the stream re-entrantly.  Keep that one raw state
+// projection in this boundary helper so the pointer-free allocation plan has
+// one ordered publication boundary.
+unsafe fn publish_deflate_storage(
+    state: *mut crate::src::deflate::internal_state,
+    slot: DeflateStorageSlot,
+    allocation: crate::stdlib::voidpf,
+) {
+    let state = &mut *state;
+    match slot {
+        DeflateStorageSlot::Window => {
+            state.window = ::core::ptr::NonNull::new(allocation.cast());
+        }
+        DeflateStorageSlot::Prev => {
+            state.prev = ::core::ptr::NonNull::new(allocation.cast());
+        }
+        DeflateStorageSlot::Head => {
+            state.head = ::core::ptr::NonNull::new(allocation.cast());
+        }
+        DeflateStorageSlot::Pending => {
+            state.pending_buf = ::core::ptr::NonNull::new(allocation.cast());
+        }
+    }
+}
+
 // Keep the state record in the same pointer-free allocation plan as its four
 // backing regions.  The current ABI adapter still invokes zalloc directly,
 // but a future allocation broker can consume this complete plan and preserve
@@ -964,46 +990,18 @@ pub unsafe extern "C" fn deflateInit2_(
     // callback: a caller allocator may observe the stream re-entrantly.
     // Each callback result is instead published through a short projection,
     // and all work after the final callback uses an ordinary Rust borrow.
-    let window = ::core::ptr::NonNull::new(
-        Some(stream.zalloc.expect("non-null function pointer"))
+    for (slot, request) in storage.callback_requests() {
+        let allocation = Some(stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
                 stream.opaque,
-                storage.window.items,
-                storage.window.size,
-            ) as *mut crate::stdlib::Bytef,
-    );
-    (&mut *s).window = window;
-    let prev = ::core::ptr::NonNull::new(
-        Some(stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-                stream.opaque,
-                storage.prev.items,
-                storage.prev.size,
-            ) as *mut crate::src::deflate::Posf,
-    );
-    (&mut *s).prev = prev;
-    let head = ::core::ptr::NonNull::new(
-        Some(stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-                stream.opaque,
-                storage.head.items,
-                storage.head.size,
-            ) as *mut crate::src::deflate::Posf,
-    );
-    (&mut *s).head = head;
-    let pending_buf = ::core::ptr::NonNull::new(
-        Some(stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-                stream.opaque,
-                storage.pending.items,
-                storage.pending.size,
-            ) as *mut crate::zutil_h::uchf
-            as *mut crate::stdlib::Bytef,
-    );
+                request.items,
+                request.size,
+            );
+        publish_deflate_storage(s, slot, allocation);
+    }
     let state = &mut *s;
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = layout.lit_bufsize;
-    state.pending_buf = pending_buf;
     state.pending_buf_size = storage
         .pending
         .byte_len()
