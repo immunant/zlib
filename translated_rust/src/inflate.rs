@@ -2478,9 +2478,7 @@ pub unsafe extern "C" fn inflateSyncPoint(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return ((*state).mode as ::core::ffi::c_uint
-        == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
-        && (*state).bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
+    return inflate_sync_point(&*state);
 }
 #[export_name = "inflateSyncPoint"]
 
@@ -2601,8 +2599,7 @@ pub unsafe extern "C" fn inflateUndermine(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).sane = 1 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_DATA_ERROR;
+    return inflate_undermine(&mut *state);
 }
 #[export_name = "inflateUndermine"]
 
@@ -2622,12 +2619,7 @@ pub unsafe extern "C" fn inflateValidate(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if check != 0 && (*state).wrap != 0 {
-        (*state).wrap |= 4 as ::core::ffi::c_int;
-    } else {
-        (*state).wrap &= !(4 as ::core::ffi::c_int);
-    }
-    return crate::zlib_h::Z_OK;
+    return inflate_validate(&mut *state, check);
 }
 #[export_name = "inflateValidate"]
 
@@ -2644,21 +2636,48 @@ pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::co
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return (((*state).back as ::core::ffi::c_long as ::core::ffi::c_ulong)
+    return inflate_mark(&*state);
+}
+
+fn inflate_sync_point(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
+    (state.mode as ::core::ffi::c_uint
+        == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
+        && state.bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int
+}
+
+fn inflate_undermine(state: &mut crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
+    state.sane = 1 as ::core::ffi::c_int;
+    crate::zlib_h::Z_DATA_ERROR
+}
+
+fn inflate_validate(
+    state: &mut crate::src::inflate::inflate_state,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if check != 0 && state.wrap != 0 {
+        state.wrap |= 4 as ::core::ffi::c_int;
+    } else {
+        state.wrap &= !(4 as ::core::ffi::c_int);
+    }
+    crate::zlib_h::Z_OK
+}
+
+fn inflate_mark(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_long {
+    ((state.back as ::core::ffi::c_long as ::core::ffi::c_ulong)
         << 16 as ::core::ffi::c_int) as ::core::ffi::c_long
-        + (if (*state).mode as ::core::ffi::c_uint
+        + (if state.mode as ::core::ffi::c_uint
             == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint
         {
-            (*state).length
+            state.length
         } else {
-            if (*state).mode as ::core::ffi::c_uint
+            if state.mode as ::core::ffi::c_uint
                 == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint
             {
-                (*state).was.wrapping_sub((*state).length)
+                state.was.wrapping_sub(state.length)
             } else {
                 0 as ::core::ffi::c_uint
             }
-        }) as ::core::ffi::c_long;
+        }) as ::core::ffi::c_long
 }
 #[export_name = "inflateMark"]
 
