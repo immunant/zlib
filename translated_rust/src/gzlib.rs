@@ -1405,14 +1405,8 @@ pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
         return;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
-        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
-    {
+    if !gz_clear_error_state(state) {
         return;
-    }
-    if state.mode == crate::gzguts_h::GZ_READ {
-        state.eof = 0 as ::core::ffi::c_int;
-        state.past = 0 as ::core::ffi::c_int;
     }
     gz_error(
         state as *mut crate::gzguts_h::gz_state,
@@ -1425,6 +1419,22 @@ pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     gzclearerr(file)
 }
+
+// Clearing a gzip error only changes already-bound state.  Keep the message
+// ownership work in `gz_error`, which remains the raw allocation boundary.
+fn gz_clear_error_state(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+    {
+        return false;
+    }
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0 as ::core::ffi::c_int;
+        state.past = 0 as ::core::ffi::c_int;
+    }
+    true
+}
+
 pub unsafe extern "C" fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
     mut err: ::core::ffi::c_int,
