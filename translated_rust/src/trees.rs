@@ -3665,7 +3665,7 @@ unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
     let pending = (*s).pending;
     for (index, byte) in bytes.into_iter().take(count).enumerate() {
         let cursor = pending.wrapping_add(index as crate::zutil_h::ulg);
-        *(*s).pending_buf.offset(cursor as isize) = byte;
+        *(*s).pending_buf.wrapping_add(cursor as usize) = byte;
     }
     (*s).pending = pending_cursor_after_bytes(pending, count);
 }

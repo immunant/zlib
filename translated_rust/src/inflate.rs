@@ -2266,10 +2266,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap != 0 as ::core::ffi::c_int
-        && (*state).mode as ::core::ffi::c_uint
-            != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
+    if !inflate_dictionary_is_allowed((*state).wrap, (*state).mode) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if (*state).mode as ::core::ffi::c_uint
@@ -2301,6 +2298,14 @@ pub unsafe extern "C" fn inflateSetDictionary(
     (*state).havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
+
+fn inflate_dictionary_is_allowed(
+    wrap: ::core::ffi::c_int,
+    mode: crate::src::inflate::inflate_mode,
+) -> bool {
+    wrap == 0 || mode == crate::src::inflate::DICT
+}
+
 #[export_name = "inflateSetDictionary"]
 
 pub unsafe extern "C" fn inflateSetDictionary_ffi(
@@ -2710,15 +2715,15 @@ mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header, inflate_copy_progress,
-        inflate_data_type_value, inflate_header_wrap_allows_capture, inflate_mark_progress,
-        inflate_mark_value, inflate_mode_data_type_flags, inflate_mode_is_valid,
-        inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
-        inflate_should_update_window, inflate_state_metadata_is_valid,
+        inflate_data_type_value, inflate_dictionary_is_allowed, inflate_header_wrap_allows_capture,
+        inflate_mark_progress, inflate_mark_value, inflate_mode_data_type_flags,
+        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update,
+        inflate_reset2_params, inflate_should_update_window, inflate_state_metadata_is_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_point_value,
         inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
         inflate_validate_wrap, initial_window_metadata, stored_block_length, syncsearch_safe,
         window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD,
+        InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD,
         LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
@@ -2737,6 +2742,15 @@ mod tests {
         assert_eq!(inflate_mode_data_type_flags(TYPE), 128);
         assert_eq!(inflate_mode_data_type_flags(LEN_), 256);
         assert_eq!(inflate_mode_data_type_flags(COPY_), 256);
+    }
+
+    #[test]
+    fn inflate_dictionary_permission_matches_wrapper_and_mode() {
+        assert!(inflate_dictionary_is_allowed(0, HEAD));
+        assert!(inflate_dictionary_is_allowed(0, DICT));
+        assert!(inflate_dictionary_is_allowed(1, DICT));
+        assert!(!inflate_dictionary_is_allowed(1, HEAD));
+        assert!(!inflate_dictionary_is_allowed(4, BAD));
     }
 
     #[test]
