@@ -167,16 +167,12 @@ pub unsafe extern "C" fn adler32_ffi(adler: uLong, buf: *const Bytef, len: uInt)
 }
 
 #[export_name = "adler32_combine"]
-pub unsafe extern "C" fn adler32_combine_ffi(adler1: uLong, adler2: uLong, len2: off_t) -> uLong {
+pub extern "C" fn adler32_combine_ffi(adler1: uLong, adler2: uLong, len2: off_t) -> uLong {
     adler32_combine(adler1, adler2, len2)
 }
 
 #[export_name = "adler32_combine64"]
-pub unsafe extern "C" fn adler32_combine64_ffi(
-    adler1: uLong,
-    adler2: uLong,
-    len2: off64_t,
-) -> uLong {
+pub extern "C" fn adler32_combine64_ffi(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
     adler32_combine64(adler1, adler2, len2)
 }
 
