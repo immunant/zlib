@@ -866,7 +866,7 @@ macro_rules! gzseek_at_boundary {
                 None => return -1,
             };
             if result.advance != 0 {
-                state.x.next = state.x.next.offset(result.advance as isize);
+                state.x.next = state.x.next.wrapping_add(result.advance as usize);
             }
             if result.clear_error {
                 state.msg = None;
