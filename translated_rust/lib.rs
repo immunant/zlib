@@ -47,6 +47,11 @@ pub mod gzguts_h {
         pub path: std::ffi::CString,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
+        // The raw pointers below are cursors used by the translated zlib
+        // engine.  Their storage is owned by these vectors, never by C
+        // allocation routines.
+        pub in_buf: Vec<u8>,
+        pub out_buf: Vec<u8>,
         pub in_0: *mut ::core::ffi::c_uchar,
         pub out: *mut ::core::ffi::c_uchar,
         pub direct: ::core::ffi::c_int,

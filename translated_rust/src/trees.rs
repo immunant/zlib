@@ -4247,8 +4247,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut last: ::core::ffi::c_int,
 ) {
     let s = &mut *s;
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
     let buf = if stored_len == 0 {
         &[]
     } else {
@@ -4283,8 +4282,7 @@ pub fn _tr_align(
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let s = &mut *s;
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
     _tr_align(s, pending_buf)
 }
 fn compress_block(
@@ -4384,8 +4382,7 @@ pub unsafe extern "C" fn _tr_flush_block(
     let s = &mut *s;
     // These buffers remain raw-owned by the legacy state. Borrow them once at
     // this boundary so all block encoding below stays slice-based.
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
     let sym_buf = ::core::slice::from_raw_parts(s.sym_buf, s.sym_next as usize);
     let mut opt_lenb: crate::zutil_h::ulg = 0;
     let mut static_lenb: crate::zutil_h::ulg = 0;

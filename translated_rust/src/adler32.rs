@@ -1,4 +1,4 @@
-use crate::stdlib::{off64_t, off_t, Bytef, uInt, uLong, z_size_t};
+use crate::stdlib::{off64_t, off_t, uInt, uLong, z_size_t, Bytef};
 
 pub const BASE: uLong = 65_521;
 pub const NMAX: usize = 5_552;

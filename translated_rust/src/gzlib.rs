@@ -61,6 +61,45 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+/// Allocate the gzip input and output buffers using Rust-owned storage.
+///
+/// `in_0` and `out` remain cursor pointers for the translated compression
+/// engine, but they always point into the vectors retained by `state`.
+pub fn gz_init_buffers(
+    state: &mut crate::gzguts_h::gz_state,
+    input_len: usize,
+    output_len: usize,
+) -> bool {
+    state.in_buf.clear();
+    state.out_buf.clear();
+
+    if state.in_buf.try_reserve_exact(input_len).is_err() {
+        state.in_0 = ::core::ptr::null_mut();
+        state.out = ::core::ptr::null_mut();
+        return false;
+    }
+    state.in_buf.resize(input_len, 0);
+
+    if state.out_buf.try_reserve_exact(output_len).is_err() {
+        state.in_buf.clear();
+        state.in_0 = ::core::ptr::null_mut();
+        state.out = ::core::ptr::null_mut();
+        return false;
+    }
+    state.out_buf.resize(output_len, 0);
+    state.in_0 = if input_len == 0 {
+        ::core::ptr::null_mut()
+    } else {
+        state.in_buf.as_mut_ptr()
+    };
+    state.out = if output_len == 0 {
+        ::core::ptr::null_mut()
+    } else {
+        state.out_buf.as_mut_ptr()
+    };
+    true
+}
+
 unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
     (*state).x.have = 0 as ::core::ffi::c_uint;
     if (*state).mode == crate::gzguts_h::GZ_READ {
@@ -105,6 +144,8 @@ unsafe extern "C" fn gz_open(
         path: std::ffi::CString::default(),
         size: 0,
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
+        in_buf: Vec::new(),
+        out_buf: Vec::new(),
         in_0: ::core::ptr::null_mut(),
         out: ::core::ptr::null_mut(),
         direct: 0,

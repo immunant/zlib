@@ -2572,10 +2572,8 @@ unsafe extern "C" fn deflate_stored(
             0 as ::core::ffi::c_int
         };
         let state = &mut *s;
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
+        let pending_buf =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
         let stored = ::core::slice::from_raw_parts(
             state.window.offset(state.block_start as isize),
             len as usize,

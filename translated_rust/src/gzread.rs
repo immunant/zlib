@@ -145,14 +145,11 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
-        (*state).in_0 = crate::stdlib::malloc((*state).want as crate::__stddef_size_t_h::size_t)
-            as *mut ::core::ffi::c_uchar;
-        (*state).out = crate::stdlib::malloc(
-            ((*state).want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-        ) as *mut ::core::ffi::c_uchar;
-        if (*state).in_0.is_null() || (*state).out.is_null() {
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+        if !crate::src::gzlib::gz_init_buffers(
+            &mut *state,
+            (*state).want as usize,
+            ((*state).want << 1 as ::core::ffi::c_int) as usize,
+        ) {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -173,8 +170,10 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         ) != crate::zlib_h::Z_OK
         {
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+            (*state).in_buf.clear();
+            (*state).out_buf.clear();
+            (*state).in_0 = ::core::ptr::null_mut();
+            (*state).out = ::core::ptr::null_mut();
             (*state).size = 0 as ::core::ffi::c_uint;
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
@@ -828,8 +827,6 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
         crate::src::inflate::inflateEnd(
             &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
-        crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-        crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
     }
     err = if (*state).err == crate::zlib_h::Z_BUF_ERROR {
         crate::zlib_h::Z_BUF_ERROR
