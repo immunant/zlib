@@ -250,7 +250,11 @@ pub mod stdlib {
         // still need an unsafe operation to read or write the returned raw
         // pointer.
         pub safe fn __errno_location() -> *mut ::core::ffi::c_int;
-        pub fn fcntl(
+        // Gzip uses only the integer-only descriptor-control forms below:
+        // `F_GETFL`, `F_SETFL`, `F_GETFD`, and `F_SETFD`. Invalid descriptors
+        // or flags are reported by libc, and no Rust-managed memory is
+        // borrowed or dereferenced at this boundary.
+        pub(crate) safe fn fcntl(
             __fd: ::core::ffi::c_int,
             __cmd: ::core::ffi::c_int,
             ...

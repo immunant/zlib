@@ -13,13 +13,8 @@ pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::gzguts_h::LOOK;
 pub use crate::internal::__INT_MAX__;
 pub use crate::limits_h::INT_MAX;
-pub use crate::stdlib::fcntl;
 pub use crate::stdlib::open;
 pub use crate::stdlib::__O_CLOEXEC;
-pub use crate::stdlib::F_GETFD;
-pub use crate::stdlib::F_GETFL;
-pub use crate::stdlib::F_SETFD;
-pub use crate::stdlib::F_SETFL;
 pub use crate::stdlib::O_APPEND;
 pub use crate::stdlib::O_CLOEXEC;
 pub use crate::stdlib::O_CREAT;
@@ -1373,35 +1368,34 @@ fn gz_open(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     let oflag = gz_open_flags(state_ref, &options);
-    // SAFETY: the descriptor plans use only their documented integer
-    // arguments; the open path remains a valid C string for this call.
-    unsafe {
-        match gz_open_fd_plan(fd, oflag) {
-            GzOpenFdPlan::Open => {
-                state_ref.fd =
-                    crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
+    match gz_open_fd_plan(fd, oflag) {
+        GzOpenFdPlan::Open => {
+            // SAFETY: `path` is the valid, NUL-terminated C string bound by
+            // the FFI entry point for this descriptor-open call.
+            state_ref.fd = unsafe {
+                crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int)
+            };
+        }
+        GzOpenFdPlan::Use {
+            nonblocking,
+            close_on_exec,
+        } => {
+            if nonblocking {
+                crate::stdlib::fcntl(
+                    fd,
+                    crate::stdlib::F_SETFL,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL)
+                        | crate::stdlib::O_NONBLOCK,
+                );
             }
-            GzOpenFdPlan::Use {
-                nonblocking,
-                close_on_exec,
-            } => {
-                if nonblocking {
-                    crate::stdlib::fcntl(
-                        fd,
-                        crate::stdlib::F_SETFL,
-                        crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL)
-                            | crate::stdlib::O_NONBLOCK,
-                    );
-                }
-                if close_on_exec {
-                    crate::stdlib::fcntl(
-                        fd,
-                        crate::stdlib::F_SETFD,
-                        crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
-                    );
-                }
-                state_ref.fd = fd;
+            if close_on_exec {
+                crate::stdlib::fcntl(
+                    fd,
+                    crate::stdlib::F_SETFD,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
+                );
             }
+            state_ref.fd = fd;
         }
     }
     if state_ref.fd == -1 as ::core::ffi::c_int {
