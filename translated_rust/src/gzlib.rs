@@ -2854,6 +2854,31 @@ fn gzerror(
         Some(GzErrorMessage::Empty)
     }
 }
+
+// Keep error-presentation selection pointer-free. The ABI wrapper only
+// converts the selected byte slice to its final C pointer after it has
+// validated the opaque handle and optional scalar output.
+fn gzerror_message_bytes<'a>(
+    message: GzErrorMessage,
+    state_message: Option<&'a [u8]>,
+) -> Option<&'a [u8]> {
+    match message {
+        GzErrorMessage::OutOfMemory => Some(b"out of memory\0"),
+        GzErrorMessage::Empty => Some(b"\0"),
+        GzErrorMessage::State => state_message,
+    }
+}
+
+fn gzerror_bytes<'a>(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    state_message: Option<&'a [u8]>,
+    errnum: Option<&mut ::core::ffi::c_int>,
+) -> Option<&'a [u8]> {
+    gzerror(mode, err, state_message.is_some(), errnum)
+        .and_then(|message| gzerror_message_bytes(message, state_message))
+}
+
 #[export_name = "gzerror"]
 
 pub unsafe extern "C" fn gzerror_ffi(
@@ -2865,15 +2890,10 @@ pub unsafe extern "C" fn gzerror_ffi(
     };
     let state = state.as_ref();
     let errnum = ::core::ptr::NonNull::new(errnum).map(|mut errnum| errnum.as_mut());
-    match gzerror(state.mode, state.err, state.msg.is_some(), errnum) {
-        None => ::core::ptr::null::<::core::ffi::c_char>(),
-        Some(GzErrorMessage::OutOfMemory) => b"out of memory\0".as_ptr().cast(),
-        Some(GzErrorMessage::Empty) => b"\0".as_ptr().cast(),
-        Some(GzErrorMessage::State) => state
-            .msg
-            .as_deref()
-            .map_or(::core::ptr::null(), |msg| msg.as_ptr().cast()),
-    }
+    let Some(message) = gzerror_bytes(state.mode, state.err, state.msg.as_deref(), errnum) else {
+        return ::core::ptr::null();
+    };
+    message.as_ptr().cast()
 }
 fn gzclearerr(
     mode: ::core::ffi::c_int,
