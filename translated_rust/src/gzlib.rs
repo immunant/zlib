@@ -1984,6 +1984,23 @@ fn gz_owned_states() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedState)>> 
     GZ_OWNED_STATES.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
 }
 
+// A gzip handle is an opaque pointer to one of the boxes retained in this
+// registry.  Public operations can identify that allocation by its address
+// without reconstructing a reference from the foreign handle.  Keep the
+// registry lock for the duration of the operation so a concurrent close
+// cannot remove the backing box while it is borrowed.
+pub(crate) fn gz_with_owned_state<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut crate::gzguts_h::gz_state) -> R,
+) -> Option<R> {
+    if state_key == 0 {
+        return None;
+    }
+    let mut states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    let (_, state) = states.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(state.0.as_mut()))
+}
+
 fn gz_owned_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>> {
     GZ_OWNED_BUFFERS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
 }

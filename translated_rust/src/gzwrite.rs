@@ -622,20 +622,23 @@ fn gzputc_ffi_dispatch(
         None => -1,
     }
 }
+
+// The opaque handle is keyed by address in gzip's owned-state registry. This
+// keeps the public dispatch reference-bound without recreating a mutable
+// reference from the foreign handle in the ABI wrapper.
+fn gzputc_handle(file_key: usize, c: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        gzputc_ffi_dispatch(Some(state), c)
+    })
+    .unwrap_or(-1)
+}
 #[export_name = "gzputc"]
 
 pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let state = if file.is_null() {
-        None
-    } else {
-        // SAFETY: a non-null gzip handle identifies the state bound by this
-        // ABI entry. The dispatcher owns the public null-handle result.
-        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
-    };
-    gzputc_ffi_dispatch(state, c)
+    gzputc_handle(file.addr(), c)
 }
 // Once the dispatcher has accepted the write state and bound the caller's
 // string, the write itself needs only a safe C-string view.
