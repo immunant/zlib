@@ -527,38 +527,86 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let mut state = InflateState(state);
     inflate_reset2_impl(strm, &mut state, windowBits)
 }
+/// The final operation to perform after an inflater state has been installed
+/// in its ABI-visible storage.
+///
+/// The caller supplies a fully initialized Rust value.  Initialization that
+/// needs the stream's state link (the public init path) and the copied-header
+/// association (the copy path) happen only after that value has been written
+/// to its final storage.
+#[derive(Copy, Clone)]
+enum InflateStateInstallation<'a> {
+    Initialize(::core::ffi::c_int),
+    Copy {
+        source_stream: &'a crate::zlib_h::z_stream_s,
+        source_state: &'a crate::src::inflate::inflate_state,
+    },
+}
+
 /// Allocate, initialize, and install an inflater state through the stream's
 /// ABI allocator.
 ///
-/// Construct state with either the caller's paired callbacks or Rust's
-/// default owner.  Both paths initialize state before exposing it through the
-/// ABI stream link.
+/// This is the single callback-owned state-storage handoff shared by public
+/// initialization and copying.  Callers construct codec-owned data first;
+/// this helper alone invokes the paired allocator and writes the resulting
+/// state slot.
 unsafe fn inflate_allocate_state(
     strm: &mut crate::zlib_h::z_stream_s,
-    window_bits: ::core::ffi::c_int,
+    initialized: crate::src::inflate::inflate_state,
+    installation: InflateStateInstallation<'_>,
 ) -> ::core::ffi::c_int {
-    let mut initialized = new_inflate_state();
-    initialized.mode = crate::src::inflate::HEAD;
-    if strm.zalloc.is_none() && strm.zfree.is_none() {
+    let (source_stream, copied_header, zalloc, zfree, opaque) = match installation {
+        InflateStateInstallation::Initialize(_) => {
+            (None, None, strm.zalloc, strm.zfree, strm.opaque)
+        }
+        InflateStateInstallation::Copy {
+            source_stream,
+            source_state,
+        } => (
+            Some(source_stream),
+            Some(source_state),
+            source_stream.zalloc,
+            source_stream.zfree,
+            source_stream.opaque,
+        ),
+    };
+    if zalloc.is_none() && zfree.is_none() {
         let mut state = Box::new(initialized);
-        strm.state = core::ptr::from_mut(state.as_mut()).cast();
-        let ret = inflate_reset2_impl(strm, &mut InflateState(state.as_mut()), window_bits);
+        let state_pointer = core::ptr::from_mut(state.as_mut());
+        if source_stream.is_none() {
+            strm.state = state_pointer.cast();
+        }
+        let ret = match installation {
+            InflateStateInstallation::Initialize(window_bits) => {
+                inflate_reset2_impl(strm, &mut InflateState(state.as_mut()), window_bits)
+            }
+            InflateStateInstallation::Copy { .. } => crate::zlib_h::Z_OK,
+        };
         if ret != crate::zlib_h::Z_OK {
             inflate_release_owned_state(state.as_mut());
             strm.state = core::ptr::null_mut();
             return ret;
         }
         if retain_default_inflate_state(state) {
+            if let Some(source) = source_stream {
+                *strm = *source;
+                strm.state = state_pointer.cast();
+            }
+            if let Some(source) = copied_header {
+                copy_inflate_header_registration(source, strm.state.addr());
+            }
             return ret;
         }
-        strm.state = core::ptr::null_mut();
+        if source_stream.is_none() {
+            strm.state = core::ptr::null_mut();
+        }
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let (Some(zalloc), Some(_)) = (strm.zalloc, strm.zfree) else {
+    let (Some(zalloc), Some(_)) = (zalloc, zfree) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let allocation = zalloc(
-        strm.opaque,
+        opaque,
         1,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     )
@@ -566,17 +614,34 @@ unsafe fn inflate_allocate_state(
     if allocation.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    strm.state = allocation.cast::<crate::src::deflate::internal_state>();
-    let mut state = InflateState(&mut initialized);
-    let ret = inflate_reset2_impl(strm, &mut state, window_bits);
-    drop(state);
-    if ret != crate::zlib_h::Z_OK {
-        inflate_release_owned_state(&mut initialized);
-    }
+    // The callback storage has no Rust type until this write completes.
+    // Create the typed reference only afterwards, so Option and Vec fields
+    // never observe uninitialized bytes.
     allocation.write(initialized);
+    if source_stream.is_none() {
+        strm.state = allocation.cast::<crate::src::deflate::internal_state>();
+    }
+    let state = &mut *allocation;
+    let ret = match installation {
+        InflateStateInstallation::Initialize(window_bits) => {
+            inflate_reset2_impl(strm, &mut InflateState(state), window_bits)
+        }
+        InflateStateInstallation::Copy { .. } => crate::zlib_h::Z_OK,
+    };
     if ret != crate::zlib_h::Z_OK {
-        strm.zfree.expect("callback pair is validated")(strm.opaque, allocation.cast());
-        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        inflate_release_owned_state(state);
+        zfree.expect("callback pair is validated")(opaque, allocation.cast());
+        if source_stream.is_none() {
+            strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        }
+    } else {
+        if let Some(source) = source_stream {
+            *strm = *source;
+            strm.state = allocation.cast();
+        }
+        if let Some(source) = copied_header {
+            copy_inflate_header_registration(source, allocation.addr());
+        }
     }
     ret
 }
@@ -609,7 +674,13 @@ pub unsafe fn inflateInit2_(
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    inflate_allocate_state(strm, windowBits)
+    let mut initialized = new_inflate_state();
+    initialized.mode = crate::src::inflate::HEAD;
+    inflate_allocate_state(
+        strm,
+        initialized,
+        InflateStateInstallation::Initialize(windowBits),
+    )
 }
 #[export_name = "inflateInit2_"]
 
@@ -3215,44 +3286,23 @@ fn inflate_copy_impl(
     Ok(source.state.clone())
 }
 
-/// Install a prepared decoder-state clone using the source stream's paired
-/// ABI allocator.  This is deliberately the only raw ownership handoff in
-/// the copy path; cloning and validation remain in `inflate_copy_impl`.
+/// Install a prepared decoder-state clone using the shared state-storage
+/// facade.  Cloning and validation remain in `inflate_copy_impl`; allocator
+/// callbacks and writes are confined to `inflate_allocate_state`.
 unsafe fn inflate_copy_install(
     dest: &mut crate::zlib_h::z_stream_s,
     source: &crate::zlib_h::z_stream_s,
     source_state: &crate::src::inflate::inflate_state,
     copied_state: crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
-    if source.zalloc.is_none() && source.zfree.is_none() {
-        let copy = Box::new(copied_state);
-        let copy_pointer = core::ptr::from_ref(copy.as_ref());
-        let address = copy_pointer.addr();
-        if !retain_default_inflate_state(copy) {
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-        *dest = *source;
-        copy_inflate_header_registration(source_state, address);
-        dest.state = copy_pointer.cast_mut().cast();
-        return crate::zlib_h::Z_OK;
-    }
-    let (Some(zalloc), Some(_)) = (source.zalloc, source.zfree) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let copy = zalloc(
-        source.opaque,
-        1,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+    inflate_allocate_state(
+        dest,
+        copied_state,
+        InflateStateInstallation::Copy {
+            source_stream: source,
+            source_state,
+        },
     )
-    .cast::<crate::src::inflate::inflate_state>();
-    if copy.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    copy.write(copied_state);
-    *dest = *source;
-    copy_inflate_header_registration(source_state, copy.addr());
-    dest.state = copy.cast();
-    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateCopy"]
 
