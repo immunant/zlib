@@ -152,6 +152,23 @@ pub struct inflate_state {
     pub was: ::core::ffi::c_uint,
 }
 
+/// The caller-visible inflate state still retains the legacy allocation
+/// handle, but the size of that allocation is pure state metadata.  Keeping
+/// it in pointer-free data lets allocation and copy paths agree now, and is
+/// the shape an owned window can later take without rediscovering the ABI
+/// sizing rule.
+struct InflateWindowLayout {
+    allocation_items: crate::stdlib::uInt,
+}
+
+impl InflateWindowLayout {
+    fn from_state(state: &inflate_state) -> Self {
+        Self {
+            allocation_items: (1 as crate::stdlib::uInt) << state.wbits,
+        }
+    }
+}
+
 fn copy_inflate_state(source: &inflate_state) -> inflate_state {
     inflate_state {
         strm: source.strm,
@@ -632,10 +649,11 @@ fn updatewindow(
         let Some(zalloc) = strm.zalloc else {
             return 1 as ::core::ffi::c_int;
         };
+        let layout = InflateWindowLayout::from_state(state);
         state.window = unsafe {
             zalloc(
                 strm.opaque,
-                (1 as crate::stdlib::uInt) << state.wbits,
+                layout.allocation_items,
                 ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
             ) as *mut ::core::ffi::c_uchar
         };
@@ -2904,11 +2922,12 @@ fn initialize_inflate_copy(
     }
     let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if !source_state.window.is_null() {
+        let layout = InflateWindowLayout::from_state(source_state);
         window = unsafe {
             Some(source.zalloc.expect("validated allocator"))
                 .expect("validated allocator")(
                 source.opaque,
-                (1 as crate::stdlib::uInt) << source_state.wbits,
+                layout.allocation_items,
                 ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
             ) as *mut ::core::ffi::c_uchar
         };
