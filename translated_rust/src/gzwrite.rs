@@ -526,7 +526,14 @@ unsafe fn gzputc(
     if !policy.accepts_write() {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
@@ -647,7 +654,14 @@ unsafe fn gzflush(
     if !policy.accepts_write() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -682,7 +696,14 @@ unsafe fn gzsetparams(
     if !policy.accepts_params() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     if level == state.level && strategy == state.strategy {
         return crate::zlib_h::Z_OK;
     }

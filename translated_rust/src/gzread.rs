@@ -804,7 +804,14 @@ unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::
     if !policy.accepts_read() {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     if (output.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
         crate::src::gzlib::gz_set_error(
             &mut state.msg,
@@ -871,7 +878,14 @@ unsafe fn gzfread(
     if !policy.accepts_read() {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     len = nitems.wrapping_mul(size);
     if size != 0 && len.wrapping_div(size) != nitems {
         crate::src::gzlib::gz_set_error(
@@ -918,7 +932,14 @@ unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if !policy.accepts_read() {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     if state.x.have != 0 {
         // Convert the ABI cursor once at this boundary.  The cursor view
         // checks the complete advertised unread range before the safe read
@@ -981,7 +1002,14 @@ unsafe fn gzungetc(
     if !policy.accepts_read() {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
@@ -1049,7 +1077,14 @@ unsafe fn gzgets(
     if !policy.accepts_read() {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
