@@ -3614,7 +3614,7 @@ unsafe extern "C" fn deflate_fast(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                        .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
                 } else {
                     ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -3645,7 +3645,7 @@ unsafe extern "C" fn deflate_fast(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -3669,7 +3669,7 @@ unsafe extern "C" fn deflate_fast(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -3867,7 +3867,7 @@ unsafe extern "C" fn deflate_slow(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
                         (*s).window
-                            .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                            .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                             as *mut crate::stdlib::charf
                     } else {
                         ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -3917,7 +3917,7 @@ unsafe extern "C" fn deflate_slow(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
                         (*s).window
-                            .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                            .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                             as *mut crate::stdlib::charf
                     } else {
                         ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -3980,7 +3980,7 @@ unsafe extern "C" fn deflate_slow(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -4004,7 +4004,7 @@ unsafe extern "C" fn deflate_slow(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -4321,7 +4321,7 @@ unsafe extern "C" fn deflate_rle(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                        .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
                 } else {
                     ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -4346,7 +4346,7 @@ unsafe extern "C" fn deflate_rle(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -4370,7 +4370,7 @@ unsafe extern "C" fn deflate_rle(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -4446,7 +4446,7 @@ unsafe extern "C" fn deflate_huff(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                        .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
                 } else {
                     ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -4471,7 +4471,7 @@ unsafe extern "C" fn deflate_huff(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
@@ -4495,7 +4495,7 @@ unsafe extern "C" fn deflate_huff(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+                    .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
                     as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
