@@ -174,6 +174,15 @@ fn inflate_back_state_config(window_bits: ::core::ffi::c_int) -> InflateBackStat
     }
 }
 
+// `inflateBack()` starts each decode by resetting only the fields whose
+// lifetime is confined to that operation.  Keep that state transition
+// reference-based once the FFI entry point has established the state binding.
+fn inflate_back_reset(state: &mut crate::src::inflate::inflate_state) {
+    state.mode = crate::src::inflate::TYPE;
+    state.last = 0;
+    state.whave = 0;
+}
+
 fn inflate_back_block_header(
     hold: ::core::ffi::c_ulong,
 ) -> (::core::ffi::c_int, InflateBackBlockType) {
@@ -549,9 +558,8 @@ pub unsafe extern "C" fn inflateBack(
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*state).mode = crate::src::inflate::TYPE;
-    (*state).last = 0 as ::core::ffi::c_int;
-    (*state).whave = 0 as ::core::ffi::c_uint;
+    let state_ref = &mut *state;
+    inflate_back_reset(state_ref);
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
     have = (if !next.is_null() {
         (*strm).avail_in
@@ -560,8 +568,8 @@ pub unsafe extern "C" fn inflateBack(
     }) as ::core::ffi::c_uint;
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
-    put = (*state).window;
-    left = (*state).wsize;
+    put = state_ref.window;
+    left = state_ref.wsize;
     '_inf_leave: loop {
         match (*state).mode as ::core::ffi::c_uint {
             16191 => {
