@@ -415,7 +415,8 @@ fn read_buf_bytes(
 // owned allocations pass `false` for `bind_input`, avoiding an unnecessary
 // bind of the unrelated caller input cursor.
 fn fill_window<T>(
-    s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
     bind_input: bool,
     operation: impl FnOnce(
         &mut crate::src::deflate::deflate_state,
@@ -426,11 +427,6 @@ fn fill_window<T>(
         &[crate::stdlib::Bytef],
     ) -> T,
 ) -> T {
-    // SAFETY: all callers operate on a live deflater state initialized by
-    // `deflateInit2_()` and associated with its stream.
-    let state = unsafe { &mut *s };
-    // SAFETY: the validated deflater keeps this stream alive for the state.
-    let stream = unsafe { &mut *state.strm };
     let window = if state.window_size == 0 {
         &mut []
     } else {
@@ -853,19 +849,21 @@ pub unsafe extern "C" fn deflateSetDictionary(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm).is_none() || dictionary.is_null() {
+    let Some((stream, state)) = deflateStateCheck(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if dictionary.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = (*strm).state as *mut crate::src::deflate::deflate_state;
-    let avail_in = (*strm).avail_in;
-    let next_in = (*strm).next_in;
-    (*strm).avail_in = dictLength;
-    (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
-    let result = fill_window(state, true, |state, stream, window, head, prev, dictionary| {
+    let avail_in = stream.avail_in;
+    let next_in = stream.next_in;
+    stream.avail_in = dictLength;
+    stream.next_in = dictionary as *mut crate::stdlib::Bytef;
+    let result = fill_window(state, stream, true, |state, stream, window, head, prev, dictionary| {
         deflate_set_dictionary(state, stream, window, head, prev, dictionary)
     });
-    (*strm).next_in = next_in;
-    (*strm).avail_in = avail_in;
+    stream.next_in = next_in;
+    stream.avail_in = avail_in;
     result
 }
 
@@ -1062,7 +1060,7 @@ pub unsafe extern "C" fn deflateResetKeep(
     let result = deflate_reset_keep(strm, state);
     crate::src::trees::_tr_init(state);
     if result == crate::zlib_h::Z_OK && initialize_matcher {
-        fill_window(state, false, |state, _stream, _window, head, _prev, _input| {
+        fill_window(state, strm, false, |state, _stream, _window, head, _prev, _input| {
             lm_init_state(state, head)
         });
     }
