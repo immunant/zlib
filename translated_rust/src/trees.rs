@@ -5570,9 +5570,6 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     let Some(state) = s.as_mut() else {
         return;
     };
-    if state.strm.is_null() {
-        return;
-    }
     // This export boundary owns the two ABI buffer lends.  The implementation
     // core receives only checked slices, so Rust callers never need the legacy
     // raw stored-block cursor.
@@ -5599,9 +5596,10 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
         ))
     };
     tr_flush_block(state, pending_and_symbols, stored, stored_len, last);
-    let Some(strm) = state.strm.as_mut() else {
+    let Some(mut strm) = state.strm else {
         return;
     };
+    let strm = strm.as_mut();
     strm.data_type = state.data_type;
 }
 pub fn _tr_tally(
