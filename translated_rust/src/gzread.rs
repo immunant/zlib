@@ -46,14 +46,20 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-unsafe extern "C" fn gz_load(
+struct GzLoadResult {
+    received: ::core::ffi::c_uint,
+    status: ::core::ffi::c_int,
+}
+
+// This is the raw descriptor-read boundary.  Keep the byte count in a typed
+// result instead of passing a raw out-pointer through each caller, including
+// the partial-read error case that gzip must still account for.
+unsafe fn gz_load(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: *mut ::core::ffi::c_uchar,
     mut len: ::core::ffi::c_uint,
-    mut have: *mut ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
+) -> GzLoadResult {
     let state = &mut *state;
-    let have = &mut *have;
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
     // Keep the byte count local while crossing the raw read boundary.  The
@@ -82,16 +88,20 @@ unsafe extern "C" fn gz_load(
         loaded,
         *crate::stdlib::__errno_location(),
     ) {
-        *have = loaded;
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_ERRNO,
             crate::stdlib::strerror(errno),
         );
-        return -1;
+        return GzLoadResult {
+            received: loaded,
+            status: -1,
+        };
     }
-    *have = loaded;
-    0
+    GzLoadResult {
+        received: loaded,
+        status: 0,
+    }
 }
 
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
@@ -115,13 +125,9 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 ::core::ptr::copy(input, state.in_0, buffered as usize);
             }
         }
-        if gz_load(
-            state,
-            state.in_0.offset(buffered as isize),
-            requested,
-            &raw mut got,
-        ) == -1 as ::core::ffi::c_int
-        {
+        let result = gz_load(state, state.in_0.offset(buffered as isize), requested);
+        got = result.received;
+        if result.status == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
         crate::src::gzlib::gz_avail_after_load(state, got);
@@ -301,13 +307,9 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 }
             }
             crate::gzguts_h::COPY => {
-                if gz_load(
-                    state,
-                    state.out,
-                    state.size << 1 as ::core::ffi::c_int,
-                    &raw mut state.x.have,
-                ) == -1 as ::core::ffi::c_int
-                {
+                let result = gz_load(state, state.out, state.size << 1 as ::core::ffi::c_int);
+                state.x.have = result.received;
+                if result.status == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
                 state.x.next = state.out;
@@ -418,7 +420,9 @@ unsafe extern "C" fn gz_read(
             }
             crate::src::gzlib::GzReadPlan::Copy(chunk) => {
                 n = chunk;
-                err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
+                let result = gz_load(state, buf as *mut ::core::ffi::c_uchar, n);
+                n = result.received;
+                err = result.status;
             }
             crate::src::gzlib::GzReadPlan::Decompress(chunk) => {
                 n = chunk;
