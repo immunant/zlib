@@ -299,6 +299,22 @@ fn inflate_back_start_block(
     }
 }
 
+// Decoding the three block-header bits and applying their meaning are two
+// separate concerns: the caller owns the raw input cursor, while this helper
+// owns the decoder state change that follows a successfully loaded header.
+// Keeping the bit-buffer update with that state change prevents individual
+// decoder arms from publishing a partially applied header.
+fn inflate_back_apply_block_header(
+    state: &mut crate::src::inflate::inflate_state,
+    hold: &mut ::core::ffi::c_ulong,
+    bits: &mut ::core::ffi::c_uint,
+) -> bool {
+    let (last, block_type) = inflate_back_block_header(*hold);
+    state.last = last;
+    inflate_back_drop_bits(hold, bits, 3);
+    inflate_back_start_block(state, block_type)
+}
+
 fn inflate_back_stored_length(hold: ::core::ffi::c_ulong) -> Option<::core::ffi::c_uint> {
     let length = hold as ::core::ffi::c_uint & 0xffff;
     if hold & 0xffff == hold >> 16 ^ 0xffff {
@@ -315,6 +331,20 @@ fn inflate_back_start_stored_copy(
     length: ::core::ffi::c_uint,
 ) {
     state.length = length;
+}
+
+// A stored block discards its byte-aligned length descriptor before copying
+// payload bytes.  This is decoder bookkeeping only; input and output cursors
+// remain at the raw callback boundary.
+fn inflate_back_begin_stored_copy(
+    state: &mut crate::src::inflate::inflate_state,
+    length: ::core::ffi::c_uint,
+    hold: &mut ::core::ffi::c_ulong,
+    bits: &mut ::core::ffi::c_uint,
+) {
+    inflate_back_start_stored_copy(state, length);
+    *hold = 0;
+    *bits = 0;
 }
 
 // These transitions happen around output callbacks, but do not themselves
@@ -357,6 +387,17 @@ fn inflate_back_finish_literal(state: &mut crate::src::inflate::inflate_state) {
     state.mode = crate::src::inflate::LEN;
 }
 
+// Literal publication consumes exactly one byte from the active output
+// window.  The byte store itself stays in the raw decoder, while its state
+// accounting is reference-bound here.
+fn inflate_back_commit_literal(
+    state: &mut crate::src::inflate::inflate_state,
+    left: &mut ::core::ffi::c_uint,
+) {
+    *left = left.wrapping_sub(1);
+    inflate_back_finish_literal(state);
+}
+
 fn inflate_back_literal_byte(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_uchar {
     state.length as ::core::ffi::c_uchar
 }
@@ -392,6 +433,19 @@ fn inflate_back_set_dynamic_header(
     state.nlen = header.nlen;
     state.ndist = header.ndist;
     state.ncode = header.ncode;
+}
+
+// Once the caller has loaded a complete dynamic-block header, all remaining
+// work is local decoder state and bit-buffer bookkeeping.
+fn inflate_back_apply_dynamic_header(
+    state: &mut crate::src::inflate::inflate_state,
+    hold: &mut ::core::ffi::c_ulong,
+    bits: &mut ::core::ffi::c_uint,
+) -> InflateBackDynamicHeader {
+    let header = inflate_back_dynamic_header(*hold);
+    inflate_back_set_dynamic_header(state, header);
+    inflate_back_drop_bits(hold, bits, 14);
+    header
 }
 
 fn inflate_back_start_code_length_order(state: &mut crate::src::inflate::inflate_state) {
@@ -877,10 +931,7 @@ pub unsafe extern "C" fn inflateBack(
                         hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    let (last, block_type) = inflate_back_block_header(hold);
-                    state_ref.last = last;
-                    inflate_back_drop_bits(&mut hold, &mut bits, 3);
-                    if inflate_back_start_block(state_ref, block_type) {
+                    if inflate_back_apply_block_header(state_ref, &mut hold, &mut bits) {
                         strm.msg = b"invalid block type\0".as_ptr() as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
                         inflate_back_enter_bad(state_ref);
@@ -907,9 +958,7 @@ pub unsafe extern "C" fn inflateBack(
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 if let Some(length) = inflate_back_stored_length(hold) {
-                    inflate_back_start_stored_copy(state_ref, length);
-                    hold = 0 as ::core::ffi::c_ulong;
-                    bits = 0 as ::core::ffi::c_uint;
+                    inflate_back_begin_stored_copy(state_ref, length, &mut hold, &mut bits);
                     while state_ref.length != 0 as ::core::ffi::c_uint {
                         copy = state_ref.length;
                         if have == 0 as ::core::ffi::c_uint {
@@ -964,9 +1013,7 @@ pub unsafe extern "C" fn inflateBack(
                     hold = hold.wrapping_add((*c2rust_fresh2 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                let header = inflate_back_dynamic_header(hold);
-                inflate_back_set_dynamic_header(state_ref, header);
-                inflate_back_drop_bits(&mut hold, &mut bits, 14);
+                let header = inflate_back_apply_dynamic_header(state_ref, &mut hold, &mut bits);
                 if !inflate_back_dynamic_header_is_valid(header) {
                     strm.msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
@@ -1287,8 +1334,7 @@ pub unsafe extern "C" fn inflateBack(
                     let c2rust_fresh15 = put;
                     put = put.wrapping_add(1);
                     *c2rust_fresh15 = inflate_back_literal_byte(state_ref);
-                    left = left.wrapping_sub(1);
-                    inflate_back_finish_literal(state_ref);
+                    inflate_back_commit_literal(state_ref, &mut left);
                 }
                 InflateBackLengthCode::End => {
                     inflate_back_finish_end_code(state_ref);
