@@ -74,6 +74,54 @@ impl GzWritePolicy {
     }
 }
 
+// Retuning has a small pointer-free admission phase before it reaches the
+// embedded deflater.  In particular, a rejected request must preserve the
+// previous error, while an accepted no-op clears it without materializing a
+// deferred seek or touching the codec.
+enum GzSetParamsPlan {
+    Reject,
+    NoChange,
+    Change { materialize_skip: bool },
+}
+
+fn gzsetparams_plan(
+    policy: &GzWritePolicy,
+    current_level: ::core::ffi::c_int,
+    current_strategy: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+) -> GzSetParamsPlan {
+    if !policy.accepts_params() {
+        GzSetParamsPlan::Reject
+    } else if level == current_level && strategy == current_strategy {
+        GzSetParamsPlan::NoChange
+    } else {
+        GzSetParamsPlan::Change {
+            materialize_skip: skip != 0,
+        }
+    }
+}
+
+// The zero-fill step may initialize the write buffers, so form this second
+// plan only after it has completed.  It describes the remaining scalar codec
+// transition without retaining any ABI cursor or storage borrow.
+struct GzSetParamsCodecPlan {
+    retune: bool,
+    flush_buffered_input: bool,
+}
+
+fn gzsetparams_codec_plan(
+    buffers_size: crate::stdlib::uInt,
+    buffered_input: bool,
+) -> GzSetParamsCodecPlan {
+    let retune = buffers_size != 0;
+    GzSetParamsCodecPlan {
+        retune,
+        flush_buffered_input: retune && buffered_input,
+    }
+}
+
 // Closing a writer has a small, but externally visible, error-precedence
 // policy: both pending zero-fill and the final codec flush are attempted, and
 // a later descriptor-close failure wins over either codec result.  Keep those
@@ -1133,7 +1181,15 @@ unsafe fn gzsetparams(
         again: state.again,
         direct: state.direct,
     };
-    if !policy.accepts_params() {
+    let plan = gzsetparams_plan(
+        &policy,
+        state.level,
+        state.strategy,
+        level,
+        strategy,
+        state.skip,
+    );
+    if matches!(plan, GzSetParamsPlan::Reject) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::GzErrorState {
@@ -1144,18 +1200,22 @@ unsafe fn gzsetparams(
         path: state.path.as_deref(),
     }
     .clear();
-    if level == state.level && strategy == state.strategy {
+    let GzSetParamsPlan::Change { materialize_skip } = plan else {
         return crate::zlib_h::Z_OK;
-    }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    };
+    if materialize_skip && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    if state.buffers.size != 0 {
-        if state
+    let codec = gzsetparams_codec_plan(
+        state.buffers.size,
+        state
             .buffers
             .write_owner
             .as_ref()
-            .is_some_and(|owner| owner.input().available() != 0)
+            .is_some_and(|owner| owner.input().available() != 0),
+    );
+    if codec.retune {
+        if codec.flush_buffered_input
             && gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int
         {
             return state.err;
