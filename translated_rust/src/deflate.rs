@@ -1472,14 +1472,33 @@ fn deflate_state_status_is_valid(status: ::core::ffi::c_int) -> bool {
         || status == crate::src::deflate::FINISH_STATE
 }
 
+// The callback allocations remain owned by `internal_state` and are released
+// through its recorded zfree transaction.  This view only borrows them for a
+// single stream operation; in particular, it never extends their lifetime to
+// `'static` or replaces their callback provenance with a Rust allocation.
+struct DeflateCallbackStorage<'stream> {
+    window: Option<&'stream mut [crate::stdlib::Bytef]>,
+    prev: Option<&'stream mut [crate::src::deflate::Posf]>,
+    head: Option<&'stream mut [crate::src::deflate::Posf]>,
+    pending: Option<&'stream mut [crate::stdlib::Bytef]>,
+}
+
+enum DeflateStorageProjection {
+    None,
+    Dictionary,
+}
+
 // The caller first checks and borrows the ABI stream, then this short-lived
-// projection validates its opaque state.  Keeping both references tied to
-// that stream borrow prevents a state reference from escaping the ABI call.
+// projection validates its opaque state.  Keeping all returned borrows tied
+// to that stream borrow prevents a state or callback-buffer reference from
+// escaping the ABI call.
 unsafe fn deflate_stream_and_state<'stream>(
     strm: &'stream mut crate::zlib_h::z_stream_s,
+    projection: DeflateStorageProjection,
 ) -> Option<(
     &'stream mut crate::zlib_h::z_stream_s,
     &'stream mut crate::src::deflate::deflate_state,
+    DeflateCallbackStorage<'stream>,
 )> {
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return None;
@@ -1491,7 +1510,30 @@ unsafe fn deflate_stream_and_state<'stream>(
     if !deflate_state_status_is_valid(state.status) {
         return None;
     }
-    Some((strm, state))
+    let storage = match projection {
+        DeflateStorageProjection::None => DeflateCallbackStorage {
+            window: None,
+            prev: None,
+            head: None,
+            pending: None,
+        },
+        DeflateStorageProjection::Dictionary => DeflateCallbackStorage {
+            window: Some(::core::slice::from_raw_parts_mut(
+                state.window.expect("initialized window").as_ptr(),
+                state.window_size as usize,
+            )),
+            prev: Some(::core::slice::from_raw_parts_mut(
+                state.prev.expect("initialized prev table").as_ptr(),
+                state.w_size as usize,
+            )),
+            head: Some(::core::slice::from_raw_parts_mut(
+                state.head.expect("initialized head table").as_ptr(),
+                state.hash_size as usize,
+            )),
+            pending: None,
+        },
+    };
+    Some((strm, state, storage))
 }
 
 // Insert the initial dictionary strings into the hash chains.  The caller
@@ -1771,21 +1813,14 @@ pub unsafe fn deflate_set_dictionary_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    let Some((strm, s)) = deflate_stream_and_state(strm) else {
+    let Some((strm, s, storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let window = ::core::slice::from_raw_parts_mut(
-        s.window.expect("initialized window").as_ptr(),
-        s.window_size as usize,
-    );
-    let head = ::core::slice::from_raw_parts_mut(
-        s.head.expect("initialized head table").as_ptr(),
-        s.hash_size as usize,
-    );
-    let prev = ::core::slice::from_raw_parts_mut(
-        s.prev.expect("initialized prev table").as_ptr(),
-        s.w_size as usize,
-    );
+    let window = storage.window.expect("dictionary window projection");
+    let head = storage.head.expect("dictionary head projection");
+    let prev = storage.prev.expect("dictionary prev projection");
     let mut state = DictionaryState {
         wrap: s.wrap,
         status: s.status,
@@ -1847,9 +1882,9 @@ pub unsafe extern "C" fn deflateGetDictionary(
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
     let mut len: crate::stdlib::uInt = 0;
-    let Some((_strm, state)) = strm
+    let Some((_strm, state, _storage)) = strm
         .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
+        .and_then(|strm| deflate_stream_and_state(strm, DeflateStorageProjection::None))
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2045,7 +2080,9 @@ pub(crate) unsafe fn deflate_reset_keep_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     kind: DeflateResetKind,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = deflate_stream_and_state(strm) else {
+    let Some((strm, state, _storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let adler = deflateResetKeep(DeflateResetKeepOwner {
@@ -2143,9 +2180,9 @@ pub unsafe extern "C" fn deflateSetHeader(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = strm
+    let Some((_strm, state, _storage)) = strm
         .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
+        .and_then(|strm| deflate_stream_and_state(strm, DeflateStorageProjection::None))
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2217,9 +2254,9 @@ pub unsafe extern "C" fn deflatePending(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = strm
+    let Some((_strm, state, _storage)) = strm
         .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
+        .and_then(|strm| deflate_stream_and_state(strm, DeflateStorageProjection::None))
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2260,7 +2297,9 @@ pub unsafe fn deflateUsed(
     strm: &mut crate::zlib_h::z_stream_s,
     bits: Option<&mut ::core::ffi::c_int>,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflate_stream_and_state(strm) else {
+    let Some((_strm, state, _storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     deflate_used_impl(state.bi_used, bits)
@@ -2321,7 +2360,9 @@ pub unsafe fn deflatePrime(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflate_stream_and_state(strm) else {
+    let Some((_strm, state, _storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let pending_buf = ::core::slice::from_raw_parts_mut(
@@ -2509,7 +2550,9 @@ pub unsafe fn deflate_params_from_stream(
     // borrow across that call; reproject afterwards instead of indexing the
     // raw cursors throughout the parameter policy.
     let needs_flush = {
-        let Some((_stream, state)) = deflate_stream_and_state(strm) else {
+        let Some((_stream, state, _storage)) =
+            deflate_stream_and_state(strm, DeflateStorageProjection::None)
+        else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         let algorithm = configuration_table[state.level as usize].algorithm;
@@ -2523,7 +2566,9 @@ pub unsafe fn deflate_params_from_stream(
             return err;
         }
         let flush_left_input = {
-            let Some((stream, state)) = deflate_stream_and_state(strm) else {
+            let Some((stream, state, _storage)) =
+                deflate_stream_and_state(strm, DeflateStorageProjection::None)
+            else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             stream.avail_in != 0
@@ -2535,7 +2580,9 @@ pub unsafe fn deflate_params_from_stream(
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    let Some((_stream, state)) = deflate_stream_and_state(strm) else {
+    let Some((_stream, state, _storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let needs_table_cleanup = state.level != level && state.level == 0 && state.matches != 0;
@@ -2616,7 +2663,9 @@ pub unsafe fn deflateTune(
     nice_length: ::core::ffi::c_int,
     max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, s)) = deflate_stream_and_state(strm) else {
+    let Some((_strm, s, _storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let (good_match, max_lazy_match, nice_match, max_chain_length) =
@@ -4533,7 +4582,9 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
     let Some(flush) = DeflateFlush::parse(flush) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state)) = deflate_stream_and_state(strm) else {
+    let Some((strm, state, _storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
@@ -4764,7 +4815,9 @@ pub unsafe fn deflateEnd(
     mut strm: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
 ) -> ::core::ffi::c_int {
     let strm = strm.as_mut();
-    let Some((strm, state)) = deflate_stream_and_state(strm) else {
+    let Some((strm, state, _storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // Keep the ABI projection at the release boundary.  Everything after
