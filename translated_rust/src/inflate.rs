@@ -698,12 +698,8 @@ impl WindowHistory {
         if window.len() != self.size as usize {
             return None;
         }
-        let plan = window_update_plan(
-            self.size,
-            self.next,
-            self.have,
-            produced.len() as ::core::ffi::c_uint,
-        );
+        let produced_len = window_update_copy_len(produced.len())?;
+        let plan = window_update_plan(self.size, self.next, self.have, produced_len);
 
         if plan.replace {
             let start = produced.len().checked_sub(window.len())?;
@@ -1372,6 +1368,13 @@ fn update_window_core(
 
 fn update_window_buffer_len(wsize: ::core::ffi::c_uint) -> usize {
     wsize as usize
+}
+
+/// Convert a safe produced slice length to the C-width count consumed by the
+/// history cursor logic.  Callers that can only represent a larger slice must
+/// fail instead of silently truncating it before updating the window.
+fn window_update_copy_len(produced_len: usize) -> Option<::core::ffi::c_uint> {
+    ::core::ffi::c_uint::try_from(produced_len).ok()
 }
 
 fn update_window_produced_len(copy: ::core::ffi::c_uint) -> Option<usize> {
@@ -5252,6 +5255,21 @@ mod tests {
         assert_eq!(update.wnext, 3);
         assert_eq!(update.whave, 5);
         assert_eq!(window, *b"abcdefgh");
+    }
+
+    #[test]
+    fn window_update_copy_len_rejects_lengths_outside_c_width() {
+        assert_eq!(super::window_update_copy_len(0), Some(0));
+        assert_eq!(
+            super::window_update_copy_len(::core::ffi::c_uint::MAX as usize),
+            Some(::core::ffi::c_uint::MAX)
+        );
+
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(
+            super::window_update_copy_len(::core::ffi::c_uint::MAX as usize + 1),
+            None
+        );
     }
 
     #[test]
