@@ -374,7 +374,6 @@ struct DeflateLayout {
     hash_mask: crate::stdlib::uInt,
     hash_shift: crate::stdlib::uInt,
     lit_bufsize: crate::stdlib::uInt,
-    pending_buf_size: crate::zutil_h::ulg,
 }
 
 // Keep the allocator-facing shape separate from the ABI-shaped state.  These
@@ -384,6 +383,16 @@ struct DeflateLayout {
 struct DeflateAllocation {
     items: crate::stdlib::uInt,
     size: crate::stdlib::uInt,
+}
+
+impl DeflateAllocation {
+    // Keep the allocation request and its view capacity together. The
+    // callback still receives the original `(items, size)` pair, while a
+    // future owner-backed allocation broker can use this checked capacity to
+    // construct its bounded byte view without re-deriving it from ABI state.
+    fn byte_len(&self) -> Option<usize> {
+        (self.items as usize).checked_mul(self.size as usize)
+    }
 }
 
 struct DeflateStorageLayout {
@@ -485,7 +494,6 @@ fn deflate_layout(
             .wrapping_sub(1)
             .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt),
         lit_bufsize,
-        pending_buf_size: (lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4),
     })
 }
 
@@ -817,7 +825,10 @@ pub unsafe extern "C" fn deflateInit2_(
         storage.pending.items,
         storage.pending.size,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef);
-    (*s).pending_buf_size = layout.pending_buf_size;
+    (*s).pending_buf_size = storage
+        .pending
+        .byte_len()
+        .expect("validated pending allocation geometry") as crate::zutil_h::ulg;
     if (*s).window.is_null()
         || (*s).prev.is_null()
         || (*s).head.is_null()
