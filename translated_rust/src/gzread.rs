@@ -72,6 +72,14 @@ struct GzReadPolicy {
     again: ::core::ffi::c_int,
 }
 
+// The public read entry points all begin with the same scalar admission and
+// error-reset transition.  Keep that transition over the pointer-free error
+// view, so the eventual gzip owner can reuse it without exposing an ABI
+// cursor or embedded stream to the request layer.
+struct GzReadRequest {
+    policy: GzReadPolicy,
+}
+
 // Allocate the read side's paired buffers before changing the ABI-shaped
 // state.  The eventual gzip owner can take this transaction directly, while
 // this boundary still performs the existing stream/cursor projection.
@@ -99,6 +107,22 @@ impl GzReadPolicy {
             && (self.err == crate::zlib_h::Z_OK
                 || self.err == crate::zlib_h::Z_BUF_ERROR
                 || self.again != 0)
+    }
+}
+
+impl GzReadRequest {
+    fn new(mode: ::core::ffi::c_int, err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> Self {
+        Self {
+            policy: GzReadPolicy { mode, err, again },
+        }
+    }
+
+    fn begin(&self, error: &mut crate::src::gzlib::GzErrorState<'_>) -> bool {
+        if !self.policy.accepts_read() {
+            return false;
+        }
+        error.clear();
+        true
     }
 }
 
@@ -822,34 +846,25 @@ unsafe fn gz_read(
     return got;
 }
 unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::core::ffi::c_int {
-    let policy = GzReadPolicy {
-        mode: state.mode,
-        err: state.err,
-        again: state.again,
-    };
-    if !policy.accepts_read() {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::GzErrorState {
+    let request = GzReadRequest::new(state.mode, state.err, state.again);
+    let mut error = crate::src::gzlib::GzErrorState {
         message: &mut state.msg,
         error: &mut state.err,
         buffered: &mut state.x.have,
         again: state.again,
         path: state.path.as_deref(),
+    };
+    if !request.begin(&mut error) {
+        return -1 as ::core::ffi::c_int;
     }
-    .clear();
     if (output.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_set_error(
-            &mut state.msg,
-            &mut state.err,
-            &mut state.x.have,
-            state.again,
-            state.path.as_deref(),
+        error.set(
             crate::zlib_h::Z_STREAM_ERROR,
             Some(b"request does not fit in an int"),
         );
         return -1 as ::core::ffi::c_int;
     }
+    drop(error);
     let len = gz_read(state, output) as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
         if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
@@ -896,35 +911,26 @@ unsafe fn gzfread(
     mut nitems: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let mut len: crate::stdlib::z_size_t = 0;
-    let policy = GzReadPolicy {
-        mode: state.mode,
-        err: state.err,
-        again: state.again,
-    };
-    if !policy.accepts_read() {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    crate::src::gzlib::GzErrorState {
+    let request = GzReadRequest::new(state.mode, state.err, state.again);
+    let mut error = crate::src::gzlib::GzErrorState {
         message: &mut state.msg,
         error: &mut state.err,
         buffered: &mut state.x.have,
         again: state.again,
         path: state.path.as_deref(),
+    };
+    if !request.begin(&mut error) {
+        return 0 as crate::stdlib::z_size_t;
     }
-    .clear();
     len = nitems.wrapping_mul(size);
     if size != 0 && len.wrapping_div(size) != nitems {
-        crate::src::gzlib::gz_set_error(
-            &mut state.msg,
-            &mut state.err,
-            &mut state.x.have,
-            state.again,
-            state.path.as_deref(),
+        error.set(
             crate::zlib_h::Z_STREAM_ERROR,
             Some(b"request does not fit in a size_t"),
         );
         return 0 as crate::stdlib::z_size_t;
     }
+    drop(error);
     return if len != 0 {
         gz_read(state, output).wrapping_div(size)
     } else {
@@ -950,22 +956,18 @@ pub unsafe extern "C" fn gzfread_ffi(
 }
 unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let policy = GzReadPolicy {
-        mode: state.mode,
-        err: state.err,
-        again: state.again,
-    };
-    if !policy.accepts_read() {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::GzErrorState {
+    let request = GzReadRequest::new(state.mode, state.err, state.again);
+    let mut error = crate::src::gzlib::GzErrorState {
         message: &mut state.msg,
         error: &mut state.err,
         buffered: &mut state.x.have,
         again: state.again,
         path: state.path.as_deref(),
+    };
+    if !request.begin(&mut error) {
+        return -1 as ::core::ffi::c_int;
     }
-    .clear();
+    drop(error);
     if state.x.have != 0 {
         // Convert the ABI cursor once at this boundary.  The cursor view
         // checks the complete advertised unread range before the safe read
@@ -1020,22 +1022,18 @@ unsafe fn gzungetc(
     if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
         gz_look(state);
     }
-    let policy = GzReadPolicy {
-        mode: state.mode,
-        err: state.err,
-        again: state.again,
-    };
-    if !policy.accepts_read() {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::GzErrorState {
+    let request = GzReadRequest::new(state.mode, state.err, state.again);
+    let mut error = crate::src::gzlib::GzErrorState {
         message: &mut state.msg,
         error: &mut state.err,
         buffered: &mut state.x.have,
         again: state.again,
         path: state.path.as_deref(),
+    };
+    if !request.begin(&mut error) {
+        return -1 as ::core::ffi::c_int;
     }
-    .clear();
+    drop(error);
     if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
