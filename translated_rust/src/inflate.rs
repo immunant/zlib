@@ -2901,8 +2901,8 @@ pub unsafe extern "C" fn inflateCopy(
     // Derive all source-state information needed after allocation before
     // calling the source allocator. This value snapshot prevents a Rust
     // reference to source state from spanning that user callback.
-    let (plan, source_state) = {
-        let Some((_source, state)) = inflateStateCheck(source) else {
+    let (plan, source_state, initial_zalloc, initial_opaque) = {
+        let Some((source, state)) = inflateStateCheck(source) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         if dest.is_null() {
@@ -2911,11 +2911,18 @@ pub unsafe extern "C" fn inflateCopy(
         let Some(plan) = inflate_copy_plan(state) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        (plan, *state)
+        // C reads these first-allocation arguments before the callback. Keep
+        // that small value snapshot rather than reopening the already-bound
+        // source stream through its raw pointer.
+        (
+            plan,
+            *state,
+            source.zalloc.expect("non-null function pointer"),
+            source.opaque,
+        )
     };
-    copy = Some((*source).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*source).opaque,
+    copy = Some(initial_zalloc).expect("non-null function pointer")(
+        initial_opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
