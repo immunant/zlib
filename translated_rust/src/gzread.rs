@@ -425,6 +425,26 @@ fn gz_read_buffer_copy_commit_state(
     true
 }
 
+/// Commit the common read-loop byte accounting after the boundary has copied
+/// or produced `copied` bytes and advanced its raw caller cursor.
+fn gz_read_progress_state(
+    remaining: crate::stdlib::z_size_t,
+    got: crate::stdlib::z_size_t,
+    pos: crate::stdlib::off64_t,
+    copied: ::core::ffi::c_uint,
+) -> (
+    crate::stdlib::z_size_t,
+    crate::stdlib::z_size_t,
+    crate::stdlib::off64_t,
+) {
+    let copied = copied as crate::stdlib::z_size_t;
+    (
+        remaining.wrapping_sub(copied),
+        got.wrapping_add(copied),
+        pos.wrapping_add(copied as crate::stdlib::off64_t),
+    )
+}
+
 /// Limit one `gzgets` copy to the caller's remaining space and, when one was
 /// found in that range, include the newline byte.  The boundary still locates
 /// that byte in its raw buffered output.
@@ -584,10 +604,8 @@ unsafe extern "C" fn gz_read(
                     (*state).x.have = 0 as ::core::ffi::c_uint;
                 }
             }
-            len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
-            got = got.wrapping_add(n as crate::stdlib::z_size_t);
-            (*state).x.pos += n as crate::stdlib::off64_t;
+            (len, got, (*state).x.pos) = gz_read_progress_state(len, got, (*state).x.pos, n);
         }
         if !(len != 0 && err == 0) {
             break;
