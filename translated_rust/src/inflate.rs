@@ -366,6 +366,76 @@ fn inflate_table_header_plan(
     })
 }
 
+/// The completed dynamic-code lengths live entirely in the owned inflate
+/// state. Build both decode tables there, preserving the legacy order of
+/// partial state publication while keeping table ranges and table-source
+/// selection out of the cursor-driven decoder loop.
+///
+/// The caller remains responsible for the ABI-visible diagnostic and mode
+/// transition.  Distinguishing the two failures preserves their existing
+/// messages without requiring this safe helper to inspect a stream record.
+enum InflateDynamicTableError {
+    Lengths,
+    Distances,
+}
+
+fn inflate_build_dynamic_tables(
+    state: &mut crate::src::inflate::inflate_state,
+) -> Result<(), InflateDynamicTableError> {
+    let nlen = state.nlen as usize;
+    state.next = 0;
+    state.lencode = InflateCodeTable::Dynamic(0);
+    state.lenbits = 9;
+    let lenbits = state.lenbits;
+    let (lens_used, root) = {
+        let (lens, codes, work) = (&state.lens, &mut state.codes, &mut state.work);
+        let Some(lens) = lens.get(..nlen) else {
+            return Err(InflateDynamicTableError::Lengths);
+        };
+        let Some(table) = codes.get_mut(..crate::src::inftrees::ENOUGH_LENS as usize) else {
+            return Err(InflateDynamicTableError::Lengths);
+        };
+        crate::src::inftrees::inflate_table_into(
+            crate::src::inftrees::LENS,
+            lens,
+            table,
+            work,
+            lenbits,
+        )
+        .map_err(|_| InflateDynamicTableError::Lengths)?
+    };
+    state.next = lens_used;
+    state.lenbits = root;
+
+    let ndist = state.ndist as usize;
+    state.distcode = InflateCodeTable::Dynamic(lens_used);
+    state.distbits = 6;
+    let distbits = state.distbits;
+    let end = lens_used
+        .checked_add(crate::src::inftrees::ENOUGH_DISTS as usize)
+        .ok_or(InflateDynamicTableError::Distances)?;
+    let (dist_used, root) = {
+        let (lens, codes, work) = (&state.lens, &mut state.codes, &mut state.work);
+        let Some(lens) = lens.get(nlen..nlen.saturating_add(ndist)) else {
+            return Err(InflateDynamicTableError::Distances);
+        };
+        let Some(table) = codes.get_mut(lens_used..end) else {
+            return Err(InflateDynamicTableError::Distances);
+        };
+        crate::src::inftrees::inflate_table_into(
+            crate::src::inftrees::DISTS,
+            lens,
+            table,
+            work,
+            distbits,
+        )
+        .map_err(|_| InflateDynamicTableError::Distances)?
+    };
+    state.next = lens_used.saturating_add(dist_used);
+    state.distbits = root;
+    Ok(())
+}
+
 /// Ordinary inflate only validates a trailer when the active wrapper has a
 /// checksum.  This preserves the raw decoder's no-wrapper path while keeping
 /// the comparison as a safe scalar operation.
@@ -1679,10 +1749,6 @@ pub fn inflate(
     };
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    // Keep the dynamic literal/length table size as a scalar so the distance
-    // table can borrow the following owned portion of `codes` without
-    // reconstructing an interior raw cursor.
-    let mut table_used: usize = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
     static order: [::core::ffi::c_ushort; 19] = [
         16 as ::core::ffi::c_ushort,
@@ -2521,80 +2587,26 @@ pub fn inflate(
                                                                             state_ref.mode = crate::src::inflate::BAD;
                                                                             continue '_inf_leave;
                                                                         } else {
-                                                                            ret = {
-                                                                                let nlen = state_ref.nlen as usize;
-                                                                                state_ref.next = 0;
-                                                                                state_ref.lencode = InflateCodeTable::Dynamic(0);
-                                                                                state_ref.lenbits = 9 as ::core::ffi::c_uint;
-                                                                                match state_ref.lens.get(..nlen) {
-                                                                                    Some(lens) => match crate::src::inftrees::inflate_table_into(
-                                                                                        crate::src::inftrees::LENS,
-                                                                                        lens,
-                                                                                        &mut state_ref.codes[..crate::src::inftrees::ENOUGH_LENS as usize],
-                                                                                        &mut state_ref.work,
-                                                                                        state_ref.lenbits,
-                                                                                    ) {
-                                                                                        Ok((used, root)) => {
-                                                                                            table_used = used;
-                                                                                            state_ref.next = used;
-                                                                                            state_ref.lenbits = root;
-                                                                                            0
-                                                                                        }
-                                                                                        Err(status) => status,
-                                                                                    },
-                                                                                    None => 1,
-                                                                                }
-                                                                            };
-                                                                            if ret != 0 {
-                                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[11].as_ptr()
-                                                                                    as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                state_ref.mode = crate::src::inflate::BAD;
-                                                                                continue '_inf_leave;
-                                                                            } else {
-                                                                                ret = {
-                                                                                    let nlen = state_ref.nlen as usize;
-                                                                                    let ndist = state_ref.ndist as usize;
-                                                                                    state_ref.distcode = InflateCodeTable::Dynamic(table_used);
-                                                                                    state_ref.distbits = 6 as ::core::ffi::c_uint;
-                                                                                    let end = match table_used.checked_add(
-                                                                                        crate::src::inftrees::ENOUGH_DISTS as usize,
-                                                                                    ) {
-                                                                                        Some(end) => end,
-                                                                                        None => 0,
-                                                                                    };
-                                                                                    match (
-                                                                                        state_ref.lens.get(nlen..nlen.saturating_add(ndist)),
-                                                                                        state_ref.codes.get_mut(table_used..end),
-                                                                                    ) {
-                                                                                        (Some(lens), Some(table)) => match crate::src::inftrees::inflate_table_into(
-                                                                                            crate::src::inftrees::DISTS,
-                                                                                            lens,
-                                                                                            table,
-                                                                                            &mut state_ref.work,
-                                                                                            state_ref.distbits,
-                                                                                        ) {
-                                                                                            Ok((used, root)) => {
-                                                                                                state_ref.next = table_used.saturating_add(used);
-                                                                                                state_ref.distbits = root;
-                                                                                                0
-                                                                                            }
-                                                                                            Err(status) => status,
-                                                                                        },
-                                                                                        _ => 1,
-                                                                                    }
-                                                                                };
-                                                                                if ret != 0 {
-                                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[12].as_ptr()
-                                                                                        as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                    state_ref.mode = crate::src::inflate::BAD;
-                                                                                    continue '_inf_leave;
-                                                                                } else {
+                                                                            match inflate_build_dynamic_tables(state_ref) {
+                                                                                Ok(()) => {
                                                                                     state_ref.mode = crate::src::inflate::LEN_;
                                                                                     if flush == crate::zlib_h::Z_TREES {
                                                                                         break '_inf_leave;
                                                                                     } else {
                                                                                         break 'c_2397;
                                                                                     }
+                                                                                }
+                                                                                Err(InflateDynamicTableError::Lengths) => {
+                                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[11].as_ptr()
+                                                                                        as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                    state_ref.mode = crate::src::inflate::BAD;
+                                                                                    continue '_inf_leave;
+                                                                                }
+                                                                                Err(InflateDynamicTableError::Distances) => {
+                                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[12].as_ptr()
+                                                                                        as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                    state_ref.mode = crate::src::inflate::BAD;
+                                                                                    continue '_inf_leave;
                                                                                 }
                                                                             }
                                                                         }
