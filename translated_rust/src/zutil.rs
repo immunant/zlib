@@ -7,17 +7,17 @@ pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
 #[no_mangle]
 
-pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    b"need dictionary\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream end\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"file error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"data error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"insufficient memory\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"buffer error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+pub static z_errmsg: [::core::sync::atomic::AtomicPtr<::core::ffi::c_char>; 10] = [
+    ::core::sync::atomic::AtomicPtr::new(b"need dictionary\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"stream end\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"file error\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"stream error\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"data error\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"insufficient memory\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"buffer error\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"incompatible version\0".as_ptr() as *mut _),
+    ::core::sync::atomic::AtomicPtr::new(b"\0".as_ptr() as *mut _),
 ];
 pub extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
     return crate::zlib_h::ZLIB_VERSION.as_ptr();
@@ -103,12 +103,13 @@ pub extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
 pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
     zlibCompileFlags()
 }
-pub unsafe extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+pub extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     return z_errmsg[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
         9 as ::core::ffi::c_int
     } else {
         2 as ::core::ffi::c_int - err
-    }) as usize];
+    }) as usize]
+        .load(::core::sync::atomic::Ordering::Relaxed);
 }
 #[export_name = "zError"]
 
