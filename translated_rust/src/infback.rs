@@ -1089,13 +1089,13 @@ fn inflate_back_init_state(
 }
 
 // This is deliberately the private implementation target for the exported
-// initializer below.  The ABI wrapper binds only its version-byte argument
-// and dispatches here; validation, stream binding, allocation, and state
-// setup remain outside the exported entry point.
+// initializer below. The ABI wrapper binds its foreign arguments and
+// dispatches here; validation, allocation, and state setup remain outside
+// the exported entry point.
 fn inflateBackInit_(
-    mut strm: crate::zlib_h::z_streamp,
+    strm: Option<&mut crate::zlib_h::z_stream>,
     mut windowBits: ::core::ffi::c_int,
-    mut window: *mut ::core::ffi::c_uchar,
+    window: Option<&mut ::core::ffi::c_uchar>,
     version_first: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -1104,17 +1104,15 @@ fn inflateBackInit_(
     let config = match inflate_back_init_config(
         version_first,
         stream_size,
-        !strm.is_null(),
-        !window.is_null(),
+        strm.is_some(),
+        window.is_some(),
         windowBits,
     ) {
         Ok(config) => config,
         Err(error) => return error,
     };
-    // SAFETY: the configuration preflight rejected a null stream. The ABI
-    // caller provides the live stream allocation for the duration of this
-    // initialization call.
-    let strm_ref = unsafe { &mut *strm };
+    let strm_ref = strm.expect("configuration preflight requires a stream");
+    let window = window.expect("configuration preflight requires a window") as *mut _;
     inflate_back_prepare_stream(strm_ref);
     // SAFETY: preflight requires the initialized allocator. This is the
     // allocation contract paired with `inflateBackEnd()` for the newly
@@ -1146,7 +1144,12 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let version_first = version.as_ref().copied();
+    // SAFETY: this ABI adapter only binds optional caller-owned arguments.
+    // The named implementation retains validation and all initialization
+    // work, including allocation and persistent state setup.
+    let strm = unsafe { strm.as_mut() };
+    let window = unsafe { window.as_mut() };
+    let version_first = unsafe { version.as_ref().copied() };
     inflateBackInit_(strm, windowBits, window, version_first, stream_size)
 }
 pub unsafe extern "C" fn inflateBack(
