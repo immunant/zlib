@@ -19,7 +19,6 @@ pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
-pub use crate::src::inflate::inflateReset;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidp;
