@@ -120,6 +120,16 @@ impl GzOpenOptions {
     }
 }
 
+/// Everything the raw open boundary needs after it has borrowed the mode
+/// C-string.  Keeping the parsed state and descriptor flags together avoids
+/// having separate copies of the mode interpretation at the allocation and
+/// descriptor steps.
+#[derive(Clone, Copy)]
+struct GzOpenPlan {
+    options: GzOpenOptions,
+    descriptor_flags: ::core::ffi::c_int,
+}
+
 /// Apply one non-NUL gzip mode byte.  `None` is the legacy rejection of
 /// update mode (`+`); all other unrecognized bytes are ignored.
 fn gz_open_option_byte(mut options: GzOpenOptions, byte: u8) -> Option<GzOpenOptions> {
@@ -200,6 +210,16 @@ fn gz_open_descriptor_flags(options: GzOpenOptions) -> ::core::ffi::c_int {
         }
 }
 
+/// Parse a gzip mode exactly once and derive all descriptor-facing flags
+/// before the FFI boundary allocates state or adopts/opens a descriptor.
+fn gz_open_plan(mode: &[u8]) -> Option<GzOpenPlan> {
+    let options = gz_open_options(mode)?;
+    Some(GzOpenPlan {
+        descriptor_flags: gz_open_descriptor_flags(options),
+        options,
+    })
+}
+
 /// The synthetic path reported by `gzdopen`.  It is kept in fixed storage so
 /// constructing it cannot introduce a second allocation failure before the
 /// gzip state itself is opened.
@@ -252,7 +272,7 @@ unsafe extern "C" fn gz_open(
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut options: GzOpenOptions;
+    let plan: GzOpenPlan;
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -265,17 +285,17 @@ unsafe extern "C" fn gz_open(
     (*state).want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
     (*state).err = crate::zlib_h::Z_OK;
     (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    options = match gz_open_options(::std::ffi::CStr::from_ptr(mode).to_bytes()) {
-        Some(options) => options,
+    plan = match gz_open_plan(::std::ffi::CStr::from_ptr(mode).to_bytes()) {
+        Some(plan) => plan,
         None => {
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     };
-    (*state).mode = options.mode;
-    (*state).level = options.level;
-    (*state).strategy = options.strategy;
-    (*state).direct = options.direct;
+    (*state).mode = plan.options.mode;
+    (*state).level = plan.options.level;
+    (*state).strategy = plan.options.strategy;
+    (*state).direct = plan.options.direct;
     len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
     (*state).path = crate::stdlib::malloc(
         (len as crate::__stddef_size_t_h::size_t)
@@ -292,7 +312,7 @@ unsafe extern "C" fn gz_open(
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
         path as *const ::core::ffi::c_char,
     );
-    let oflag = gz_open_descriptor_flags(options);
+    let oflag = plan.descriptor_flags;
     if fd == -1 as ::core::ffi::c_int {
         (*state).fd = crate::stdlib::open(
             path as *const ::core::ffi::c_char,
