@@ -739,7 +739,7 @@ fn inflate_back_init_state(
 // initializer below.  The ABI wrapper binds only its version-byte argument
 // and dispatches here; validation, stream binding, allocation, and state
 // setup remain outside the exported entry point.
-unsafe fn inflateBackInit_(
+fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
     mut window: *mut ::core::ffi::c_uchar,
@@ -758,18 +758,28 @@ unsafe fn inflateBackInit_(
         Ok(config) => config,
         Err(error) => return error,
     };
-    let strm_ref = &mut *strm;
+    // SAFETY: the configuration preflight rejected a null stream. The ABI
+    // caller provides the live stream allocation for the duration of this
+    // initialization call.
+    let strm_ref = unsafe { &mut *strm };
     inflate_back_prepare_stream(strm_ref);
-    state = Some(strm_ref.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        strm_ref.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
+    // SAFETY: preflight requires the initialized allocator. This is the
+    // allocation contract paired with `inflateBackEnd()` for the newly
+    // initialized stream state.
+    state = unsafe {
+        Some(strm_ref.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm_ref.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state
+    };
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let state_ref = &mut *state;
+    // SAFETY: the allocator above returned a non-null state allocation with
+    // the exact layout requested for `inflate_state`.
+    let state_ref = unsafe { &mut *state };
     state_ref.window = window;
     inflate_back_init_state(strm_ref, state_ref, config);
     return crate::zlib_h::Z_OK;
