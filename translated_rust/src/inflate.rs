@@ -2204,11 +2204,20 @@ pub fn inflate(
                                     if have == 0 as ::core::ffi::c_uint {
                                         break '_inf_leave;
                                     }
+                                    // `have` bounds the current input cursor for this
+                                    // NAME phase. Borrow it once so byte reads and the
+                                    // optional header checksum use the same checked span.
+                                    // The caller-owned header output remains a raw boundary:
+                                    // its advertised capacity is not a Rust slice length.
+                                    let name_input = ::core::slice::from_raw_parts(
+                                        next,
+                                        have as usize,
+                                    );
                                     copy = 0 as ::core::ffi::c_uint;
                                     loop {
                                         let c2rust_fresh5 = copy;
                                         copy = copy.wrapping_add(1);
-                                        len = *next.wrapping_add(c2rust_fresh5 as usize)
+                                        len = name_input[c2rust_fresh5 as usize]
                                             as ::core::ffi::c_uint;
                                         if let Some(head) = header.as_mut() {
                                             if !head.name.is_null()
@@ -2229,10 +2238,7 @@ pub fn inflate(
                                     {
                                         state.check = crate::src::crc32::crc32(
                                             state.check as crate::stdlib::uLong,
-                                            Some(::core::slice::from_raw_parts(
-                                                next,
-                                                copy as usize,
-                                            )),
+                                            Some(&name_input[..copy as usize]),
                                         )
                                             as ::core::ffi::c_ulong;
                                     }
@@ -2332,11 +2338,20 @@ pub fn inflate(
                             if have == 0 as ::core::ffi::c_uint {
                                 break '_inf_leave;
                             }
+                            // As in NAME, this is exactly the currently bounded input
+                            // span. Keep COMMENT decoding/checksum reads in one safe
+                            // view without constructing a slice for the caller's header
+                            // output buffer.
+                            let comment_input = ::core::slice::from_raw_parts(
+                                next,
+                                have as usize,
+                            );
                             copy = 0 as ::core::ffi::c_uint;
                             loop {
                                 let c2rust_fresh7 = copy;
                                 copy = copy.wrapping_add(1);
-                                len = *next.wrapping_add(c2rust_fresh7 as usize) as ::core::ffi::c_uint;
+                                len = comment_input[c2rust_fresh7 as usize]
+                                    as ::core::ffi::c_uint;
                                 if let Some(head) = header.as_mut() {
                                     if !head.comment.is_null()
                                         && state.length < head.comm_max
@@ -2356,7 +2371,7 @@ pub fn inflate(
                             {
                                 state.check = crate::src::crc32::crc32(
                                     state.check as crate::stdlib::uLong,
-                                    Some(::core::slice::from_raw_parts(next, copy as usize)),
+                                    Some(&comment_input[..copy as usize]),
                                 )
                                     as ::core::ffi::c_ulong;
                             }
