@@ -852,6 +852,10 @@ fn inflate_match_copy_from_state_window(
 pub(crate) enum InflateWindowAccess<'a> {
     Ensure,
     Update(&'a [crate::stdlib::Bytef]),
+    // `inflateCopy()` needs to populate an already-allocated destination
+    // history buffer without changing the copied state's window cursors.
+    // Keep that byte transfer at this existing owned-window binding boundary.
+    CopyFrom(&'a [crate::stdlib::Bytef]),
     Inspect,
     Existing,
 }
@@ -899,6 +903,12 @@ pub(crate) fn updatewindow<T>(
                 window.expect("window updates require a bound window"),
                 output,
             );
+            Ok(operation(state, None))
+        }
+        InflateWindowAccess::CopyFrom(source) => {
+            window
+                .expect("window copies require a bound window")
+                .copy_from_slice(source);
             Ok(operation(state, None))
         }
         InflateWindowAccess::Inspect => {
@@ -3153,26 +3163,26 @@ pub fn inflateCopy(
     if window.is_null() {
         inflate_copy_state(dest, &source_stream, copy, &source_state, &plan, None);
     } else {
-        let destination_window = ::core::slice::from_raw_parts_mut(
-            window,
-            plan.window_len.expect("window allocation has a length"),
-        );
         updatewindow(
             source,
             &mut source_state,
             InflateWindowAccess::Inspect,
             |source_state, source_window| {
-                inflate_copy_state(
+                inflate_copy_state(dest, &source_stream, copy, source_state, &plan, None);
+                // Preserve the copied state's exact window metadata, then
+                // populate its already-allocated storage through the shared
+                // owned-window binder. This avoids reopening `window` here
+                // as another raw slice.
+                copy.window = window;
+                updatewindow(
                     dest,
-                    &source_stream,
                     copy,
-                    source_state,
-                    &plan,
-                    Some((
+                    InflateWindowAccess::CopyFrom(
                         source_window.expect("source copy window is bound"),
-                        destination_window,
-                    )),
-                );
+                    ),
+                    |_copy, _window| {},
+                )
+                .expect("a copied destination window is already allocated");
             },
         )
         .expect("a copied source window is already allocated");
