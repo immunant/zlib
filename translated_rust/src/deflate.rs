@@ -401,6 +401,29 @@ fn deflate_rle_clamp_match_length(
     match_length.min(lookahead)
 }
 
+fn deflate_rle_can_scan_match(
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+) -> bool {
+    lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt && strstart > 0
+}
+
+fn deflate_rle_match_state_after_emit(
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    match_length: crate::stdlib::uInt,
+) -> (
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+) {
+    (
+        lookahead.wrapping_sub(match_length),
+        strstart.wrapping_add(match_length),
+        0,
+    )
+}
+
 pub(crate) fn symbol_triplet_cursors(
     start: crate::stdlib::uInt,
 ) -> ([crate::stdlib::uInt; 3], crate::stdlib::uInt) {
@@ -3541,9 +3564,7 @@ unsafe fn deflate_rle(
             }
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            && (*s).strstart > 0 as crate::stdlib::uInt
-        {
+        if deflate_rle_can_scan_match((*s).lookahead, (*s).strstart) {
             scan = (*s)
                 .window
                 .wrapping_offset((*s).strstart as isize)
@@ -3663,9 +3684,11 @@ unsafe fn deflate_rle(
                     .value
                     .wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-            (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
-            (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
-            (*s).match_length = 0 as crate::stdlib::uInt;
+            ((*s).lookahead, (*s).strstart, (*s).match_length) = deflate_rle_match_state_after_emit(
+                (*s).lookahead,
+                (*s).strstart,
+                (*s).match_length,
+            );
         } else {
             let mut cc: crate::zutil_h::uch =
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
@@ -3865,7 +3888,8 @@ mod tests {
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_flush_rank,
         deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_clamp_match_length,
+        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
+        deflate_rle_clamp_match_length, deflate_rle_match_state_after_emit,
         deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
         deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
@@ -3910,6 +3934,24 @@ mod tests {
         assert_eq!(
             deflate_rle_clamp_match_length(crate::stdlib::uInt::MAX, crate::stdlib::uInt::MAX),
             crate::stdlib::uInt::MAX
+        );
+    }
+
+    #[test]
+    fn deflate_rle_can_scan_match_requires_minimum_lookahead_and_prior_byte() {
+        let min_match = crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+
+        assert!(!deflate_rle_can_scan_match(min_match.wrapping_sub(1), 1));
+        assert!(!deflate_rle_can_scan_match(min_match, 0));
+        assert!(deflate_rle_can_scan_match(min_match, 1));
+    }
+
+    #[test]
+    fn deflate_rle_match_state_after_emit_preserves_wrapping_and_clears_length() {
+        assert_eq!(deflate_rle_match_state_after_emit(10, 5, 3), (7, 8, 0));
+        assert_eq!(
+            deflate_rle_match_state_after_emit(0, crate::stdlib::uInt::MAX, 1),
+            (crate::stdlib::uInt::MAX, 0, 0),
         );
     }
 

@@ -347,6 +347,19 @@ fn gz_write_direct_action(
     }
 }
 
+fn gz_write_apply_direct_progress(
+    pos: &mut crate::stdlib::off64_t,
+    remaining: &mut crate::stdlib::z_size_t,
+    chunk_len: ::core::ffi::c_uint,
+    remaining_avail_in: crate::stdlib::uInt,
+    ret: ::core::ffi::c_int,
+) -> GzWriteDirectAction {
+    let progress = gz_write_progress(*pos, *remaining, chunk_len, remaining_avail_in);
+    *pos = progress.pos;
+    *remaining = progress.remaining;
+    gz_write_direct_action(ret, *remaining)
+}
+
 fn gz_zero_apply_progress(
     pos: &mut crate::stdlib::off64_t,
     skip: &mut crate::stdlib::off64_t,
@@ -929,10 +942,13 @@ unsafe fn gz_write(
             let n = gz_write_chunk_len(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
             let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            let progress = gz_write_progress(state.x.pos, len, n, state.strm.avail_in);
-            state.x.pos = progress.pos;
-            len = progress.remaining;
-            match gz_write_direct_action(ret, len) {
+            match gz_write_apply_direct_progress(
+                &mut state.x.pos,
+                &mut len,
+                n,
+                state.strm.avail_in,
+                ret,
+            ) {
                 GzWriteDirectAction::Error => return gz_write_error_result(state.again, put, len),
                 GzWriteDirectAction::Done => break,
                 GzWriteDirectAction::Continue => {}
@@ -1293,15 +1309,15 @@ mod tests {
     use super::{
         gz_buffer_is_initialized, gz_comp_apply_deflate_progress, gz_comp_deflate_progress,
         gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress, gz_comp_has_output,
-        gz_comp_max_write_chunk, gz_comp_needs_output_write, gz_comp_output_buffer_action,
-        gz_comp_needs_reset, gz_comp_output_produced, gz_comp_output_write_chunk_len,
+        gz_comp_max_write_chunk, gz_comp_needs_output_write, gz_comp_needs_reset,
+        gz_comp_output_buffer_action, gz_comp_output_produced, gz_comp_output_write_chunk_len,
         gz_comp_output_write_progress, gz_comp_pending_after_write, gz_comp_reset_action,
         gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result,
         gz_has_pending_input, gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
-        gz_write_apply_chunk_progress, gz_write_buffered_copy_len, gz_write_buffered_progress,
-        gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
-        gz_write_error_result, gz_write_is_empty, gz_write_progress,
+        gz_write_apply_chunk_progress, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
+        gz_write_buffered_progress, gz_write_chunk_len, gz_write_consumed, gz_write_direct_action,
+        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_chunk_step, gz_zero_initial_step, gz_zero_needs_initialization,
@@ -1310,9 +1326,8 @@ mod tests {
         gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action,
         gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
         GzCloseBufferAction, GzCompOutputBufferAction, GzCompResetAction, GzCompWriteFailure,
-        GzCompWriteResult,
-        GzFlushAction, GzPutcWriteAction, GzSetParamsBufferAction, GzWriteDirectAction,
-        GzZeroAction, GzZeroStep,
+        GzCompWriteResult, GzFlushAction, GzPutcWriteAction, GzSetParamsBufferAction,
+        GzWriteDirectAction, GzZeroAction, GzZeroStep,
     };
 
     #[test]
@@ -2188,6 +2203,45 @@ mod tests {
             gz_write_direct_action(0, 1),
             GzWriteDirectAction::Continue
         ));
+    }
+
+    #[test]
+    fn gz_write_apply_direct_progress_updates_state_before_reporting_errors() {
+        let mut pos = 10;
+        let mut remaining = 100;
+
+        assert!(matches!(
+            gz_write_apply_direct_progress(&mut pos, &mut remaining, 80, 20, -1),
+            GzWriteDirectAction::Error
+        ));
+        assert_eq!(pos, 70);
+        assert_eq!(remaining, 40);
+    }
+
+    #[test]
+    fn gz_write_apply_direct_progress_reports_completion_after_consumption() {
+        let mut pos = 10;
+        let mut remaining = 80;
+
+        assert!(matches!(
+            gz_write_apply_direct_progress(&mut pos, &mut remaining, 80, 0, 0),
+            GzWriteDirectAction::Done
+        ));
+        assert_eq!(pos, 90);
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn gz_write_apply_direct_progress_continues_for_partial_writes() {
+        let mut pos = 10;
+        let mut remaining = 100;
+
+        assert!(matches!(
+            gz_write_apply_direct_progress(&mut pos, &mut remaining, 80, 20, 0),
+            GzWriteDirectAction::Continue
+        ));
+        assert_eq!(pos, 70);
+        assert_eq!(remaining, 40);
     }
 
     #[test]
