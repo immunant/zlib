@@ -55,11 +55,10 @@ struct GzLoadResult {
 // result instead of passing a raw out-pointer through each caller, including
 // the partial-read error case that gzip must still account for.
 unsafe fn gz_load(
-    mut state: crate::gzguts_h::gz_statep,
+    state: &mut crate::gzguts_h::gz_state,
     mut buf: *mut ::core::ffi::c_uchar,
     mut len: ::core::ffi::c_uint,
 ) -> GzLoadResult {
-    let state = &mut *state;
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
     // Keep the byte count local while crossing the raw read boundary.  The
