@@ -3837,23 +3837,45 @@ fn next_code_for_len(
     code
 }
 
+fn canonical_codes_for_lengths(
+    lengths: &[crate::zutil_h::ush],
+    bl_count: &[crate::zutil_h::ush; 16],
+) -> Vec<Option<crate::zutil_h::ush>> {
+    let mut next_code = next_codes(bl_count);
+    lengths
+        .iter()
+        .map(|&len| {
+            if len == 0 {
+                None
+            } else {
+                let code = next_code_for_len(&mut next_code, len as ::core::ffi::c_int);
+                Some(
+                    bi_reverse(code as ::core::ffi::c_uint, len as ::core::ffi::c_int)
+                        as crate::zutil_h::ush,
+                )
+            }
+        })
+        .collect()
+}
+
 unsafe fn gen_codes(
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
+    tree: *mut crate::src::deflate::ct_data,
+    max_code: ::core::ffi::c_int,
     bl_count: &[crate::zutil_h::ush; 16],
 ) {
-    let mut next_code = next_codes(bl_count);
-    let mut n: ::core::ffi::c_int = 0;
-    n = 0 as ::core::ffi::c_int;
+    let mut lengths = Vec::with_capacity(max_code as usize + 1);
+    let mut n = 0;
     while n <= max_code {
-        let node = tree.wrapping_add(n as usize);
-        let mut len: ::core::ffi::c_int = (*node).dl.len as ::core::ffi::c_int;
-        if !(len == 0 as ::core::ffi::c_int) {
-            let c2rust_fresh58 = next_code_for_len(&mut next_code, len);
-            (*node).fc.value =
-                bi_reverse(c2rust_fresh58 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
-        }
+        lengths.push((*tree.wrapping_add(n as usize)).dl.len);
         n += 1;
+    }
+    for (index, code) in canonical_codes_for_lengths(&lengths, bl_count)
+        .into_iter()
+        .enumerate()
+    {
+        if let Some(code) = code {
+            (*tree.wrapping_add(index)).fc.value = code;
+        }
     }
 }
 
@@ -5252,8 +5274,8 @@ mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bit_length_correction, bl_order,
         bl_tree_header_bit_length, block_bit_length_bytes, block_header_bits,
-        clamped_tree_bit_length, classify_tree_run, combined_tree_frequency,
-        detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
+        canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
+        combined_tree_frequency, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
         last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
         rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
         static_d_desc, static_l_desc, supplemental_tree_node, symbol_buffer_is_full,
@@ -5417,6 +5439,17 @@ mod tests {
 
         assert_eq!(bi_reverse(0xdead_beef, 0), 0);
         assert_eq!(bi_reverse(0xdead_beef, -1), 0);
+    }
+
+    #[test]
+    fn canonical_codes_skip_zero_lengths_and_reverse_assigned_codes() {
+        let mut counts = [0; 16];
+        counts[1] = 1;
+        counts[2] = 2;
+
+        let codes = canonical_codes_for_lengths(&[0, 1, 2, 2, 0], &counts);
+
+        assert_eq!(codes, vec![None, Some(0), Some(1), Some(3), None]);
     }
 
     #[test]
