@@ -370,6 +370,7 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                     crate::zlib_h::Z_NO_FLUSH,
                     Some(&input[input_range]),
                     &mut output[output_range],
+                    None,
                 ))
             });
             let Some(Some(result)) = result else {

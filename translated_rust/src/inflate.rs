@@ -923,6 +923,7 @@ pub fn inflate(
     mut flush: ::core::ffi::c_int,
     input_storage: Option<&[crate::stdlib::Bytef]>,
     mut output_storage: &mut [crate::stdlib::Bytef],
+    mut head: Option<&mut crate::zlib_h::gz_header>,
 ) -> ::core::ffi::c_int {
     // The state adapter and cursor validation below bind the stream before
     // the translated decoder runs. Keep ordinary state transitions on those
@@ -1015,18 +1016,11 @@ pub fn inflate(
     let input = input_storage
         .or(callback_input.as_deref())
         .unwrap_or(&[]);
-    // `inflateGetHeader()` retains this optional caller-owned structure for
-    // the duration of inflate. Bind it once for this decode call, so gzip
-    // header publication below does not repeatedly dereference the same raw
-    // pointer. The variable-length buffers it contains remain bound only at
-    // their existing copy sites.
-    let mut head = if state.head.is_null() {
-        None
-    } else {
-        // A registered gzip header remains caller-owned and live for this
-        // synchronous call, as required by `inflateGetHeader()`.
-        Some(unsafe { &mut *state.head })
-    };
+    // `inflateGetHeader()` retains an optional caller-owned header. The ABI
+    // adapter binds that pointer for this synchronous call; all parsing and
+    // publication below remain ordinary reference-based decoder work. The
+    // variable-length buffers it contains remain bound only at their existing
+    // copy sites.
     hold = state.hold;
     bits = state.bits;
     in_0 = have;
@@ -2657,16 +2651,16 @@ pub fn inflate(
             && ((state.mode as ::core::ffi::c_uint)
                 < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
                 || flush != crate::zlib_h::Z_FINISH);
-    if update_window {
-        if updatewindow(strm, state, InflateWindowAccess::Ensure, |_, _, _| ()).is_err() {
-            state.mode = crate::src::inflate::MEM;
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-    }
     let output = &output_storage[output_capacity - out as usize
         ..output_capacity - out as usize + produced as usize];
     if update_window {
-        let _ = updatewindow(strm, state, InflateWindowAccess::Update(output), |_, _, _| ());
+        // `Update` allocates the window on demand before applying this
+        // bounded output slice, so it covers the former ensure-then-update
+        // sequence with one owner binding.
+        if updatewindow(strm, state, InflateWindowAccess::Update(output), |_, _, _| ()).is_err() {
+            state.mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
     }
     in_0 = in_0.wrapping_sub(strm.avail_in as ::core::ffi::c_uint);
     out = out.wrapping_sub(strm.avail_out as ::core::ffi::c_uint);
@@ -2735,7 +2729,16 @@ pub unsafe extern "C" fn inflate_ffi(
     let output = unsafe {
         ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
     };
-    inflate(strm, flush, Some(input), output)
+    // Bind the registered caller-owned gzip header at the ABI boundary. The
+    // safe decoder receives that temporary reference and retains all header
+    // parsing and publication work.
+    let head = {
+        let Some((_strm, state)) = inflateStateCheck(strm) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        unsafe { state.head.as_mut() }
+    };
+    inflate(strm, flush, Some(input), output, head)
 }
 pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflateStateCheck(strm) else {

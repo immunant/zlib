@@ -487,6 +487,7 @@ pub fn inflate_fast(
         crate::zlib_h::Z_NO_FLUSH,
         Some(input),
         output,
+        None,
     );
 }
 

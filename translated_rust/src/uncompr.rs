@@ -149,6 +149,7 @@ fn uncompress2_z_bound(
             crate::zlib_h::Z_NO_FLUSH,
             Some(&source[source_offset..input_end]),
             &mut dest[dest_offset..output_end],
+            None,
         );
         source_offset += before_in.wrapping_sub(stream.avail_in) as usize;
         dest_offset += before_out.wrapping_sub(stream.avail_out) as usize;

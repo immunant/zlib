@@ -1185,6 +1185,7 @@ pub(crate) fn inflateBack(
                         crate::zlib_h::Z_NO_FLUSH,
                         None,
                         &mut callback_window[written..],
+                        None,
                     );
                     written = inflate_back_pending_output(
                         window_size as ::core::ffi::c_uint,
