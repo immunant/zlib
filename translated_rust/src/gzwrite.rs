@@ -505,27 +505,17 @@ pub unsafe extern "C" fn gzputc_ffi(
     };
     gzputc(state, c)
 }
-pub unsafe extern "C" fn gzputs(
-    mut file: crate::zlib_h::gzFile,
-    mut s: *const ::core::ffi::c_char,
+unsafe fn gzputs(
+    state: &mut crate::gzguts_h::gz_state,
+    input: &[u8],
 ) -> ::core::ffi::c_int {
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut put: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
-    let state = &mut *state;
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    let input = std::ffi::CStr::from_ptr(s).to_bytes();
-    len = input.len();
+    let len = input.len();
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
         || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
     {
@@ -536,7 +526,7 @@ pub unsafe extern "C" fn gzputs(
         );
         return -1 as ::core::ffi::c_int;
     }
-    put = gz_write(state, input);
+    let put = gz_write(state, input);
     return if len != 0 && put == 0 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
@@ -546,10 +536,17 @@ pub unsafe extern "C" fn gzputs(
 #[export_name = "gzputs"]
 
 pub unsafe extern "C" fn gzputs_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut s: *const ::core::ffi::c_char,
+    file: crate::zlib_h::gzFile,
+    s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    gzputs(file, s)
+    if file.is_null() || s.is_null() {
+        return -1;
+    }
+    let input = std::ffi::CStr::from_ptr(s).to_bytes();
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1;
+    };
+    gzputs(state, input)
 }
 pub unsafe fn gzflush(
     state: &mut crate::gzguts_h::gz_state,
