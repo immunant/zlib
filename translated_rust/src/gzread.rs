@@ -180,6 +180,28 @@ struct GzAvailState<'a> {
     path: Option<&'a [u8]>,
 }
 
+// This owns the pointer-free portion of one gzip inflate loop.  The ABI
+// stream remains projected by its caller only for the actual codec dispatch;
+// refill, result handling, and gzip error state need no raw cursor or stream.
+struct GzDecompLoopState<'a> {
+    err: &'a mut ::core::ffi::c_int,
+    eof: &'a mut ::core::ffi::c_int,
+    size: usize,
+    input: &'a mut Option<Box<[u8]>>,
+    fd: &'a rustix::fd::OwnedFd,
+    again: &'a mut ::core::ffi::c_int,
+    message: &'a mut Option<Box<[u8]>>,
+    buffered: &'a mut ::core::ffi::c_uint,
+    path: Option<&'a [u8]>,
+}
+
+struct GzInflateResult {
+    result: ::core::ffi::c_int,
+    input: GzCodecInput,
+    output_available: crate::stdlib::uInt,
+    data_error_message: Option<&'static [u8]>,
+}
+
 // Skipping buffered gzip output needs only a checked buffer offset and scalar
 // progress.  Keep that transition independent of the ABI cursor so the
 // eventual gzip owner can reuse it after the cursor becomes an offset rather
@@ -430,6 +452,95 @@ fn gz_avail(state: GzAvailState<'_>) -> Option<()> {
     Some(())
 }
 
+impl GzDecompLoopState<'_> {
+    fn refill(&mut self, decomp: &mut crate::src::gzlib::GzDecompState) -> Result<(), ()> {
+        gz_avail(GzAvailState {
+            err: self.err,
+            eof: self.eof,
+            input_cursor: decomp.input_mut(),
+            size: self.size,
+            input: self.input,
+            fd: self.fd,
+            again: self.again,
+            message: self.message,
+            buffered: self.buffered,
+            path: self.path,
+        })
+        .ok_or(())
+    }
+
+    fn set_error(&mut self, error: ::core::ffi::c_int, message: &'static [u8]) {
+        crate::src::gzlib::GzErrorState {
+            message: self.message,
+            error: self.err,
+            buffered: self.buffered,
+            again: *self.again,
+            path: self.path,
+        }
+        .set(error, Some(message));
+    }
+}
+
+// The loop is entirely over checked cursors, owned buffers, and scalar gzip
+// state.  `inflate` is injected so the only ABI stream projection stays in
+// the caller until the codec owner/view split can remove it as well.
+fn gz_decomp_loop(
+    decomp: &mut crate::src::gzlib::GzDecompState,
+    state: &mut GzDecompLoopState<'_>,
+    mut inflate: impl FnMut(&[u8], &GzCodecInput, crate::stdlib::uInt) -> Option<GzInflateResult>,
+) -> ::core::ffi::c_int {
+    let mut result = crate::zlib_h::Z_OK;
+    loop {
+        if decomp.needs_input() && state.refill(decomp).is_err() {
+            result = *state.err;
+            break;
+        }
+        if decomp.needs_input() {
+            if *state.again == 0 {
+                state.set_error(crate::zlib_h::Z_BUF_ERROR, b"unexpected end of file");
+            }
+            break;
+        }
+        let Some(call) = state
+            .input
+            .as_deref()
+            .and_then(|input| inflate(input, decomp.input(), decomp.output_available()))
+        else {
+            result = -1;
+            break;
+        };
+        result = call.result;
+        decomp.record_input(call.input);
+        match decomp.record_inflate(result, call.output_available) {
+            crate::src::gzlib::GzDecompAction::Continue => {}
+            crate::src::gzlib::GzDecompAction::Stop => break,
+            crate::src::gzlib::GzDecompAction::Junk => {
+                result = crate::zlib_h::Z_OK;
+                break;
+            }
+            crate::src::gzlib::GzDecompAction::StreamError => {
+                state.set_error(
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal error: inflate stream corrupt",
+                );
+                break;
+            }
+            crate::src::gzlib::GzDecompAction::MemoryError => {
+                state.set_error(crate::zlib_h::Z_MEM_ERROR, b"out of memory");
+                break;
+            }
+            crate::src::gzlib::GzDecompAction::DataError => {
+                state.set_error(
+                    crate::zlib_h::Z_DATA_ERROR,
+                    call.data_error_message.unwrap_or(b"compressed data error"),
+                );
+                break;
+            }
+        }
+    }
+    decomp.finish(result)
+}
+
 unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
         let Some(buffers) = GzReadBuffers::allocate(state.want) else {
@@ -541,7 +652,6 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 }
 
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let output_len = (state.size << 1 as ::core::ffi::c_int) as usize;
     // Publish the ABI codec cursor only after a pointer-free view proves that
     // its complete advertised output range lies in the owned gzip buffer.
@@ -563,127 +673,68 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     };
     state.strm.avail_out = decomp.output_available();
     state.strm.next_out = next_out;
-    // The stream itself is embedded in the state we already exclusively own.
-    // Keep field access through that borrow; only `inflate()` needs the ABI
-    // pointer projection at its call boundary.
-    let strm = &mut state.strm;
     // `inflate()` advances `next_out`, but gzip's buffered cursor must point
     // at the beginning of this output span. Retain that boundary value rather
     // than recovering it later with raw-pointer arithmetic.
-    let output_start = strm.next_out;
-    loop {
-        if decomp.needs_input() {
-            let Some(mut input_cursor) = state.in_0.as_deref().and_then(|buffer| {
-                GzCodecInput::from_owned_buffer(buffer, strm.next_in.addr(), strm.avail_in)
-            }) else {
-                ret = -1 as ::core::ffi::c_int;
-                break;
-            };
-            if gz_avail(GzAvailState {
-                err: &mut state.err,
-                eof: &mut state.eof,
-                input_cursor: &mut input_cursor,
-                size: state.size as usize,
-                input: &mut state.in_0,
-                fd: state.fd.as_ref().expect("gzip state has an open file"),
-                again: &mut state.again,
-                message: &mut state.msg,
-                buffered: &mut state.x.have,
-                path: state.path.as_deref(),
-            })
-            .is_none()
-            {
-                ret = state.err;
-                break;
-            }
-            strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
-            strm.avail_in = input_cursor.available();
-            decomp.record_input(input_cursor);
-        }
-        if decomp.needs_input() {
-            if state.again == 0 {
-                crate::src::gzlib::GzErrorState {
-                    message: &mut state.msg,
-                    error: &mut state.err,
-                    buffered: &mut state.x.have,
-                    again: state.again,
-                    path: state.path.as_deref(),
-                }
-                .set(crate::zlib_h::Z_BUF_ERROR, Some(b"unexpected end of file"));
-            }
-            break;
-        } else {
-            ret = crate::src::inflate::inflate(
-                strm as *mut crate::zlib_h::z_stream_s,
-                crate::zlib_h::Z_NO_FLUSH,
-            );
-            let Some(input) = state.in_0.as_deref().and_then(|buffer| {
-                GzCodecInput::from_owned_buffer(buffer, strm.next_in.addr(), strm.avail_in)
-            }) else {
-                ret = -1 as ::core::ffi::c_int;
-                break;
-            };
-            decomp.record_input(input);
-            match decomp.record_inflate(ret, strm.avail_out) {
-                crate::src::gzlib::GzDecompAction::Continue => {}
-                crate::src::gzlib::GzDecompAction::Stop => break,
-                crate::src::gzlib::GzDecompAction::Junk => {
-                    strm.avail_in = 0 as crate::stdlib::uInt;
-                    ret = crate::zlib_h::Z_OK;
-                    break;
-                }
-                crate::src::gzlib::GzDecompAction::StreamError => {
-                    crate::src::gzlib::GzErrorState {
-                        message: &mut state.msg,
-                        error: &mut state.err,
-                        buffered: &mut state.x.have,
-                        again: state.again,
-                        path: state.path.as_deref(),
-                    }
-                    .set(
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        Some(b"internal error: inflate stream corrupt"),
-                    );
-                    break;
-                }
-                crate::src::gzlib::GzDecompAction::MemoryError => {
-                    crate::src::gzlib::GzErrorState {
-                        message: &mut state.msg,
-                        error: &mut state.err,
-                        buffered: &mut state.x.have,
-                        again: state.again,
-                        path: state.path.as_deref(),
-                    }
-                    .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-                    break;
-                }
-                crate::src::gzlib::GzDecompAction::DataError => {
-                    // `inflate()` owns every diagnostic it publishes through
-                    // `strm.msg`. Match that known static storage by address,
-                    // rather than dereferencing the ABI pointer just to copy
-                    // a NUL-terminated string. The fallback preserves the
-                    // established gzip message if no codec diagnostic exists.
-                    let message = crate::src::inflate::INFLATE_ERROR_MESSAGES
-                        .iter()
-                        .find(|known| known.as_ptr().cast::<::core::ffi::c_char>() == strm.msg)
-                        .map(|known| &known[..known.len() - 1])
-                        .unwrap_or(b"compressed data error");
-                    crate::src::gzlib::GzErrorState {
-                        message: &mut state.msg,
-                        error: &mut state.err,
-                        buffered: &mut state.x.have,
-                        again: state.again,
-                        path: state.path.as_deref(),
-                    }
-                    .set(crate::zlib_h::Z_DATA_ERROR, Some(message));
-                    break;
-                }
-            }
-        }
-    }
+    let output_start = state.strm.next_out;
+    let result = {
+        // The stream itself is embedded in the state we already exclusively
+        // own. Its cursor projection and the unsafe codec call stay in this
+        // small closure; the loop around it is pointer-free.
+        let strm = &mut state.strm;
+        let mut loop_state = GzDecompLoopState {
+            err: &mut state.err,
+            eof: &mut state.eof,
+            size: state.size as usize,
+            input: &mut state.in_0,
+            fd: state.fd.as_ref().expect("gzip state has an open file"),
+            again: &mut state.again,
+            message: &mut state.msg,
+            buffered: &mut state.x.have,
+            path: state.path.as_deref(),
+        };
+        gz_decomp_loop(
+            &mut decomp,
+            &mut loop_state,
+            |input, input_cursor, available_out| {
+                strm.next_in = input
+                    .as_ptr()
+                    .wrapping_add(input_cursor.cursor())
+                    .cast_mut();
+                strm.avail_in = input_cursor.available();
+                strm.avail_out = available_out;
+                let result = crate::src::inflate::inflate(
+                    strm as *mut crate::zlib_h::z_stream_s,
+                    crate::zlib_h::Z_NO_FLUSH,
+                );
+                let input =
+                    GzCodecInput::from_owned_buffer(input, strm.next_in.addr(), strm.avail_in)?;
+                // `inflate()` owns every diagnostic it publishes through
+                // `strm.msg`. Match that known static storage by address rather
+                // than dereferencing the ABI pointer. The safe loop receives only
+                // the selected byte slice.
+                let data_error_message = if result == crate::zlib_h::Z_DATA_ERROR {
+                    Some(
+                        crate::src::inflate::INFLATE_ERROR_MESSAGES
+                            .iter()
+                            .find(|known| known.as_ptr().cast::<::core::ffi::c_char>() == strm.msg)
+                            .map(|known| &known[..known.len() - 1])
+                            .unwrap_or(b"compressed data error"),
+                    )
+                } else {
+                    None
+                };
+                Some(GzInflateResult {
+                    result,
+                    input,
+                    output_available: strm.avail_out,
+                    data_error_message,
+                })
+            },
+        )
+    };
     state.x.have = decomp.written() as ::core::ffi::c_uint;
     state.x.next = output_start;
-    let result = decomp.finish(ret);
     let input = decomp.input();
     let Some(buffer) = state.in_0.as_deref_mut() else {
         return -1 as ::core::ffi::c_int;

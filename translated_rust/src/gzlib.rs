@@ -720,6 +720,10 @@ impl GzDecompState {
         &self.input
     }
 
+    pub(crate) fn input_mut(&mut self) -> &mut GzCodecInput {
+        &mut self.input
+    }
+
     pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
         self.output.available()
     }
