@@ -5,6 +5,9 @@ pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
+use core::ffi::CStr;
+
+const ZLIB_VERSION_TEXT: &CStr = c"1.3.2.1-motley";
 static ERROR_NEED_DICT: [u8; 16] = *b"need dictionary\0";
 static ERROR_STREAM_END: [u8; 11] = *b"stream end\0";
 static ERROR_EMPTY: [u8; 1] = *b"\0";
@@ -41,13 +44,13 @@ static ERROR_MESSAGES: [&[u8]; 10] = [
     &ERROR_VERSION,
     &ERROR_EMPTY,
 ];
-pub unsafe extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
-    return crate::zlib_h::ZLIB_VERSION.as_ptr();
+fn zlib_version() -> &'static CStr {
+    ZLIB_VERSION_TEXT
 }
 #[export_name = "zlibVersion"]
 
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
-    zlibVersion()
+    zlib_version().as_ptr()
 }
 pub fn zlibCompileFlags() -> crate::stdlib::uLong {
     let mut flags: crate::stdlib::uLong = 0;
