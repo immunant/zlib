@@ -3222,9 +3222,12 @@ pub fn deflate(
             return crate::zlib_h::Z_OK;
         }
         {
-            let stream = &*strm;
             let state = &mut *s;
-            if state.wrap <= 0 as ::core::ffi::c_int {
+            let trailer = {
+                let stream = &*strm;
+                deflate_trailer_plan(state.wrap, stream.adler, stream.total_in)
+            };
+            if matches!(trailer, DeflateTrailerPlan::None) {
                 return crate::zlib_h::Z_STREAM_END;
             }
             let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
@@ -3238,22 +3241,19 @@ pub fn deflate(
             } else {
                 ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
             };
-            let trailer_written = if state.wrap == 2 as ::core::ffi::c_int {
-                append_gzip_trailer_state(
+            let trailer_written = match trailer {
+                DeflateTrailerPlan::Gzip { check, total_in } => {
+                    append_gzip_trailer_state(pending_buf, &mut state.pending, check, total_in)
+                }
+                DeflateTrailerPlan::Zlib {
+                    check_high,
+                    check_low,
+                } => append_zlib_words_state(
                     pending_buf,
                     &mut state.pending,
-                    stream.adler,
-                    stream.total_in,
-                )
-            } else {
-                append_zlib_words_state(
-                    pending_buf,
-                    &mut state.pending,
-                    &[
-                        (stream.adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                        (stream.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-                    ],
-                )
+                    &[check_high, check_low],
+                ),
+                DeflateTrailerPlan::None => return crate::zlib_h::Z_STREAM_END,
             };
             if !trailer_written {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -5183,6 +5183,42 @@ fn deflate_post_flush_result(
         Some(if finishing { finish_started } else { need_more })
     } else {
         None
+    }
+}
+
+/// Describe the wrapper trailer that a completed deflate stream must append.
+///
+/// The dispatcher still owns the callback-allocated pending buffer, but the
+/// wrapper choice and zlib's big-endian checksum split are plain scalar
+/// policy.  Keeping them here prevents the transitional boundary from mixing
+/// raw stream access with trailer arithmetic.
+#[derive(Copy, Clone)]
+enum DeflateTrailerPlan {
+    None,
+    Gzip {
+        check: crate::stdlib::uLong,
+        total_in: crate::stdlib::uLong,
+    },
+    Zlib {
+        check_high: crate::stdlib::uInt,
+        check_low: crate::stdlib::uInt,
+    },
+}
+
+fn deflate_trailer_plan(
+    wrap: ::core::ffi::c_int,
+    check: crate::stdlib::uLong,
+    total_in: crate::stdlib::uLong,
+) -> DeflateTrailerPlan {
+    if wrap <= 0 {
+        DeflateTrailerPlan::None
+    } else if wrap == 2 {
+        DeflateTrailerPlan::Gzip { check, total_in }
+    } else {
+        DeflateTrailerPlan::Zlib {
+            check_high: (check >> 16) as crate::stdlib::uInt,
+            check_low: (check & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+        }
     }
 }
 
