@@ -417,7 +417,7 @@ pub unsafe extern "C" fn inflateBack(
                     (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                     (*state).lencode = (*state).next as *const crate::src::inftrees::code;
                     (*state).lenbits = 7 as ::core::ffi::c_uint;
-                    ret = crate::src::inftrees::inflate_table(
+                    ret = crate::src::inftrees::inflate_table_raw(
                         crate::src::inftrees::CODES,
                         &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                         19 as ::core::ffi::c_uint,
@@ -641,7 +641,7 @@ pub unsafe extern "C" fn inflateBack(
                                 &raw mut (*state).codes as *mut crate::src::inftrees::code;
                             (*state).lencode = (*state).next as *const crate::src::inftrees::code;
                             (*state).lenbits = 9 as ::core::ffi::c_uint;
-                            ret = crate::src::inftrees::inflate_table(
+                            ret = crate::src::inftrees::inflate_table_raw(
                                 crate::src::inftrees::LENS,
                                 &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                                 (*state).nlen,
@@ -660,7 +660,7 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).distcode =
                                     (*state).next as *const crate::src::inftrees::code;
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
-                                ret = crate::src::inftrees::inflate_table(
+                                ret = crate::src::inftrees::inflate_table_raw(
                                     crate::src::inftrees::DISTS,
                                     (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
                                         .offset((*state).nlen as isize),

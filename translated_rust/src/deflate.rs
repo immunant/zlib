@@ -236,9 +236,8 @@ const fn c_char_bytes(bytes: [u8; 70]) -> [::core::ffi::c_char; 70] {
 }
 
 #[no_mangle]
-pub static deflate_copyright: [::core::ffi::c_char; 70] = c_char_bytes(
-    *b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0",
-);
+pub static deflate_copyright: [::core::ffi::c_char; 70] =
+    c_char_bytes(*b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0");
 
 pub const NIL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 
@@ -2660,8 +2659,7 @@ unsafe extern "C" fn deflate_fast(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
+                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
                     .offset(dist as isize) as ::core::ffi::c_int
             } else {
@@ -2722,8 +2720,7 @@ unsafe extern "C" fn deflate_fast(
             let c2rust_fresh49 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh49 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc =
-                (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
@@ -2911,8 +2908,7 @@ unsafe extern "C" fn deflate_slow(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
+                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
                     .offset(dist as isize) as ::core::ffi::c_int
             } else {
@@ -2992,8 +2988,7 @@ unsafe extern "C" fn deflate_slow(
             let c2rust_fresh40 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh40 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc =
-                (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
@@ -3037,8 +3032,7 @@ unsafe extern "C" fn deflate_slow(
         let c2rust_fresh43 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
         *(*s).sym_buf.offset(c2rust_fresh43 as isize) = cc_0 as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc_0 as usize].fc =
-            (*s).dyn_ltree[cc_0 as usize].fc.wrapping_add(1);
+        (*s).dyn_ltree[cc_0 as usize].fc = (*s).dyn_ltree[cc_0 as usize].fc.wrapping_add(1);
         bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
@@ -3225,8 +3219,7 @@ unsafe extern "C" fn deflate_rle(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
+                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
                     .offset(dist as isize) as ::core::ffi::c_int
             } else {
@@ -3254,8 +3247,7 @@ unsafe extern "C" fn deflate_rle(
             let c2rust_fresh55 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh55 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc =
-                (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
