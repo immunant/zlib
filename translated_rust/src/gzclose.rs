@@ -27,6 +27,25 @@ pub(crate) enum GzCloseTarget {
     Write,
 }
 
+// Selecting a close path depends only on scalar mode and the caller's close
+// request.  Keep that policy separate from the ABI-shaped handle so the
+// eventual owned gzip facade can make the same decision without exposing the
+// embedded stream or cursor fields.
+enum GzCloseAction {
+    Read,
+    Write,
+}
+
+fn gzclose_action(mode: ::core::ffi::c_int, target: GzCloseTarget) -> Option<GzCloseAction> {
+    match target {
+        GzCloseTarget::Any if mode == crate::gzguts_h::GZ_READ => Some(GzCloseAction::Read),
+        GzCloseTarget::Any => Some(GzCloseAction::Write),
+        GzCloseTarget::Read if mode == crate::gzguts_h::GZ_READ => Some(GzCloseAction::Read),
+        GzCloseTarget::Write if mode == crate::gzguts_h::GZ_WRITE => Some(GzCloseAction::Write),
+        GzCloseTarget::Read | GzCloseTarget::Write => None,
+    }
+}
+
 pub(crate) unsafe fn gzclose(
     state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
     target: GzCloseTarget,
@@ -36,22 +55,12 @@ pub(crate) unsafe fn gzclose(
     };
     let state_ptr = state.as_ptr();
     let state = state.as_mut();
-    let close: unsafe fn(&mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int = match target {
-        GzCloseTarget::Any => {
-            if state.mode == crate::gzguts_h::GZ_READ {
-                crate::src::gzread::gzclose_r
-            } else {
-                crate::src::gzwrite::gzclose_w
-            }
-        }
-        GzCloseTarget::Read if state.mode == crate::gzguts_h::GZ_READ => {
-            crate::src::gzread::gzclose_r
-        }
-        GzCloseTarget::Write if state.mode == crate::gzguts_h::GZ_WRITE => {
-            crate::src::gzwrite::gzclose_w
-        }
-        GzCloseTarget::Read | GzCloseTarget::Write => return crate::zlib_h::Z_STREAM_ERROR,
-    };
+    let close: unsafe fn(&mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int =
+        match gzclose_action(state.mode, target) {
+            Some(GzCloseAction::Read) => crate::src::gzread::gzclose_r,
+            Some(GzCloseAction::Write) => crate::src::gzwrite::gzclose_w,
+            None => return crate::zlib_h::Z_STREAM_ERROR,
+        };
     let ret = close(state);
     // `gz_open()` allocated this opaque handle as a one-element Vec.  The
     // selected close path has released its owned resources, so reclaim that
