@@ -1995,6 +1995,18 @@ pub fn inflateGetDictionary(
 ) -> (::core::ffi::c_uint, ::core::ffi::c_uint) {
     return (state.wnext, state.whave);
 }
+
+fn copy_inflate_dictionary_window(
+    dictionary: &mut [crate::stdlib::Bytef],
+    window: &[crate::stdlib::Bytef],
+    wnext: usize,
+    whave: usize,
+) {
+    let first = whave - wnext;
+    dictionary[..first].copy_from_slice(&window[wnext..whave]);
+    dictionary[first..whave].copy_from_slice(&window[..wnext]);
+}
+
 #[export_name = "inflateGetDictionary"]
 
 pub unsafe extern "C" fn inflateGetDictionary_ffi(
@@ -2008,15 +2020,13 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     let state = &*((*strm).state as *mut crate::src::inflate::inflate_state);
     let (wnext, whave) = inflateGetDictionary(state);
     if whave != 0 && !dictionary.is_null() {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            state.window.offset(wnext as isize) as *const ::core::ffi::c_void,
-            whave.wrapping_sub(wnext) as crate::__stddef_size_t_h::size_t,
-        );
-        crate::stdlib::memcpy(
-            dictionary.offset(whave as isize).offset(-(wnext as isize)) as *mut ::core::ffi::c_void,
-            state.window as *const ::core::ffi::c_void,
-            wnext as crate::__stddef_size_t_h::size_t,
+        let dictionary_slice = ::core::slice::from_raw_parts_mut(dictionary, whave as usize);
+        let window_slice = ::core::slice::from_raw_parts(state.window, whave as usize);
+        copy_inflate_dictionary_window(
+            dictionary_slice,
+            window_slice,
+            wnext as usize,
+            whave as usize,
         );
     }
     if !dictLength.is_null() {

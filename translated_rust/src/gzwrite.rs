@@ -238,8 +238,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*strm).avail_in = n as crate::stdlib::uInt;
         (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        n = n.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-        (*state).x.pos += n as crate::stdlib::off64_t;
+        n = gz_note_input_consumed(&mut *state, n);
         (*state).skip -= n as crate::stdlib::off64_t;
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
@@ -310,8 +309,7 @@ unsafe extern "C" fn gz_write(
             let mut n: ::core::ffi::c_uint = gz_z_size_to_uInt_chunk(len);
             (*state).strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
-            (*state).x.pos += n as crate::stdlib::off64_t;
+            n = gz_note_input_consumed(&mut *state, n);
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
                 return if (*state).again != 0 {
@@ -339,6 +337,15 @@ fn gz_write_params_ready(state: &crate::gzguts_h::gz_state) -> bool {
 fn gz_note_buffered_input(state: &mut crate::gzguts_h::gz_state, count: ::core::ffi::c_uint) {
     state.strm.avail_in = state.strm.avail_in.wrapping_add(count);
     state.x.pos += count as crate::stdlib::off64_t;
+}
+
+fn gz_note_input_consumed(
+    state: &mut crate::gzguts_h::gz_state,
+    requested: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let consumed = requested.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
+    state.x.pos += consumed as crate::stdlib::off64_t;
+    consumed
 }
 
 fn gz_note_direct_input_written(strm: &mut crate::zlib_h::z_stream, written: ::core::ffi::c_int) {
