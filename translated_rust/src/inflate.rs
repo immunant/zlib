@@ -534,10 +534,21 @@ fn inflate_prime(
 }
 
 // All callers reach this only after zlib's window-bit validation. Keeping the
-// conversion in one value-only helper makes allocation and slice capacities
-// agree without adding another raw-pointer boundary.
-fn inflate_window_size(wbits: crate::stdlib::uInt) -> usize {
-    1usize << wbits
+// byte length and allocator request together makes window allocation and
+// slice capacities agree without adding another raw-pointer boundary.
+struct InflateWindowLayout {
+    len: usize,
+    alloc_items: crate::stdlib::uInt,
+    alloc_size: crate::stdlib::uInt,
+}
+
+fn inflate_window_layout(wbits: crate::stdlib::uInt) -> InflateWindowLayout {
+    let len = 1usize << wbits;
+    InflateWindowLayout {
+        len,
+        alloc_items: len as crate::stdlib::uInt,
+        alloc_size: ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+    }
 }
 
 fn update_window(
@@ -546,7 +557,7 @@ fn update_window(
     end: &[crate::stdlib::Bytef],
 ) {
     if state.wsize == 0 {
-        state.wsize = inflate_window_size(state.wbits) as ::core::ffi::c_uint;
+        state.wsize = inflate_window_layout(state.wbits).len as ::core::ffi::c_uint;
         state.wnext = 0;
         state.whave = 0;
     }
@@ -589,6 +600,7 @@ fn updatewindow(
     state: &mut crate::src::inflate::inflate_state,
     output: Option<&[crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
+    let layout = inflate_window_layout(state.wbits);
     if state.window.is_null() {
         // SAFETY: zlib's initialized allocator is invoked with the same
         // window size and element count as the C implementation.
@@ -596,8 +608,8 @@ fn updatewindow(
             Some(stream.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 stream.opaque,
-                inflate_window_size(state.wbits) as crate::stdlib::uInt,
-                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+                layout.alloc_items,
+                layout.alloc_size,
             ) as *mut ::core::ffi::c_uchar
         };
         if state.window.is_null() {
@@ -612,7 +624,7 @@ fn updatewindow(
     let window = unsafe {
         ::core::slice::from_raw_parts_mut(
             state.window,
-            inflate_window_size(state.wbits),
+            layout.len,
         )
     };
     update_window(state, window, output);
@@ -2500,12 +2512,13 @@ pub unsafe extern "C" fn inflateSetDictionary(
     if let Err(error) = inflate_dictionary_check(state, dictionary) {
         return error;
     }
+    let layout = inflate_window_layout(state.wbits);
     if state.window.is_null() {
         state.window = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
-            inflate_window_size(state.wbits) as crate::stdlib::uInt,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            layout.alloc_items,
+            layout.alloc_size,
         ) as *mut ::core::ffi::c_uchar;
     }
     if state.window.is_null() {
@@ -2514,7 +2527,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
     }
     let window = ::core::slice::from_raw_parts_mut(
         state.window,
-        inflate_window_size(state.wbits),
+        layout.len,
     );
     inflate_set_dictionary(state, window, dictionary)
 }
@@ -2791,7 +2804,7 @@ struct InflateCopyPlan {
 // allocator and raw storage bindings at its existing ABI boundary.
 fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> InflateCopyPlan {
     InflateCopyPlan {
-        window_len: (!state.window.is_null()).then_some(inflate_window_size(state.wbits)),
+        window_len: (!state.window.is_null()).then_some(inflate_window_layout(state.wbits).len),
     }
 }
 
