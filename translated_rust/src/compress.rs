@@ -23,6 +23,22 @@ pub use crate::zlib_h::Z_NO_FLUSH;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+/// Compute the number of bytes committed to the one-shot output stream from
+/// its scalar capacity accounting.  `unassigned` has not yet been lent to
+/// deflate, while `avail_out` is the unused part of the final lent chunk.
+/// This replaces same-allocation raw cursor-distance arithmetic at the ABI
+/// boundary.
+fn compress_output_len(
+    capacity: crate::stdlib::z_size_t,
+    unassigned: crate::stdlib::z_size_t,
+    avail_out: crate::stdlib::uInt,
+) -> crate::stdlib::z_size_t {
+    capacity
+        .wrapping_sub(unassigned)
+        .wrapping_sub(avail_out as crate::stdlib::z_size_t)
+}
+
 // This macro expands only in exported functions. It retains the one-shot
 // stream's raw cursors and legacy deflate calls at the ABI boundary until C4
 // has a safe stream-call adapter, avoiding private unsafe forwarding
@@ -53,6 +69,7 @@ macro_rules! compress2_z_at_boundary {
         let mut err: ::core::ffi::c_int = 0;
         let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
         let mut left: crate::stdlib::z_size_t = 0;
+        let mut capacity: crate::stdlib::z_size_t = 0;
         if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
             || destLen.is_null()
             || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
@@ -60,6 +77,7 @@ macro_rules! compress2_z_at_boundary {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         left = *destLen;
+        capacity = left;
         *destLen = 0 as crate::stdlib::z_size_t;
         stream.zalloc = None;
         stream.zfree = None;
@@ -110,7 +128,7 @@ macro_rules! compress2_z_at_boundary {
                 break;
             }
         }
-        *destLen = stream.next_out.offset_from(dest) as crate::stdlib::z_size_t;
+        *destLen = compress_output_len(capacity, left, stream.avail_out);
         crate::src::deflate::deflateEnd(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
