@@ -4331,24 +4331,6 @@ pub fn tr_stored_block(
     state.pending = state.pending.wrapping_add(stored_len);
 }
 
-pub unsafe extern "C" fn _tr_stored_block(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    let state = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
-    let source = if stored_len == 0 {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts(buf, stored_len as usize))
-    };
-    tr_stored_block(state, pending_buf, source, stored_len, last);
-}
 #[export_name = "_tr_stored_block"]
 
 pub unsafe extern "C" fn _tr_stored_block_ffi(
@@ -4515,7 +4497,13 @@ pub unsafe extern "C" fn _tr_flush_block(
         opt_lenb = static_lenb;
     }
     if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
-        _tr_stored_block(s, buf, stored_len, last);
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        let source = ::core::slice::from_raw_parts(buf, stored_len as usize);
+        tr_stored_block(state, pending_buf, Some(source), stored_len, last);
     } else if static_lenb == opt_lenb {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if (*s).bi_valid > crate::src::deflate::Buf_size - len {

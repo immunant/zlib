@@ -159,7 +159,6 @@ pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
-pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
 pub use crate::src::zutil::zcfree;
@@ -1935,9 +1934,15 @@ pub unsafe extern "C" fn deflate(
                 );
                 crate::src::trees::_tr_align(state, pending_buf);
             } else if flush != crate::zlib_h::Z_BLOCK {
-                crate::src::trees::_tr_stored_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    ::core::ptr::null_mut::<crate::stdlib::charf>(),
+                let state = &mut *s;
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    state.pending_buf,
+                    state.pending_buf_size as usize,
+                );
+                crate::src::trees::tr_stored_block(
+                    state,
+                    pending_buf,
+                    None,
                     0 as crate::zutil_h::ulg,
                     0 as ::core::ffi::c_int,
                 );
@@ -2380,9 +2385,15 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ::core::ptr::null_mut::<crate::stdlib::charf>(),
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        crate::src::trees::tr_stored_block(
+            state,
+            pending_buf,
+            None,
             0 as crate::zutil_h::ulg,
             last,
         );
@@ -2563,9 +2574,19 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ((*s).window as *mut crate::stdlib::charf).offset((*s).block_start as isize),
+        let state = &mut *s;
+        let source = ::core::slice::from_raw_parts(
+            state.window.offset(state.block_start as isize) as *const crate::stdlib::charf,
+            len as usize,
+        );
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        crate::src::trees::tr_stored_block(
+            state,
+            pending_buf,
+            Some(source),
             len as crate::zutil_h::ulg,
             last,
         );
