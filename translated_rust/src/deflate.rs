@@ -2619,28 +2619,24 @@ pub unsafe fn deflate_params_from_stream(
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    let Some((_stream, state, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    let Some((_stream, state, storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let needs_table_cleanup = state.level != level && state.level == 0 && state.matches != 0;
     let tables = if needs_table_cleanup {
-        // `head` and (for the single-match case) `prev` have their exact
-        // allocation geometry from `deflateInit2_()` or `deflateCopy()`.
-        let head = ::core::slice::from_raw_parts_mut(
-            state.head.expect("initialized head table").as_ptr(),
-            state.hash_size as usize,
-        );
+        // `head` and (for the single-match case) `prev` are the bounded
+        // callback-storage views established with state validation above.
         let prev = if state.matches == 1 {
-            Some(::core::slice::from_raw_parts_mut(
-                state.prev.expect("initialized prev table").as_ptr(),
-                state.w_size as usize,
-            ))
+            Some(storage.prev.expect("parameter previous-table projection"))
         } else {
             None
         };
-        Some(DeflateCallbackHashStorage { head, prev })
+        Some(DeflateCallbackHashStorage {
+            head: storage.head.expect("parameter hash-table projection"),
+            prev,
+        })
     } else {
         None
     };
