@@ -20,7 +20,10 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe extern "C" fn gzclose(
+// The FFI wrapper validates and binds `file` before reaching this dispatcher.
+// Selecting the read or write close coordinator only uses the bound state, so
+// keep that selection safe and leave the raw handle conversion at the ABI edge.
+pub fn gzclose(
     state: &mut crate::gzguts_h::gz_state,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {

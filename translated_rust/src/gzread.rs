@@ -835,7 +835,10 @@ fn gz_close_read_finish(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     err
 }
 
-pub unsafe extern "C" fn gzclose_r(
+// The close dispatcher has already validated and bound `file` to `state`.
+// Keep its mode/error decisions safe; inflater teardown, allocation release,
+// and descriptor closing remain at the narrow raw cleanup boundary below.
+pub fn gzclose_r(
     state: &mut crate::gzguts_h::gz_state,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
@@ -844,19 +847,29 @@ pub unsafe extern "C" fn gzclose_r(
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.size != 0 {
-        crate::src::inflate::inflateEnd(
-            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
-        crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-        crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+    // SAFETY: this close path owns the initialized inflater and gzip buffers.
+    // The dispatcher bound `file` to this state, and no allocation escapes
+    // after it is released.
+    unsafe {
+        if state.size != 0 {
+            crate::src::inflate::inflateEnd(
+                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+            );
+            crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+        }
     }
     err = gz_close_read_finish(state);
     let path = state.path;
     let fd = state.fd;
-    crate::stdlib::free(path as *mut ::core::ffi::c_void);
-    ret = crate::stdlib::close(fd);
-    crate::stdlib::free(file as *mut ::core::ffi::c_void);
+    // SAFETY: `path`, `fd`, and `file` are owned by this closing state. The
+    // result of closing the descriptor intentionally overrides the earlier
+    // buffered-error result, matching zlib's cleanup order.
+    unsafe {
+        crate::stdlib::free(path as *mut ::core::ffi::c_void);
+        ret = crate::stdlib::close(fd);
+        crate::stdlib::free(file as *mut ::core::ffi::c_void);
+    }
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
