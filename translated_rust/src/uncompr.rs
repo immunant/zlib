@@ -4,7 +4,7 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd;
-pub use crate::src::inflate::inflateInit_;
+pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::uLongf;
@@ -69,8 +69,9 @@ pub unsafe extern "C" fn uncompress2_z(
     stream.zalloc = None;
     stream.zfree = None;
     stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    err = crate::src::inflate::inflateInit_(
+    err = crate::src::inflate::inflateInit2_(
         &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+        crate::zutil_h::DEF_WBITS,
         crate::zlib_h::ZLIB_VERSION.as_ptr(),
         ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
     );
