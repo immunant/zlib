@@ -565,13 +565,7 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !inflate_stream_has_allocators(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflateResetKeep(strm, state)
+    inflate_reset_keep_stream(strm)
 }
 pub fn inflateReset(
     strm: &mut crate::zlib_h::z_stream,
@@ -642,6 +636,16 @@ pub(crate) fn inflate_reset_stream(
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
+/// Keep mutable opaque-state access behind the typed stream bridge. The FFI
+/// entry point only validates its stream pointer before dispatching here.
+fn inflate_reset_keep_stream(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    with_inflate_stream_state(strm, inflateResetKeep)
+        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
+
 #[export_name = "inflateReset"]
 
 pub unsafe extern "C" fn inflateReset_ffi(
@@ -650,13 +654,7 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !inflate_stream_has_allocators(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflate_reset_state(strm, Some(state))
+    inflate_reset_stream(strm)
 }
 /// The safe reset decision, including a callback-owned window that the ABI
 /// boundary must release before the reset mutates the stream state.
@@ -916,6 +914,20 @@ fn inflate_prime_stream(
     }
     inflate_prime(state, bits, value)
 }
+
+fn inflate_prime_for_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    with_inflate_stream_state(strm, |strm, state| {
+        inflate_prime_stream(strm, state, bits, value)
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
 #[export_name = "inflatePrime"]
 
 pub unsafe extern "C" fn inflatePrime_ffi(
@@ -926,13 +938,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !inflate_stream_has_allocators(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflate_prime_stream(strm, state, bits, value)
+    inflate_prime_for_stream(strm, bits, value)
 }
 fn update_window(
     state: &mut crate::src::inflate::inflate_state,
@@ -3389,6 +3395,19 @@ fn inflate_set_dictionary(
     inflate_set_dictionary_complete(state);
     return crate::zlib_h::Z_OK;
 }
+
+fn inflate_set_dictionary_for_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    dictionary: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    with_inflate_stream_state(strm, |strm, state| {
+        inflate_set_dictionary(strm, state, dictionary)
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
 #[export_name = "inflateSetDictionary"]
 
 pub unsafe extern "C" fn inflateSetDictionary_ffi(
@@ -3402,9 +3421,9 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+    if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    }
     if dictLength != 0 && dictionary.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -3413,7 +3432,7 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     } else {
         ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
-    inflate_set_dictionary(strm, state, dictionary)
+    inflate_set_dictionary_for_stream(strm, dictionary)
 }
 pub fn inflateGetHeader(
     strm: &mut crate::zlib_h::z_stream_s,
@@ -3430,6 +3449,17 @@ pub fn inflateGetHeader(
     head.done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
+
+fn inflate_get_header_for_stream(
+    strm: &mut crate::zlib_h::z_stream_s,
+    head: &mut crate::zlib_h::gz_header_s,
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    with_inflate_stream_state(strm, |strm, state| inflateGetHeader(strm, state, head))
+        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
 #[export_name = "inflateGetHeader"]
 
 pub unsafe extern "C" fn inflateGetHeader_ffi(
@@ -3442,13 +3472,13 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+    if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    }
     let Some(head) = head.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateGetHeader(strm, state, head)
+    inflate_get_header_for_stream(strm, head)
 }
 fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> ::core::ffi::c_uint {
     let mut got = *have;
@@ -3531,6 +3561,22 @@ fn inflate_sync(
     state.mode = crate::src::inflate::TYPE;
     (crate::zlib_h::Z_OK, len as usize)
 }
+
+fn inflate_sync_for_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    input: &[u8],
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    with_inflate_stream_state(strm, |strm, state| {
+        let next_in = strm.next_in;
+        let (ret, consumed) = inflate_sync(strm, state, input);
+        strm.next_in = next_in.wrapping_add(consumed);
+        ret
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
@@ -3540,18 +3586,15 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+    if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    }
     let input = if strm.avail_in == 0 {
         &[]
     } else {
         ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
     };
-    let next_in = strm.next_in;
-    let (ret, consumed) = inflate_sync(strm, state, input);
-    strm.next_in = next_in.wrapping_add(consumed);
-    ret
+    inflate_sync_for_stream(strm, input)
 }
 fn inflate_sync_point(state: Option<&crate::src::inflate::inflate_state>) -> ::core::ffi::c_int {
     let Some(state) = state else {
@@ -3770,6 +3813,19 @@ fn inflate_undermine_stream(
     }
     inflate_undermine(Some(state), subvert)
 }
+
+fn inflate_undermine_for_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    subvert: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return inflate_undermine(None, subvert);
+    }
+    with_inflate_stream_state(strm, |strm, state| {
+        inflate_undermine_stream(strm, state, subvert)
+    })
+    .unwrap_or_else(|| inflate_undermine(None, subvert))
+}
 #[export_name = "inflateUndermine"]
 
 pub unsafe extern "C" fn inflateUndermine_ffi(
@@ -3779,13 +3835,7 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     let Some(strm) = strm.as_mut() else {
         return inflate_undermine(None, subvert);
     };
-    if !inflate_stream_has_allocators(strm) {
-        return inflate_undermine(None, subvert);
-    }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
-        return inflate_undermine(None, subvert);
-    };
-    inflate_undermine_stream(strm, state, subvert)
+    inflate_undermine_for_stream(strm, subvert)
 }
 fn inflate_validate(
     state: Option<&mut crate::src::inflate::inflate_state>,
@@ -3811,6 +3861,19 @@ fn inflate_validate_stream(
     }
     inflate_validate(Some(state), check)
 }
+
+fn inflate_validate_for_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return inflate_validate(None, check);
+    }
+    with_inflate_stream_state(strm, |strm, state| {
+        inflate_validate_stream(strm, state, check)
+    })
+    .unwrap_or_else(|| inflate_validate(None, check))
+}
 #[export_name = "inflateValidate"]
 
 pub unsafe extern "C" fn inflateValidate_ffi(
@@ -3820,13 +3883,7 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     let Some(strm) = strm.as_mut() else {
         return inflate_validate(None, check);
     };
-    if !inflate_stream_has_allocators(strm) {
-        return inflate_validate(None, check);
-    }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
-        return inflate_validate(None, check);
-    };
-    inflate_validate_stream(strm, state, check)
+    inflate_validate_for_stream(strm, check)
 }
 fn inflate_mark(state: Option<&crate::src::inflate::inflate_state>) -> ::core::ffi::c_long {
     let Some(state) = state else {
