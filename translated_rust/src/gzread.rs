@@ -440,6 +440,11 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
+enum GzReadStep {
+    ProducedOutput,
+    NeedMoreInput,
+}
+
 unsafe fn gz_read(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: crate::stdlib::voidp,
@@ -459,8 +464,8 @@ unsafe fn gz_read(
     }
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
-    let mut c2rust_current_block_30: u64;
     loop {
+        let step: GzReadStep;
         n = gz_z_size_to_uInt_chunk(len);
         if (*state).x.have != 0 {
             n = gz_read_buffered_copy_len(len, (*state).x.have);
@@ -473,7 +478,7 @@ unsafe fn gz_read(
             if (*state).err != crate::zlib_h::Z_OK {
                 err = -1 as ::core::ffi::c_int;
             }
-            c2rust_current_block_30 = 2719512138335094285;
+            step = GzReadStep::ProducedOutput;
         } else {
             if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
@@ -485,7 +490,7 @@ unsafe fn gz_read(
                 {
                     err = -1 as ::core::ffi::c_int;
                 }
-                c2rust_current_block_30 = 15240798224410183470;
+                step = GzReadStep::NeedMoreInput;
             } else {
                 let state_ref = &mut *state;
                 if state_ref.how == crate::gzguts_h::COPY {
@@ -498,18 +503,18 @@ unsafe fn gz_read(
                     n = (*state).x.have;
                     (*state).x.have = 0 as ::core::ffi::c_uint;
                 }
-                c2rust_current_block_30 = 2719512138335094285;
+                step = GzReadStep::ProducedOutput;
             }
         }
-        match c2rust_current_block_30 {
-            2719512138335094285 => {
+        match step {
+            GzReadStep::ProducedOutput => {
                 len = len.wrapping_sub(n as crate::stdlib::z_size_t);
                 buf = (buf as *mut ::core::ffi::c_char).wrapping_add(n as usize)
                     as crate::stdlib::voidp;
                 got = got.wrapping_add(n as crate::stdlib::z_size_t);
                 (*state).x.pos += n as crate::stdlib::off64_t;
             }
-            _ => {}
+            GzReadStep::NeedMoreInput => {}
         }
         if !(len != 0 && err == 0) {
             break;

@@ -2309,6 +2309,34 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     }
     return crate::zlib_h::Z_OK;
 }
+
+enum InflateDictionaryState {
+    Reject,
+    CheckId,
+    Accept,
+}
+
+fn inflate_dictionary_state(
+    wrap: ::core::ffi::c_int,
+    mode: ::core::ffi::c_uint,
+) -> InflateDictionaryState {
+    let dict_mode = crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint;
+    if wrap != 0 as ::core::ffi::c_int && mode != dict_mode {
+        InflateDictionaryState::Reject
+    } else if mode == dict_mode {
+        InflateDictionaryState::CheckId
+    } else {
+        InflateDictionaryState::Accept
+    }
+}
+
+fn inflate_dictionary_id_matches(
+    dictid: ::core::ffi::c_ulong,
+    expected: ::core::ffi::c_ulong,
+) -> bool {
+    dictid == expected
+}
+
 #[export_name = "inflateSetDictionary"]
 
 pub unsafe extern "C" fn inflateSetDictionary_ffi(
@@ -2324,24 +2352,22 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap != 0 as ::core::ffi::c_int
-        && (*state).mode as ::core::ffi::c_uint
-            != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if (*state).mode as ::core::ffi::c_uint
-        == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        dictid = crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
-        dictid = crate::src::adler32::adler32_ffi(
-            dictid as crate::stdlib::uLong,
-            dictionary,
-            dictLength,
-        ) as ::core::ffi::c_ulong;
-        if dictid != (*state).check {
-            return crate::zlib_h::Z_DATA_ERROR;
+    match inflate_dictionary_state((*state).wrap, (*state).mode as ::core::ffi::c_uint) {
+        InflateDictionaryState::Reject => {
+            return crate::zlib_h::Z_STREAM_ERROR;
         }
+        InflateDictionaryState::CheckId => {
+            dictid = crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
+            dictid = crate::src::adler32::adler32_ffi(
+                dictid as crate::stdlib::uLong,
+                dictionary,
+                dictLength,
+            ) as ::core::ffi::c_ulong;
+            if !inflate_dictionary_id_matches(dictid, (*state).check) {
+                return crate::zlib_h::Z_DATA_ERROR;
+            }
+        }
+        InflateDictionaryState::Accept => {}
     }
     ret = updatewindow(
         strm,
