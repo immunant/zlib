@@ -1205,15 +1205,10 @@ fn gzseek64(
             } {
                 return -1 as crate::stdlib::off64_t;
             }
-            // SAFETY: this bound state owns the error record; a null message
-            // does not dereference caller memory.
-            unsafe {
-                gz_error(
-                    state,
-                    crate::zlib_h::Z_OK,
-                    ::core::ptr::null::<::core::ffi::c_char>(),
-                );
-            }
+            // This path immediately clears the same read-side flags below,
+            // so `gzclearerr` has the same observable state transition as
+            // the former Z_OK error-record update.
+            gzclearerr(state);
             gz_seek_after_copy(state, offset)
         }
         GzSeekPlan::Rewind { offset } => {
