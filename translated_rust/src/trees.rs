@@ -5545,19 +5545,30 @@ fn tr_flush_block_state(
         )
 }
 
+/// Flush a deflate block whose stored bytes have already been validated by
+/// the caller. Rust codec callers provide the callback-owned pending buffer
+/// as an existing checked lend, so no raw stored-block cursor is needed to
+/// enter the tree core.
+pub(crate) fn tr_flush_block(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_and_symbols: &mut [crate::stdlib::Byte],
+    stored: Option<&[crate::stdlib::Byte]>,
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
+) {
+    let _ = tr_flush_block_state(state, pending_and_symbols, stored, stored_len, last);
+}
+
 /// Compatibility adapter for the legacy deflate block-flush boundary.
 ///
-/// Rust callers pass an already-validated state reference; raw buffer lends
-/// remain tightly scoped while the actual tree work is delegated to
-/// `tr_flush_block_state`.
+/// C callers still provide a raw stored-block cursor. Rust callers should use
+/// `tr_flush_block()` with a checked slice instead.
 pub fn _tr_flush_block(
     state: &mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
+    buf: *mut crate::stdlib::charf,
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
 ) {
-    // Raw buffer and stream-field lends are retained only at this transitional
-    // compatibility boundary. Everything after the lends is slice-based.
     unsafe {
         let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
             return;
@@ -5581,7 +5592,7 @@ pub fn _tr_flush_block(
                 stored_len_usize,
             ))
         };
-        let _ = tr_flush_block_state(state, pending_and_symbols, stored, stored_len, last);
+        tr_flush_block(state, pending_and_symbols, stored, stored_len, last);
     }
 }
 #[export_name = "_tr_flush_block"]
