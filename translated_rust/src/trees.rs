@@ -3934,14 +3934,15 @@ fn gen_bitlen(
     }
 }
 
-unsafe fn build_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut desc: *mut crate::src::deflate::tree_desc,
+// Build the Huffman tree after the deflater's dynamic tree has been bound to
+// its complete `2 * elems + 1` allocation. The heap and tree walk is then
+// ordinary state and slice work.
+fn build_tree_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    desc: &mut crate::src::deflate::tree_desc,
+    tree: &mut [crate::src::deflate::ct_data],
+    stat_desc: &crate::src::deflate::static_tree_desc,
 ) {
-    let state = &mut *s;
-    let desc = &mut *desc;
-    let stat_desc = &*desc.stat_desc;
-    let mut tree: *mut crate::src::deflate::ct_data = desc.dyn_tree;
     let stree = stat_desc.static_tree;
     let mut elems: ::core::ffi::c_int = stat_desc.elems;
     let mut n: ::core::ffi::c_int = 0;
@@ -3952,27 +3953,27 @@ unsafe fn build_tree(
     state.heap_max = crate::src::deflate::HEAP_SIZE;
     n = 0 as ::core::ffi::c_int;
     while n < elems {
-        if (*tree.offset(n as isize)).fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+        if tree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             max_code = n;
             state.heap_len += 1;
             state.heap[state.heap_len as usize] = max_code;
             state.depth[n as usize] = 0 as crate::zutil_h::uch;
         } else {
-            (*tree.offset(n as isize)).dl.dad = 0 as crate::zutil_h::ush;
+            tree[n as usize].dl.dad = 0 as crate::zutil_h::ush;
         }
         n += 1;
     }
     while state.heap_len < 2 as ::core::ffi::c_int {
         state.heap_len += 1;
-        let c2rust_lvalue_ptr = &raw mut state.heap[state.heap_len as usize];
-        *c2rust_lvalue_ptr = if max_code < 2 as ::core::ffi::c_int {
+        let entry = &mut state.heap[state.heap_len as usize];
+        *entry = if max_code < 2 as ::core::ffi::c_int {
             max_code += 1;
             max_code
         } else {
             0 as ::core::ffi::c_int
         };
-        node = *c2rust_lvalue_ptr;
-        (*tree.offset(node as isize)).fc.freq = 1 as crate::zutil_h::ush;
+        node = *entry;
+        tree[node as usize].fc.freq = 1 as crate::zutil_h::ush;
         state.depth[node as usize] = 0 as crate::zutil_h::uch;
         state.opt_len = state.opt_len.wrapping_sub(1);
         if let Some(stree) = stree {
@@ -3988,7 +3989,7 @@ unsafe fn build_tree(
             &mut state.heap,
             state.heap_len,
             &state.depth,
-            ::core::slice::from_raw_parts(tree, (elems * 2 + 1) as usize),
+            tree,
             n,
         );
         n -= 1;
@@ -4003,7 +4004,7 @@ unsafe fn build_tree(
             &mut state.heap,
             state.heap_len,
             &state.depth,
-            ::core::slice::from_raw_parts(tree, (elems * 2 + 1) as usize),
+            tree,
             SMALLEST,
         );
         m = state.heap[SMALLEST as usize];
@@ -4011,9 +4012,8 @@ unsafe fn build_tree(
         state.heap[state.heap_max as usize] = n;
         state.heap_max -= 1;
         state.heap[state.heap_max as usize] = m;
-        (*tree.offset(node as isize)).fc.freq = ((*tree.offset(n as isize)).fc.freq
-            as ::core::ffi::c_int
-            + (*tree.offset(m as isize)).fc.freq as ::core::ffi::c_int)
+        tree[node as usize].fc.freq = (tree[n as usize].fc.freq as ::core::ffi::c_int
+            + tree[m as usize].fc.freq as ::core::ffi::c_int)
             as crate::zutil_h::ush;
         state.depth[node as usize] = ((if state.depth[n as usize] as ::core::ffi::c_int
             >= state.depth[m as usize] as ::core::ffi::c_int
@@ -4022,8 +4022,8 @@ unsafe fn build_tree(
         } else {
             state.depth[m as usize] as ::core::ffi::c_int
         }) + 1 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        (*tree.offset(m as isize)).dl.dad = node as crate::zutil_h::ush;
-        (*tree.offset(n as isize)).dl.dad = (*tree.offset(m as isize)).dl.dad;
+        tree[m as usize].dl.dad = node as crate::zutil_h::ush;
+        tree[n as usize].dl.dad = tree[m as usize].dl.dad;
         let c2rust_fresh56 = node;
         node = node + 1;
         state.heap[SMALLEST as usize] = c2rust_fresh56;
@@ -4031,7 +4031,7 @@ unsafe fn build_tree(
             &mut state.heap,
             state.heap_len,
             &state.depth,
-            ::core::slice::from_raw_parts(tree, (elems * 2 + 1) as usize),
+            tree,
             SMALLEST,
         );
         if state.heap_len < 2 as ::core::ffi::c_int {
@@ -4040,9 +4040,25 @@ unsafe fn build_tree(
     }
     state.heap_max -= 1;
     state.heap[state.heap_max as usize] = state.heap[SMALLEST as usize];
-    let tree = ::core::slice::from_raw_parts_mut(tree, (elems * 2 + 1) as usize);
     gen_bitlen(state, tree, desc.max_code, stat_desc);
     gen_codes(&mut tree[..elems as usize], max_code, &state.bl_count);
+}
+
+// The deflater stores its dynamic trees behind C-compatible pointers. Bind
+// those pointers exactly once here; the construction algorithm above has no
+// raw-pointer operations.
+unsafe fn build_tree(
+    s: *mut crate::src::deflate::deflate_state,
+    desc: *mut crate::src::deflate::tree_desc,
+) {
+    let state = &mut *s;
+    let desc = &mut *desc;
+    let stat_desc = &*desc.stat_desc;
+    let tree = ::core::slice::from_raw_parts_mut(
+        desc.dyn_tree,
+        (stat_desc.elems * 2 + 1) as usize,
+    );
+    build_tree_impl(state, desc, tree, stat_desc);
 }
 
 unsafe fn scan_tree(
