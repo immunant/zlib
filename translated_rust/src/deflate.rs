@@ -581,18 +581,16 @@ unsafe extern "C" fn read_buf(
         return 0 as ::core::ffi::c_uint;
     }
     (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    crate::stdlib::memcpy(
-        buf as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
-    );
+    // `len` is bounded by both the caller-provided destination capacity and
+    // the stream's available input above, so each view covers exactly the
+    // bytes transferred by this call.
+    let input = ::core::slice::from_raw_parts((*strm).next_in, len as usize);
+    let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
+    output.copy_from_slice(input);
     if (*(*strm).state).wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler =
-            crate::src::adler32::adler32((*strm).adler, buf, len as crate::stdlib::uInt);
+        (*strm).adler = crate::src::adler32::adler32_z((*strm).adler, output);
     } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::crc32::crc32((*strm).adler, unsafe {
-            ::core::slice::from_raw_parts(buf, len as usize)
-        });
+        (*strm).adler = crate::src::crc32::crc32((*strm).adler, output);
     }
     (*strm).next_in = (*strm).next_in.offset(len as isize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
