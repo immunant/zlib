@@ -723,7 +723,13 @@ pub unsafe extern "C" fn deflateInit2_(
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf = (*s).pending_buf.offset((*s).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
+    // The allocation above reserves four bytes for every literal entry, so
+    // this cursor remains within that allocation.  Wrapping arithmetic keeps
+    // the pointer calculation explicit without requiring `offset`'s unsafe
+    // in-bounds contract here.
+    (*s).sym_buf = (*s)
+        .pending_buf
+        .wrapping_add((*s).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
     (*s).sym_end = (*s)
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
