@@ -594,13 +594,6 @@ fn gzseek64_impl(
     state.skip = offset;
     return state.x.pos + offset;
 }
-pub unsafe fn gzseek64(
-    state: &mut crate::gzguts_h::gz_state,
-    offset: crate::stdlib::off64_t,
-    whence: ::core::ffi::c_int,
-) -> crate::stdlib::off64_t {
-    gzseek64_impl(state, offset, whence)
-}
 #[export_name = "gzseek64"]
 
 pub unsafe extern "C" fn gzseek64_ffi(
