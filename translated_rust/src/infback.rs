@@ -146,7 +146,7 @@ fn initialize_allocated_inflate_back_state(
     window: &mut [::core::ffi::c_uchar],
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
-    crate::src::inflate::with_callback_inflate_state_slot(
+    crate::src::zutil::with_callback_state_slot(
         strm,
         crate::src::inflate::empty_inflate_state(),
         |strm, state| {

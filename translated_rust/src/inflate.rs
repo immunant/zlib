@@ -732,32 +732,6 @@ fn initialize_inflate_state_base(
     state.mode = crate::src::inflate::HEAD;
 }
 
-/// Allocate one uninitialized opaque inflate-state slot and expose it only
-/// after storing its first Rust value.
-///
-/// The arbitrary callback allocation remains the one local unsafe boundary.
-/// Initialization and reset policy receive only a typed state reference, so
-/// they cannot form an initialized reference before the value exists.
-pub(crate) fn with_callback_inflate_state_slot<R>(
-    strm: &mut crate::zlib_h::z_stream,
-    value: crate::src::inflate::inflate_state,
-    initialize: impl FnOnce(
-        &mut crate::zlib_h::z_stream,
-        &mut crate::src::inflate::inflate_state,
-    ) -> R,
-) -> Option<R> {
-    let allocation = (strm.zalloc?)(
-        strm.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut ::core::mem::MaybeUninit<crate::src::inflate::inflate_state>;
-    let mut slot = ::core::ptr::NonNull::new(allocation)?;
-    // The callback allocation is live and uniquely owned by stream setup.
-    // Write the first value before exposing a typed state reference.
-    let state = unsafe { slot.as_mut().write(value) };
-    Some(initialize(strm, state))
-}
-
 /// Allocate, initialize, and install the opaque state through one named
 /// implementation boundary.  The stream takes ownership only after its ABI
 /// state field has been installed.
@@ -766,7 +740,10 @@ fn initialize_allocated_inflate_state(
     window_bits: ::core::ffi::c_int,
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
-    let ret = with_callback_inflate_state_slot(strm, empty_inflate_state(), |strm, state| {
+    let ret = crate::src::zutil::with_callback_state_slot(
+        strm,
+        empty_inflate_state(),
+        |strm, state| {
         strm.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
         initialize_inflate_state_base(state, strm, allocator_provenance);
         match prepare_inflate_reset2(strm, state, window_bits) {
@@ -776,7 +753,8 @@ fn initialize_allocated_inflate_state(
             }
             Err(error) => error,
         }
-    })
+        },
+    )
     .unwrap_or(crate::zlib_h::Z_MEM_ERROR);
     if ret != crate::zlib_h::Z_OK {
         Some(strm.zfree.expect("non-null function pointer"))
@@ -3517,7 +3495,7 @@ fn initialize_inflate_copy(
         adler: source.adler,
         reserved: source.reserved,
     };
-    with_callback_inflate_state_slot(
+    crate::src::zutil::with_callback_state_slot(
         &mut allocation_stream,
         copy_inflate_state(source_state),
         |allocation_stream, copy_ref| {

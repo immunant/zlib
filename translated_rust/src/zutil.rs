@@ -45,6 +45,28 @@ pub(crate) const UNKNOWN_ALLOCATOR_PROVENANCE: AllocatorProvenance = AllocatorPr
 pub(crate) const fn allocator_pair_is_fully_default(provenance: &AllocatorProvenance) -> bool {
     matches!(provenance, AllocatorProvenance::DefaultPair)
 }
+
+/// Allocate, initialize, and expose one opaque stream-state value.
+///
+/// A zlib allocator callback returns uninitialized foreign storage.  Keep the
+/// single typed initialization boundary shared by deflate and inflate so their
+/// setup paths do not each need to establish the first Rust value themselves.
+pub(crate) fn with_callback_state_slot<T, R>(
+    strm: &mut crate::zlib_h::z_stream,
+    value: T,
+    initialize: impl FnOnce(&mut crate::zlib_h::z_stream, &mut T) -> R,
+) -> Option<R> {
+    let allocation = (strm.zalloc?)(
+        strm.opaque,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<T>() as crate::stdlib::uInt,
+    ) as *mut ::core::mem::MaybeUninit<T>;
+    let mut slot = ::core::ptr::NonNull::new(allocation)?;
+    // The allocation is live and uniquely owned by this initialization path.
+    // Write its first Rust value before exposing the typed reference.
+    let state = unsafe { slot.as_mut().write(value) };
+    Some(initialize(strm, state))
+}
 #[no_mangle]
 
 pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; 10] = [

@@ -78,30 +78,6 @@ pub type IPos = ::core::ffi::c_uint;
 
 pub type deflate_state = crate::src::deflate::internal_state;
 
-/// A callback-allocated slot for one opaque stream state.
-///
-/// The allocator callback supplies uninitialized storage, so turning that
-/// storage into the first Rust value remains the one explicit unsafe boundary
-/// in this facade. Keeping the callback boundary typed lets initialization and
-/// deep-copy setup share it without each recreating a raw state reference.
-fn with_callback_state_slot<T, R>(
-    strm: &mut crate::zlib_h::z_stream,
-    value: T,
-    initialize: impl FnOnce(&mut crate::zlib_h::z_stream, &mut T) -> R,
-) -> Option<R> {
-    let allocation = (strm.zalloc?)(
-        strm.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<T>() as crate::stdlib::uInt,
-    ) as *mut ::core::mem::MaybeUninit<T>;
-    let mut slot = ::core::ptr::NonNull::new(allocation)?;
-    // The callback allocation is live and uniquely owned by the stream
-    // setup path. Establish exactly one initialized Rust value in it before
-    // exposing its typed reference to the caller.
-    let state = unsafe { slot.as_mut().write(value) };
-    Some(initialize(strm, state))
-}
-
 #[derive(Clone)]
 #[repr(C)]
 
@@ -1215,7 +1191,7 @@ fn initialize_allocated_deflate_state(
     let Some(storage) = DeflateStorageLayout::from_init(config.window_bits, mem_level) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    with_callback_state_slot(strm, empty_deflate_state(), |strm, state| {
+    crate::src::zutil::with_callback_state_slot(strm, empty_deflate_state(), |strm, state| {
         strm.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
         let outcome = configure_allocated_deflate_state(
             state,
@@ -3608,7 +3584,7 @@ pub fn deflateCopy(
         None => None,
     };
     crate::zlib_h::copy_z_stream(dest_stream, source_stream);
-    with_callback_state_slot(
+    crate::src::zutil::with_callback_state_slot(
         dest_stream,
         source_state.clone(),
         |dest_stream, dest_state| {
