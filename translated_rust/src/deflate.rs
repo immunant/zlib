@@ -1008,7 +1008,8 @@ pub unsafe extern "C" fn deflateInit2_(
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf = (*s).pending_buf.offset((*s).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
+    (*s).sym_buf =
+        (*s).pending_buf.wrapping_add((*s).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
     (*s).sym_end = (*s)
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
@@ -1146,7 +1147,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
             (*s).block_start = 0 as ::core::ffi::c_long;
             (*s).insert = 0 as crate::stdlib::uInt;
         }
-        dictionary = dictionary.offset(dictLength.wrapping_sub((*s).w_size) as isize);
+        dictionary = dictionary.wrapping_add(dictLength.wrapping_sub((*s).w_size) as usize);
         dictLength = (*s).w_size;
     }
     avail = (*strm).avail_in as ::core::ffi::c_uint;
@@ -1490,9 +1491,9 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
         || (*s).sym_buf
-            < (*s).pending_out.offset(
+            < (*s).pending_out.wrapping_add(
                 (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as isize,
+                    as usize,
             )
     {
         return crate::zlib_h::Z_BUF_ERROR;
@@ -2588,10 +2589,9 @@ pub unsafe extern "C" fn deflate(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *(*s)
-                        .head
-                        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                        NIL as crate::src::deflate::Posf;
+                    *(*s).head.wrapping_add(
+                        (*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
+                    ) = NIL as crate::src::deflate::Posf;
                     crate::stdlib::memset(
                         (*s).head as *mut ::core::ffi::c_void,
                         0 as ::core::ffi::c_int,
@@ -2834,7 +2834,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         (*ss).pending as crate::__stddef_size_t_h::size_t,
     );
     (*ds).sym_buf =
-        (*ds).pending_buf.offset((*ds).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
+        (*ds).pending_buf.wrapping_add((*ds).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
     crate::stdlib::memcpy(
         (*ds).sym_buf as *mut ::core::ffi::c_void,
         (*ss).sym_buf as *const ::core::ffi::c_void,
@@ -3340,8 +3340,10 @@ unsafe extern "C" fn deflate_stored(
             return need_more;
         }
         let window = ::core::slice::from_raw_parts_mut((*s).window, window_len);
-        let consumed =
-            ::core::slice::from_raw_parts((*(*s).strm).next_in.offset(-(used as isize)), used_len);
+        let consumed = ::core::slice::from_raw_parts(
+            (*(*s).strm).next_in.wrapping_sub(used as usize),
+            used_len,
+        );
         if !update_stored_history_state(&mut *s, window, consumed) {
             return need_more;
         }
@@ -3377,7 +3379,11 @@ unsafe extern "C" fn deflate_stored(
         have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
-        read_buf((*s).strm, (*s).window.offset((*s).strstart as isize), have);
+        read_buf(
+            (*s).strm,
+            (*s).window.wrapping_add((*s).strstart as usize),
+            have,
+        );
         record_stored_input_state(&mut *s, have);
     }
     if let Some(plan) = stored_tail_block_plan(
@@ -3393,7 +3399,7 @@ unsafe extern "C" fn deflate_stored(
         last = plan.last;
         crate::src::trees::_tr_stored_block(
             s as *mut crate::src::deflate::internal_state,
-            ((*s).window as *mut crate::stdlib::charf).offset((*s).block_start as isize),
+            ((*s).window as *mut crate::stdlib::charf).wrapping_offset((*s).block_start as isize),
             len as crate::zutil_h::ulg,
             last,
         );
