@@ -190,7 +190,10 @@ impl InflateHeaderSink {
                 true
             }
             InflateHeaderUpdate::ClearExtra => {
-                self.header.extra = ::core::ptr::null_mut();
+                self.header.extra.store(
+                    ::core::ptr::null_mut(),
+                    ::core::sync::atomic::Ordering::Relaxed,
+                );
                 self.extra = None;
                 true
             }
@@ -217,7 +220,10 @@ impl InflateHeaderSink {
                 true
             }
             InflateHeaderUpdate::ClearName => {
-                self.header.name = ::core::ptr::null_mut();
+                self.header.name.store(
+                    ::core::ptr::null_mut(),
+                    ::core::sync::atomic::Ordering::Relaxed,
+                );
                 self.name = None;
                 true
             }
@@ -232,7 +238,10 @@ impl InflateHeaderSink {
                 true
             }
             InflateHeaderUpdate::ClearComment => {
-                self.header.comment = ::core::ptr::null_mut();
+                self.header.comment.store(
+                    ::core::ptr::null_mut(),
+                    ::core::sync::atomic::Ordering::Relaxed,
+                );
                 self.comment = None;
                 true
             }
@@ -3592,11 +3601,11 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     let Some(head) = head.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let extra = head.extra;
+    let extra = head.extra.load(::core::sync::atomic::Ordering::Relaxed);
     let extra_max = head.extra_max as usize;
-    let name = head.name;
+    let name = head.name.load(::core::sync::atomic::Ordering::Relaxed);
     let name_max = head.name_max as usize;
-    let comment = head.comment;
+    let comment = head.comment.load(::core::sync::atomic::Ordering::Relaxed);
     let comment_max = head.comm_max as usize;
     // zlib's `inflateGetHeader` contract keeps the header and its buffers
     // live until reset/end.  Establish those retained views only at this FFI

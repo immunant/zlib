@@ -1926,26 +1926,29 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
         deflate_clear_header(state)
     } else {
         let header = &mut *head;
-        let name = if header.name.is_null() {
+        let name_pointer = header.name.load(::core::sync::atomic::Ordering::Relaxed);
+        let name = if name_pointer.is_null() {
             None
         } else {
-            Some(::std::ffi::CStr::from_ptr(header.name.cast()))
+            Some(::std::ffi::CStr::from_ptr(name_pointer.cast()))
         };
-        let comment = if header.comment.is_null() {
+        let comment_pointer = header.comment.load(::core::sync::atomic::Ordering::Relaxed);
+        let comment = if comment_pointer.is_null() {
             None
         } else {
-            Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
+            Some(::std::ffi::CStr::from_ptr(comment_pointer.cast()))
         };
-        let extra = if header.extra.is_null() {
+        let extra_pointer = header.extra.load(::core::sync::atomic::Ordering::Relaxed);
+        let extra = if extra_pointer.is_null() {
             None
         } else {
             Some(::core::slice::from_raw_parts(
-                header.extra,
+                extra_pointer,
                 (header.extra_len & 0xffff as crate::stdlib::uInt) as usize,
             ))
         };
         let bound = deflate_bound_header_metadata(
-            !header.extra.is_null(),
+            !extra_pointer.is_null(),
             header.extra_len,
             name,
             comment,

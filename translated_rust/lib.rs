@@ -87,6 +87,8 @@ pub mod zutil_h {
     pub const PRESET_DICT: ::core::ffi::c_int = 0x20 as ::core::ffi::c_int;
 }
 pub mod zlib_h {
+    use ::core::sync::atomic::AtomicPtr;
+
     pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = [
         b'1' as ::core::ffi::c_char,
         b'.' as ::core::ffi::c_char,
@@ -164,12 +166,14 @@ pub mod zlib_h {
         pub time: crate::stdlib::uLong,
         pub xflags: ::core::ffi::c_int,
         pub os: ::core::ffi::c_int,
-        pub extra: *mut crate::stdlib::Bytef,
+        // Keep the C pointer-sized ABI field, while allowing a retained
+        // header sink to be safely shared by copied inflate states.
+        pub extra: AtomicPtr<crate::stdlib::Bytef>,
         pub extra_len: crate::stdlib::uInt,
         pub extra_max: crate::stdlib::uInt,
-        pub name: *mut crate::stdlib::Bytef,
+        pub name: AtomicPtr<crate::stdlib::Bytef>,
         pub name_max: crate::stdlib::uInt,
-        pub comment: *mut crate::stdlib::Bytef,
+        pub comment: AtomicPtr<crate::stdlib::Bytef>,
         pub comm_max: crate::stdlib::uInt,
         pub hcrc: ::core::ffi::c_int,
         pub done: ::core::ffi::c_int,
