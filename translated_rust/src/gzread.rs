@@ -109,7 +109,11 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
     if (*state).eof == 0 as ::core::ffi::c_int {
         if (*strm).avail_in != 0 {
             let mut p: *mut ::core::ffi::c_uchar = (*state).in_buf.as_mut_ptr();
-            let mut q: *const ::core::ffi::c_uchar = (*strm).next_in;
+            let q = (*strm)
+                .next_in
+                .0
+                .expect("non-null input cursor");
+            let mut q = ::core::ptr::with_exposed_provenance::<::core::ffi::c_uchar>(q.get());
             if q != p as *const ::core::ffi::c_uchar {
                 let mut n: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
                 loop {
@@ -140,7 +144,7 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
             return -1 as ::core::ffi::c_int;
         }
         (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
-        (*strm).next_in = (*state).in_buf.as_mut_ptr();
+        (*strm).next_in = crate::input_cursor!((*state).in_buf.as_mut_ptr());
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -165,7 +169,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*state).strm.zfree = None;
         (*state).strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         (*state).strm.avail_in = 0 as crate::stdlib::uInt;
-        (*state).strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+        (*state).strm.next_in = crate::zlib_h::InputBuffer::default();
         if crate::src::inflate::inflateInit2_(
             &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
@@ -200,10 +204,10 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         return 0 as ::core::ffi::c_int;
     }
     if (*strm).avail_in > 3 as crate::stdlib::uInt
-        && *(*strm).next_in.offset(0 as isize) as ::core::ffi::c_int == 31 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(1 as isize) as ::core::ffi::c_int == 139 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(2 as isize) as ::core::ffi::c_int == 8 as ::core::ffi::c_int
-        && (*(*strm).next_in.offset(3 as isize) as ::core::ffi::c_int) < 32 as ::core::ffi::c_int
+        && *crate::input_pointer!((*strm).next_in).offset(0 as isize) as ::core::ffi::c_int == 31 as ::core::ffi::c_int
+        && *crate::input_pointer!((*strm).next_in).offset(1 as isize) as ::core::ffi::c_int == 139 as ::core::ffi::c_int
+        && *crate::input_pointer!((*strm).next_in).offset(2 as isize) as ::core::ffi::c_int == 8 as ::core::ffi::c_int
+        && (*crate::input_pointer!((*strm).next_in).offset(3 as isize) as ::core::ffi::c_int) < 32 as ::core::ffi::c_int
     {
         crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
         (*state).how = crate::gzguts_h::GZIP;
@@ -214,7 +218,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     (*state).x.next = (*state).out_buf.as_mut_ptr();
     crate::stdlib::memcpy(
         (*state).x.next as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
+        crate::input_pointer!((*strm).next_in) as *const ::core::ffi::c_void,
         (*strm).avail_in as crate::__stddef_size_t_h::size_t,
     );
     (*state).x.have = (*strm).avail_in as ::core::ffi::c_uint;

@@ -186,7 +186,11 @@ pub unsafe extern "C" fn inflateBack(
     (*state).mode = crate::src::inflate::TYPE;
     (*state).last = 0 as ::core::ffi::c_int;
     (*state).whave = 0 as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
+    let input_cursor = (*strm).next_in;
+    next = match input_cursor.0 {
+        Some(address) => ::core::ptr::with_exposed_provenance_mut(address.get()),
+        None => ::core::ptr::null_mut(),
+    } as *mut ::core::ffi::c_uchar;
     have = (if !next.is_null() {
         (*strm).avail_in
     } else {
@@ -691,7 +695,7 @@ pub unsafe extern "C" fn inflateBack(
         if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
             (*strm).next_out = put as *mut crate::stdlib::Bytef;
             (*strm).avail_out = left as crate::stdlib::uInt;
-            (*strm).next_in = next as *mut crate::stdlib::Bytef;
+            (*strm).next_in = crate::input_cursor!(next);
             (*strm).avail_in = have as crate::stdlib::uInt;
             (*state).hold = hold;
             (*state).bits = bits;
@@ -701,7 +705,11 @@ pub unsafe extern "C" fn inflateBack(
             );
             put = (*strm).next_out as *mut ::core::ffi::c_uchar;
             left = (*strm).avail_out as ::core::ffi::c_uint;
-            next = (*strm).next_in as *mut ::core::ffi::c_uchar;
+            let input_cursor = (*strm).next_in;
+            next = match input_cursor.0 {
+                Some(address) => ::core::ptr::with_exposed_provenance_mut(address.get()),
+                None => ::core::ptr::null_mut(),
+            } as *mut ::core::ffi::c_uchar;
             have = (*strm).avail_in as ::core::ffi::c_uint;
             hold = (*state).hold;
             bits = (*state).bits;
@@ -987,7 +995,7 @@ pub unsafe extern "C" fn inflateBack(
             ret = crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
+    (*strm).next_in = crate::input_cursor!(next);
     (*strm).avail_in = have as crate::stdlib::uInt;
     return ret;
 }

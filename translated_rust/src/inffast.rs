@@ -76,7 +76,7 @@ pub unsafe extern "C" fn inflate_fast(
     let mut dist: ::core::ffi::c_uint = 0;
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
+    in_0 = crate::input_pointer!((*strm).next_in) as *mut ::core::ffi::c_uchar;
     last = in_0.offset((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
     out = (*strm).next_out as *mut ::core::ffi::c_uchar;
     beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as isize));
@@ -374,7 +374,7 @@ pub unsafe extern "C" fn inflate_fast(
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
-    (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
+    (*strm).next_in = crate::input_cursor!(in_0);
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
     (*strm).avail_in = (if in_0 < last {
         5 as isize + last.offset_from(in_0)

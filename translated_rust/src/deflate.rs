@@ -1942,7 +1942,7 @@ pub fn deflate(
         let s = &mut *strm.state;
         let state_key = strm.state.addr();
         if strm.next_out.is_null()
-            || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.is_null()
+            || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.0.is_none()
             || s.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
         {
             strm.msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
@@ -2436,7 +2436,11 @@ pub fn deflate(
             let input = if (*strm).avail_in == 0 {
                 Vec::new()
             } else {
-                ::core::slice::from_raw_parts((*strm).next_in, (*strm).avail_in as usize).to_vec()
+                ::core::slice::from_raw_parts(
+                    crate::input_pointer!((*strm).next_in),
+                    (*strm).avail_in as usize,
+                )
+                .to_vec()
             };
             let mut io = deflate_io::new(input, (*strm).avail_out as usize, (*strm).adler);
             let state = &mut *s;
@@ -2454,7 +2458,14 @@ pub fn deflate(
             let output_end = output_pos + io.output.len();
             output[output_pos..output_end].copy_from_slice(&io.output);
             output_pos = output_end;
-            (*strm).next_in = (*strm).next_in.offset(io.input_pos as isize);
+            (*strm).next_in = crate::zlib_h::InputBuffer(::core::num::NonZeroUsize::new(
+                (*strm)
+                    .next_in
+                    .0
+                    .expect("non-null input cursor")
+                    .get()
+                    .wrapping_add(io.input_pos)
+            ));
             (*strm).avail_in = io.avail_in();
             (*strm).total_in = (*strm)
                 .total_in

@@ -149,7 +149,7 @@ unsafe extern "C" fn gz_open(
         err: crate::zlib_h::Z_OK,
         msg: None,
         strm: crate::zlib_h::z_stream_s {
-            next_in: ::core::ptr::null_mut(),
+            next_in: crate::zlib_h::InputBuffer::default(),
             avail_in: 0,
             total_in: 0,
             next_out: ::core::ptr::null_mut(),

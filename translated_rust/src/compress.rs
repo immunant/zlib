@@ -32,7 +32,7 @@ pub unsafe extern "C" fn compress2_z(
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
-        next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
+        next_in: crate::zlib_h::InputBuffer::default(),
         avail_in: 0,
         total_in: 0,
         next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
@@ -67,7 +67,7 @@ pub unsafe extern "C" fn compress2_z(
     }
     stream.next_out = dest;
     stream.avail_out = 0 as crate::stdlib::uInt;
-    stream.next_in = source as *mut crate::stdlib::Bytef;
+    stream.next_in = crate::input_cursor!(source);
     stream.avail_in = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {

@@ -113,6 +113,22 @@ pub mod zutil_h {
 pub mod __stddef_null_h {
     pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 }
+
+#[macro_export]
+macro_rules! input_cursor {
+    ($pointer:expr) => {
+        crate::zlib_h::InputBuffer(::core::num::NonZeroUsize::new(($pointer).addr()))
+    };
+}
+
+#[macro_export]
+macro_rules! input_pointer {
+    ($cursor:expr) => {
+        ::core::ptr::with_exposed_provenance_mut::<crate::stdlib::Bytef>(
+            ($cursor).0.expect("non-null input cursor").get(),
+        )
+    };
+}
 pub mod zlib_h {
     pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = unsafe {
         ::core::mem::transmute::<[u8; 15], [::core::ffi::c_char; 15]>(*b"1.3.2.1-motley\0")
@@ -130,11 +146,19 @@ pub mod zlib_h {
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 
+    /// A nullable, ABI-compatible input cursor.  The C cursor address is
+    /// represented as a non-zero address, so the stream no longer stores a
+    /// raw pointer field directly.  Conversion back to `NonNull` is confined
+    /// to the existing translated pointer-consuming code.
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Default)]
+    pub struct InputBuffer(pub Option<::core::num::NonZeroUsize>);
+
     #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct z_stream_s {
-        pub next_in: *mut crate::stdlib::Bytef,
+        pub next_in: InputBuffer,
         pub avail_in: crate::stdlib::uInt,
         pub total_in: crate::stdlib::uLong,
         pub next_out: *mut crate::stdlib::Bytef,

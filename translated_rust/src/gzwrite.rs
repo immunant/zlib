@@ -134,7 +134,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_MEM_ERROR, Some(c"out of memory"));
         return -1 as ::core::ffi::c_int;
     }
-    state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+    state.strm.next_in = crate::zlib_h::InputBuffer::default();
     state.size = state.want;
     state.out_start = 0;
     state.strm.avail_out = state.size as crate::stdlib::uInt;
@@ -283,7 +283,7 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             first = 0 as ::core::ffi::c_int;
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
-        state.strm.next_in = state.in_buf.as_mut_ptr();
+        state.strm.next_in = crate::input_cursor!(state.in_buf.as_mut_ptr());
         state.in_end = n as usize;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
@@ -335,7 +335,7 @@ fn gz_write(state: &mut crate::gzguts_h::gz_state, mut input: &[u8]) -> crate::s
             let mut have: ::core::ffi::c_uint = 0;
             let mut copy: ::core::ffi::c_uint = 0;
             if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = state.in_buf.as_mut_ptr();
+                state.strm.next_in = crate::input_cursor!(state.in_buf.as_mut_ptr());
                 state.in_end = 0;
             }
             have = state.in_end as ::core::ffi::c_uint;
@@ -373,7 +373,7 @@ fn gz_write(state: &mut crate::gzguts_h::gz_state, mut input: &[u8]) -> crate::s
                 n = len as ::core::ffi::c_uint;
             }
             state.strm.avail_in = n as crate::stdlib::uInt;
-            state.strm.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
+            state.strm.next_in = crate::input_cursor!(input.as_ptr());
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
             n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
             state.x.pos += n as crate::stdlib::off64_t;
@@ -509,7 +509,7 @@ fn gzputc(state: &mut crate::gzguts_h::gz_state, c: ::core::ffi::c_int) -> ::cor
     }
     if state.direct == 0 && state.size != 0 {
         if state.strm.avail_in == 0 as crate::stdlib::uInt {
-            state.strm.next_in = state.in_buf.as_mut_ptr();
+            state.strm.next_in = crate::input_cursor!(state.in_buf.as_mut_ptr());
             state.in_end = 0;
         }
         let have = state.in_end as ::core::ffi::c_uint;

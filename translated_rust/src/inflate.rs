@@ -516,7 +516,7 @@ pub unsafe extern "C" fn inflate(
     ];
     if inflateStateCheck(strm) != 0
         || (*strm).next_out.is_null()
-        || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
+        || (*strm).next_in.0.is_none() && (*strm).avail_in != 0 as crate::stdlib::uInt
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -528,7 +528,11 @@ pub unsafe extern "C" fn inflate(
     }
     put = (*strm).next_out as *mut ::core::ffi::c_uchar;
     left = (*strm).avail_out as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
+    let input_cursor = (*strm).next_in;
+    next = match input_cursor.0 {
+        Some(address) => ::core::ptr::with_exposed_provenance_mut(address.get()),
+        None => ::core::ptr::null_mut(),
+    } as *mut ::core::ffi::c_uchar;
     have = (*strm).avail_in as ::core::ffi::c_uint;
     hold = (*state).hold;
     bits = (*state).bits;
@@ -1093,7 +1097,7 @@ pub unsafe extern "C" fn inflate(
                                                                                     if (*state).havedict == 0 as ::core::ffi::c_int {
                                                                                         (*strm).next_out = put as *mut crate::stdlib::Bytef;
                                                                                         (*strm).avail_out = left as crate::stdlib::uInt;
-                                                                                        (*strm).next_in = next as *mut crate::stdlib::Bytef;
+                                                                                        (*strm).next_in = crate::input_cursor!(next);
                                                                                         (*strm).avail_in = have as crate::stdlib::uInt;
                                                                                         (*state).hold = hold;
                                                                                         (*state).bits = bits;
@@ -1631,7 +1635,7 @@ pub unsafe extern "C" fn inflate(
                                         {
                                             (*strm).next_out = put as *mut crate::stdlib::Bytef;
                                             (*strm).avail_out = left as crate::stdlib::uInt;
-                                            (*strm).next_in = next as *mut crate::stdlib::Bytef;
+                                            (*strm).next_in = crate::input_cursor!(next);
                                             (*strm).avail_in = have as crate::stdlib::uInt;
                                             (*state).hold = hold;
                                             (*state).bits = bits;
@@ -1641,7 +1645,11 @@ pub unsafe extern "C" fn inflate(
                                             );
                                             put = (*strm).next_out as *mut ::core::ffi::c_uchar;
                                             left = (*strm).avail_out as ::core::ffi::c_uint;
-                                            next = (*strm).next_in as *mut ::core::ffi::c_uchar;
+                                            let input_cursor = (*strm).next_in;
+                                            next = match input_cursor.0 {
+                                                Some(address) => ::core::ptr::with_exposed_provenance_mut(address.get()),
+                                                None => ::core::ptr::null_mut(),
+                                            } as *mut ::core::ffi::c_uchar;
                                             have = (*strm).avail_in as ::core::ffi::c_uint;
                                             hold = (*state).hold;
                                             bits = (*state).bits;
@@ -2114,7 +2122,7 @@ pub unsafe extern "C" fn inflate(
     }
     (*strm).next_out = put as *mut crate::stdlib::Bytef;
     (*strm).avail_out = left as crate::stdlib::uInt;
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
+    (*strm).next_in = crate::input_cursor!(next);
     (*strm).avail_in = have as crate::stdlib::uInt;
     (*state).hold = hold;
     (*state).bits = bits;
@@ -2406,11 +2414,18 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     }
     len = syncsearch(
         &raw mut (*state).have,
-        (*strm).next_in,
+        crate::input_pointer!((*strm).next_in),
         (*strm).avail_in as ::core::ffi::c_uint,
     );
     (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
+    (*strm).next_in = crate::zlib_h::InputBuffer(::core::num::NonZeroUsize::new(
+        (*strm)
+            .next_in
+            .0
+            .expect("non-null input cursor")
+            .get()
+            .wrapping_add(len as usize)
+    ));
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
     if (*state).have != 4 as ::core::ffi::c_uint {
         return crate::zlib_h::Z_DATA_ERROR;
