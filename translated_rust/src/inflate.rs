@@ -2038,7 +2038,7 @@ pub fn inflate(
                                                     }
                                                 {
                                                     crate::stdlib::memcpy(
-                                                        (*(*state).head).extra.offset(len as isize)
+                                                        (*(*state).head).extra.wrapping_add(len as usize)
                                                             as *mut ::core::ffi::c_void,
                                                         next as *const ::core::ffi::c_void,
                                                         (if len.wrapping_add(copy)
@@ -2114,7 +2114,7 @@ pub fn inflate(
                                     loop {
                                         let c2rust_fresh5 = copy;
                                         copy = copy.wrapping_add(1);
-                                        len = *next.offset(c2rust_fresh5 as isize)
+                                        len = *next.wrapping_add(c2rust_fresh5 as usize)
                                             as ::core::ffi::c_uint;
                                         if !(*state).head.is_null()
                                             && !(*(*state).head).name.is_null()
@@ -2122,7 +2122,7 @@ pub fn inflate(
                                         {
                                             let c2rust_fresh6 = (*state).length;
                                             (*state).length = (*state).length.wrapping_add(1);
-                                            *(*(*state).head).name.offset(c2rust_fresh6 as isize) =
+                                            *(*(*state).head).name.wrapping_add(c2rust_fresh6 as usize) =
                                                 len as crate::stdlib::Bytef;
                                         }
                                         if !(len != 0 && copy < have) {
@@ -2237,14 +2237,14 @@ pub fn inflate(
                             loop {
                                 let c2rust_fresh7 = copy;
                                 copy = copy.wrapping_add(1);
-                                len = *next.offset(c2rust_fresh7 as isize) as ::core::ffi::c_uint;
+                                len = *next.wrapping_add(c2rust_fresh7 as usize) as ::core::ffi::c_uint;
                                 if !(*state).head.is_null()
                                     && !(*(*state).head).comment.is_null()
                                     && (*state).length < (*(*state).head).comm_max
                                 {
                                     let c2rust_fresh8 = (*state).length;
                                     (*state).length = (*state).length.wrapping_add(1);
-                                    *(*(*state).head).comment.offset(c2rust_fresh8 as isize) =
+                                    *(*(*state).head).comment.wrapping_add(c2rust_fresh8 as usize) =
                                         len as crate::stdlib::Bytef;
                                 }
                                 if !(len != 0 && copy < have) {
