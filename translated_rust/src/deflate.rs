@@ -1637,6 +1637,18 @@ fn write_zlib_header(
     }
 }
 
+// The gzip magic and method always fit in the initialized pending allocation.
+// Serialize this fixed prefix through the bound slice so it does not need raw
+// pending-buffer cursor writes.
+fn write_gzip_prefix(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) {
+    let pending = state.pending as usize;
+    pending_buf[pending..pending + 3].copy_from_slice(&[31, 139, 8]);
+    state.pending = state.pending.wrapping_add(3);
+}
+
 fn write_gzip_trailer(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -1901,18 +1913,14 @@ pub unsafe extern "C" fn deflate(
     }
     if (*s).status == crate::src::deflate::GZIP_STATE {
         (*strm).adler = crate::src::crc32::crc32_buffer(0 as crate::stdlib::uLong, None);
-        let c2rust_fresh0 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh0 as isize) =
-            31 as ::core::ffi::c_int as crate::stdlib::Bytef;
-        let c2rust_fresh1 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh1 as isize) =
-            139 as ::core::ffi::c_int as crate::stdlib::Bytef;
-        let c2rust_fresh2 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh2 as isize) =
-            8 as ::core::ffi::c_int as crate::stdlib::Bytef;
+        {
+            let state = &mut *s;
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            write_gzip_prefix(state, pending_buf);
+        }
         if (*s).gzhead.is_null() {
             let c2rust_fresh3 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
