@@ -537,48 +537,64 @@ fn inflate_init_version_and_size_valid(
         && stream_size == ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
 }
 
-pub unsafe extern "C" fn inflateInit2_(
-    mut strm: crate::zlib_h::z_streamp,
+// The ABI adapter binds the optional stream and version byte before reaching
+// this implementation. Keeping the initializer reference- and value-based
+// removes the raw-pointer contract from the core allocation and reset path.
+pub(crate) fn inflateInit2_(
+    strm: Option<&mut crate::zlib_h::z_stream>,
     mut windowBits: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
+    version: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let version_first = if version.is_null() { None } else { Some(*version) };
-    if !inflate_init_version_and_size_valid(version_first, stream_size) {
+    if !inflate_init_version_and_size_valid(version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() {
+    let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // Bind the valid caller stream once. The remaining initialization is
-    // ordinary stream/state work, including default callback selection.
-    let strm = &mut *strm;
+    };
+    // The remaining initialization is ordinary stream/state work, including
+    // default callback selection.
     inflate_prepare_stream(strm);
-    state = Some(strm.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        strm.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
+    // SAFETY: `inflate_prepare_stream()` installed a zlib-compatible
+    // allocator when the caller did not provide one. The callback ABI owns
+    // the allocation contract for this state request.
+    state = unsafe {
+        Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state
+    };
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        state as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
-    strm.state = state as *mut crate::src::deflate::internal_state;
-    let state = &mut *state;
-    state.strm = strm;
-    let ret = inflate_initialize_state(strm, state, windowBits);
-    if ret != crate::zlib_h::Z_OK {
-        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            strm.opaque,
-            state as *mut crate::src::inflate::inflate_state as crate::stdlib::voidpf,
+    // SAFETY: the allocator returned a non-null allocation large enough for
+    // one `inflate_state`; C zlib initializes that allocation bytewise.
+    unsafe {
+        crate::stdlib::memset(
+            state as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
         );
+    }
+    strm.state = state as *mut crate::src::deflate::internal_state;
+    // SAFETY: `state` is the live non-null allocation initialized above and
+    // remains owned by this stream until the matching release below.
+    let ret = unsafe {
+        let state = &mut *state;
+        state.strm = strm;
+        inflate_initialize_state(strm, state, windowBits)
+    };
+    if ret != crate::zlib_h::Z_OK {
+        // SAFETY: this is the still-owned allocation returned by the
+        // stream's matching allocator. No state reference spans the callback.
+        unsafe {
+            Some(strm.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(strm.opaque, state as crate::stdlib::voidpf);
+        }
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     ret
@@ -591,10 +607,14 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this ABI adapter alone binds the optional foreign stream and
+    // version pointers. Validation and initialization stay in `inflateInit2_`.
+    let strm = unsafe { strm.as_mut() };
+    let version = unsafe { version.as_ref().copied() };
     inflateInit2_(strm, windowBits, version, stream_size)
 }
 // This internal dispatcher only supplies zlib's default window size and
-// accepts references already bound by its callers. Keep the raw-pointer
+// accepts references already bound by its callers. Keep the initialization
 // contract contained in `inflateInit2_`.
 pub fn inflateInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
@@ -608,17 +628,12 @@ pub fn inflateInit_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // SAFETY: references prove the stream and version byte are valid for the
-    // initializer's checks and setup. The shared preflight above preserved
-    // `inflateInit2_`'s required validation order.
-    unsafe {
-        inflateInit2_(
-            strm,
-            crate::zutil_h::DEF_WBITS,
-            &version_first.expect("preflight accepted version"),
-            stream_size,
-        )
-    }
+    inflateInit2_(
+        Some(strm),
+        crate::zutil_h::DEF_WBITS,
+        version_first,
+        stream_size,
+    )
 }
 #[export_name = "inflateInit_"]
 

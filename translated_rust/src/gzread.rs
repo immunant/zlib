@@ -18,7 +18,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd;
-pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidp;
@@ -260,17 +259,12 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         };
         gz_look_prepare_stream(state);
-        // SAFETY: this state now owns both gzip buffers and has initialized
-        // its stream fields. The inflater constructor is the remaining raw
-        // callback/allocation boundary.
-        let init_ret = unsafe {
-            crate::src::inflate::inflateInit2_(
-                &mut state.strm,
-                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-                crate::zlib_h::ZLIB_VERSION.as_ptr(),
-                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-            )
-        };
+        let init_ret = crate::src::inflate::inflateInit2_(
+            Some(&mut state.strm),
+            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+            Some(crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_char),
+            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+        );
         if init_ret != crate::zlib_h::Z_OK {
             crate::src::zutil::zcfree(
                 ::core::ptr::null_mut(),
