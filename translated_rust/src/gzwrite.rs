@@ -74,6 +74,24 @@ fn gz_zero_needs_initialization(first: ::core::ffi::c_int) -> bool {
     first != 0
 }
 
+fn gzclose_w_result(
+    zero_error: Option<::core::ffi::c_int>,
+    finish_error: Option<::core::ffi::c_int>,
+    close_failed: bool,
+) -> ::core::ffi::c_int {
+    let mut ret = crate::zlib_h::Z_OK;
+    if let Some(error) = zero_error {
+        ret = error;
+    }
+    if let Some(error) = finish_error {
+        ret = error;
+    }
+    if close_failed {
+        ret = crate::zlib_h::Z_ERRNO;
+    }
+    ret
+}
+
 fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
     (len as ::core::ffi::c_int) >= 0 && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
 }
@@ -862,7 +880,6 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     gzsetparams(file, level, strategy)
 }
 pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -872,12 +889,16 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     if (*state).mode != crate::gzguts_h::GZ_WRITE {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
-    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
+    let zero_error = if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+        Some((*state).err)
+    } else {
+        None
+    };
+    let finish_error = if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
+        Some((*state).err)
+    } else {
+        None
+    };
     if (*state).size != 0 {
         if (*state).direct == 0 {
             crate::src::deflate::deflateEnd(
@@ -893,11 +914,9 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-    if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
-        ret = crate::zlib_h::Z_ERRNO;
-    }
+    let close_failed = crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int;
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
-    return ret;
+    return gzclose_w_result(zero_error, finish_error, close_failed);
 }
 #[export_name = "gzclose_w"]
 
@@ -917,8 +936,37 @@ mod tests {
         gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
         gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
         gz_zero_needs_pending_flush, gzflush_mode_is_valid, gzfwrite_len, gzputc_result,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match, gzwrite_len_fits_int,
+        gzclose_w_result, gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
+        gzwrite_len_fits_int,
     };
+
+    #[test]
+    fn gzclose_w_result_returns_success_without_errors() {
+        assert_eq!(gzclose_w_result(None, None, false), crate::zlib_h::Z_OK);
+    }
+
+    #[test]
+    fn gzclose_w_result_returns_zero_error() {
+        assert_eq!(gzclose_w_result(Some(-10), None, false), -10);
+    }
+
+    #[test]
+    fn gzclose_w_result_returns_finish_error() {
+        assert_eq!(gzclose_w_result(None, Some(-11), false), -11);
+    }
+
+    #[test]
+    fn gzclose_w_result_prefers_finish_error() {
+        assert_eq!(gzclose_w_result(Some(-10), Some(-11), false), -11);
+    }
+
+    #[test]
+    fn gzclose_w_result_prefers_close_failure() {
+        assert_eq!(
+            gzclose_w_result(Some(-10), Some(-11), true),
+            crate::zlib_h::Z_ERRNO
+        );
+    }
 
     #[test]
     fn gz_zero_chunk_len_limits_to_remaining_skip() {

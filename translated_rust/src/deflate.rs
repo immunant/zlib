@@ -1151,6 +1151,28 @@ pub unsafe extern "C" fn deflatePrime_ffi(
 ) -> ::core::ffi::c_int {
     deflatePrime(strm, bits, value)
 }
+
+fn normalize_deflate_params(
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> Option<(::core::ffi::c_int, ::core::ffi::c_int)> {
+    let level = if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
+        6 as ::core::ffi::c_int
+    } else {
+        level
+    };
+
+    if level < 0 as ::core::ffi::c_int
+        || level > 9 as ::core::ffi::c_int
+        || strategy < 0 as ::core::ffi::c_int
+        || strategy > crate::zlib_h::Z_FIXED
+    {
+        None
+    } else {
+        Some((level, strategy))
+    }
+}
+
 pub unsafe extern "C" fn deflateParams(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
@@ -1163,16 +1185,10 @@ pub unsafe extern "C" fn deflateParams(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
-        level = 6 as ::core::ffi::c_int;
-    }
-    if level < 0 as ::core::ffi::c_int
-        || level > 9 as ::core::ffi::c_int
-        || strategy < 0 as ::core::ffi::c_int
-        || strategy > crate::zlib_h::Z_FIXED
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    let (level, strategy) = match normalize_deflate_params(level, strategy) {
+        Some(params) => params,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
     func = configuration_table[(*s).level as usize].func;
     if (strategy != (*s).strategy || func != configuration_table[level as usize].func)
         && (*s).last_flush != -2 as ::core::ffi::c_int
@@ -3588,8 +3604,42 @@ mod tests {
     use super::{
         deflate_bound_lengths, deflate_copyright, deflate_version_matches, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, pending_output_len,
-        slide_hash_entry, zlib_header,
+        normalize_deflate_params, slide_hash_entry, zlib_header,
     };
+
+    #[test]
+    fn normalize_deflate_params_maps_default_level_to_six() {
+        assert_eq!(
+            normalize_deflate_params(
+                crate::zlib_h::Z_DEFAULT_COMPRESSION,
+                crate::zlib_h::Z_DEFAULT_STRATEGY,
+            ),
+            Some((6, crate::zlib_h::Z_DEFAULT_STRATEGY)),
+        );
+    }
+
+    #[test]
+    fn normalize_deflate_params_accepts_level_and_strategy_endpoints() {
+        assert_eq!(normalize_deflate_params(0, 0), Some((0, 0)));
+        assert_eq!(
+            normalize_deflate_params(9, crate::zlib_h::Z_FIXED),
+            Some((9, crate::zlib_h::Z_FIXED)),
+        );
+    }
+
+    #[test]
+    fn normalize_deflate_params_rejects_out_of_range_levels() {
+        assert_eq!(normalize_deflate_params(-2, 0), None);
+        assert_eq!(normalize_deflate_params(10, 0), None);
+    }
+
+    #[test]
+    fn normalize_deflate_params_rejects_strategy_past_z_fixed() {
+        assert_eq!(
+            normalize_deflate_params(6, crate::zlib_h::Z_FIXED + 1),
+            None,
+        );
+    }
 
     #[test]
     fn copyright_export_has_stable_bytes() {
