@@ -71,6 +71,7 @@ pub struct internal_state {
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
     pub pending_out: *mut crate::stdlib::Bytef,
+    pub pending_out_offset: crate::zutil_h::ulg,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
     pub gzhead: crate::zlib_h::gz_headerp,
@@ -927,6 +928,7 @@ fn deflate_reset_keep_state(
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
     state.pending = 0 as crate::zutil_h::ulg;
     state.pending_out = state.pending_buf;
+    state.pending_out_offset = 0 as crate::zutil_h::ulg;
     let reset = deflate_reset_keep_config(state.wrap);
     state.wrap = reset.wrap;
     state.status = reset.status;
@@ -1156,10 +1158,10 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || (*s).sym_buf
-            < (*s).pending_out.offset(
+        || ((*s).lit_bufsize as crate::zutil_h::ulg)
+            < (*s).pending_out_offset.wrapping_add(
                 (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as isize,
+                    as crate::zutil_h::ulg,
             )
     {
         return crate::zlib_h::Z_BUF_ERROR;
@@ -1738,25 +1740,29 @@ fn deflate_pending_copy_len(
 
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
-    let mut s: *mut crate::src::deflate::deflate_state =
-        (*strm).state as *mut crate::src::deflate::deflate_state;
-    crate::src::trees::_tr_flush_bits_ffi(s as *mut crate::src::deflate::internal_state);
-    let Some(copy_len) = deflate_pending_copy_len((*s).pending, (*strm).avail_out) else {
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::deflate::deflate_state);
+    crate::src::trees::_tr_flush_bits_ffi(state as *mut crate::src::deflate::internal_state);
+    let Some(copy_len) = deflate_pending_copy_len(state.pending, strm_ref.avail_out) else {
         return;
     };
     len = copy_len;
     crate::stdlib::memcpy(
-        (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_out as *const ::core::ffi::c_void,
+        strm_ref.next_out as *mut ::core::ffi::c_void,
+        state.pending_out as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
-    (*strm).next_out = (*strm).next_out.wrapping_add(len as usize);
-    (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
-    (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
-    (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
-    (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if (*s).pending == 0 as crate::zutil_h::ulg {
-        (*s).pending_out = (*s).pending_buf;
+    strm_ref.next_out = strm_ref.next_out.wrapping_add(len as usize);
+    state.pending_out = state.pending_out.wrapping_add(len as usize);
+    state.pending_out_offset = state
+        .pending_out_offset
+        .wrapping_add(len as crate::zutil_h::ulg);
+    strm_ref.total_out = strm_ref.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm_ref.avail_out = strm_ref.avail_out.wrapping_sub(len);
+    state.pending = state.pending.wrapping_sub(len as crate::zutil_h::ulg);
+    if state.pending == 0 as crate::zutil_h::ulg {
+        state.pending_out = state.pending_buf;
+        state.pending_out_offset = 0 as crate::zutil_h::ulg;
     }
 }
 #[export_name = "deflate"]
@@ -2376,9 +2382,8 @@ pub unsafe extern "C" fn deflateCopy_ffi(
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()
                 as crate::__stddef_size_t_h::size_t),
     );
-    (*ds).pending_out = (*ds)
-        .pending_buf
-        .offset((*ss).pending_out.offset_from((*ss).pending_buf) as ::core::ffi::c_long as isize);
+    (*ds).pending_out_offset = (*ss).pending_out_offset;
+    (*ds).pending_out = (*ds).pending_buf.offset((*ds).pending_out_offset as isize);
     crate::stdlib::memcpy(
         (*ds).pending_out as *mut ::core::ffi::c_void,
         (*ss).pending_out as *const ::core::ffi::c_void,
