@@ -375,31 +375,8 @@ pub unsafe extern "C" fn inflatePrime(
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if bits == 0 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_OK;
-    }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if bits < 0 as ::core::ffi::c_int {
-        (*state).hold = 0 as ::core::ffi::c_ulong;
-        (*state).bits = 0 as ::core::ffi::c_uint;
-        return crate::zlib_h::Z_OK;
-    }
-    if bits > 16 as ::core::ffi::c_int
-        || ((*state).bits as crate::stdlib::uInt).wrapping_add(bits as crate::stdlib::uInt)
-            > 32 as ::core::ffi::c_uint
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    value = (value as ::core::ffi::c_long
-        & ((1 as ::core::ffi::c_long) << bits) - 1 as ::core::ffi::c_long)
-        as ::core::ffi::c_int;
-    (*state).hold = (*state)
-        .hold
-        .wrapping_add((value as ::core::ffi::c_ulong) << (*state).bits);
-    (*state).bits = (*state)
-        .bits
-        .wrapping_add(bits as crate::stdlib::uInt as ::core::ffi::c_uint);
-    return crate::zlib_h::Z_OK;
+    return inflate_prime(&mut *state, bits, value);
 }
 #[export_name = "inflatePrime"]
 
@@ -410,6 +387,38 @@ pub unsafe extern "C" fn inflatePrime_ffi(
 ) -> ::core::ffi::c_int {
     inflatePrime(strm, bits, value)
 }
+
+fn inflate_prime(
+    state: &mut crate::src::inflate::inflate_state,
+    bits: ::core::ffi::c_int,
+    mut value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if bits == 0 as ::core::ffi::c_int {
+        return crate::zlib_h::Z_OK;
+    }
+    if bits < 0 as ::core::ffi::c_int {
+        state.hold = 0 as ::core::ffi::c_ulong;
+        state.bits = 0 as ::core::ffi::c_uint;
+        return crate::zlib_h::Z_OK;
+    }
+    if bits > 16 as ::core::ffi::c_int
+        || (state.bits as crate::stdlib::uInt).wrapping_add(bits as crate::stdlib::uInt)
+            > 32 as ::core::ffi::c_uint
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    value = (value as ::core::ffi::c_long
+        & ((1 as ::core::ffi::c_long) << bits) - 1 as ::core::ffi::c_long)
+        as ::core::ffi::c_int;
+    state.hold = state
+        .hold
+        .wrapping_add((value as ::core::ffi::c_ulong) << state.bits);
+    state.bits = state
+        .bits
+        .wrapping_add(bits as crate::stdlib::uInt as ::core::ffi::c_uint);
+    crate::zlib_h::Z_OK
+}
+
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
@@ -2351,12 +2360,7 @@ pub unsafe extern "C" fn inflateGetHeader(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    (*state).head = head;
-    (*head).done = 0 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_OK;
+    return inflate_get_header(&mut *state, &mut *head);
 }
 #[export_name = "inflateGetHeader"]
 
@@ -2366,6 +2370,19 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
 ) -> ::core::ffi::c_int {
     inflateGetHeader(strm, head)
 }
+
+fn inflate_get_header(
+    state: &mut crate::src::inflate::inflate_state,
+    head: &mut crate::zlib_h::gz_header,
+) -> ::core::ffi::c_int {
+    if state.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    state.head = head;
+    head.done = 0 as ::core::ffi::c_int;
+    crate::zlib_h::Z_OK
+}
+
 fn syncsearch_byte(
     mut have: ::core::ffi::c_uint,
     byte: ::core::ffi::c_uchar,
@@ -2695,10 +2712,7 @@ pub unsafe extern "C" fn inflateCodesUsed(
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return (*state)
-        .next
-        .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-        as ::core::ffi::c_ulong;
+    return inflate_codes_used(&*state);
 }
 #[export_name = "inflateCodesUsed"]
 
@@ -2706,4 +2720,16 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
     inflateCodesUsed(strm)
+}
+
+fn inflate_codes_used(state: &crate::src::inflate::inflate_state) -> crate::stdlib::uLong {
+    let base = state.codes.as_ptr().addr();
+    let next = state.next.addr();
+    let size = ::core::mem::size_of::<crate::src::inftrees::code>();
+    if next >= base {
+        next.wrapping_sub(base).wrapping_div(size) as crate::stdlib::uLong
+    } else {
+        (base.wrapping_sub(next).wrapping_div(size) as ::core::ffi::c_long).wrapping_neg()
+            as crate::stdlib::uLong
+    }
 }
