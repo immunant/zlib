@@ -192,9 +192,7 @@ unsafe fn gz_comp(
                 (*strm).avail_in as ::core::ffi::c_uint
             };
             writ = crate::stdlib::write(
-                <rustix::fd::OwnedFd as rustix::fd::AsRawFd>::as_raw_fd(
-                    state.fd.as_ref().unwrap(),
-                ),
+                <rustix::fd::OwnedFd as rustix::fd::AsRawFd>::as_raw_fd(state.fd.as_ref().unwrap()),
                 (*strm).next_in as *const ::core::ffi::c_void,
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
@@ -247,7 +245,7 @@ unsafe fn gz_comp(
                 if writ < 0 as ::core::ffi::c_int {
                     let failure = gz_write_failure(*crate::stdlib::__errno_location());
                     if failure.would_block {
-                    state.again = 1 as ::core::ffi::c_int;
+                        state.again = 1 as ::core::ffi::c_int;
                     }
                     crate::src::gzlib::gz_error(
                         state,
@@ -705,16 +703,11 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     };
     gzsetparams(state, level, strategy)
 }
-pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    if file.is_null() {
+    if state.mode != crate::gzguts_h::GZ_WRITE {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state_ptr = file as crate::gzguts_h::gz_statep;
-    if (*state_ptr).mode != crate::gzguts_h::GZ_WRITE {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *state_ptr;
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         ret = state.err;
     }
@@ -746,11 +739,13 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     {
         ret = crate::zlib_h::Z_ERRNO;
     }
-    drop(Vec::from_raw_parts(state_ptr, 1, 1));
     return ret;
 }
 #[export_name = "gzclose_w"]
 
 pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_w(file)
+    crate::src::gzclose::gzclose(
+        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
+        crate::src::gzclose::GzCloseTarget::Write,
+    )
 }

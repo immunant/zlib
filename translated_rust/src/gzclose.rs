@@ -20,22 +20,50 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-unsafe fn gzclose(
+
+pub(crate) enum GzCloseTarget {
+    Any,
+    Read,
+    Write,
+}
+
+pub(crate) unsafe fn gzclose(
     state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    target: GzCloseTarget,
 ) -> ::core::ffi::c_int {
-    let Some(state) = state else {
+    let Some(mut state) = state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if state.as_ref().mode == crate::gzguts_h::GZ_READ {
-        crate::src::gzread::gzclose_r(state.as_ptr().cast::<crate::zlib_h::gzFile_s>())
-    } else {
-        crate::src::gzwrite::gzclose_w(state.as_ptr().cast::<crate::zlib_h::gzFile_s>())
-    }
+    let state_ptr = state.as_ptr();
+    let state = state.as_mut();
+    let close: unsafe fn(&mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int = match target {
+        GzCloseTarget::Any => {
+            if state.mode == crate::gzguts_h::GZ_READ {
+                crate::src::gzread::gzclose_r
+            } else {
+                crate::src::gzwrite::gzclose_w
+            }
+        }
+        GzCloseTarget::Read if state.mode == crate::gzguts_h::GZ_READ => {
+            crate::src::gzread::gzclose_r
+        }
+        GzCloseTarget::Write if state.mode == crate::gzguts_h::GZ_WRITE => {
+            crate::src::gzwrite::gzclose_w
+        }
+        GzCloseTarget::Read | GzCloseTarget::Write => return crate::zlib_h::Z_STREAM_ERROR,
+    };
+    let ret = close(state);
+    // `gz_open()` allocated this opaque handle as a one-element Vec.  The
+    // selected close path has released its owned resources, so reclaim that
+    // allocation exactly once after mode-dependent cleanup.
+    drop(Vec::from_raw_parts(state_ptr, 1, 1));
+    ret
 }
 #[export_name = "gzclose"]
 
 pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose(::core::ptr::NonNull::new(
-        file as crate::gzguts_h::gz_statep,
-    ))
+    gzclose(
+        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
+        GzCloseTarget::Any,
+    )
 }

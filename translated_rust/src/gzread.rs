@@ -673,10 +673,7 @@ unsafe fn gz_read(
     }
     return got;
 }
-unsafe fn gzread(
-    state: &mut crate::gzguts_h::gz_state,
-    output: &mut [u8],
-) -> ::core::ffi::c_int {
+unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
@@ -1034,17 +1031,12 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     };
     gzdirect(state.as_mut())
 }
-pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+pub unsafe fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut err: ::core::ffi::c_int = 0;
-    if file.is_null() {
+    if state.mode != crate::gzguts_h::GZ_READ {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state_ptr = file as crate::gzguts_h::gz_statep;
-    if (*state_ptr).mode != crate::gzguts_h::GZ_READ {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *state_ptr;
     if state.size != 0 {
         crate::src::inflate::inflateEnd(
             &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
@@ -1070,7 +1062,6 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
         .unwrap_or(-1 as ::core::ffi::c_int),
         None => -1 as ::core::ffi::c_int,
     };
-    drop(Vec::from_raw_parts(state_ptr, 1, 1));
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
@@ -1080,5 +1071,8 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
 #[export_name = "gzclose_r"]
 
 pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_r(file)
+    crate::src::gzclose::gzclose(
+        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
+        crate::src::gzclose::GzCloseTarget::Read,
+    )
 }
