@@ -3013,46 +3013,61 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     let dict_length = dictLength.as_mut();
     inflate_get_dictionary(request, dictionary, dict_length)
 }
-pub unsafe fn inflateSetDictionary(
-    strm: &mut crate::zlib_h::z_stream_s,
+// Dictionary installation is entirely a normal-decoder-state transition.
+// Keeping it on the pointer-free owner lets embedded callers reuse the same
+// policy without reopening the ABI stream/state boundary.
+fn inflateSetDictionary(
+    owner: &mut InflateNormalStateOwner<'_>,
     dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
     let mut dictid: ::core::ffi::c_ulong = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if state.normal.wrap != 0 as ::core::ffi::c_int
-        && state.normal.mode as ::core::ffi::c_uint
+    let normal = &mut *owner.normal;
+    if normal.wrap != 0 as ::core::ffi::c_int
+        && normal.mode as ::core::ffi::c_uint
             != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.normal.mode as ::core::ffi::c_uint
+    if normal.mode as ::core::ffi::c_uint
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         dictid =
             crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None) as ::core::ffi::c_ulong;
         dictid = crate::src::adler32::adler32(dictid as crate::stdlib::uLong, dictionary)
             as ::core::ffi::c_ulong;
-        if dictid != state.normal.check {
+        if dictid != normal.check {
             return crate::zlib_h::Z_DATA_ERROR;
         }
     }
     ret = update_window_from_slice(
-        &mut state.normal.owned_window,
-        state.normal.wbits,
-        &mut state.normal.wsize,
-        &mut state.normal.wnext,
-        &mut state.normal.whave,
+        &mut normal.owned_window,
+        normal.wbits,
+        &mut normal.wsize,
+        &mut normal.wnext,
+        &mut normal.whave,
         dictionary,
     );
     if ret != 0 {
-        state.normal.mode = crate::src::inflate::MEM;
+        normal.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    state.normal.havedict = 1 as ::core::ffi::c_int;
+    normal.havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
+}
+
+// The stream-bound opaque-state projection stays outside the pointer-free
+// dictionary policy.  The export wrapper validates the raw stream and forms
+// the bounded dictionary slice before dispatching here.
+unsafe fn inflate_set_dictionary_from_stream(
+    strm: &mut crate::zlib_h::z_stream_s,
+    dictionary: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let mut owner = InflateNormalStateOwner::new(&mut state.normal);
+    inflateSetDictionary(&mut owner, dictionary)
 }
 #[export_name = "inflateSetDictionary"]
 
@@ -3072,7 +3087,7 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     } else {
         ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
-    inflateSetDictionary(strm, dictionary)
+    inflate_set_dictionary_from_stream(strm, dictionary)
 }
 // A registered gzip header must retain the original pointer's provenance for
 // later decoder calls.  The export boundary forms that handle after checking
