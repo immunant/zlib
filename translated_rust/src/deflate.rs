@@ -60,12 +60,18 @@ pub type static_tree_desc = crate::src::deflate::static_tree_desc_s;
 
 pub type tree_desc = crate::src::deflate::tree_desc_s;
 #[derive(Copy, Clone)]
+#[repr(u8)]
+pub enum DynamicTree {
+    Literal = 0,
+    Distance = 1,
+    BitLength = 2,
+}
+#[derive(Copy, Clone)]
 #[repr(C)]
 
 pub struct tree_desc_s {
-    pub dyn_tree: *mut crate::src::deflate::ct_data,
+    pub dynamic_tree: crate::src::deflate::DynamicTree,
     pub max_code: ::core::ffi::c_int,
-    pub stat_desc: *const crate::src::deflate::static_tree_desc,
 }
 
 pub type Pos = crate::zutil_h::ush;
@@ -2992,12 +2998,6 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).sym_buf as *const ::core::ffi::c_void,
         (*ss).sym_next as crate::__stddef_size_t_h::size_t,
     );
-    (*ds).l_desc.dyn_tree = &raw mut (*ds).dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).d_desc.dyn_tree = &raw mut (*ds).dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).bl_desc.dyn_tree = &raw mut (*ds).bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
