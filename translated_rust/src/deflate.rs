@@ -2267,60 +2267,74 @@ fn output_tail<'a>(
     output.get_mut(start..end)
 }
 
+// A single borrowed view of all storage a deflate strategy may touch.  The
+// legacy engine constructs this only after validating its ABI allocations;
+// strategy dispatch and the strategies themselves consequently need no raw
+// storage handles.  Keeping this pointer-free view separate from
+// `deflate_state` is the bridge to replacing the legacy allocations with
+// owned buffers.
+struct DeflateWorkspace<'a> {
+    window: &'a mut [crate::stdlib::Bytef],
+    head: Option<&'a mut [crate::src::deflate::Posf]>,
+    prev: Option<&'a mut [crate::src::deflate::Posf]>,
+    input: &'a [crate::stdlib::Bytef],
+    pending_buf: &'a mut [crate::stdlib::Bytef],
+    output: &'a mut [crate::stdlib::Bytef],
+}
+
 // The legacy stream engine owns the one raw-to-slice conversion for this
 // update. Keep strategy selection here, over ordinary Rust borrows, so the
 // compression modes cannot grow their own raw stream paths.
 fn deflate_update(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
-    window: &mut [crate::stdlib::Bytef],
-    head: Option<&mut [crate::src::deflate::Posf]>,
-    prev: Option<&mut [crate::src::deflate::Posf]>,
-    input: &[crate::stdlib::Bytef],
-    pending_buf: &mut [crate::stdlib::Bytef],
-    output: &mut [crate::stdlib::Bytef],
+    workspace: &mut DeflateWorkspace<'_>,
     flush: ::core::ffi::c_int,
 ) -> Option<block_state> {
     if state.level == 0 {
         return Some(deflate_stored(
             state,
             strm,
-            window,
-            input,
-            pending_buf,
-            output,
+            &mut *workspace.window,
+            workspace.input,
+            &mut *workspace.pending_buf,
+            &mut *workspace.output,
             flush,
         ));
     }
     if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-        let (Some(head), Some(prev)) = (head, prev) else {
+        let (Some(head), Some(prev)) =
+            (workspace.head.as_deref_mut(), workspace.prev.as_deref_mut())
+        else {
             return None;
         };
         return Some(deflate_huff(
             state,
             strm,
-            window,
+            &mut *workspace.window,
             head,
             prev,
-            input,
-            pending_buf,
-            output,
+            workspace.input,
+            &mut *workspace.pending_buf,
+            &mut *workspace.output,
             flush,
         ));
     }
     if state.strategy == crate::zlib_h::Z_RLE {
-        let (Some(head), Some(prev)) = (head, prev) else {
+        let (Some(head), Some(prev)) =
+            (workspace.head.as_deref_mut(), workspace.prev.as_deref_mut())
+        else {
             return None;
         };
         return Some(deflate_rle(
             state,
             strm,
-            window,
+            &mut *workspace.window,
             head,
             prev,
-            input,
-            pending_buf,
-            output,
+            workspace.input,
+            &mut *workspace.pending_buf,
+            &mut *workspace.output,
             flush,
         ));
     }
@@ -2328,41 +2342,45 @@ fn deflate_update(
         CompressorKind::Stored => Some(deflate_stored(
             state,
             strm,
-            window,
-            input,
-            pending_buf,
-            output,
+            &mut *workspace.window,
+            workspace.input,
+            &mut *workspace.pending_buf,
+            &mut *workspace.output,
             flush,
         )),
         CompressorKind::Fast => {
-            let (Some(head), Some(prev)) = (head, prev) else {
+            let (Some(head), Some(prev)) =
+                (workspace.head.as_deref_mut(), workspace.prev.as_deref_mut())
+            else {
                 return None;
             };
             Some(deflate_fast(
                 state,
                 strm,
-                window,
+                &mut *workspace.window,
                 head,
                 prev,
-                input,
-                pending_buf,
-                output,
+                workspace.input,
+                &mut *workspace.pending_buf,
+                &mut *workspace.output,
                 flush,
             ))
         }
         CompressorKind::Slow => {
-            let (Some(head), Some(prev)) = (head, prev) else {
+            let (Some(head), Some(prev)) =
+                (workspace.head.as_deref_mut(), workspace.prev.as_deref_mut())
+            else {
                 return None;
             };
             Some(deflate_slow(
                 state,
                 strm,
-                window,
+                &mut *workspace.window,
                 head,
                 prev,
-                input,
-                pending_buf,
-                output,
+                workspace.input,
+                &mut *workspace.pending_buf,
+                &mut *workspace.output,
                 flush,
             ))
         }
@@ -2778,19 +2796,18 @@ pub fn deflate(
             let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            let Some(bstate) = deflate_update(
-                state,
-                strm,
+            let mut workspace = DeflateWorkspace {
                 window,
-                head.as_deref_mut(),
+                head: head.as_deref_mut(),
                 prev,
                 input,
-                &mut pending_buffer,
+                pending_buf: &mut pending_buffer,
                 output,
-                flush,
-            ) else {
+            };
+            let Some(bstate) = deflate_update(state, strm, &mut workspace, flush) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
+            drop(workspace);
             (bstate, head)
         };
         if bstate as ::core::ffi::c_uint
