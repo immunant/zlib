@@ -4364,7 +4364,7 @@ fn send_bits_state(
     true
 }
 
-fn tr_stored_block_state(
+pub(crate) fn tr_stored_block_state(
     pending_buf: &mut [crate::stdlib::Byte],
     pending: &mut crate::zutil_h::ulg,
     bi_buf: &mut crate::zutil_h::ush,

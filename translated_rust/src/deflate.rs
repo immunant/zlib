@@ -3290,27 +3290,35 @@ unsafe extern "C" fn deflate_stored(
         len = plan.len;
         left = plan.left;
         last = plan.last;
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ::core::ptr::null_mut::<crate::stdlib::charf>(),
-            0 as crate::zutil_h::ulg,
-            last,
-        );
-        let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+        // The zero-length stored block needs only the already-owned pending
+        // buffer.  Lend that validated buffer directly to the safe core
+        // instead of round-tripping through the raw `_tr_stored_block`
+        // adapter.
+        let state = &mut *s;
+        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
             return need_more;
         };
-        if pending_len != 0 && (*s).pending_buf.is_null() {
+        if pending_len != 0 && state.pending_buf.is_null() {
             return need_more;
         }
         let pending_buf = if pending_len == 0 {
             &mut []
         } else {
-            ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
         };
-        if !set_stored_block_length_state(pending_buf, (*s).pending, len) {
+        let _ = crate::src::trees::tr_stored_block_state(
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+            &[],
+            last,
+        );
+        if !set_stored_block_length_state(pending_buf, state.pending, len) {
             return need_more;
         }
-        flush_pending((*s).strm);
+        flush_pending(state.strm);
         if left != 0 {
             let state = &mut *s;
             let strm = &mut *state.strm;
