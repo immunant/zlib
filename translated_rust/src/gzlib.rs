@@ -546,7 +546,7 @@ struct GzReadResetFields {
 // those safe transitions.  Carry both availability counters here: reset
 // clears only pending input, while output capacity remains owned by the
 // active codec operation.
-struct GzCodecCounters {
+pub(crate) struct GzCodecCounters {
     available_input: crate::stdlib::uInt,
     available_output: crate::stdlib::uInt,
     total_in: crate::stdlib::uLong,
@@ -554,11 +554,61 @@ struct GzCodecCounters {
 }
 
 impl GzCodecCounters {
+    pub(crate) fn from_stream_fields(
+        available_input: crate::stdlib::uInt,
+        available_output: crate::stdlib::uInt,
+        total_in: crate::stdlib::uLong,
+        total_out: crate::stdlib::uLong,
+    ) -> Self {
+        Self {
+            available_input,
+            available_output,
+            total_in,
+            total_out,
+        }
+    }
+
     // zlib reset clears pending input but deliberately retains the stream's
     // cumulative counters.  Keep that distinction in the safe projection so
     // a future owned codec state can preserve the same observable values.
     fn reset_input(&mut self) {
         self.available_input = 0;
+    }
+}
+
+// A codec operation reports output progress by decreasing `avail_out`. Keep
+// that accounting separate from the ABI cursor so gzip can eventually hand a
+// bounded output view directly to its owned codec state. The subtraction is
+// deliberately wrapping: this mirrors the translated stream accounting until
+// the owner/view split can reject a malformed embedded stream earlier.
+pub(crate) struct GzCodecOutput {
+    capacity: crate::stdlib::uInt,
+    available: crate::stdlib::uInt,
+}
+
+impl GzCodecOutput {
+    pub(crate) fn new(capacity: usize) -> Option<Self> {
+        let capacity = crate::stdlib::uInt::try_from(capacity).ok()?;
+        Some(Self {
+            capacity,
+            available: capacity,
+        })
+    }
+
+    pub(crate) fn available(&self) -> crate::stdlib::uInt {
+        self.available
+    }
+
+    pub(crate) fn record_available(&mut self, available: crate::stdlib::uInt) {
+        self.available = available;
+    }
+
+    pub(crate) fn has_output(&self) -> bool {
+        self.available < self.capacity
+    }
+
+    pub(crate) fn written(&self) -> crate::stdlib::uInt {
+        self.capacity.wrapping_sub(self.available)
     }
 }
 
@@ -659,12 +709,12 @@ fn reset_gz_target(mode: ::core::ffi::c_int, target: GzResetTarget<'_>) {
         err: *target.err,
         msg: target.msg.take(),
         pos: *target.pos,
-        codec: GzCodecCounters {
-            available_input: *target.codec_available_input,
-            available_output: *target.codec_available_output,
-            total_in: *target.codec_total_in,
-            total_out: *target.codec_total_out,
-        },
+        codec: GzCodecCounters::from_stream_fields(
+            *target.codec_available_input,
+            *target.codec_available_output,
+            *target.codec_total_in,
+            *target.codec_total_out,
+        ),
     });
     store_gz_reset_target(target, reset);
 }

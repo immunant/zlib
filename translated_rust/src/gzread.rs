@@ -537,7 +537,6 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let mut had: ::core::ffi::c_uint = 0;
     let output_len = (state.size << 1 as ::core::ffi::c_int) as usize;
     // Publish the ABI codec cursor only after a pointer-free view proves that
     // its complete advertised output range lies in the owned gzip buffer.
@@ -547,13 +546,15 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     }) else {
         return -1 as ::core::ffi::c_int;
     };
-    state.strm.avail_out = output_len as crate::stdlib::uInt;
+    let Some(mut output_progress) = crate::src::gzlib::GzCodecOutput::new(output_len) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    state.strm.avail_out = output_progress.available();
     state.strm.next_out = next_out;
     // The stream itself is embedded in the state we already exclusively own.
     // Keep field access through that borrow; only `inflate()` needs the ABI
     // pointer projection at its call boundary.
     let strm = &mut state.strm;
-    had = strm.avail_out as ::core::ffi::c_uint;
     // `inflate()` advances `next_out`, but gzip's buffered cursor must point
     // at the beginning of this output span. Retain that boundary value rather
     // than recovering it later with raw-pointer arithmetic.
@@ -598,7 +599,8 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );
-            if strm.avail_out < had {
+            output_progress.record_available(strm.avail_out);
+            if output_progress.has_output() {
                 state.junk = 0 as ::core::ffi::c_int;
             }
             if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
@@ -657,7 +659,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
         }
     }
-    state.x.have = (had as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as ::core::ffi::c_uint;
+    state.x.have = output_progress.written() as ::core::ffi::c_uint;
     state.x.next = output_start;
     if ret == crate::zlib_h::Z_STREAM_END {
         state.junk = 0 as ::core::ffi::c_int;
