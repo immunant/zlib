@@ -88,6 +88,11 @@ pub struct internal_state {
     // Preserve initializer-time allocator origin without carrying callback
     // pointers into the eventual owned-storage facade.
     pub(crate) allocator_provenance: crate::src::zutil::AllocatorProvenance,
+    // Streams that installed zlib's complete default allocator pair own their
+    // workspace outright. Custom and mixed allocator pairs retain the ABI
+    // callback allocations below, so their allocation/free observations stay
+    // exactly as supplied by the caller.
+    owned_storage: Option<DeflateOwnedStorage>,
     pub status: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
@@ -179,6 +184,7 @@ struct DeflateStorageLayout {
 /// callback allocator still owns the live buffers today, but keeping their
 /// checked Rust representation here lets the allocator facade switch storage
 /// ownership without changing strategy code or recreating its geometry.
+#[derive(Clone)]
 struct DeflateOwnedStorage {
     window: Vec<crate::stdlib::Bytef>,
     prev: Vec<crate::src::deflate::Posf>,
@@ -934,6 +940,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
     crate::src::deflate::deflate_state {
         strm: 0,
         allocator_provenance: crate::src::zutil::UNKNOWN_ALLOCATOR_PROVENANCE,
+        owned_storage: None,
         status: 0,
         pending_buf: ::core::ptr::null_mut(),
         pending_buf_size: 0,
@@ -1054,34 +1061,59 @@ fn initialize_allocated_deflate_state(
             config.window_bits,
             mem_level,
         );
-        state.window = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            storage.window_items,
-            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                as crate::stdlib::uInt,
-        ) as *mut crate::stdlib::Bytef;
-        state.prev = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            storage.window_items,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
-        state.head = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            storage.hash_items,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
         state.high_water = 0 as crate::zutil_h::ulg;
         state.lit_bufsize = storage.pending_items;
-        state.pending_buf = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            storage.pending_items,
-            4 as crate::stdlib::uInt,
-        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
         state.pending_buf_size = storage.pending_bytes();
+        state.window_size = (2 as crate::zutil_h::ulg)
+            .wrapping_mul(state.w_size as crate::zutil_h::ulg);
+        state.sym_buf = state.lit_bufsize as usize;
+        state.sym_end = state
+            .lit_bufsize
+            .wrapping_sub(1 as crate::stdlib::uInt)
+            .wrapping_mul(3 as crate::stdlib::uInt);
+        if crate::src::zutil::allocator_pair_is_fully_default(&state.allocator_provenance) {
+            let Some(mut owned) = storage.try_owned() else {
+                state.status = crate::src::deflate::FINISH_STATE;
+                strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
+                    .load(::core::sync::atomic::Ordering::Relaxed);
+                deflateEnd(strm);
+                return crate::zlib_h::Z_MEM_ERROR;
+            };
+            if !owned.bind_state_buffers(state) {
+                state.status = crate::src::deflate::FINISH_STATE;
+                strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
+                    .load(::core::sync::atomic::Ordering::Relaxed);
+                deflateEnd(strm);
+                return crate::zlib_h::Z_MEM_ERROR;
+            }
+            state.owned_storage = Some(owned);
+        } else {
+            state.window = Some(strm.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                strm.opaque,
+                storage.window_items,
+                (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+                    as crate::stdlib::uInt,
+            ) as *mut crate::stdlib::Bytef;
+            state.prev = Some(strm.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                strm.opaque,
+                storage.window_items,
+                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+            ) as *mut crate::src::deflate::Posf;
+            state.head = Some(strm.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                strm.opaque,
+                storage.hash_items,
+                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+            ) as *mut crate::src::deflate::Posf;
+            state.pending_buf = Some(strm.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                strm.opaque,
+                storage.pending_items,
+                4 as crate::stdlib::uInt,
+            ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+        }
         if state.window.is_null()
             || state.prev.is_null()
             || state.head.is_null()
@@ -1093,11 +1125,6 @@ fn initialize_allocated_deflate_state(
             deflateEnd(strm);
             return crate::zlib_h::Z_MEM_ERROR;
         }
-        state.sym_buf = state.lit_bufsize as usize;
-        state.sym_end = state
-            .lit_bufsize
-            .wrapping_sub(1 as crate::stdlib::uInt)
-            .wrapping_mul(3 as crate::stdlib::uInt);
         state.level = config.level;
         state.strategy = strategy;
         state.method = method as crate::stdlib::Byte;
@@ -3239,16 +3266,26 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int 
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let status = state.status;
-    // The C allocator releases these in this exact order.  Keep one explicit
-    // ABI-callback boundary for the loop; the individual allocations remain
-    // raw only until deflate storage becomes owned Rust data.
-    let allocations = [
-        state.pending_buf as crate::stdlib::voidpf,
-        state.head as crate::stdlib::voidpf,
-        state.prev as crate::stdlib::voidpf,
-        state.window as crate::stdlib::voidpf,
-        stream.state as crate::stdlib::voidpf,
-    ];
+    // Default-pair workspaces are ordinary owned vectors. Drop them before
+    // releasing the still callback-allocated opaque state; custom and mixed
+    // streams retain zlib's exact pending/head/prev/window/state free order.
+    let allocations = if state.owned_storage.take().is_some() {
+        [
+            ::core::ptr::null_mut(),
+            ::core::ptr::null_mut(),
+            ::core::ptr::null_mut(),
+            ::core::ptr::null_mut(),
+            stream.state as crate::stdlib::voidpf,
+        ]
+    } else {
+        [
+            state.pending_buf as crate::stdlib::voidpf,
+            state.head as crate::stdlib::voidpf,
+            state.prev as crate::stdlib::voidpf,
+            state.window as crate::stdlib::voidpf,
+            stream.state as crate::stdlib::voidpf,
+        ]
+    };
     for allocation in allocations {
         if !allocation.is_null() {
             unsafe {
@@ -3345,6 +3382,10 @@ pub fn deflateCopy(
         &mut *ds.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>()
     };
     let dest_state = ds_slot.write(source_state.clone());
+    // A copied stream still uses the legacy callback allocation sequence.
+    // Do not retain a cloned default-pair workspace whose raw handles are
+    // about to be replaced below.
+    dest_state.owned_storage = None;
     dest_state.strm = stream_identity(dest_stream);
     let storage = DeflateStorageLayout::from_state(dest_state);
     dest_state.window = unsafe {
