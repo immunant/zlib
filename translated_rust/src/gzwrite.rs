@@ -117,6 +117,20 @@ fn gz_zero_needs_initialization(first: ::core::ffi::c_int) -> bool {
     first != 0
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct GzZeroChunkLimits {
+    int_and_off64_are_same_size: bool,
+    int_max: ::core::ffi::c_uint,
+}
+
+fn gz_zero_chunk_limits() -> GzZeroChunkLimits {
+    GzZeroChunkLimits {
+        int_and_off64_are_same_size: ::core::mem::size_of::<::core::ffi::c_int>()
+            == ::core::mem::size_of::<crate::stdlib::off64_t>(),
+        int_max: crate::src::gzlib::gz_intmax(),
+    }
+}
+
 enum GzZeroStep {
     FlushPending,
     WriteChunk {
@@ -954,14 +968,14 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
+    let limits = gz_zero_chunk_limits();
     match gz_zero_initial_step(
         state.strm.avail_in,
         first,
         state.size,
         state.skip,
-        ::core::mem::size_of::<::core::ffi::c_int>()
-            == ::core::mem::size_of::<crate::stdlib::off64_t>(),
-        crate::src::gzlib::gz_intmax(),
+        limits.int_and_off64_are_same_size,
+        limits.int_max,
     ) {
         GzZeroStep::FlushPending => {
             if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
@@ -972,6 +986,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     first = 1 as ::core::ffi::c_int;
     loop {
+        let limits = gz_zero_chunk_limits();
         let GzZeroStep::WriteChunk {
             len,
             initialize_buffer,
@@ -979,9 +994,8 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             first,
             state.size,
             state.skip,
-            ::core::mem::size_of::<::core::ffi::c_int>()
-                == ::core::mem::size_of::<crate::stdlib::off64_t>(),
-            crate::src::gzlib::gz_intmax(),
+            limits.int_and_off64_are_same_size,
+            limits.int_max,
         )
         else {
             unreachable!();
@@ -1456,8 +1470,8 @@ mod tests {
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
         gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
         gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_step, gz_zero_initial_step,
-        gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
+        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_limits, gz_zero_chunk_step,
+        gz_zero_initial_step, gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
         gzclose_buffer_action, gzclose_mode_is_writable, gzclose_w_result, gzflush_action,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
         gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
@@ -1465,7 +1479,7 @@ mod tests {
         GzCompOutputBufferAction, GzCompResetAction, GzCompWriteFailure, GzCompWriteResult,
         GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
         GzSetParamsBufferAction, GzWriteBufferedInputAction, GzWriteDirectAction,
-        GzWritePreparation, GzZeroAction, GzZeroStep,
+        GzWritePreparation, GzZeroAction, GzZeroChunkLimits, GzZeroStep,
     };
 
     #[test]
@@ -1584,6 +1598,37 @@ mod tests {
         assert!(gz_zero_needs_initialization(1));
         assert!(gz_zero_needs_initialization(-1));
         assert!(!gz_zero_needs_initialization(0));
+    }
+
+    #[test]
+    fn gz_zero_chunk_limits_match_current_platform() {
+        assert_eq!(
+            gz_zero_chunk_limits(),
+            GzZeroChunkLimits {
+                int_and_off64_are_same_size: ::core::mem::size_of::<::core::ffi::c_int>()
+                    == ::core::mem::size_of::<crate::stdlib::off64_t>(),
+                int_max: crate::src::gzlib::gz_intmax(),
+            }
+        );
+    }
+
+    #[test]
+    fn gz_zero_chunk_limits_drive_zero_chunk_setup() {
+        let limits = gz_zero_chunk_limits();
+
+        assert!(matches!(
+            gz_zero_chunk_step(
+                1,
+                1024,
+                99,
+                limits.int_and_off64_are_same_size,
+                limits.int_max,
+            ),
+            GzZeroStep::WriteChunk {
+                len: 99,
+                initialize_buffer: true,
+            }
+        ));
     }
 
     #[test]

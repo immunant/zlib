@@ -763,6 +763,10 @@ fn gz_output_buffer_len(size: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     size << 1 as ::core::ffi::c_int
 }
 
+fn gz_look_window_bits() -> ::core::ffi::c_int {
+    15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int
+}
+
 enum GzLookGzipSource {
     Forced { junk_is_known: bool },
     Header,
@@ -846,7 +850,7 @@ unsafe fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         (*state).strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
         if crate::src::inflate::inflateInit2_(
             &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+            gz_look_window_bits(),
             crate::zlib_h::ZLIB_VERSION.as_ptr(),
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         ) != crate::zlib_h::Z_OK
@@ -1706,6 +1710,11 @@ mod tests {
         assert!(gz_decomp_needs_input_load(0));
         assert!(!gz_decomp_needs_input_load(1));
         assert!(!gz_decomp_needs_input_load(crate::stdlib::uInt::MAX));
+    }
+
+    #[test]
+    fn gz_look_window_bits_selects_the_gzip_wrapper() {
+        assert_eq!(gz_look_window_bits(), 31);
     }
 
     #[test]

@@ -3896,12 +3896,21 @@ fn tally_symbol_bytes(
     ]
 }
 
+fn match_tree_codes(
+    lc: ::core::ffi::c_uint,
+    dist: ::core::ffi::c_uint,
+) -> (::core::ffi::c_uint, ::core::ffi::c_uint) {
+    (
+        crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_uint,
+        crate::src::trees::_dist_code[dist_code_index(dist.wrapping_sub(1))] as ::core::ffi::c_uint,
+    )
+}
+
 fn tally_match_tree_indices(dist: ::core::ffi::c_uint, lc: ::core::ffi::c_uint) -> (usize, usize) {
-    let length_code = crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
-        + crate::src::deflate::LITERALS
-        + 1 as ::core::ffi::c_int;
-    let distance_code = crate::src::trees::_dist_code[dist_code_index(dist.wrapping_sub(1))];
-    (length_code as usize, distance_code as usize)
+    let (length_code, distance_code) = match_tree_codes(lc, dist);
+    let length_index =
+        length_code as ::core::ffi::c_int + crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int;
+    (length_index as usize, distance_code as usize)
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -5161,7 +5170,9 @@ unsafe fn compress_block(
                     (*s).bi_valid += len;
                 }
             } else {
-                code = crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_uint;
+                let (length_code, distance_code) =
+                    match_tree_codes(lc as ::core::ffi::c_uint, dist);
+                code = length_code;
                 let mut len_0: ::core::ffi::c_int = (*ltree.offset(
                     code.wrapping_add(256 as ::core::ffi::c_uint)
                         .wrapping_add(1 as ::core::ffi::c_uint) as isize,
@@ -5237,7 +5248,7 @@ unsafe fn compress_block(
                     }
                 }
                 dist = dist.wrapping_sub(1);
-                code = crate::src::trees::_dist_code[dist_code_index(dist)] as ::core::ffi::c_uint;
+                code = distance_code;
                 let mut len_2: ::core::ffi::c_int =
                     (*dtree.offset(code as isize)).dl.len as ::core::ffi::c_int;
                 if bit_buffer_would_overflow((*s).bi_valid, len_2) {
@@ -5541,12 +5552,12 @@ mod tests {
         combined_tree_frequency, detect_data_type_from_ltree, dist_code_index,
         dynamic_tree_header_counts, gen_bitlen_node_plan, gen_bitlen_overflow_reassignment,
         heap_node_precedes, last_nonzero_bl_code_rank, length_extra_bits,
-        mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_bit_length_counts,
-        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
-        supplemental_tree_node, supplemental_tree_opt_len, symbol_buffer_is_full,
-        symbol_triplet_cursors, tally_match_tree_indices, tally_scan_tree_action,
-        tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
+        mark_bl_code_nonzero_at_rank, match_tree_codes, next_code_for_len, next_codes,
+        pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
+        reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
+        static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
+        symbol_buffer_is_full, symbol_triplet_cursors, tally_match_tree_indices,
+        tally_scan_tree_action, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_heap_has_pair, tree_next_cursor, tree_parent_depth,
         tree_run_continues, tree_run_extra_bits, tree_run_limits, BlockEncoding,
         GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
@@ -6189,6 +6200,13 @@ mod tests {
         assert_eq!(tally_match_tree_indices(32_768, 255), (285, 29));
     }
 
+    #[test]
+    fn match_tree_codes_use_deflate_lookup_boundaries() {
+        assert_eq!(match_tree_codes(0, 1), (0, 0));
+        assert_eq!(match_tree_codes(255, 256), (28, 15));
+        assert_eq!(match_tree_codes(255, 257), (28, 16));
+        assert_eq!(match_tree_codes(255, 32_768), (28, 29));
+    }
     #[test]
     fn tally_tree_update_selects_literal_or_match_frequency_targets() {
         assert_eq!(
