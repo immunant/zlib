@@ -2522,21 +2522,15 @@ pub unsafe extern "C" fn inflate_ffi(
     };
     inflate(strm, flush)
 }
-pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    if !inflate_stream_has_allocators(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // The state handle is an ABI field.  Keep its one conversion at the
-    // teardown boundary after validating the allocator pair above.
-    let Some(state) = (unsafe { (strm.state as *mut crate::src::inflate::inflate_state).as_mut() })
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !inflate_state_valid(strm, state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // The C allocator releases the window before the state. Keep that order
-    // in one explicit callback boundary while these allocations remain raw.
+
+/// Release the window and state allocations in the order required by the C
+/// allocator contract.  This is the named ownership boundary that a future
+/// allocator facade can replace without spreading callback invocations across
+/// stream operations.
+fn release_inflate_allocations(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
+) {
     let allocations = [
         state.window as crate::stdlib::voidpf,
         strm.state as crate::stdlib::voidpf,
@@ -2550,6 +2544,22 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
         }
     }
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+}
+
+pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // The state handle is an ABI field.  Keep its one conversion at the
+    // teardown boundary after validating the allocator pair above.
+    let Some(state) = (unsafe { (strm.state as *mut crate::src::inflate::inflate_state).as_mut() })
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !inflate_state_valid(strm, state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    release_inflate_allocations(strm, state);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateEnd"]
