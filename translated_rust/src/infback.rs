@@ -1214,7 +1214,7 @@ pub(crate) fn inflateBack(
                                 break crate::zlib_h::Z_BUF_ERROR;
                             }
                             strm.next_in = next;
-                            strm.avail_in = have as crate::stdlib::uInt;
+                            inflate_back_publish_available_input(strm, have);
                         }
                         crate::zlib_h::Z_OK | crate::zlib_h::Z_BUF_ERROR => break status,
                         _ => break status,
