@@ -975,14 +975,6 @@ fn deflate_slow_can_search_match(
         && can_search_hash_match(hash_head, strstart, w_size)
 }
 
-unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    let head = &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
-    slide_hash_core(head, prev, state.w_size);
-    state.slid = 1;
-}
-
 fn read_buf_len(
     available: ::core::ffi::c_uint,
     requested: ::core::ffi::c_uint,
@@ -1219,94 +1211,108 @@ fn fill_window_lookahead_after_read(
 }
 
 unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+    let state = &mut *s;
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
+    let mut wsize: crate::stdlib::uInt = state.w_size;
     loop {
         more = fill_window_available_space(
-            (*s).window_size,
-            (*s).lookahead,
-            (*s).strstart,
+            state.window_size,
+            state.lookahead,
+            state.strstart,
             wsize,
             ::core::mem::size_of::<::core::ffi::c_int>() <= 2,
         );
-        if fill_window_should_slide((*s).strstart, wsize) {
+        if fill_window_should_slide(state.strstart, wsize) {
             crate::stdlib::memcpy(
-                (*s).window as *mut ::core::ffi::c_void,
-                (*s).window.wrapping_add(wsize as usize) as *const ::core::ffi::c_void,
+                state.window as *mut ::core::ffi::c_void,
+                state.window.wrapping_add(wsize as usize) as *const ::core::ffi::c_void,
                 wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
             );
             (
-                (*s).match_start,
-                (*s).strstart,
-                (*s).block_start,
-                (*s).insert,
+                state.match_start,
+                state.strstart,
+                state.block_start,
+                state.insert,
             ) = fill_window_state_after_slide(
-                (*s).match_start,
-                (*s).strstart,
-                (*s).block_start,
-                (*s).insert,
+                state.match_start,
+                state.strstart,
+                state.block_start,
+                state.insert,
                 wsize,
             );
-            slide_hash(s);
+            // The raw hash-table storage belongs to the callback-allocated
+            // deflate state.  Establish its short-lived views at this
+            // existing state boundary; the rebasing algorithm itself is
+            // slice-based and safe.
+            let head = &mut *::core::ptr::slice_from_raw_parts_mut(
+                state.head,
+                state.hash_size as usize,
+            );
+            let prev = &mut *::core::ptr::slice_from_raw_parts_mut(
+                state.prev,
+                state.w_size as usize,
+            );
+            slide_hash_core(head, prev, wsize);
+            state.slid = 1;
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
-        if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
+        if (*state.strm).avail_in == 0 as crate::stdlib::uInt {
             break;
         }
-        let cursor = fill_window_cursor((*s).strstart, (*s).lookahead);
-        n = read_buf((*s).strm, (*s).window.wrapping_add(cursor as usize), more);
-        (*s).lookahead = fill_window_lookahead_after_read((*s).lookahead, n);
-        if fill_window_has_insertable_match((*s).lookahead, (*s).insert) {
-            let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
-            (*s).ins_h = *(*s).window.wrapping_add(str as usize) as crate::stdlib::uInt;
-            (*s).ins_h = fill_window_hash_update(
-                (*s).ins_h,
-                *(*s)
+        let cursor = fill_window_cursor(state.strstart, state.lookahead);
+        n = read_buf(state.strm, state.window.wrapping_add(cursor as usize), more);
+        state.lookahead = fill_window_lookahead_after_read(state.lookahead, n);
+        if fill_window_has_insertable_match(state.lookahead, state.insert) {
+            let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
+            state.ins_h = *state.window.wrapping_add(str as usize) as crate::stdlib::uInt;
+            state.ins_h = fill_window_hash_update(
+                state.ins_h,
+                *state
                     .window
                     .wrapping_add(str.wrapping_add(1 as crate::stdlib::uInt) as usize)
                     as crate::stdlib::uInt,
-                (*s).hash_shift,
-                (*s).hash_mask,
+                state.hash_shift,
+                state.hash_mask,
             );
-            while (*s).insert != 0 {
-                (*s).ins_h = fill_window_hash_update(
-                    (*s).ins_h,
-                    *(*s).window.wrapping_add(
+            while state.insert != 0 {
+                state.ins_h = fill_window_hash_update(
+                    state.ins_h,
+                    *state.window.wrapping_add(
                         str.wrapping_add(3 as crate::stdlib::uInt)
                             .wrapping_sub(1 as crate::stdlib::uInt)
                             as usize,
                     ) as crate::stdlib::uInt,
-                    (*s).hash_shift,
-                    (*s).hash_mask,
+                    state.hash_shift,
+                    state.hash_mask,
                 );
-                *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
-                    *(*s).head.wrapping_add((*s).ins_h as usize);
-                *(*s).head.wrapping_add((*s).ins_h as usize) =
+                *state.prev.wrapping_add((str & state.w_mask) as usize) =
+                    *state.head.wrapping_add(state.ins_h as usize);
+                *state.head.wrapping_add(state.ins_h as usize) =
                     str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 str = str.wrapping_add(1);
-                (*s).insert = (*s).insert.wrapping_sub(1);
-                if !fill_window_has_insertable_match((*s).lookahead, (*s).insert) {
+                state.insert = state.insert.wrapping_sub(1);
+                if !fill_window_has_insertable_match(state.lookahead, state.insert) {
                     break;
                 }
             }
         }
-        if !fill_window_should_refill((*s).lookahead, (*(*s).strm).avail_in) {
+        if !fill_window_should_refill(state.lookahead, (*state.strm).avail_in) {
             break;
         }
     }
     if let Some((start, len)) = fill_window_zero_range(
-        (*s).high_water,
-        (*s).window_size,
-        (*s).strstart,
-        (*s).lookahead,
+        state.high_water,
+        state.window_size,
+        state.strstart,
+        state.lookahead,
     ) {
         crate::stdlib::memset(
-            (*s).window.wrapping_add(start as usize) as *mut ::core::ffi::c_void,
+            state.window.wrapping_add(start as usize) as *mut ::core::ffi::c_void,
             0 as ::core::ffi::c_int,
             len as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
         );
-        (*s).high_water = fill_window_high_water_after_zero(start, len);
+        state.high_water = fill_window_high_water_after_zero(start, len);
     }
 }
 #[export_name = "deflateInit_"]
@@ -2165,55 +2171,67 @@ pub unsafe extern "C" fn deflateParams(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let s = &mut *s;
     let (level, strategy) = match normalize_deflate_params(level, strategy) {
         Some(params) => params,
         None => return crate::zlib_h::Z_STREAM_ERROR,
     };
-    func = configuration_table[(*s).level as usize].func;
-    if (strategy != (*s).strategy || func != configuration_table[level as usize].func)
-        && (*s).last_flush != -2 as ::core::ffi::c_int
+    func = configuration_table[s.level as usize].func;
+    if (strategy != s.strategy || func != configuration_table[level as usize].func)
+        && s.last_flush != -2 as ::core::ffi::c_int
     {
         let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
         if (*strm).avail_in != 0
-            || (*s).strstart as ::core::ffi::c_long - (*s).block_start
-                + (*s).lookahead as ::core::ffi::c_long
+            || s.strstart as ::core::ffi::c_long - s.block_start + s.lookahead as ::core::ffi::c_long
                 != 0
         {
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    if (*s).level != level {
-        if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
-            if (*s).matches == 1 as crate::stdlib::uInt {
-                slide_hash(s);
+    if s.level != level {
+        if s.level == 0 as ::core::ffi::c_int && s.matches != 0 as crate::stdlib::uInt {
+            if s.matches == 1 as crate::stdlib::uInt {
+                // `s` is validated by this exported boundary.  Keep the raw
+                // table views local and delegate the actual rebase to the
+                // safe slice algorithm.
+                let head = &mut *::core::ptr::slice_from_raw_parts_mut(
+                    s.head,
+                    s.hash_size as usize,
+                );
+                let prev = &mut *::core::ptr::slice_from_raw_parts_mut(
+                    s.prev,
+                    s.w_size as usize,
+                );
+                slide_hash_core(head, prev, s.w_size);
+                s.slid = 1;
             } else {
-                *(*s)
+                *s
                     .head
-                    .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
+                    .wrapping_add(s.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
                     NIL as crate::src::deflate::Posf;
                 crate::stdlib::memset(
-                    (*s).head as *mut ::core::ffi::c_void,
+                    s.head as *mut ::core::ffi::c_void,
                     0 as ::core::ffi::c_int,
-                    ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
+                    (s.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
                         as crate::__stddef_size_t_h::size_t)
                         .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
                             as crate::__stddef_size_t_h::size_t),
                 );
-                (*s).slid = 0 as ::core::ffi::c_int;
+                s.slid = 0 as ::core::ffi::c_int;
             }
-            (*s).matches = 0 as crate::stdlib::uInt;
+            s.matches = 0 as crate::stdlib::uInt;
         }
-        (*s).level = level;
-        (*s).max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        (*s).good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        (*s).nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        (*s).max_chain_length =
+        s.level = level;
+        s.max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
+        s.good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
+        s.nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
+        s.max_chain_length =
             configuration_table[level as usize].max_chain as crate::stdlib::uInt;
     }
-    (*s).strategy = strategy;
+    s.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateParams"]
