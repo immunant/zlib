@@ -114,7 +114,7 @@ fn gz_open_state(
         reset: 0,
         skip: 0,
         err: crate::zlib_h::Z_OK,
-        msg: ::core::ptr::null_mut(),
+        msg: None,
         strm: crate::zlib_h::z_stream_s {
             next_in: ::core::ptr::null_mut(),
             avail_in: 0,
@@ -651,10 +651,10 @@ pub unsafe extern "C" fn gzerror(
     }
     return if (*state).err == crate::zlib_h::Z_MEM_ERROR {
         b"out of memory\0".as_ptr() as *const ::core::ffi::c_char
-    } else if (*state).msg.is_null() {
+    } else if (*state).msg.is_none() {
         b"\0".as_ptr() as *const ::core::ffi::c_char
     } else {
-        (*state).msg as *const ::core::ffi::c_char
+        (*state).msg.as_ref().unwrap().as_ptr()
     };
 }
 #[export_name = "gzerror"]
@@ -690,30 +690,24 @@ pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     gzclearerr(file)
 }
-pub unsafe extern "C" fn gz_error(
-    state: crate::gzguts_h::gz_statep,
+fn gz_error_state(
+    state: &mut crate::gzguts_h::gz_state,
     err: ::core::ffi::c_int,
-    msg: *const ::core::ffi::c_char,
+    msg: Option<&::core::ffi::CStr>,
 ) {
-    let state = &mut *state;
-    if !state.msg.is_null() {
-        if state.err != crate::zlib_h::Z_MEM_ERROR {
-            crate::stdlib::free(state.msg.cast());
-        }
-        state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
+    state.msg = None;
     if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && state.again == 0 {
-        state.x.have = 0 as ::core::ffi::c_uint;
+        state.x.have = 0;
     }
     state.err = err;
-    if msg.is_null() {
+    let Some(msg) = msg else {
         return;
-    }
+    };
     if err == crate::zlib_h::Z_MEM_ERROR {
         return;
     }
     let path = state.path.to_bytes();
-    let message = ::core::ffi::CStr::from_ptr(msg).to_bytes();
+    let message = msg.to_bytes();
     let size = match path
         .len()
         .checked_add(2)
@@ -726,17 +720,29 @@ pub unsafe extern "C" fn gz_error(
             return;
         }
     };
-    let allocated = crate::stdlib::malloc(size).cast::<::core::ffi::c_char>();
-    if allocated.is_null() {
+    let mut text = Vec::new();
+    if text.try_reserve_exact(size).is_err() {
         state.err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
-    let destination = ::core::slice::from_raw_parts_mut(allocated.cast::<u8>(), size);
-    destination[..path.len()].copy_from_slice(path);
-    destination[path.len()..path.len() + 2].copy_from_slice(b": ");
-    destination[path.len() + 2..size - 1].copy_from_slice(message);
-    destination[size - 1] = 0;
-    state.msg = allocated;
+    text.extend_from_slice(path);
+    text.extend_from_slice(b": ");
+    text.extend_from_slice(message);
+    text.push(0);
+    state.msg = Some(
+        std::ffi::CString::from_vec_with_nul(text)
+            .expect("a concatenation of C strings contains only its final NUL"),
+    );
+}
+
+pub unsafe fn gz_error(
+    state: crate::gzguts_h::gz_statep,
+    err: ::core::ffi::c_int,
+    msg: *const ::core::ffi::c_char,
+) {
+    let state = &mut *state;
+    let msg = (!msg.is_null()).then(|| ::core::ffi::CStr::from_ptr(msg));
+    gz_error_state(state, err, msg);
 }
 #[export_name = "gz_error"]
 

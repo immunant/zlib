@@ -59,7 +59,7 @@ pub mod gzguts_h {
         pub reset: ::core::ffi::c_int,
         pub skip: crate::stdlib::off64_t,
         pub err: ::core::ffi::c_int,
-        pub msg: *mut ::core::ffi::c_char,
+        pub msg: Option<std::ffi::CString>,
         pub strm: crate::zlib_h::z_stream,
     }
 
