@@ -1166,7 +1166,7 @@ fn gz_decomp_decision(
     avail_out: crate::stdlib::uInt,
 ) -> GzDecompDecision {
     let clear_junk = produced_output;
-    let junk = if clear_junk { 0 } else { junk };
+    let junk = gz_decomp_junk_after_output(junk, clear_junk);
     let action = if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
         GzDecompAction::InternalError
     } else if ret == crate::zlib_h::Z_MEM_ERROR {
@@ -1182,6 +1182,17 @@ fn gz_decomp_decision(
     };
 
     GzDecompDecision { clear_junk, action }
+}
+
+fn gz_decomp_junk_after_output(
+    junk: ::core::ffi::c_int,
+    produced_output: bool,
+) -> ::core::ffi::c_int {
+    if produced_output {
+        0
+    } else {
+        junk
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1247,9 +1258,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             state.junk,
             stream_state.avail_out,
         );
-        if decision.clear_junk {
-            state.junk = 0 as ::core::ffi::c_int;
-        }
+        state.junk = gz_decomp_junk_after_output(state.junk, decision.clear_junk);
         match decision.action {
             GzDecompAction::InternalError => {
                 crate::src::gzlib::gz_error(
@@ -2234,6 +2243,14 @@ mod tests {
                 action: GzDecompAction::DataError,
             }
         );
+    }
+
+    #[test]
+    fn gz_decomp_junk_after_output_clears_only_when_output_was_produced() {
+        assert_eq!(gz_decomp_junk_after_output(7, true), 0);
+        assert_eq!(gz_decomp_junk_after_output(-1, true), 0);
+        assert_eq!(gz_decomp_junk_after_output(7, false), 7);
+        assert_eq!(gz_decomp_junk_after_output(-1, false), -1);
     }
 
     #[test]

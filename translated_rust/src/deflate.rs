@@ -894,6 +894,13 @@ fn fill_window_zero_range(
     }
 }
 
+fn fill_window_high_water_after_zero(
+    start: crate::zutil_h::ulg,
+    len: crate::zutil_h::ulg,
+) -> crate::zutil_h::ulg {
+    start.wrapping_add(len)
+}
+
 fn fill_window_should_refill(
     lookahead: crate::stdlib::uInt,
     avail_in: crate::stdlib::uInt,
@@ -1003,7 +1010,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             0 as ::core::ffi::c_int,
             len as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
         );
-        (*s).high_water = start.wrapping_add(len);
+        (*s).high_water = fill_window_high_water_after_zero(start, len);
     }
 }
 #[export_name = "deflateInit_"]
@@ -4334,13 +4341,14 @@ mod tests {
         deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
         deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
         fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
-        fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
-        fill_window_state_after_slide, fill_window_zero_range, flush_pending_accounting,
-        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        lm_head_reset_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
-        longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
-        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
-        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
+        fill_window_high_water_after_zero, fill_window_insert_after_slide,
+        fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
+        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_reset_plan,
+        lm_initial_state, lm_match_parameters, lm_reset_plan, longest_match_candidate_update,
+        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
+        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
+        pending_output_len, pending_short_cursors, read_buf_checksum,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_entry, stored_block_available_output,
         stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
@@ -4673,6 +4681,15 @@ mod tests {
             crate::stdlib::uInt::MAX,
             3
         ));
+    }
+
+    #[test]
+    fn fill_window_high_water_after_zero_preserves_wrapping_advance() {
+        assert_eq!(fill_window_high_water_after_zero(10, 5), 15);
+        assert_eq!(
+            fill_window_high_water_after_zero(crate::zutil_h::ulg::MAX, 1),
+            0
+        );
     }
 
     #[test]

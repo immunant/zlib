@@ -608,6 +608,17 @@ fn window_allocation_failed(plan: WindowAllocationPlan, has_window: bool) -> boo
     matches!(plan, WindowAllocationPlan::Allocate { .. }) && !has_window
 }
 
+fn update_window_allocation_status(
+    plan: WindowAllocationPlan,
+    has_window: bool,
+) -> ::core::ffi::c_int {
+    if window_allocation_failed(plan, has_window) {
+        1
+    } else {
+        0
+    }
+}
+
 fn window_update_plan(
     wsize: ::core::ffi::c_uint,
     wnext: ::core::ffi::c_uint,
@@ -1149,8 +1160,10 @@ unsafe fn updatewindow(
             .expect("non-null function pointer")((*strm).opaque, items, size)
             as *mut crate::stdlib::Byte;
     }
-    if window_allocation_failed(allocation_plan, !state.window.is_null()) {
-        return 1;
+    let allocation_status =
+        update_window_allocation_status(allocation_plan, !state.window.is_null());
+    if allocation_status != 0 {
+        return allocation_status;
     }
     let slice_plan = update_window_slice_plan(state.wsize, state.wbits, copy);
     update_window_core(
@@ -3260,16 +3273,16 @@ mod tests {
         inflate_trailer_checksum_is_valid, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
         inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, update_window_buffer_len, update_window_core,
-        update_window_history, update_window_slice_plan, window_allocation_failed,
-        window_allocation_plan, window_allocation_request, window_allocation_request_for_plan,
-        window_metadata_update_plan, window_needs_allocation, window_update_plan,
-        DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress, InflateCopyProgress,
-        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
-        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
-        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams,
-        WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        stored_block_length, syncsearch_safe, update_window_allocation_status,
+        update_window_buffer_len, update_window_core, update_window_history,
+        update_window_slice_plan, window_allocation_failed, window_allocation_plan,
+        window_allocation_request, window_allocation_request_for_plan, window_metadata_update_plan,
+        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
+        InflateCallProgress, InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags,
+        InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
+        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
+        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4550,6 +4563,22 @@ mod tests {
             window_allocation_plan(true, 15),
             false
         ));
+    }
+
+    #[test]
+    fn update_window_allocation_status_matches_allocation_outcome() {
+        assert_eq!(
+            update_window_allocation_status(window_allocation_plan(false, 15), false),
+            1
+        );
+        assert_eq!(
+            update_window_allocation_status(window_allocation_plan(false, 15), true),
+            0
+        );
+        assert_eq!(
+            update_window_allocation_status(window_allocation_plan(true, 15), false),
+            0
+        );
     }
 
     #[test]
