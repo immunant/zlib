@@ -347,6 +347,18 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
     (*s).slid = 1 as ::core::ffi::c_int;
 }
 
+fn read_buf_checksum(
+    checksum: crate::stdlib::uLong,
+    wrap: ::core::ffi::c_int,
+    bytes: &[crate::stdlib::Bytef],
+) -> crate::stdlib::uLong {
+    match wrap {
+        1 => crate::src::adler32::adler32(checksum, bytes),
+        2 => crate::src::crc32::crc32_z(checksum, Some(bytes)),
+        _ => checksum,
+    }
+}
+
 unsafe extern "C" fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
@@ -360,19 +372,10 @@ unsafe extern "C" fn read_buf(
         return 0 as ::core::ffi::c_uint;
     }
     (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    crate::stdlib::memcpy(
-        buf as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
-    );
-    if (*(*strm).state).wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32(
-            (*strm).adler,
-            ::core::slice::from_raw_parts(buf, len as usize),
-        );
-    } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::crc32::crc32_z_raw((*strm).adler, buf, len as crate::stdlib::z_size_t);
-    }
+    let input = ::core::slice::from_raw_parts((*strm).next_in, len as usize);
+    let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
+    output.copy_from_slice(input);
+    (*strm).adler = read_buf_checksum((*strm).adler, (*(*strm).state).wrap, output);
     (*strm).next_in = (*strm).next_in.offset(len as isize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
     return len;
