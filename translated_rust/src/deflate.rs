@@ -1044,6 +1044,10 @@ pub unsafe extern "C" fn deflateInit2_(
     stream.total_in = 0;
     stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     stream.data_type = crate::zlib_h::Z_UNKNOWN;
+    let head = ::core::slice::from_raw_parts_mut(
+        state.head.expect("initialized head table").as_ptr(),
+        state.hash_size as usize,
+    );
     stream.adler = reset_keep_core(
         &mut state.pending,
         &mut state.pending_out,
@@ -1064,26 +1068,25 @@ pub unsafe extern "C" fn deflateInit2_(
         &mut state.bi_valid,
         &mut state.bi_used,
     );
-    state.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
-        .wrapping_mul(state.w_size as crate::zutil_h::ulg);
-    let head = ::core::slice::from_raw_parts_mut(
-        state.head.expect("initialized head table").as_ptr(),
-        state.hash_size as usize,
-    );
-    clear_hash_table(head);
-    state.slid = 0;
-    state.max_lazy_match = configuration_table[state.level as usize].max_lazy as crate::stdlib::uInt;
-    state.good_match = configuration_table[state.level as usize].good_length as crate::stdlib::uInt;
-    state.nice_match = configuration_table[state.level as usize].nice_length as ::core::ffi::c_int;
-    state.max_chain_length = configuration_table[state.level as usize].max_chain as crate::stdlib::uInt;
-    state.strstart = 0;
-    state.block_start = 0;
-    state.lookahead = 0;
-    state.insert = 0;
-    state.prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    state.match_length = state.prev_length;
-    state.match_available = 0;
-    state.ins_h = 0;
+    let w_size = state.w_size;
+    let config = &configuration_table[state.level as usize];
+    DeflateResetCore {
+        window_size: &mut state.window_size,
+        slid: &mut state.slid,
+        max_lazy_match: &mut state.max_lazy_match,
+        good_match: &mut state.good_match,
+        nice_match: &mut state.nice_match,
+        max_chain_length: &mut state.max_chain_length,
+        strstart: &mut state.strstart,
+        block_start: &mut state.block_start,
+        lookahead: &mut state.lookahead,
+        insert: &mut state.insert,
+        prev_length: &mut state.prev_length,
+        match_length: &mut state.match_length,
+        match_available: &mut state.match_available,
+        ins_h: &mut state.ins_h,
+    }
+    .reset_after_keep(head, w_size, config);
     crate::zlib_h::Z_OK
 }
 #[export_name = "deflateInit2_"]
@@ -1561,6 +1564,54 @@ fn reset_keep_core(
     }
 }
 
+// The full reset policy is independent of the ABI stream and of the callback
+// allocation handles.  Keep it over ordinary references so initialization and
+// reset share exactly the same lifecycle once their callers have made the one
+// bounded head-table view.
+struct DeflateResetCore<'a> {
+    window_size: &'a mut crate::zutil_h::ulg,
+    slid: &'a mut ::core::ffi::c_int,
+    max_lazy_match: &'a mut crate::stdlib::uInt,
+    good_match: &'a mut crate::stdlib::uInt,
+    nice_match: &'a mut ::core::ffi::c_int,
+    max_chain_length: &'a mut crate::stdlib::uInt,
+    strstart: &'a mut crate::stdlib::uInt,
+    block_start: &'a mut ::core::ffi::c_long,
+    lookahead: &'a mut crate::stdlib::uInt,
+    insert: &'a mut crate::stdlib::uInt,
+    prev_length: &'a mut crate::stdlib::uInt,
+    match_length: &'a mut crate::stdlib::uInt,
+    match_available: &'a mut ::core::ffi::c_int,
+    ins_h: &'a mut crate::stdlib::uInt,
+}
+
+impl DeflateResetCore<'_> {
+    fn reset_after_keep(
+        &mut self,
+        head: &mut [crate::src::deflate::Posf],
+        w_size: crate::stdlib::uInt,
+        config: &config,
+    ) {
+        *self.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
+            .wrapping_mul(w_size as crate::zutil_h::ulg);
+        clear_hash_table(head);
+        *self.slid = 0;
+        *self.max_lazy_match = config.max_lazy as crate::stdlib::uInt;
+        *self.good_match = config.good_length as crate::stdlib::uInt;
+        *self.nice_match = config.nice_length as ::core::ffi::c_int;
+        *self.max_chain_length = config.max_chain as crate::stdlib::uInt;
+        *self.strstart = 0;
+        *self.block_start = 0;
+        *self.lookahead = 0;
+        *self.insert = 0;
+        *self.prev_length =
+            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+        *self.match_length = *self.prev_length;
+        *self.match_available = 0;
+        *self.ins_h = 0;
+    }
+}
+
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -1607,33 +1658,31 @@ pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
     ret = deflateResetKeep(strm);
     if ret == crate::zlib_h::Z_OK {
         let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
-        state.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
-            .wrapping_mul(state.w_size as crate::zutil_h::ulg);
         // `head` has exactly `hash_size` elements from `deflateInit2_()` or
         // `deflateCopy()`.
         let head = ::core::slice::from_raw_parts_mut(
             state.head.expect("initialized head table").as_ptr(),
             state.hash_size as usize,
         );
-        clear_hash_table(head);
-        state.slid = 0 as ::core::ffi::c_int;
-        state.max_lazy_match =
-            configuration_table[state.level as usize].max_lazy as crate::stdlib::uInt;
-        state.good_match =
-            configuration_table[state.level as usize].good_length as crate::stdlib::uInt;
-        state.nice_match =
-            configuration_table[state.level as usize].nice_length as ::core::ffi::c_int;
-        state.max_chain_length =
-            configuration_table[state.level as usize].max_chain as crate::stdlib::uInt;
-        state.strstart = 0 as crate::stdlib::uInt;
-        state.block_start = 0 as ::core::ffi::c_long;
-        state.lookahead = 0 as crate::stdlib::uInt;
-        state.insert = 0 as crate::stdlib::uInt;
-        state.prev_length =
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        state.match_length = state.prev_length;
-        state.match_available = 0 as ::core::ffi::c_int;
-        state.ins_h = 0 as crate::stdlib::uInt;
+        let w_size = state.w_size;
+        let config = &configuration_table[state.level as usize];
+        DeflateResetCore {
+            window_size: &mut state.window_size,
+            slid: &mut state.slid,
+            max_lazy_match: &mut state.max_lazy_match,
+            good_match: &mut state.good_match,
+            nice_match: &mut state.nice_match,
+            max_chain_length: &mut state.max_chain_length,
+            strstart: &mut state.strstart,
+            block_start: &mut state.block_start,
+            lookahead: &mut state.lookahead,
+            insert: &mut state.insert,
+            prev_length: &mut state.prev_length,
+            match_length: &mut state.match_length,
+            match_available: &mut state.match_available,
+            ins_h: &mut state.ins_h,
+        }
+        .reset_after_keep(head, w_size, config);
     }
     return ret;
 }
