@@ -3602,7 +3602,7 @@ static mut static_bl_desc: crate::src::deflate::static_tree_desc = unsafe {
     }
 };
 
-unsafe extern "C" fn bi_reverse(
+fn bi_reverse(
     mut code: ::core::ffi::c_uint,
     mut len: ::core::ffi::c_int,
 ) -> ::core::ffi::c_uint {
@@ -3692,7 +3692,7 @@ unsafe extern "C" fn gen_codes(
     }
 }
 
-unsafe extern "C" fn tr_static_init() {}
+fn tr_static_init() {}
 
 unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;

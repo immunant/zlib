@@ -4764,13 +4764,13 @@ fn x2nmodp(mut n: crate::stdlib::off64_t, mut k: ::core::ffi::c_uint) -> crate::
     }
     return p;
 }
-pub unsafe extern "C" fn get_crc_table() -> *const crate::stdlib::z_crc_t {
-    return &raw const crc_table as *const crate::stdlib::z_crc_t;
+fn crc_table_ref() -> &'static [crate::stdlib::z_crc_t; 256] {
+    &crc_table
 }
 #[export_name = "get_crc_table"]
 
 pub unsafe extern "C" fn get_crc_table_ffi() -> *const crate::stdlib::z_crc_t {
-    get_crc_table()
+    crc_table_ref().as_ptr()
 }
 fn crc_word(mut data: z_word_t) -> crate::stdlib::z_crc_t {
     let mut k: ::core::ffi::c_int = 0;
@@ -5121,7 +5121,7 @@ pub unsafe extern "C" fn crc32_combine_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{crc32_combine, crc32_combine_gen64, crc32_combine_op};
+    use super::{crc32_combine, crc32_combine_gen64, crc32_combine_op, crc_table_ref};
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
     const WORLD_CRC: crate::stdlib::uLong = 0x3a77_1143;
@@ -5148,5 +5148,17 @@ mod tests {
     fn invalid_lengths_and_operators_return_zero() {
         assert_eq!(crc32_combine_gen64(-1), 0);
         assert_eq!(crc32_combine_op(HELLO_SPACE_CRC, WORLD_CRC, 0), 0);
+    }
+
+    #[test]
+    fn crc_table_reference_is_complete_and_stable() {
+        let first = crc_table_ref();
+        let second = crc_table_ref();
+
+        assert_eq!(first.len(), 256);
+        assert_eq!(first[0], 0);
+        assert_eq!(first[1], 0x7707_3096);
+        assert_eq!(first[255], 0x2d02_ef8d);
+        assert_eq!(first.as_ptr(), second.as_ptr());
     }
 }
