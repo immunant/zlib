@@ -167,6 +167,16 @@ fn inflate_stream_has_allocator_callbacks(has_zalloc: bool, has_zfree: bool) -> 
     has_zalloc && has_zfree
 }
 
+fn inflate_state_is_usable(
+    has_zalloc: bool,
+    has_zfree: bool,
+    stream_matches: bool,
+    mode: inflate_mode,
+) -> bool {
+    inflate_stream_has_allocator_callbacks(has_zalloc, has_zfree)
+        && inflate_state_metadata_is_valid(stream_matches, mode)
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateZlibHeaderError {
     IncorrectCheck,
@@ -589,15 +599,17 @@ unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::
         return 1 as ::core::ffi::c_int;
     }
     let stream = &*strm;
-    if !inflate_stream_has_allocator_callbacks(stream.zalloc.is_some(), stream.zfree.is_some()) {
-        return 1 as ::core::ffi::c_int;
-    }
     let state = stream.state as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return 1 as ::core::ffi::c_int;
     }
     let state = &*state;
-    if !inflate_state_metadata_is_valid(state.strm == strm, state.mode) {
+    if !inflate_state_is_usable(
+        stream.zalloc.is_some(),
+        stream.zfree.is_some(),
+        state.strm == strm,
+        state.mode,
+    ) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -2896,16 +2908,17 @@ mod tests {
         inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
         inflate_match_copy_plan, inflate_mode_data_type_flags, inflate_mode_is_valid,
         inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
-        inflate_reset2_params, inflate_should_update_window, inflate_state_metadata_is_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
-        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
-        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
-        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
-        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
-        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
-        InflateSyncSearch, InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_reset2_params, inflate_should_update_window, inflate_state_is_usable,
+        inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
+        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
+        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
+        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
+        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
+        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
+        InflateBlockKind, InflateCopyProgress, InflateMatchPlan, InflateMatchSource,
+        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
+        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -3558,6 +3571,15 @@ mod tests {
         assert!(!inflate_stream_has_allocator_callbacks(false, true));
         assert!(!inflate_stream_has_allocator_callbacks(true, false));
         assert!(!inflate_stream_has_allocator_callbacks(false, false));
+    }
+
+    #[test]
+    fn inflate_state_usability_requires_callbacks_and_valid_metadata() {
+        assert!(inflate_state_is_usable(true, true, true, HEAD));
+        assert!(!inflate_state_is_usable(false, true, true, HEAD));
+        assert!(!inflate_state_is_usable(true, false, true, HEAD));
+        assert!(!inflate_state_is_usable(true, true, false, HEAD));
+        assert!(!inflate_state_is_usable(true, true, true, SYNC + 1));
     }
 
     #[test]
