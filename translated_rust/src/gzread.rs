@@ -1317,14 +1317,10 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
 #[derive(Clone, Copy)]
 enum GzUngetcBufferPlan {
     InvalidCharacter,
+    InvalidCapacity,
     Full,
-    Empty {
-        capacity: crate::stdlib::uInt,
-    },
-    Buffered {
-        shift_to_end: bool,
-        capacity: crate::stdlib::uInt,
-    },
+    Empty { capacity: usize },
+    Buffered { shift_to_end: bool, capacity: usize },
 }
 
 fn gzungetc_buffer_plan(
@@ -1336,11 +1332,13 @@ fn gzungetc_buffer_plan(
     if c < 0 {
         return GzUngetcBufferPlan::InvalidCharacter;
     }
-    let capacity = size.wrapping_shl(1);
+    let Some(capacity) = (size as usize).checked_mul(2) else {
+        return GzUngetcBufferPlan::InvalidCapacity;
+    };
     if have == 0 {
         return GzUngetcBufferPlan::Empty { capacity };
     }
-    if have >= capacity {
+    if have as usize >= capacity {
         return GzUngetcBufferPlan::Full;
     }
     GzUngetcBufferPlan::Buffered {
@@ -1357,7 +1355,9 @@ fn gzungetc_buffer_commit_state(
     plan: GzUngetcBufferPlan,
 ) -> bool {
     let capacity = match plan {
-        GzUngetcBufferPlan::InvalidCharacter | GzUngetcBufferPlan::Full => return false,
+        GzUngetcBufferPlan::InvalidCharacter
+        | GzUngetcBufferPlan::InvalidCapacity
+        | GzUngetcBufferPlan::Full => return false,
         GzUngetcBufferPlan::Empty { capacity } => {
             if state.x.have != 0 {
                 return false;
@@ -1365,13 +1365,13 @@ fn gzungetc_buffer_commit_state(
             capacity
         }
         GzUngetcBufferPlan::Buffered { capacity, .. } => {
-            if state.x.have == 0 || state.x.have >= capacity {
+            if state.x.have == 0 || state.x.have as usize >= capacity {
                 return false;
             }
             capacity
         }
     };
-    if state.size.wrapping_shl(1) != capacity {
+    if (state.size as usize).checked_mul(2) != Some(capacity) {
         return false;
     }
     state.x.have = state.x.have.wrapping_add(1);
@@ -1405,23 +1405,33 @@ fn gzungetc_buffer_insert(
 ) -> Result<(usize, GzUngetcBufferPlan), GzUngetcBufferPlan> {
     let plan = gzungetc_buffer_plan(c, have, size, next_index == 0);
     let capacity = match plan {
-        GzUngetcBufferPlan::InvalidCharacter | GzUngetcBufferPlan::Full => return Err(plan),
+        GzUngetcBufferPlan::InvalidCharacter
+        | GzUngetcBufferPlan::InvalidCapacity
+        | GzUngetcBufferPlan::Full => return Err(plan),
         GzUngetcBufferPlan::Empty { capacity } | GzUngetcBufferPlan::Buffered { capacity, .. } => {
-            capacity as usize
+            capacity
         }
     };
     // An ungetc buffer uses the output allocation's leading `capacity`
     // bytes. Besides checking the cursor itself, ensure its buffered range
     // fits there before the mutation below can write a byte.
-    if capacity > output.len() {
+    if output.len() != capacity {
+        return Err(plan);
+    }
+    let Some(advertised_end) = next_index.checked_add(have as usize) else {
+        return Err(plan);
+    };
+    if output.get(next_index..advertised_end).is_none() {
         return Err(plan);
     }
     match plan {
         GzUngetcBufferPlan::Empty { .. } | GzUngetcBufferPlan::Buffered { .. } => {}
-        GzUngetcBufferPlan::InvalidCharacter | GzUngetcBufferPlan::Full => return Err(plan),
+        GzUngetcBufferPlan::InvalidCharacter
+        | GzUngetcBufferPlan::InvalidCapacity
+        | GzUngetcBufferPlan::Full => return Err(plan),
     };
     if let GzUngetcBufferPlan::Empty { capacity } = plan {
-        let Some(index) = (capacity as usize).checked_sub(1) else {
+        let Some(index) = capacity.checked_sub(1) else {
             return Err(plan);
         };
         let Some(slot) = output.get_mut(index..=index) else {
