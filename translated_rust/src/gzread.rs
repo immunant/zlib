@@ -579,6 +579,32 @@ fn gzgets_buffer_copy_plan(
     }
 }
 
+/// Copy a bounded prefix of the owned read buffer into a caller-provided
+/// line buffer.  Both cursor positions are indices supplied by the export
+/// boundary, so this core can find a newline and copy bytes without C memory
+/// routines or pointer arithmetic.
+fn gzgets_buffered_copy(
+    destination: &mut [u8],
+    available: &[u8],
+    have: crate::stdlib::uInt,
+    left: ::core::ffi::c_uint,
+) -> Option<(::core::ffi::c_uint, bool)> {
+    let available = available.get(..have as usize)?;
+    let limit = gzgets_buffer_copy_plan(have, left, None) as usize;
+    let candidate = available.get(..limit)?;
+    let copied = match candidate.iter().position(|byte| *byte == b'\n') {
+        Some(offset) => offset.checked_add(1)?,
+        None => candidate.len(),
+    };
+    destination
+        .get_mut(..copied)?
+        .copy_from_slice(candidate.get(..copied)?);
+    Some((
+        copied as ::core::ffi::c_uint,
+        copied != 0 && candidate[copied - 1] == b'\n',
+    ))
+}
+
 /// Commit a preflighted `gzgets` buffered copy after the boundary has copied
 /// bytes and advanced its raw cursors.
 fn gzgets_buffer_copy_commit_state(
@@ -701,13 +727,9 @@ unsafe extern "C" fn gz_read(
                     return got;
                 };
                 let destination = ::core::slice::from_raw_parts_mut(buf as *mut u8, n as usize);
-                let Some(copied) = gz_read_buffered_copy(
-                    destination,
-                    buffered,
-                    next_index,
-                    n,
-                    state_ref.x.have,
-                ) else {
+                let Some(copied) =
+                    gz_read_buffered_copy(destination, buffered, next_index, n, state_ref.x.have)
+                else {
                     return got;
                 };
                 n = copied;
@@ -1087,71 +1109,6 @@ pub unsafe extern "C" fn gzungetc_ffi(
     state.x.next = output.as_mut_ptr().wrapping_add(next_index);
     c
 }
-pub unsafe extern "C" fn gzgets(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: *mut ::core::ffi::c_char,
-    mut len: ::core::ffi::c_int,
-) -> *mut ::core::ffi::c_char {
-    let mut left: ::core::ffi::c_uint = 0;
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut eol: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    if !gzread_state_is_valid(state.mode, state.err, state.again) {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    crate::src::gzlib::gz_error_clear(state);
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    str = buf;
-    left = (len as ::core::ffi::c_uint).wrapping_sub(1 as ::core::ffi::c_uint);
-    if left != 0 {
-        while !(state.x.have == 0 as ::core::ffi::c_uint
-            && gz_fetch(state) == -1 as ::core::ffi::c_int)
-        {
-            if state.x.have == 0 as ::core::ffi::c_uint {
-                state.past = 1 as ::core::ffi::c_int;
-                break;
-            } else {
-                n = gzgets_buffer_copy_plan(state.x.have, left, None);
-                eol = crate::stdlib::memchr(
-                    state.x.next as *const ::core::ffi::c_void,
-                    '\n' as ::core::ffi::c_int,
-                    n as crate::__stddef_size_t_h::size_t,
-                ) as *mut ::core::ffi::c_uchar;
-                let newline_offset = if eol.is_null() {
-                    None
-                } else {
-                    Some(eol.offset_from(state.x.next) as ::core::ffi::c_uint)
-                };
-                n = gzgets_buffer_copy_plan(state.x.have, left, newline_offset);
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    state.x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
-                state.x.next = state.x.next.offset(n as isize);
-                let Some(remaining) = gzgets_buffer_copy_commit_state(state, left, n) else {
-                    return ::core::ptr::null_mut::<::core::ffi::c_char>();
-                };
-                left = remaining;
-                buf = buf.offset(n as isize);
-                if !(left != 0 && eol.is_null()) {
-                    break;
-                }
-            }
-        }
-    }
-    if buf == str {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    *buf.offset(0 as ::core::ffi::c_int as isize) = 0 as ::core::ffi::c_char;
-    return str;
-}
 #[export_name = "gzgets"]
 
 pub unsafe extern "C" fn gzgets_ffi(
@@ -1159,7 +1116,50 @@ pub unsafe extern "C" fn gzgets_ffi(
     mut buf: *mut ::core::ffi::c_char,
     mut len: ::core::ffi::c_int,
 ) -> *mut ::core::ffi::c_char {
-    gzgets(file, buf, len)
+    if file.is_null() || buf.is_null() || len < 1 {
+        return ::core::ptr::null_mut();
+    }
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzread_state_is_valid(state.mode, state.err, state.again) {
+        return ::core::ptr::null_mut();
+    }
+    let destination = ::core::slice::from_raw_parts_mut(buf as *mut u8, len as usize);
+    crate::src::gzlib::gz_error_clear(state);
+    if state.skip != 0 && gz_skip(state) == -1 {
+        return ::core::ptr::null_mut();
+    }
+    let mut left = (destination.len() as ::core::ffi::c_uint).wrapping_sub(1);
+    let mut written = 0usize;
+    while left != 0 && !(state.x.have == 0 && gz_fetch(state) == -1) {
+        if state.x.have == 0 {
+            state.past = 1;
+            break;
+        }
+        let available = ::core::slice::from_raw_parts(state.x.next, state.x.have as usize);
+        let Some((copied, found_newline)) =
+            gzgets_buffered_copy(&mut destination[written..], available, state.x.have, left)
+        else {
+            return ::core::ptr::null_mut();
+        };
+        state.x.next = state.x.next.offset(copied as isize);
+        let Some(remaining) = gzgets_buffer_copy_commit_state(state, left, copied) else {
+            return ::core::ptr::null_mut();
+        };
+        left = remaining;
+        written = match written.checked_add(copied as usize) {
+            Some(written) => written,
+            None => return ::core::ptr::null_mut(),
+        };
+        if found_newline {
+            break;
+        }
+    }
+    if written == 0 {
+        ::core::ptr::null_mut()
+    } else {
+        destination[written] = 0;
+        buf
+    }
 }
 /// Convert the direct-stream flag into the public `gzdirect` result after
 /// the boundary has performed any required lazy lookahead.
