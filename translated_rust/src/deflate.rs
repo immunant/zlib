@@ -542,7 +542,7 @@ fn deflate_rle_match_state_after_emit(
     )
 }
 
-fn deflate_fast_literal_state_after_emit(
+fn deflate_literal_state_after_emit(
     lookahead: crate::stdlib::uInt,
     strstart: crate::stdlib::uInt,
 ) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
@@ -584,10 +584,11 @@ fn deflate_huff_literal_progress(
     crate::stdlib::uInt,
     bool,
 ) {
+    let (lookahead, strstart) = deflate_literal_state_after_emit(lookahead, strstart);
     (
         sym_next_after_literal,
-        lookahead.wrapping_sub(1),
-        strstart.wrapping_add(1),
+        lookahead,
+        strstart,
         symbol_buffer_is_full(sym_next_after_literal, sym_end),
     )
 }
@@ -3547,7 +3548,7 @@ unsafe extern "C" fn deflate_fast(
                 (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             ((*s).lookahead, (*s).strstart) =
-                deflate_fast_literal_state_after_emit((*s).lookahead, (*s).strstart);
+                deflate_literal_state_after_emit((*s).lookahead, (*s).strstart);
         }
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
@@ -4054,8 +4055,8 @@ unsafe fn deflate_rle(
                 (*s).dyn_ltree[cc as usize].fc.value =
                     (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
                 bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
-                (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-                (*s).strstart = (*s).strstart.wrapping_add(1);
+                ((*s).lookahead, (*s).strstart) =
+                    deflate_literal_state_after_emit((*s).lookahead, (*s).strstart);
             }
         }
         if bflush != 0 {
@@ -4243,9 +4244,9 @@ mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
-        deflate_dictionary_state_after_load, deflate_fast_literal_state_after_emit,
-        deflate_fast_should_insert_match, deflate_flush_rank, deflate_huff_literal_progress,
-        deflate_insert_after_block, deflate_match_refill_action, deflate_pending_value,
+        deflate_dictionary_state_after_load, deflate_fast_should_insert_match, deflate_flush_rank,
+        deflate_huff_literal_progress, deflate_insert_after_block,
+        deflate_literal_state_after_emit, deflate_match_refill_action, deflate_pending_value,
         deflate_preflight, deflate_prime_bits_valid, deflate_request_is_invalid,
         deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
         deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
@@ -4429,10 +4430,10 @@ mod tests {
     }
 
     #[test]
-    fn deflate_fast_literal_state_after_emit_preserves_wrapping_progress() {
-        assert_eq!(deflate_fast_literal_state_after_emit(10, 5), (9, 6));
+    fn deflate_literal_state_after_emit_preserves_wrapping_progress() {
+        assert_eq!(deflate_literal_state_after_emit(10, 5), (9, 6));
         assert_eq!(
-            deflate_fast_literal_state_after_emit(0, crate::stdlib::uInt::MAX),
+            deflate_literal_state_after_emit(0, crate::stdlib::uInt::MAX),
             (crate::stdlib::uInt::MAX, 0),
         );
     }

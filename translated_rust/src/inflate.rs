@@ -1107,18 +1107,16 @@ unsafe fn updatewindow(
     mut end: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let allocation_plan = window_allocation_plan(!(*state).window.is_null(), (*state).wbits);
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    let allocation_plan = window_allocation_plan(!state.window.is_null(), state.wbits);
     if let Some((items, size)) = window_allocation_request_for_plan(allocation_plan) {
-        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*strm).opaque, items, size
-        ) as *mut crate::stdlib::Byte;
+        state.window = Some((*strm).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")((*strm).opaque, items, size)
+            as *mut crate::stdlib::Byte;
     }
-    if window_allocation_failed(allocation_plan, !(*state).window.is_null()) {
+    if window_allocation_failed(allocation_plan, !state.window.is_null()) {
         return 1;
     }
-    let state = &mut *state;
     update_window_metadata(
         state.wbits,
         &mut state.wsize,
