@@ -3493,7 +3493,7 @@ pub unsafe extern "C" fn _tr_flush_block(
     mut last: ::core::ffi::c_int,
 ) {
     let state = &mut *s;
-    let data_type = if state.level > 0 { Some(&mut (*state.strm).data_type) } else { None };
+    let data_type = if state.level > 0 { Some(&mut (*state.strm.as_ptr()).data_type) } else { None };
     let plan = prepare_block(
         data_type,
         state.level,
