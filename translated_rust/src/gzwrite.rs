@@ -134,21 +134,25 @@ unsafe fn gz_comp(
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             if writ < 0 as ::core::ffi::c_int {
-                if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                    || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() == Some(crate::stdlib::EAGAIN)
+                    || error.raw_os_error() == Some(crate::stdlib::EWOULDBLOCK)
                 {
                     state.again = 1 as ::core::ffi::c_int;
                 }
-                let message = crate::stdlib::strerror(*crate::stdlib::__errno_location());
+                let message = std::ffi::CString::new(error.to_string()).ok();
                 crate::src::gzlib::gz_error_state(
                     state,
                     crate::zlib_h::Z_ERRNO,
-                    (!message.is_null()).then(|| ::core::ffi::CStr::from_ptr(message)),
+                    message.as_deref(),
                 );
                 return -1 as ::core::ffi::c_int;
             }
-            state.strm.avail_in = state.strm.avail_in.wrapping_sub(writ as ::core::ffi::c_uint);
-            state.strm.next_in = state.strm.next_in.offset(writ as isize);
+            state.strm.avail_in = state
+                .strm
+                .avail_in
+                .wrapping_sub(writ as ::core::ffi::c_uint);
+            state.strm.next_in = state.strm.next_in.wrapping_add(writ as usize);
         }
         return 0 as ::core::ffi::c_int;
     }
@@ -168,33 +172,33 @@ unsafe fn gz_comp(
             while state.strm.next_out > state.x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 state.again = 0 as ::core::ffi::c_int;
-                put = if state.strm.next_out.offset_from(state.x.next)
-                    > max as ::core::ffi::c_int as isize
-                {
-                    max
-                } else {
-                    state.strm.next_out.offset_from(state.x.next) as ::core::ffi::c_uint
-                };
+                let pending = state
+                    .strm
+                    .next_out
+                    .addr()
+                    .saturating_sub(state.x.next.addr());
+                put = pending.min(max as usize) as ::core::ffi::c_uint;
                 writ = crate::stdlib::write(
                     state.fd,
                     state.x.next as *const ::core::ffi::c_void,
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 if writ < 0 as ::core::ffi::c_int {
-                    if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                        || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() == Some(crate::stdlib::EAGAIN)
+                        || error.raw_os_error() == Some(crate::stdlib::EWOULDBLOCK)
                     {
                         state.again = 1 as ::core::ffi::c_int;
                     }
-                    let message = crate::stdlib::strerror(*crate::stdlib::__errno_location());
+                    let message = std::ffi::CString::new(error.to_string()).ok();
                     crate::src::gzlib::gz_error_state(
                         state,
                         crate::zlib_h::Z_ERRNO,
-                        (!message.is_null()).then(|| ::core::ffi::CStr::from_ptr(message)),
+                        message.as_deref(),
                     );
                     return -1 as ::core::ffi::c_int;
                 }
-                state.x.next = state.x.next.offset(writ as isize);
+                state.x.next = state.x.next.wrapping_add(writ as usize);
             }
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
                 state.strm.avail_out = state.size as crate::stdlib::uInt;
