@@ -3769,6 +3769,19 @@ fn tally_symbol_state(
     Some(s.sym_next == s.sym_end)
 }
 
+fn huff_tally_literal_state(
+    s: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Byte],
+    symbols: &mut [crate::zutil_h::uch],
+) -> Option<bool> {
+    let literal = *window.get(usize::try_from(s.strstart).ok()?)?;
+    let flush_now = tally_symbol_state(s, symbols, 0, literal.into())?;
+    s.match_length = 0;
+    s.lookahead = s.lookahead.wrapping_sub(1);
+    s.strstart = s.strstart.wrapping_add(1);
+    Some(flush_now)
+}
+
 fn hash_match_is_usable(
     strstart: crate::src::deflate::IPos,
     hash_head: crate::src::deflate::IPos,
@@ -4003,21 +4016,15 @@ unsafe extern "C" fn deflate_huff(
             } else {
                 ::core::slice::from_raw_parts(state.window, window_len)
             };
-            let Some(&literal) = window.get(state.strstart as usize) else {
-                return need_more;
-            };
             let symbols = if symbol_len == 0 {
                 &mut []
             } else {
                 ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
             };
-            let Some(flush_now) = tally_symbol_state(state, symbols, 0, literal.into()) else {
+            let Some(flush_now) = huff_tally_literal_state(state, window, symbols) else {
                 return need_more;
             };
             bflush = flush_now as ::core::ffi::c_int;
-            state.match_length = 0;
-            state.lookahead = state.lookahead.wrapping_sub(1);
-            state.strstart = state.strstart.wrapping_add(1);
         }
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
