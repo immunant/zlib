@@ -102,7 +102,11 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
             hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
         }
-        here = lcode.offset((hold & lmask as ::core::ffi::c_ulong) as isize);
+        // The root-table mask bounds this cursor within the validated
+        // literal/length decode table.  Dereferencing the table stays in this
+        // legacy unsafe engine, but forming the cursor itself need not be an
+        // unsafe operation.
+        here = lcode.wrapping_offset((hold & lmask as ::core::ffi::c_ulong) as isize);
         's_92: loop {
             op = (*here).bits as ::core::ffi::c_uint;
             hold >>= op;
@@ -141,7 +145,7 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                     hold = hold.wrapping_add((*c2rust_fresh5 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                here = dcode.offset((hold & dmask as ::core::ffi::c_ulong) as isize);
+                here = dcode.wrapping_offset((hold & dmask as ::core::ffi::c_ulong) as isize);
                 loop {
                     op = (*here).bits as ::core::ffi::c_uint;
                     hold >>= op;
@@ -329,8 +333,8 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
                         here = dcode
-                            .offset((*here).val as ::core::ffi::c_int as isize)
-                            .offset(
+                            .wrapping_offset((*here).val as ::core::ffi::c_int as isize)
+                            .wrapping_offset(
                                 (hold
                                     & ((1 as ::core::ffi::c_uint) << op)
                                         .wrapping_sub(1 as ::core::ffi::c_uint)
@@ -346,8 +350,8 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                 }
             } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
                 here = lcode
-                    .offset((*here).val as ::core::ffi::c_int as isize)
-                    .offset(
+                    .wrapping_offset((*here).val as ::core::ffi::c_int as isize)
+                    .wrapping_offset(
                         (hold
                             & ((1 as ::core::ffi::c_uint) << op)
                                 .wrapping_sub(1 as ::core::ffi::c_uint)
