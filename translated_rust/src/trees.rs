@@ -3264,7 +3264,7 @@ pub(crate) fn tr_tally_update_match_counts(
     dyn_dtree[dist_index].freq = dyn_dtree[dist_index].freq.wrapping_add(1);
 }
 
-fn tr_stored_block_impl(
+pub(crate) fn tr_stored_block_impl(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
     stored: &[crate::stdlib::Byte],
