@@ -4806,7 +4806,6 @@ pub unsafe extern "C" fn crc32_z(
     if len >= (N * W + W - 1 as ::core::ffi::c_int) as crate::stdlib::z_size_t {
         let mut blks: crate::stdlib::z_size_t = 0;
         let mut words: *const z_word_t = ::core::ptr::null::<z_word_t>();
-        let mut endian: ::core::ffi::c_uint = 0;
         let mut k: ::core::ffi::c_int = 0;
         while len != 0
             && buf as crate::stdlib::z_size_t
@@ -4827,8 +4826,7 @@ pub unsafe extern "C" fn crc32_z(
                 .wrapping_mul(W as crate::stdlib::z_size_t),
         );
         words = buf as *const z_word_t;
-        endian = 1 as ::core::ffi::c_uint;
-        if *(&raw mut endian as *mut ::core::ffi::c_uchar) != 0 {
+        if cfg!(target_endian = "little") {
             let mut crc0: crate::stdlib::z_crc_t = 0;
             let mut word0: z_word_t = 0;
             let mut crc1: crate::stdlib::z_crc_t = 0;

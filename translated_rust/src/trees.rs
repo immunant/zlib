@@ -3602,10 +3602,7 @@ static mut static_bl_desc: crate::src::deflate::static_tree_desc = unsafe {
     }
 };
 
-fn bi_reverse(
-    mut code: ::core::ffi::c_uint,
-    mut len: ::core::ffi::c_int,
-) -> ::core::ffi::c_uint {
+fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     let mut res: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     loop {
         res |= code & 1 as ::core::ffi::c_uint;
