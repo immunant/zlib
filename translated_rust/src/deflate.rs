@@ -1476,16 +1476,6 @@ fn append_pending_bytes(
     *pending = pending.wrapping_add(bytes.len() as crate::zutil_h::ulg);
 }
 
-unsafe extern "C" fn putShortMSB(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut b: crate::stdlib::uInt,
-) {
-    let state = &mut *s;
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    put_short_msb_bytes(pending_buf, &mut state.pending, b);
-}
-
 fn flush_pending_bytes(
     output: &mut [crate::stdlib::Bytef],
     pending_buf: &[crate::stdlib::Bytef],
@@ -1653,16 +1643,29 @@ pub unsafe extern "C" fn deflate(
             (31 as crate::stdlib::uInt)
                 .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
         );
-        putShortMSB(s, header);
-        if (*s).strstart != 0 as crate::stdlib::uInt {
-            putShortMSB(
-                s,
-                ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+        let has_dictionary = (*s).strstart != 0 as crate::stdlib::uInt;
+        let dictionary_adler = (*strm).adler;
+        {
+            let state = &mut *s;
+            // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
+            // `deflateInit2_()` and copied at that extent in `deflateCopy()`).
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
             );
-            putShortMSB(
-                s,
-                ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-            );
+            put_short_msb_bytes(pending_buf, &mut state.pending, header);
+            if has_dictionary {
+                put_short_msb_bytes(
+                    pending_buf,
+                    &mut state.pending,
+                    (dictionary_adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+                );
+                put_short_msb_bytes(
+                    pending_buf,
+                    &mut state.pending,
+                    (dictionary_adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+                );
+            }
         }
         (*strm).adler = crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None);
         (*s).status = crate::src::deflate::BUSY_STATE;
@@ -2084,14 +2087,26 @@ pub unsafe extern "C" fn deflate(
             ],
         );
     } else {
-        putShortMSB(
-            s,
-            ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        );
-        putShortMSB(
-            s,
-            ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-        );
+        let adler = (*strm).adler;
+        {
+            let state = &mut *s;
+            // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
+            // `deflateInit2_()` and copied at that extent in `deflateCopy()`).
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            put_short_msb_bytes(
+                pending_buf,
+                &mut state.pending,
+                (adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+            );
+            put_short_msb_bytes(
+                pending_buf,
+                &mut state.pending,
+                (adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+            );
+        }
     }
     flush_pending(strm);
     if (*s).wrap > 0 as ::core::ffi::c_int {
