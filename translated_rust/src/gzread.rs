@@ -1257,6 +1257,15 @@ fn gz_look_allocations_failed(input_allocated: bool, output_allocated: bool) -> 
     !input_allocated || !output_allocated
 }
 
+// Keep every failed initialization retryable.  In particular, `gzclose_r`
+// uses `size` to decide whether these allocations are live, so no failed path
+// may leave it non-zero or retain a stale buffer address.
+fn gz_look_discard_buffers(state: &mut crate::gzguts_h::gz_state) {
+    state.in_0 = ::core::ptr::null_mut();
+    state.out = ::core::ptr::null_mut();
+    state.size = 0;
+}
+
 enum GzLookGzipSource {
     Forced { junk_is_known: bool },
     Header,
@@ -1352,6 +1361,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
                 crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
             }
+            gz_look_discard_buffers(state);
             gz_defer_read_error(state, GzReadDeferredError::LookMemory, None);
             return -1 as ::core::ffi::c_int;
         }
@@ -1374,7 +1384,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
                 crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
             }
-            state.size = 0 as ::core::ffi::c_uint;
+            gz_look_discard_buffers(state);
             gz_defer_read_error(state, GzReadDeferredError::LookMemory, None);
             return -1 as ::core::ffi::c_int;
         }
@@ -2768,6 +2778,22 @@ mod tests {
         assert!(gz_look_allocations_failed(false, true));
         assert!(gz_look_allocations_failed(true, false));
         assert!(gz_look_allocations_failed(false, false));
+    }
+
+    #[test]
+    fn gz_look_discard_buffers_clears_all_liveness_markers() {
+        let mut state: crate::gzguts_h::gz_state = unsafe { core::mem::zeroed() };
+        let mut input = [0; 1];
+        let mut output = [0; 1];
+        state.in_0 = input.as_mut_ptr();
+        state.out = output.as_mut_ptr();
+        state.size = 4096;
+
+        gz_look_discard_buffers(&mut state);
+
+        assert!(state.in_0.is_null());
+        assert!(state.out.is_null());
+        assert_eq!(state.size, 0);
     }
 
     #[test]
