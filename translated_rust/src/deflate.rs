@@ -1985,6 +1985,24 @@ fn append_gzip_header_extra(
     true
 }
 
+fn append_gzip_header_string_byte(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    text: &[crate::stdlib::Bytef],
+) -> Option<bool> {
+    let (Ok(source), Ok(destination)) = (
+        usize::try_from(state.gzindex),
+        usize::try_from(state.pending),
+    ) else {
+        return None;
+    };
+    let byte = *text.get(source)?;
+    *pending_buf.get_mut(destination)? = byte;
+    state.gzindex = state.gzindex.checked_add(1)?;
+    state.pending = state.pending.checked_add(1)?;
+    Some(byte == 0)
+}
+
 fn checksum_gzip_header_range(
     checksum: &mut crate::stdlib::uLong,
     pending_buf: &[crate::stdlib::Bytef],
@@ -2337,19 +2355,28 @@ pub unsafe fn deflate(
     }
     if (*s).status == crate::src::deflate::NAME_STATE {
         if !(*(*s).gzhead).name.is_null() {
+            let name = ::std::ffi::CStr::from_ptr(
+                (*(*s).gzhead).name as *const ::core::ffi::c_char,
+            )
+            .to_bytes_with_nul();
+            let state = &mut *s;
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            let hcrc = (*(*s).gzhead).hcrc != 0;
             let mut beg_0: crate::zutil_h::ulg = (*s).pending;
-            let mut val: ::core::ffi::c_int = 0;
             loop {
                 if (*s).pending == (*s).pending_buf_size {
-                    if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
-                        (*strm).adler = crate::src::crc32::crc32_z(
-                            (*strm).adler,
-                            Some(::core::slice::from_raw_parts(
-                                (*s).pending_buf.offset(beg_0 as isize),
-                                ((*s).pending as crate::stdlib::z_size_t)
-                                    .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
-                            )),
-                        );
+                    if hcrc && (*s).pending > beg_0 {
+                        if !checksum_gzip_header_range(
+                            &mut (*strm).adler,
+                            pending_buf,
+                            beg_0,
+                            (*s).pending,
+                        ) {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        }
                     }
                     flush_pending(strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -2358,25 +2385,22 @@ pub unsafe fn deflate(
                     }
                     beg_0 = 0 as crate::zutil_h::ulg;
                 }
-                let c2rust_fresh19 = (*s).gzindex;
-                (*s).gzindex = (*s).gzindex.wrapping_add(1);
-                val = *(*(*s).gzhead).name.offset(c2rust_fresh19 as isize) as ::core::ffi::c_int;
-                let c2rust_fresh20 = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh20 as isize) = val as crate::stdlib::Bytef;
-                if val == 0 as ::core::ffi::c_int {
+                let Some(done) = append_gzip_header_string_byte(state, pending_buf, name) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if done {
                     break;
                 }
             }
-            if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
-                (*strm).adler = crate::src::crc32::crc32_z(
-                    (*strm).adler,
-                    Some(::core::slice::from_raw_parts(
-                        (*s).pending_buf.offset(beg_0 as isize),
-                        ((*s).pending as crate::stdlib::z_size_t)
-                            .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
-                    )),
-                );
+            if hcrc && (*s).pending > beg_0 {
+                if !checksum_gzip_header_range(
+                    &mut (*strm).adler,
+                    pending_buf,
+                    beg_0,
+                    (*s).pending,
+                ) {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
         }
@@ -2384,19 +2408,28 @@ pub unsafe fn deflate(
     }
     if (*s).status == crate::src::deflate::COMMENT_STATE {
         if !(*(*s).gzhead).comment.is_null() {
+            let comment = ::std::ffi::CStr::from_ptr(
+                (*(*s).gzhead).comment as *const ::core::ffi::c_char,
+            )
+            .to_bytes_with_nul();
+            let state = &mut *s;
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            let hcrc = (*(*s).gzhead).hcrc != 0;
             let mut beg_1: crate::zutil_h::ulg = (*s).pending;
-            let mut val_0: ::core::ffi::c_int = 0;
             loop {
                 if (*s).pending == (*s).pending_buf_size {
-                    if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
-                        (*strm).adler = crate::src::crc32::crc32_z(
-                            (*strm).adler,
-                            Some(::core::slice::from_raw_parts(
-                                (*s).pending_buf.offset(beg_1 as isize),
-                                ((*s).pending as crate::stdlib::z_size_t)
-                                    .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
-                            )),
-                        );
+                    if hcrc && (*s).pending > beg_1 {
+                        if !checksum_gzip_header_range(
+                            &mut (*strm).adler,
+                            pending_buf,
+                            beg_1,
+                            (*s).pending,
+                        ) {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        }
                     }
                     flush_pending(strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -2405,26 +2438,22 @@ pub unsafe fn deflate(
                     }
                     beg_1 = 0 as crate::zutil_h::ulg;
                 }
-                let c2rust_fresh21 = (*s).gzindex;
-                (*s).gzindex = (*s).gzindex.wrapping_add(1);
-                val_0 =
-                    *(*(*s).gzhead).comment.offset(c2rust_fresh21 as isize) as ::core::ffi::c_int;
-                let c2rust_fresh22 = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh22 as isize) = val_0 as crate::stdlib::Bytef;
-                if val_0 == 0 as ::core::ffi::c_int {
+                let Some(done) = append_gzip_header_string_byte(state, pending_buf, comment) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if done {
                     break;
                 }
             }
-            if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
-                (*strm).adler = crate::src::crc32::crc32_z(
-                    (*strm).adler,
-                    Some(::core::slice::from_raw_parts(
-                        (*s).pending_buf.offset(beg_1 as isize),
-                        ((*s).pending as crate::stdlib::z_size_t)
-                            .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
-                    )),
-                );
+            if hcrc && (*s).pending > beg_1 {
+                if !checksum_gzip_header_range(
+                    &mut (*strm).adler,
+                    pending_buf,
+                    beg_1,
+                    (*s).pending,
+                ) {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
             }
         }
         (*s).status = crate::src::deflate::HCRC_STATE;
