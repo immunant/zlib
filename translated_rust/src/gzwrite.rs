@@ -321,6 +321,14 @@ fn gz_comp_write_failure(errno: ::core::ffi::c_int) -> GzCompWriteFailure {
     }
 }
 
+fn gz_comp_write_again(errno: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if matches!(gz_comp_write_failure(errno), GzCompWriteFailure::Retryable) {
+        1
+    } else {
+        0
+    }
+}
+
 fn gz_comp_write_chunk_len(available: usize, max: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if available > max as usize {
         max
@@ -351,6 +359,21 @@ fn gz_comp_direct_write_progress(
 ) -> GzCompDirectWriteProgress {
     GzCompDirectWriteProgress {
         remaining_input: avail_in.wrapping_sub(written as crate::stdlib::uInt),
+        cursor_advance: written as usize,
+    }
+}
+
+struct GzCompOutputWriteProgress {
+    remaining_pending: crate::stdlib::uInt,
+    cursor_advance: usize,
+}
+
+fn gz_comp_output_write_progress(
+    pending: crate::stdlib::uInt,
+    written: ::core::ffi::c_int,
+) -> GzCompOutputWriteProgress {
+    GzCompOutputWriteProgress {
+        remaining_pending: gz_comp_pending_after_write(pending, written),
         cursor_advance: written as usize,
     }
 }
@@ -496,9 +519,7 @@ unsafe fn gz_comp(
             ) as ::core::ffi::c_int;
             if gz_comp_write_failed(writ) {
                 let errno = *crate::stdlib::__errno_location();
-                if matches!(gz_comp_write_failure(errno), GzCompWriteFailure::Retryable) {
-                    (*state).again = 1 as ::core::ffi::c_int;
-                }
+                (*state).again = gz_comp_write_again(errno);
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_ERRNO,
@@ -536,9 +557,7 @@ unsafe fn gz_comp(
                 ) as ::core::ffi::c_int;
                 if gz_comp_write_failed(writ) {
                     let errno = *crate::stdlib::__errno_location();
-                    if matches!(gz_comp_write_failure(errno), GzCompWriteFailure::Retryable) {
-                        (*state).again = 1 as ::core::ffi::c_int;
-                    }
+                    (*state).again = gz_comp_write_again(errno);
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_ERRNO,
@@ -546,8 +565,9 @@ unsafe fn gz_comp(
                     );
                     return -1 as ::core::ffi::c_int;
                 }
-                (*state).x.next = (*state).x.next.wrapping_add(writ as usize);
-                *out_pending = gz_comp_pending_after_write(*out_pending, writ);
+                let progress = gz_comp_output_write_progress(*out_pending, writ);
+                (*state).x.next = (*state).x.next.wrapping_add(progress.cursor_advance);
+                *out_pending = progress.remaining_pending;
             }
             if gz_comp_needs_output_buffer_reset((*strm).avail_out) {
                 (*strm).avail_out = (*state).size as crate::stdlib::uInt;
@@ -1001,19 +1021,20 @@ mod tests {
         gz_buffer_is_initialized, gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress,
         gz_comp_has_output, gz_comp_max_write_chunk, gz_comp_needs_output_buffer_reset,
         gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
-        gz_comp_output_write_chunk_len, gz_comp_pending_after_output, gz_comp_pending_after_write,
-        gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_skips_empty_flush,
-        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_has_pending_input,
-        gz_has_pending_skip, gz_write_advanced_pos, gz_write_apply_chunk_progress,
-        gz_write_apply_direct_progress, gz_write_buffered_copy_len,
-        gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
-        gz_write_remaining_after_consumption, gz_write_state_is_usable,
+        gz_comp_output_write_chunk_len, gz_comp_output_write_progress,
+        gz_comp_pending_after_output, gz_comp_pending_after_write, gz_comp_reset_action,
+        gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
+        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
+        gz_has_pending_input, gz_has_pending_skip, gz_write_advanced_pos,
+        gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
+        gz_write_buffered_copy_len, gz_write_buffered_have_after_copy, gz_write_buffered_step,
+        gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
+        gz_write_is_empty, gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
-        GzCompWriteFailure,
+        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int,
+        gzputs_result, gzsetparams_settings_match, gzsetparams_state_is_usable,
+        gzwrite_len_fits_int, GzCompWriteFailure,
     };
 
     #[test]
@@ -1180,6 +1201,14 @@ mod tests {
     }
 
     #[test]
+    fn gz_comp_write_again_sets_retryable_errors_only() {
+        assert_eq!(gz_comp_write_again(crate::stdlib::EAGAIN), 1);
+        assert_eq!(gz_comp_write_again(crate::stdlib::EWOULDBLOCK), 1);
+        assert_eq!(gz_comp_write_again(0), 0);
+        assert_eq!(gz_comp_write_again(1), 0);
+    }
+
+    #[test]
     fn gz_write_errno_is_retryable_for_nonblocking_write_errors() {
         assert!(gz_write_errno_is_retryable(crate::stdlib::EAGAIN));
         assert!(gz_write_errno_is_retryable(crate::stdlib::EWOULDBLOCK));
@@ -1332,6 +1361,22 @@ mod tests {
         let progress = gz_comp_direct_write_progress(0, 1);
 
         assert_eq!(progress.remaining_input, crate::stdlib::uInt::MAX);
+        assert_eq!(progress.cursor_advance, 1);
+    }
+
+    #[test]
+    fn gz_comp_output_write_progress_tracks_pending_bytes_and_cursor() {
+        let progress = gz_comp_output_write_progress(100, 24);
+
+        assert_eq!(progress.remaining_pending, 76);
+        assert_eq!(progress.cursor_advance, 24);
+    }
+
+    #[test]
+    fn gz_comp_output_write_progress_preserves_wrapping_accounting() {
+        let progress = gz_comp_output_write_progress(0, 1);
+
+        assert_eq!(progress.remaining_pending, crate::stdlib::uInt::MAX);
         assert_eq!(progress.cursor_advance, 1);
     }
 

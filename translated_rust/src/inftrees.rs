@@ -2975,6 +2975,85 @@ fn table_entry_for_symbol(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LengthState {
+    counts: [u16; MAXBITS as usize + 1],
+    min: u32,
+    max: u32,
+    root: u32,
+}
+
+impl LengthState {
+    fn try_new(
+        type_0: CodeType,
+        lens: &[u16],
+        requested_root: u32,
+    ) -> Result<Option<Self>, ::core::ffi::c_int> {
+        let mut counts = [0u16; MAXBITS as usize + 1];
+        for &length in lens {
+            if length as usize > MAXBITS as usize {
+                return Err(-1);
+            }
+            counts[length as usize] = counts[length as usize].wrapping_add(1);
+        }
+
+        let mut max = MAXBITS as u32;
+        while max >= 1 && counts[max as usize] == 0 {
+            max -= 1;
+        }
+        if max == 0 {
+            return Ok(None);
+        }
+
+        let mut min = 1u32;
+        while min < max && counts[min as usize] == 0 {
+            min += 1;
+        }
+
+        let mut root = requested_root.min(max);
+        if root < min {
+            root = min;
+        }
+
+        let mut left = 1i32;
+        for length in 1..=MAXBITS as usize {
+            left <<= 1;
+            left -= counts[length] as i32;
+            if left < 0 {
+                return Err(-1);
+            }
+        }
+        if left > 0 && (type_0 == CodeType::Codes || max != 1) {
+            return Err(-1);
+        }
+
+        Ok(Some(Self {
+            counts,
+            min,
+            max,
+            root,
+        }))
+    }
+
+    fn write_symbol_order(self, lens: &[u16], work: &mut [u16]) -> Result<(), ::core::ffi::c_int> {
+        let mut offs = [0u16; MAXBITS as usize + 1];
+        for length in 1..MAXBITS as usize {
+            offs[length + 1] = offs[length].wrapping_add(self.counts[length]);
+        }
+        for (symbol, &length) in lens.iter().enumerate() {
+            if length != 0 {
+                let offset = offs[length as usize] as usize;
+                let Some(entry) = work.get_mut(offset) else {
+                    return Err(1);
+                };
+                *entry = symbol as u16;
+                offs[length as usize] = offs[length as usize].wrapping_add(1);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Builds an inflate decoding table using bounded Rust slices.
 ///
 /// `table_cursor` is the index at which the table starts and is advanced by
@@ -3001,23 +3080,10 @@ pub fn inflate_table_safe(
         return -1;
     };
 
-    let mut count = [0u16; MAXBITS as usize + 1];
-    for &length in lens {
-        if length as usize > MAXBITS as usize {
-            return -1;
-        }
-        count[length as usize] = count[length as usize].wrapping_add(1);
-    }
-
-    let mut root = *bits;
-    let mut max = MAXBITS as u32;
-    while max >= 1 && count[max as usize] == 0 {
-        max -= 1;
-    }
-    if root > max {
-        root = max;
-    }
-    if max == 0 {
+    let Some(length_state) = (match LengthState::try_new(type_0, lens, *bits) {
+        Ok(state) => state,
+        Err(error) => return error,
+    }) else {
         let here = crate::src::inftrees::code {
             op: 64,
             bits: 1,
@@ -3029,41 +3095,13 @@ pub fn inflate_table_safe(
         *table_cursor_out = end;
         *bits = 1;
         return 0;
-    }
-
-    let mut min = 1u32;
-    while min < max && count[min as usize] == 0 {
-        min += 1;
-    }
-    if root < min {
-        root = min;
-    }
-
-    let mut left = 1i32;
-    for length in 1..=MAXBITS as usize {
-        left <<= 1;
-        left -= count[length] as i32;
-        if left < 0 {
-            return -1;
-        }
-    }
-    if left > 0 && (type_0 == CodeType::Codes || max != 1) {
-        return -1;
-    }
-
-    let mut offs = [0u16; MAXBITS as usize + 1];
-    for length in 1..MAXBITS as usize {
-        offs[length + 1] = offs[length].wrapping_add(count[length]);
-    }
-    for (symbol, &length) in lens.iter().enumerate() {
-        if length != 0 {
-            let offset = offs[length as usize] as usize;
-            let Some(entry) = work.get_mut(offset) else {
-                return 1;
-            };
-            *entry = symbol as u16;
-            offs[length as usize] = offs[length as usize].wrapping_add(1);
-        }
+    };
+    let mut count = length_state.counts;
+    let min = length_state.min;
+    let max = length_state.max;
+    let root = length_state.root;
+    if length_state.write_symbol_order(lens, work).is_err() {
+        return 1;
     }
 
     let mut huff = 0u32;
@@ -3072,6 +3110,7 @@ pub fn inflate_table_safe(
     let mut next = 0usize;
     let mut curr = root;
     let mut drop_bits = 0u32;
+    let mut left = 0i32;
     let mut low = u32::MAX;
     let mut used = 1u32 << root;
     let mask = used - 1;
@@ -3364,6 +3403,31 @@ mod tests {
             DBASE[29],
         );
         assert!(table_entry_for_symbol(CodeType::Dists, 32, 3).is_none());
+    }
+
+    #[test]
+    fn length_state_normalizes_root_and_orders_symbols() {
+        let lens = [3u16, 1, 3, 2];
+        let state = LengthState::try_new(CodeType::Lens, &lens, 9)
+            .expect("valid lengths")
+            .expect("non-empty alphabet");
+        let mut work = [0u16; 4];
+
+        assert_eq!(state.min, 1);
+        assert_eq!(state.max, 3);
+        assert_eq!(state.root, 3);
+        state
+            .write_symbol_order(&lens, &mut work)
+            .expect("workspace fits");
+        assert_eq!(work, [1, 3, 0, 2]);
+    }
+
+    #[test]
+    fn length_state_reports_empty_alphabet() {
+        assert_eq!(
+            LengthState::try_new(CodeType::Codes, &[0u16, 0], 7).expect("empty alphabet is valid"),
+            None
+        );
     }
 
     #[test]

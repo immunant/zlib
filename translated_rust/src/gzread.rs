@@ -421,7 +421,7 @@ fn gz_ungetc_buffer_state(
 ) -> GzUngetcBufferState {
     if have == 0 {
         GzUngetcBufferState::Empty
-    } else if have == gz_output_buffer_len(size) {
+    } else if have >= gz_output_buffer_len(size) {
         GzUngetcBufferState::Full
     } else {
         GzUngetcBufferState::Pushable
@@ -461,6 +461,22 @@ fn gz_ungetc_progress(
     ::core::ffi::c_int,
 ) {
     (gz_ungetc_next_have(have), pos.wrapping_sub(1), 0)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct GzUngetcCompactPlan {
+    dest_index: usize,
+    len: usize,
+}
+
+fn gz_ungetc_compact_plan(
+    have: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> GzUngetcCompactPlan {
+    GzUngetcCompactPlan {
+        dest_index: gz_output_buffer_len(size).wrapping_sub(have) as usize,
+        len: have as usize,
+    }
 }
 
 unsafe fn gz_load(
@@ -1682,7 +1698,7 @@ mod tests {
     }
 
     #[test]
-    fn gz_ungetc_buffer_state_requires_exact_double_size_to_be_full() {
+    fn gz_ungetc_buffer_state_treats_full_or_overfull_buffers_as_full() {
         assert!(matches!(
             gz_ungetc_buffer_state(15, 8),
             GzUngetcBufferState::Pushable
@@ -1693,7 +1709,7 @@ mod tests {
         ));
         assert!(matches!(
             gz_ungetc_buffer_state(17, 8),
-            GzUngetcBufferState::Pushable
+            GzUngetcBufferState::Full
         ));
     }
 
@@ -1704,6 +1720,7 @@ mod tests {
             GzUngetcAction::Empty { write_index: 15 }
         );
         assert_eq!(gz_ungetc_action(16, 8, false), GzUngetcAction::Full);
+        assert_eq!(gz_ungetc_action(17, 8, true), GzUngetcAction::Full);
         assert_eq!(
             gz_ungetc_action(15, 8, true),
             GzUngetcAction::Pushable { compact: true }
@@ -1711,6 +1728,24 @@ mod tests {
         assert_eq!(
             gz_ungetc_action(15, 8, false),
             GzUngetcAction::Pushable { compact: false }
+        );
+    }
+
+    #[test]
+    fn gz_ungetc_compact_plan_moves_buffered_bytes_to_the_output_tail() {
+        assert_eq!(
+            gz_ungetc_compact_plan(1, 8),
+            GzUngetcCompactPlan {
+                dest_index: 15,
+                len: 1,
+            }
+        );
+        assert_eq!(
+            gz_ungetc_compact_plan(15, 8),
+            GzUngetcCompactPlan {
+                dest_index: 1,
+                len: 15,
+            }
         );
     }
 
@@ -2296,17 +2331,14 @@ pub unsafe extern "C" fn gzungetc(
         }
         GzUngetcAction::Pushable { compact } => {
             if compact {
-                let mut src: *mut ::core::ffi::c_uchar =
-                    (*state).out.wrapping_add((*state).x.have as usize);
-                let mut dest: *mut ::core::ffi::c_uchar = (*state)
-                    .out
-                    .wrapping_add(gz_output_buffer_len((*state).size) as usize);
-                while src > (*state).out {
-                    src = src.wrapping_sub(1);
-                    dest = dest.wrapping_sub(1);
-                    *dest = *src;
+                let plan = gz_ungetc_compact_plan((*state).x.have, (*state).size);
+                let mut remaining = plan.len;
+                while remaining != 0 {
+                    remaining -= 1;
+                    *(*state).out.wrapping_add(plan.dest_index + remaining) =
+                        *(*state).out.wrapping_add(remaining);
                 }
-                (*state).x.next = dest;
+                (*state).x.next = (*state).out.wrapping_add(plan.dest_index);
             }
         }
     }
