@@ -2462,9 +2462,20 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     };
     gzdirect_from_abi_state(state.as_mut())
 }
-pub unsafe fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
+// The read close path has no need for the ABI cursor prefix or embedded
+// stream.  Keep its complete resource transaction over owned buffers,
+// descriptor, and error/path storage so the opaque-handle boundary can select
+// it without making close policy itself unsafe.
+pub(crate) struct GzReadCloseState<'a> {
+    pub(crate) mode: ::core::ffi::c_int,
+    pub(crate) buffers: &'a mut crate::gzguts_h::GzBuffers,
+    pub(crate) err: &'a mut ::core::ffi::c_int,
+    pub(crate) msg: &'a mut Option<Box<[u8]>>,
+    pub(crate) path: &'a mut Option<Box<[u8]>>,
+    pub(crate) fd: &'a mut Option<rustix::fd::OwnedFd>,
+}
+
+pub(crate) fn gzclose_r(state: GzReadCloseState<'_>) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_READ {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2476,15 +2487,15 @@ pub unsafe fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
         state.buffers.output = None;
         state.buffers.input = None;
     }
-    err = if state.err == crate::zlib_h::Z_BUF_ERROR {
+    let err = if *state.err == crate::zlib_h::Z_BUF_ERROR {
         crate::zlib_h::Z_BUF_ERROR
     } else {
         crate::zlib_h::Z_OK
     };
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
-    state.path = None;
-    state.msg = None;
-    ret = match state.fd.take() {
+    crate::src::gzlib::gz_clear_error(state.msg, state.err);
+    *state.path = None;
+    *state.msg = None;
+    let ret = match state.fd.take() {
         Some(fd) => crate::src::gzlib::gz_close_fd(fd)
             .map(|()| 0 as ::core::ffi::c_int)
             .unwrap_or(-1 as ::core::ffi::c_int),

@@ -6,7 +6,7 @@ pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::off64_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::gzread::gzclose_r;
+use crate::src::gzread::{gzclose_r, GzReadCloseState};
 pub use crate::src::gzwrite::gzclose_w;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -55,13 +55,18 @@ pub(crate) unsafe fn gzclose(
     };
     let state_ptr = state.as_ptr();
     let state = state.as_mut();
-    let close: unsafe fn(&mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int =
-        match gzclose_action(state.mode, target) {
-            Some(GzCloseAction::Read) => crate::src::gzread::gzclose_r,
-            Some(GzCloseAction::Write) => crate::src::gzwrite::gzclose_w,
-            None => return crate::zlib_h::Z_STREAM_ERROR,
-        };
-    let ret = close(state);
+    let ret = match gzclose_action(state.mode, target) {
+        Some(GzCloseAction::Read) => gzclose_r(GzReadCloseState {
+            mode: state.mode,
+            buffers: &mut state.buffers,
+            err: &mut state.err,
+            msg: &mut state.msg,
+            path: &mut state.path,
+            fd: &mut state.fd,
+        }),
+        Some(GzCloseAction::Write) => crate::src::gzwrite::gzclose_w(state),
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
     // `gz_open()` allocated this opaque handle as one Box.  The selected
     // close path has released its owned resources, so reclaim that matching
     // allocation exactly once after mode-dependent cleanup.
