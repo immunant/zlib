@@ -475,10 +475,10 @@ unsafe extern "C" fn updatewindow(
         (*state).whave = 0 as ::core::ffi::c_uint;
     }
     if copy >= (*state).wsize {
-        crate::stdlib::memcpy(
-            window as *mut ::core::ffi::c_void,
-            end.offset(-((*state).wsize as isize)) as *const ::core::ffi::c_void,
-            (*state).wsize as crate::__stddef_size_t_h::size_t,
+        ::core::ptr::copy_nonoverlapping(
+            end.offset(-((*state).wsize as isize)),
+            window,
+            (*state).wsize as usize,
         );
         (*state).wnext = 0 as ::core::ffi::c_uint;
         (*state).whave = (*state).wsize;
@@ -487,17 +487,17 @@ unsafe extern "C" fn updatewindow(
         if dist > copy {
             dist = copy;
         }
-        crate::stdlib::memcpy(
-            window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
-            end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-            dist as crate::__stddef_size_t_h::size_t,
+        ::core::ptr::copy_nonoverlapping(
+            end.offset(-(copy as isize)),
+            window.offset((*state).wnext as isize),
+            dist as usize,
         );
         copy = copy.wrapping_sub(dist);
         if copy != 0 {
-            crate::stdlib::memcpy(
-                window as *mut ::core::ffi::c_void,
-                end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
+            ::core::ptr::copy_nonoverlapping(
+                end.offset(-(copy as isize)),
+                window,
+                copy as usize,
             );
             (*state).wnext = copy;
             (*state).whave = (*state).wsize;
