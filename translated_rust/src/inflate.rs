@@ -3303,10 +3303,22 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     if inflate_state_check_at_ffi_boundary!(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    // `dict_length` is optional, but a non-null output pointer must be
+    // aligned before `as_mut()` can establish a Rust reference to it.
+    // Keep this validation at the FFI boundary rather than letting the safe
+    // dictionary core observe a reference with an invalid provenance.
+    if !dict_length.is_null()
+        && dict_length.align_offset(core::mem::align_of::<crate::stdlib::uInt>()) != 0
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     let whave = (*state).whave;
     let wnext = (*state).wnext;
     let (window, dictionary) = if whave != 0 && !dictionary.is_null() {
+        if (*state).window.is_null() || (*state).wsize < whave {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
         let window = core::slice::from_raw_parts((*state).window, (*state).wsize as usize);
         let dictionary = core::slice::from_raw_parts_mut(dictionary, whave as usize);
         (Some(window), Some(dictionary))
@@ -5098,6 +5110,63 @@ mod tests {
         assert_eq!(length, 5);
         assert_eq!(
             inflate_get_dictionary_result(5, 0, None, None, None),
+            crate::zlib_h::Z_OK
+        );
+    }
+
+    #[test]
+    fn inflate_get_dictionary_ffi_rejects_a_misaligned_length_output() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: core::ptr::null_mut(),
+            state: core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+        let mut aligned_length_storage = [0 as crate::stdlib::uInt; 2];
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+
+        let misaligned_length = unsafe {
+            aligned_length_storage
+                .as_mut_ptr()
+                .cast::<u8>()
+                .add(1)
+                .cast::<crate::stdlib::uInt>()
+        };
+        assert_eq!(
+            unsafe {
+                super::inflateGetDictionary_ffi(
+                    &mut stream,
+                    core::ptr::null_mut(),
+                    misaligned_length,
+                )
+            },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+        assert_eq!(aligned_length_storage, [0, 0]);
+
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut stream) },
             crate::zlib_h::Z_OK
         );
     }
