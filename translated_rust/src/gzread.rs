@@ -729,7 +729,7 @@ fn gzread(
 }
 
 // State validation and request classification happen in `gzread_dispatch()`
-// before any caller range is bound.
+// before the coordinator consumes any caller range.
 fn gzread_request_len(
     state: &mut crate::gzguts_h::gz_state,
     len: ::core::ffi::c_uint,
@@ -756,6 +756,21 @@ fn gzread_request_len(
     };
     Ok(slice_len)
 }
+
+// Byte reads neither close the handle nor invoke a user callback.  Resolve
+// the opaque address through the owned-state registry, keeping the stateful
+// request classification and result handling reference-bound.
+fn gzread_handle(
+    file_key: usize,
+    len: ::core::ffi::c_uint,
+    buffer: Option<&mut [::core::ffi::c_uchar]>,
+) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        let request = gzread_dispatch(state, len);
+        gzread(state, request, buffer)
+    })
+    .unwrap_or(-1)
+}
 #[export_name = "gzread"]
 
 pub unsafe extern "C" fn gzread_ffi(
@@ -766,23 +781,23 @@ pub unsafe extern "C" fn gzread_ffi(
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let request = gzread_dispatch(state, len);
-    // The request token comes from the implementation dispatcher, so only a
-    // validated range reaches this ABI-only binding step.
-    match request {
-        GzReadRequest::Rejected => gzread(state, request, None),
-        GzReadRequest::Bytes(0) => gzread(state, request, Some(&mut [])),
-        GzReadRequest::Bytes(_) if buf.is_null() => gzread(state, request, None),
-        GzReadRequest::Bytes(slice_len) => gzread(
-            state,
-            request,
-            Some(::core::slice::from_raw_parts_mut(
+    // SAFETY: C's `gzread` contract supplies a writable `len`-byte range
+    // for a non-null buffer.  Stateful validation remains in
+    // `gzread_handle()` after registry lookup.
+    let buffer = match crate::src::gzlib::gz_uint_request_fits_int(len)
+        .then(|| crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t))
+        .flatten()
+    {
+        Some(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
+        Some(slice_len) if !buf.is_null() => Some(unsafe {
+            ::core::slice::from_raw_parts_mut(
                 buf as *mut ::core::ffi::c_uchar,
                 slice_len,
-            )),
-        ),
-    }
+            )
+        }),
+        _ => None,
+    };
+    gzread_handle(file.addr(), len, buffer)
 }
 
 // The item-read analogue of `GzReadRequest`; empty requests deliberately do
