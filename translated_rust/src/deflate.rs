@@ -3014,6 +3014,39 @@ struct StoredBlockPlan {
     last: ::core::ffi::c_int,
 }
 
+struct StoredOutputCopy {
+    copied: crate::stdlib::uInt,
+    remaining: ::core::ffi::c_uint,
+    block_start: ::core::ffi::c_long,
+}
+
+/// Copy the already-buffered portion of a stored block to the caller's output.
+/// The mode adapter lends the legacy window and output storage; this core only
+/// performs the checked, non-overlapping byte copy and its scalar transitions.
+fn copy_stored_window_to_output_state(
+    window: &[crate::stdlib::Byte],
+    output: &mut [crate::stdlib::Byte],
+    block_start: ::core::ffi::c_long,
+    left: ::core::ffi::c_uint,
+    len: ::core::ffi::c_uint,
+) -> Option<StoredOutputCopy> {
+    if block_start < 0 {
+        return None;
+    }
+    let copied = left.min(len);
+    let copied = usize::try_from(copied).ok()?;
+    let start = usize::try_from(block_start).ok()?;
+    let end = start.checked_add(copied)?;
+    let source = window.get(start..end)?;
+    let destination = output.get_mut(..copied)?;
+    destination.copy_from_slice(source);
+    Some(StoredOutputCopy {
+        copied: crate::stdlib::uInt::try_from(copied).ok()?,
+        remaining: len.wrapping_sub(copied as ::core::ffi::c_uint),
+        block_start: block_start.checked_add(copied as ::core::ffi::c_long)?,
+    })
+}
+
 fn stored_block_plan(
     min_block: ::core::ffi::c_uint,
     bi_valid: ::core::ffi::c_int,
@@ -3150,21 +3183,41 @@ unsafe extern "C" fn deflate_stored(
         }
         flush_pending((*s).strm);
         if left != 0 {
-            if left > len {
-                left = len;
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            let (Ok(window_len), Ok(output_len)) = (
+                usize::try_from(state.window_size),
+                usize::try_from(strm.avail_out),
+            ) else {
+                return need_more;
+            };
+            if (window_len != 0 && state.window.is_null())
+                || (output_len != 0 && strm.next_out.is_null())
+            {
+                return need_more;
             }
-            crate::stdlib::memcpy(
-                (*(*s).strm).next_out as *mut ::core::ffi::c_void,
-                (*s).window.offset((*s).block_start as isize) as *const ::core::ffi::c_void,
-                left as crate::__stddef_size_t_h::size_t,
-            );
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(left as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(left);
-            (*(*s).strm).total_out = (*(*s).strm)
+            let window = if window_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(state.window, window_len)
+            };
+            let output = if output_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(strm.next_out, output_len)
+            };
+            let Some(copy) =
+                copy_stored_window_to_output_state(window, output, state.block_start, left, len)
+            else {
+                return need_more;
+            };
+            strm.next_out = strm.next_out.offset(copy.copied as isize);
+            strm.avail_out = strm.avail_out.wrapping_sub(copy.copied);
+            strm.total_out = strm
                 .total_out
-                .wrapping_add(left as crate::stdlib::uLong);
-            (*s).block_start += left as ::core::ffi::c_long;
-            len = len.wrapping_sub(left);
+                .wrapping_add(copy.copied as crate::stdlib::uLong);
+            state.block_start = copy.block_start;
+            len = copy.remaining;
         }
         if len != 0 {
             read_buf((*s).strm, (*(*s).strm).next_out, len);
