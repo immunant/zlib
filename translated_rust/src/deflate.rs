@@ -1356,22 +1356,11 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     let strm = &*strm;
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
-    }
-    if strm.state.is_null() {
+    if !deflate_params_stream_is_valid(strm) {
         return 1 as ::core::ffi::c_int;
     }
     let s = &*strm.state;
-    if s.status != crate::src::deflate::INIT_STATE
-            && s.status != crate::src::deflate::GZIP_STATE
-            && s.status != crate::src::deflate::EXTRA_STATE
-            && s.status != crate::src::deflate::NAME_STATE
-            && s.status != crate::src::deflate::COMMENT_STATE
-            && s.status != crate::src::deflate::HCRC_STATE
-            && s.status != crate::src::deflate::BUSY_STATE
-            && s.status != crate::src::deflate::FINISH_STATE
-    {
+    if !deflate_params_state_is_valid(s) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -2163,7 +2152,10 @@ pub unsafe fn deflate(
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut old_flush: ::core::ffi::c_int = 0;
-    if deflateStateCheck(strm as *mut crate::zlib_h::z_stream_s) != 0
+    // Validate the ABI carrier before following its state link.  The state
+    // machine validation then operates on the borrowed state below, rather
+    // than dispatching through the raw-pointer checker.
+    if !deflate_params_stream_is_valid(strm)
         || flush > crate::zlib_h::Z_BLOCK
         || flush < 0 as ::core::ffi::c_int
     {
@@ -2173,6 +2165,9 @@ pub unsafe fn deflate(
     // carries the state through this call, avoiding repeated raw-state
     // dereferences in the compression state machine.
     let s = &mut *strm.state;
+    if !deflate_params_state_is_valid(s) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let gzhead = gzip_header_clone((*s).gzhead);
     if strm.next_out.is_null()
         || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.is_null()
@@ -2285,11 +2280,10 @@ pub unsafe fn deflate(
                 (strm.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
             );
         }
-        strm.adler = crate::src::adler32::adler32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        );
+        // `adler32(NULL, 0)` returns the initial Adler value of one.  The
+        // slice API has no null sentinel, so supply that exact seed for the
+        // equivalent empty update.
+        strm.adler = crate::src::adler32::adler32_z(1, &[]);
         (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending_impl(s, strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -2563,7 +2557,7 @@ pub unsafe fn deflate(
         if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                crate::src::trees::_tr_align(s as *mut crate::src::deflate::internal_state);
+                crate::src::trees::tr_align(s);
             } else if flush != crate::zlib_h::Z_BLOCK {
                 crate::src::trees::tr_stored_block(
                     &mut *s,

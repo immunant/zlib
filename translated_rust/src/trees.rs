@@ -3050,7 +3050,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     // The exported boundary validates and converts the opaque state once.
     flush_bits_impl(&mut *s);
 }
-fn tr_align(s: &mut crate::src::deflate::deflate_state) {
+pub(crate) fn tr_align(s: &mut crate::src::deflate::deflate_state) {
     let len: ::core::ffi::c_int = 3;
     if s.bi_valid > crate::src::deflate::Buf_size - len {
         let val: ::core::ffi::c_int = 1 << 1;
