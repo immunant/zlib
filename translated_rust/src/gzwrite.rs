@@ -119,7 +119,6 @@ pub(crate) unsafe fn gz_comp(
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut state_ref.strm;
     if state_ref.size == 0 as ::core::ffi::c_uint && gz_init(state_ref) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
@@ -128,15 +127,16 @@ pub(crate) unsafe fn gz_comp(
         return 0 as ::core::ffi::c_int;
     }
     if state_ref.reset != 0 {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
+        if state_ref.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH
+        {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
+        crate::src::deflate::deflateReset(&raw mut state_ref.strm);
         state_ref.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
     loop {
-        if (*strm).avail_out == 0 as crate::stdlib::uInt
+        if state_ref.strm.avail_out == 0 as crate::stdlib::uInt
             || flush != crate::zlib_h::Z_NO_FLUSH
                 && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
         {
@@ -208,7 +208,7 @@ pub(crate) unsafe fn gz_comp(
                     }
                 }
             }
-            if (*strm).avail_out == 0 as crate::stdlib::uInt {
+            if state_ref.strm.avail_out == 0 as crate::stdlib::uInt {
                 let Some(output) = state_ref
                     .buffers
                     .as_mut()
@@ -216,13 +216,13 @@ pub(crate) unsafe fn gz_comp(
                 else {
                     return -1;
                 };
-                (*strm).avail_out = state_ref.size as crate::stdlib::uInt;
-                (*strm).next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
+                state_ref.strm.avail_out = state_ref.size as crate::stdlib::uInt;
+                state_ref.strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
                 state_ref.x.next = output.as_mut_ptr();
             }
         }
-        have = (*strm).avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
+        have = state_ref.strm.avail_out as ::core::ffi::c_uint;
+        ret = crate::src::deflate::deflate(&raw mut state_ref.strm, flush);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error_static(
                 state_ref,
@@ -231,7 +231,7 @@ pub(crate) unsafe fn gz_comp(
             );
             return -1 as ::core::ffi::c_int;
         }
-        have = have.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+        have = have.wrapping_sub(state_ref.strm.avail_out as ::core::ffi::c_uint);
         if have == 0 {
             break;
         }
