@@ -81,6 +81,18 @@ fn gz_avail_retain_input(
     Some(())
 }
 
+/// Plan the writable suffix for one owned compressed-input refill. This keeps
+/// the range validation independent of the ABI stream cursor and preserves
+/// zlib's wrapping availability accounting at the codec boundary.
+fn gz_avail_load_span(
+    avail_in: crate::stdlib::uInt,
+    size: ::core::ffi::c_uint,
+) -> Option<::core::ops::Range<usize>> {
+    let start = avail_in as usize;
+    let end = size as usize;
+    (start <= end).then_some(start..end)
+}
+
 /// Advance the owned input cursor after one inflate call. The boundary passes
 /// only scalar availability snapshots, so this remains independent of the
 /// ABI raw cursor.
@@ -243,12 +255,14 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 }
             }
         }
-        let avail_in = state.strm.avail_in as usize;
+        let Some(load_span) = gz_avail_load_span(state.strm.avail_in, state.size) else {
+            return -1;
+        };
         let result = {
             let (Some(file), Some(buffers)) = (state.file.as_mut(), state.buffers.as_mut()) else {
                 return -1;
             };
-            let Some(input) = buffers.input.get_mut(avail_in..state.size as usize) else {
+            let Some(input) = buffers.input.get_mut(load_span) else {
                 return -1;
             };
             gz_load(file, input)
@@ -264,8 +278,9 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
         state.strm.next_in = input;
         state.input_index = 0;
+        return 0;
     }
-    return 0 as ::core::ffi::c_int;
+    0
 }
 
 /// Derive the `junk` transition value used when lookahead restarts the
