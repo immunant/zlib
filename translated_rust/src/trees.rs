@@ -3772,6 +3772,31 @@ fn tally_match_tree_indices(dist: ::core::ffi::c_uint, lc: ::core::ffi::c_uint) 
     (length_code as usize, distance_code as usize)
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TallyTreeUpdate {
+    Literal {
+        literal_index: usize,
+    },
+    Match {
+        length_index: usize,
+        distance_index: usize,
+    },
+}
+
+fn tally_tree_update(dist: ::core::ffi::c_uint, lc: ::core::ffi::c_uint) -> TallyTreeUpdate {
+    if dist == 0 {
+        TallyTreeUpdate::Literal {
+            literal_index: lc as usize,
+        }
+    } else {
+        let (length_index, distance_index) = tally_match_tree_indices(dist, lc);
+        TallyTreeUpdate::Match {
+            length_index,
+            distance_index,
+        }
+    }
+}
+
 fn block_bit_length_bytes(bit_length: crate::zutil_h::ulg) -> crate::zutil_h::ulg {
     bit_length.wrapping_add(3).wrapping_add(7) >> 3
 }
@@ -5277,15 +5302,21 @@ pub unsafe extern "C" fn _tr_tally(
         *(*s).sym_buf.wrapping_add(cursor as usize) = byte;
     }
     (*s).sym_next = next_sym_next;
-    if dist == 0 as ::core::ffi::c_uint {
-        (*s).dyn_ltree[lc as usize].fc.value = (*s).dyn_ltree[lc as usize].fc.value.wrapping_add(1);
-    } else {
-        (*s).matches = (*s).matches.wrapping_add(1);
-        let (length_index, distance_index) = tally_match_tree_indices(dist, lc);
-        (*s).dyn_ltree[length_index].fc.value =
-            (*s).dyn_ltree[length_index].fc.value.wrapping_add(1);
-        (*s).dyn_dtree[distance_index].fc.value =
-            (*s).dyn_dtree[distance_index].fc.value.wrapping_add(1);
+    match tally_tree_update(dist, lc) {
+        TallyTreeUpdate::Literal { literal_index } => {
+            (*s).dyn_ltree[literal_index].fc.value =
+                (*s).dyn_ltree[literal_index].fc.value.wrapping_add(1);
+        }
+        TallyTreeUpdate::Match {
+            length_index,
+            distance_index,
+        } => {
+            (*s).matches = (*s).matches.wrapping_add(1);
+            (*s).dyn_ltree[length_index].fc.value =
+                (*s).dyn_ltree[length_index].fc.value.wrapping_add(1);
+            (*s).dyn_dtree[distance_index].fc.value =
+                (*s).dyn_dtree[distance_index].fc.value.wrapping_add(1);
+        }
     }
     return symbol_buffer_is_full(next_sym_next, (*s).sym_end) as ::core::ffi::c_int;
 }
@@ -5310,8 +5341,9 @@ mod tests {
         pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_block_trees,
         select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
-        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_continues,
-        tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction, END_BLOCK, MAX_BITS,
+        tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_next_cursor,
+        tree_run_continues, tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction,
+        TallyTreeUpdate, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5676,6 +5708,21 @@ mod tests {
         assert_eq!(tally_match_tree_indices(256, 255), (285, 15));
         assert_eq!(tally_match_tree_indices(257, 255), (285, 16));
         assert_eq!(tally_match_tree_indices(32_768, 255), (285, 29));
+    }
+
+    #[test]
+    fn tally_tree_update_selects_literal_or_match_frequency_targets() {
+        assert_eq!(
+            tally_tree_update(0, 42),
+            TallyTreeUpdate::Literal { literal_index: 42 }
+        );
+        assert_eq!(
+            tally_tree_update(257, 255),
+            TallyTreeUpdate::Match {
+                length_index: 285,
+                distance_index: 16,
+            }
+        );
     }
 
     #[test]

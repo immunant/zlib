@@ -142,6 +142,12 @@ fn output_cursor_after_write(
     )
 }
 
+fn match_copy_layout(
+    match_length: ::core::ffi::c_uint,
+) -> (::core::ffi::c_uint, ::core::ffi::c_uint) {
+    (match_length / 3, match_length % 3)
+}
+
 fn window_match_start(
     window_size: ::core::ffi::c_uint,
     window_next: ::core::ffi::c_uint,
@@ -405,7 +411,8 @@ pub unsafe extern "C" fn inflate_fast(
                 match c2rust_current_block_141 {
                     6072622540298447352 => {
                         from = out.wrapping_sub(dist as usize);
-                        loop {
+                        let (copy_triplets, trailing_bytes) = match_copy_layout(len);
+                        for _ in 0..copy_triplets {
                             let c2rust_fresh26 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh27 = out;
@@ -427,12 +434,8 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh31 = *c2rust_fresh30;
-                            len = len.wrapping_sub(3 as ::core::ffi::c_uint);
-                            if !(len > 2 as ::core::ffi::c_uint) {
-                                break;
-                            }
                         }
-                        if len != 0 {
+                        if trailing_bytes != 0 {
                             let c2rust_fresh32 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh33 = out;
@@ -440,7 +443,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh33 = *c2rust_fresh32;
-                            if len > 1 as ::core::ffi::c_uint {
+                            if trailing_bytes > 1 as ::core::ffi::c_uint {
                                 let c2rust_fresh34 = from;
                                 from = from.wrapping_add(1);
                                 let c2rust_fresh35 = out;
@@ -544,7 +547,8 @@ pub unsafe extern "C" fn inflate_fast(
                                 from = out.wrapping_sub(dist as usize);
                             }
                         }
-                        while len > 2 as ::core::ffi::c_uint {
+                        let (copy_triplets, trailing_bytes) = match_copy_layout(len);
+                        for _ in 0..copy_triplets {
                             let c2rust_fresh16 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh17 = out;
@@ -566,9 +570,8 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh21 = *c2rust_fresh20;
-                            len = len.wrapping_sub(3 as ::core::ffi::c_uint);
                         }
-                        if len != 0 {
+                        if trailing_bytes != 0 {
                             let c2rust_fresh22 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh23 = out;
@@ -576,7 +579,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh23 = *c2rust_fresh22;
-                            if len > 1 as ::core::ffi::c_uint {
+                            if trailing_bytes > 1 as ::core::ffi::c_uint {
                                 let c2rust_fresh24 = from;
                                 from = from.wrapping_add(1);
                                 let c2rust_fresh25 = out;
@@ -629,9 +632,9 @@ mod tests {
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_dist_action, fast_litlen_action, fast_match_uses_window,
         fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
-        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
-        table_index, unread_input_state, window_match_start, FastDistAction, FastDistance,
-        FastDistanceSource, FastLitLenAction,
+        input_remaining_after_read, low_bits, match_copy_layout, output_cursor_after_write,
+        subtable_index, table_index, unread_input_state, window_match_start, FastDistAction,
+        FastDistance, FastDistanceSource, FastLitLenAction,
     };
 
     #[test]
@@ -860,6 +863,19 @@ mod tests {
         assert_eq!(
             output_cursor_after_write(::core::ffi::c_uint::MAX, 0),
             (0, ::core::ffi::c_uint::MAX),
+        );
+    }
+
+    #[test]
+    fn match_copy_layout_splits_triplets_and_trailing_bytes() {
+        assert_eq!(match_copy_layout(0), (0, 0));
+        assert_eq!(match_copy_layout(1), (0, 1));
+        assert_eq!(match_copy_layout(2), (0, 2));
+        assert_eq!(match_copy_layout(3), (1, 0));
+        assert_eq!(match_copy_layout(8), (2, 2));
+        assert_eq!(
+            match_copy_layout(::core::ffi::c_uint::MAX),
+            (1_431_655_765, 0)
         );
     }
 
