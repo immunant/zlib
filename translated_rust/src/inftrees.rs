@@ -3297,9 +3297,9 @@ pub fn inflate_fixed(
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
     let state = &mut *state;
     inflate_fixed(
-        &mut state.lencode,
-        &mut state.lenbits,
-        &mut state.distcode,
-        &mut state.distbits,
+        &mut state.normal.lencode,
+        &mut state.normal.lenbits,
+        &mut state.normal.distcode,
+        &mut state.normal.distbits,
     )
 }

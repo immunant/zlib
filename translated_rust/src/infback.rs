@@ -166,45 +166,47 @@ pub unsafe extern "C" fn inflateBackInit_(
         state,
         crate::src::inflate::inflate_state {
             stream_identity,
-            mode: crate::src::inflate::TYPE,
-            last: 0,
-            wrap: 0,
-            havedict: 0,
-            flags: 0,
-            dmax: 32768,
-            check: 0,
-            total: 0,
             head: None,
-            wbits: plan.wbits,
-            wsize: plan.wsize,
-            whave: 0,
-            wnext: 0,
             window: Some(::core::ptr::NonNull::new(window).expect("validated caller window")),
-            owned_window: None,
-            hold: 0,
-            bits: 0,
-            length: 0,
-            offset: 0,
-            extra: 0,
-            lencode: crate::src::inflate::CodeTableRef::Dynamic(0),
-            distcode: crate::src::inflate::CodeTableRef::Dynamic(0),
-            lenbits: 0,
-            distbits: 0,
-            ncode: 0,
-            nlen: 0,
-            ndist: 0,
-            have: 0,
-            next: 0,
-            lens: [0; 320],
-            work: [0; 288],
-            codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
-                op: 0,
+            normal: crate::src::inflate::InflateNormalState {
+                mode: crate::src::inflate::TYPE,
+                last: 0,
+                wrap: 0,
+                havedict: 0,
+                flags: 0,
+                dmax: 32768,
+                check: 0,
+                total: 0,
+                wbits: plan.wbits,
+                wsize: plan.wsize,
+                whave: 0,
+                wnext: 0,
+                owned_window: None,
+                hold: 0,
                 bits: 0,
-                val: 0,
-            }),
-            sane: 1,
-            back: 0,
-            was: 0,
+                length: 0,
+                offset: 0,
+                extra: 0,
+                lencode: crate::src::inflate::CodeTableRef::Dynamic(0),
+                distcode: crate::src::inflate::CodeTableRef::Dynamic(0),
+                lenbits: 0,
+                distbits: 0,
+                ncode: 0,
+                nlen: 0,
+                ndist: 0,
+                have: 0,
+                next: 0,
+                lens: [0; 320],
+                work: [0; 288],
+                codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
+                    op: 0,
+                    bits: 0,
+                    val: 0,
+                }),
+                sane: 1,
+                back: 0,
+                was: 0,
+            },
         },
     );
     return crate::zlib_h::Z_OK;
@@ -1243,9 +1245,9 @@ pub unsafe extern "C" fn inflateBack(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    raw_state.mode = crate::src::inflate::TYPE;
-    raw_state.last = 0;
-    raw_state.whave = 0;
+    raw_state.normal.mode = crate::src::inflate::TYPE;
+    raw_state.normal.last = 0;
+    raw_state.normal.whave = 0;
     let mut next = strm.next_in as *mut ::core::ffi::c_uchar;
     let mut have = if next.is_null() {
         0
@@ -1254,30 +1256,30 @@ pub unsafe extern "C" fn inflateBack(
     };
     let window = ::core::slice::from_raw_parts_mut(
         raw_state.window.expect("inflateBack window").as_ptr(),
-        raw_state.wsize as usize,
+        raw_state.normal.wsize as usize,
     );
     let mut state = InflateBackDecoderState {
-        mode: raw_state.mode,
-        last: raw_state.last,
-        wsize: raw_state.wsize,
-        whave: raw_state.whave,
-        wnext: raw_state.wnext,
-        length: raw_state.length,
-        offset: raw_state.offset,
-        extra: raw_state.extra,
-        lencode: raw_state.lencode,
-        distcode: raw_state.distcode,
-        lenbits: raw_state.lenbits,
-        distbits: raw_state.distbits,
-        ncode: raw_state.ncode,
-        nlen: raw_state.nlen,
-        ndist: raw_state.ndist,
-        have: raw_state.have,
-        next: raw_state.next,
-        lens: &mut raw_state.lens,
-        work: &mut raw_state.work,
-        codes: &mut raw_state.codes,
-        sane: raw_state.sane,
+        mode: raw_state.normal.mode,
+        last: raw_state.normal.last,
+        wsize: raw_state.normal.wsize,
+        whave: raw_state.normal.whave,
+        wnext: raw_state.normal.wnext,
+        length: raw_state.normal.length,
+        offset: raw_state.normal.offset,
+        extra: raw_state.normal.extra,
+        lencode: raw_state.normal.lencode,
+        distcode: raw_state.normal.distcode,
+        lenbits: raw_state.normal.lenbits,
+        distbits: raw_state.normal.distbits,
+        ncode: raw_state.normal.ncode,
+        nlen: raw_state.normal.nlen,
+        ndist: raw_state.normal.ndist,
+        have: raw_state.normal.have,
+        next: raw_state.normal.next,
+        lens: &mut raw_state.normal.lens,
+        work: &mut raw_state.normal.work,
+        codes: &mut raw_state.normal.codes,
+        sane: raw_state.normal.sane,
     };
     let output = InflateBackOutput::new(window, |bytes| {
         out.expect("non-null function pointer")(
@@ -1310,22 +1312,22 @@ pub unsafe extern "C" fn inflateBack(
     // Release callback/window borrows before writing either the backing state
     // or the ABI stream.  The completion above carries only scalar state.
     drop(invocation);
-    raw_state.mode = final_state.mode;
-    raw_state.last = final_state.last;
-    raw_state.whave = final_state.whave;
-    raw_state.wnext = final_state.wnext;
-    raw_state.length = final_state.length;
-    raw_state.offset = final_state.offset;
-    raw_state.extra = final_state.extra;
-    raw_state.lencode = final_state.lencode;
-    raw_state.distcode = final_state.distcode;
-    raw_state.lenbits = final_state.lenbits;
-    raw_state.distbits = final_state.distbits;
-    raw_state.ncode = final_state.ncode;
-    raw_state.nlen = final_state.nlen;
-    raw_state.ndist = final_state.ndist;
-    raw_state.have = final_state.have;
-    raw_state.next = final_state.next;
+    raw_state.normal.mode = final_state.mode;
+    raw_state.normal.last = final_state.last;
+    raw_state.normal.whave = final_state.whave;
+    raw_state.normal.wnext = final_state.wnext;
+    raw_state.normal.length = final_state.length;
+    raw_state.normal.offset = final_state.offset;
+    raw_state.normal.extra = final_state.extra;
+    raw_state.normal.lencode = final_state.lencode;
+    raw_state.normal.distcode = final_state.distcode;
+    raw_state.normal.lenbits = final_state.lenbits;
+    raw_state.normal.distbits = final_state.distbits;
+    raw_state.normal.ncode = final_state.ncode;
+    raw_state.normal.nlen = final_state.nlen;
+    raw_state.normal.ndist = final_state.ndist;
+    raw_state.normal.have = final_state.have;
+    raw_state.normal.next = final_state.next;
     if let Some(message) = result.message {
         strm.msg = message.as_ptr().cast_mut().cast();
     }

@@ -407,20 +407,20 @@ pub(crate) unsafe fn inflate_fast_from_abi_stream(
         }
         core::slice::from_raw_parts_mut(output_start, start as usize)
     };
-    let window = state.owned_window.as_deref();
+    let window = state.normal.owned_window.as_deref();
     let fast_state = InflateFastState {
         history: FastHistory::External(window),
-        wsize: state.wsize as usize,
-        whave: state.whave as usize,
-        wnext: state.wnext as usize,
-        hold: state.hold,
-        bits: state.bits,
-        lcode: state.lencode,
-        dcode: state.distcode,
-        lmask: (1u32 << state.lenbits) - 1,
-        dmask: (1u32 << state.distbits) - 1,
-        codes: &state.codes,
-        sane: state.sane != 0,
+        wsize: state.normal.wsize as usize,
+        whave: state.normal.whave as usize,
+        wnext: state.normal.wnext as usize,
+        hold: state.normal.hold,
+        bits: state.normal.bits,
+        lcode: state.normal.lencode,
+        dcode: state.normal.distcode,
+        lmask: (1u32 << state.normal.lenbits) - 1,
+        dmask: (1u32 << state.normal.distbits) - 1,
+        codes: &state.normal.codes,
+        sane: state.normal.sane != 0,
     };
     // Use the same pointer-free transaction as normal inflate.  This keeps
     // the raw ABI cursor projection here while ensuring both fast callers
@@ -435,24 +435,24 @@ pub(crate) unsafe fn inflate_fast_from_abi_stream(
     strm.avail_in = update.input_remaining as crate::stdlib::uInt;
     strm.next_out = output_start.wrapping_add(update.output_used);
     strm.avail_out = update.output_remaining as crate::stdlib::uInt;
-    state.hold = update.hold;
-    state.bits = update.bits;
+    state.normal.hold = update.hold;
+    state.normal.bits = update.bits;
     match update.exit {
         FastExit::Continue => {}
-        FastExit::Type => state.mode = TYPE,
+        FastExit::Type => state.normal.mode = TYPE,
         FastExit::InvalidDistance => {
             strm.msg = b"invalid distance too far back\0"
                 .as_ptr()
                 .cast_mut()
                 .cast();
-            state.mode = BAD;
+            state.normal.mode = BAD;
         }
         FastExit::InvalidCode => {
             strm.msg = b"invalid literal/length or distance code\0"
                 .as_ptr()
                 .cast_mut()
                 .cast();
-            state.mode = BAD;
+            state.normal.mode = BAD;
         }
     }
 }
