@@ -112,6 +112,14 @@ fn gz_read_error_is_recoverable(err: ::core::ffi::c_int, again: ::core::ffi::c_i
     err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR || again != 0
 }
 
+fn gz_read_state_is_usable(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+) -> bool {
+    mode == crate::gzguts_h::GZ_READ && gz_read_error_is_recoverable(err, again)
+}
+
 enum GzreadOutcome {
     Read(::core::ffi::c_int),
     Error,
@@ -1066,6 +1074,30 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_state_is_usable_requires_read_mode_and_recoverable_errors() {
+        assert!(gz_read_state_is_usable(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_OK,
+            0
+        ));
+        assert!(gz_read_state_is_usable(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_DATA_ERROR,
+            1
+        ));
+        assert!(!gz_read_state_is_usable(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_OK,
+            0
+        ));
+        assert!(!gz_read_state_is_usable(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_DATA_ERROR,
+            0
+        ));
+    }
+
+    #[test]
     fn gzread_outcome_returns_nonzero_reads_even_with_state_flags() {
         assert!(matches!(
             gzread_outcome(5, crate::zlib_h::Z_DATA_ERROR, 1),
@@ -1553,10 +1585,7 @@ pub unsafe extern "C" fn gzread(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if !gz_read_error_is_recoverable((*state).err, (*state).again) {
+    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -1608,10 +1637,7 @@ pub unsafe extern "C" fn gzfread(
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if !gz_read_error_is_recoverable((*state).err, (*state).again) {
+    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again) {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_error(
@@ -1786,10 +1812,7 @@ pub unsafe extern "C" fn gzgets(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    if !gz_read_error_is_recoverable((*state).err, (*state).again) {
+    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     crate::src::gzlib::gz_error(

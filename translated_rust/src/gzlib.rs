@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -95,6 +95,10 @@ fn gzclearerr_core(
 
 fn gz_error_clears_buffer(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {
     err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0
+}
+
+fn gz_error_needs_message_allocation(err: ::core::ffi::c_int, has_message: bool) -> bool {
+    has_message && err != crate::zlib_h::Z_MEM_ERROR
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1006,10 +1010,7 @@ pub unsafe extern "C" fn gz_error(
         (*state).x.have = 0 as ::core::ffi::c_uint;
     }
     (*state).err = err;
-    if msg.is_null() {
-        return;
-    }
-    if err == crate::zlib_h::Z_MEM_ERROR {
+    if !gz_error_needs_message_allocation(err, !msg.is_null()) {
         return;
     }
     (*state).msg = crate::stdlib::malloc(
@@ -1053,13 +1054,13 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_error_clears_buffer, gz_is_read_or_write_mode,
-        gz_legacy_offset_result, gz_open_needs_open, gz_open_offset_plan, gz_open_recorded_offset,
-        gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking, gz_parse_open_mode,
-        gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
-        gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
-        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
-        gzseek_clears_pending_skip, gzseek_error_allows_positioning,
+        gz_clear_read_flags, gz_error_clears_buffer, gz_error_needs_message_allocation,
+        gz_is_read_or_write_mode, gz_legacy_offset_result, gz_open_needs_open, gz_open_offset_plan,
+        gz_open_recorded_offset, gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking,
+        gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
+        gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
+        gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
+        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
         gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
         gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
@@ -1240,6 +1241,22 @@ mod tests {
         assert!(!gz_error_clears_buffer(crate::zlib_h::Z_OK, 0));
         assert!(!gz_error_clears_buffer(crate::zlib_h::Z_BUF_ERROR, 0));
         assert!(!gz_error_clears_buffer(crate::zlib_h::Z_MEM_ERROR, 1));
+    }
+
+    #[test]
+    fn gz_error_allocates_messages_only_for_non_memory_errors_with_text() {
+        assert!(gz_error_needs_message_allocation(
+            crate::zlib_h::Z_DATA_ERROR,
+            true
+        ));
+        assert!(!gz_error_needs_message_allocation(
+            crate::zlib_h::Z_DATA_ERROR,
+            false
+        ));
+        assert!(!gz_error_needs_message_allocation(
+            crate::zlib_h::Z_MEM_ERROR,
+            true
+        ));
     }
 
     #[test]

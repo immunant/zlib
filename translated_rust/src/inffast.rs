@@ -53,6 +53,14 @@ fn bit_mask(bit_count: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     ((1 as ::core::ffi::c_uint) << bit_count).wrapping_sub(1 as ::core::ffi::c_uint)
 }
 
+fn consume_bits(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    bit_count: ::core::ffi::c_uint,
+) -> (::core::ffi::c_ulong, ::core::ffi::c_uint) {
+    (hold >> bit_count, bits.wrapping_sub(bit_count))
+}
+
 pub unsafe extern "C" fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -113,8 +121,7 @@ pub unsafe extern "C" fn inflate_fast(
         here = lcode.offset((hold & lmask as ::core::ffi::c_ulong) as isize);
         loop {
             op = (*here).bits as ::core::ffi::c_uint;
-            hold >>= op;
-            bits = bits.wrapping_sub(op);
+            (hold, bits) = consume_bits(hold, bits, op);
             op = (*here).op as ::core::ffi::c_uint;
             if op == 0 as ::core::ffi::c_uint {
                 let c2rust_fresh2 = out;
@@ -133,8 +140,7 @@ pub unsafe extern "C" fn inflate_fast(
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     len = len.wrapping_add(hold as ::core::ffi::c_uint & bit_mask(op));
-                    hold >>= op;
-                    bits = bits.wrapping_sub(op);
+                    (hold, bits) = consume_bits(hold, bits, op);
                 }
                 if bits < 15 as ::core::ffi::c_uint {
                     let c2rust_fresh4 = in_0;
@@ -165,8 +171,7 @@ pub unsafe extern "C" fn inflate_fast(
             3217834059723038609 => {
                 loop {
                     op = (*here).bits as ::core::ffi::c_uint;
-                    hold >>= op;
-                    bits = bits.wrapping_sub(op);
+                    (hold, bits) = consume_bits(hold, bits, op);
                     op = (*here).op as ::core::ffi::c_uint;
                     if op & 16 as ::core::ffi::c_uint != 0 {
                         dist = (*here).val as ::core::ffi::c_uint;
@@ -186,8 +191,7 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                         }
                         dist = dist.wrapping_add(hold as ::core::ffi::c_uint & bit_mask(op));
-                        hold >>= op;
-                        bits = bits.wrapping_sub(op);
+                        (hold, bits) = consume_bits(hold, bits, op);
                         op = out.offset_from(beg) as ::core::ffi::c_long as ::core::ffi::c_uint;
                         if dist > op {
                             c2rust_current_block_141 = 5235537862154438448;
@@ -410,7 +414,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::bit_mask;
+    use super::{bit_mask, consume_bits};
 
     #[test]
     fn bit_mask_selects_requested_low_bits() {
@@ -418,5 +422,16 @@ mod tests {
         assert_eq!(bit_mask(1), 1);
         assert_eq!(bit_mask(5), 0b1_1111);
         assert_eq!(bit_mask(15), 0x7fff);
+    }
+
+    #[test]
+    fn consume_bits_discards_low_bits_and_updates_count() {
+        assert_eq!(consume_bits(0b1011_0101, 8, 3), (0b1_0110, 5));
+    }
+
+    #[test]
+    fn consume_bits_preserves_zero_count_and_wrapping_subtraction() {
+        assert_eq!(consume_bits(0xfeed, 9, 0), (0xfeed, 9));
+        assert_eq!(consume_bits(1, 0, 1), (0, ::core::ffi::c_uint::MAX));
     }
 }
