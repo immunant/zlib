@@ -977,6 +977,63 @@ fn gz_read_buffer_aliases_storage(
         || gz_byte_ranges_overlap(caller_start, caller_len, state.out as usize, output_len)
 }
 
+// Before an exported read entry point lends the handle's allocations to a
+// safe core, validate both allocation ranges and their C cursors. This is
+// distinct from caller-buffer aliasing: two malformed internal ranges would
+// make independent input and output views unsound even with an unrelated
+// caller buffer.
+fn gz_read_storage_cursor_is_valid(
+    cursor: usize,
+    storage_start: usize,
+    storage_len: usize,
+    available: usize,
+) -> bool {
+    cursor
+        .checked_sub(storage_start)
+        .and_then(|offset| storage_len.checked_sub(offset))
+        .is_some_and(|remaining| available <= remaining)
+}
+
+fn gz_read_storage_is_valid(state: &crate::gzguts_h::gz_state) -> bool {
+    if state.size == 0 {
+        // gzopen allocates the state with malloc and, like C zlib, leaves
+        // buffer pointers unspecified until lazy initialization. `size` is
+        // the sole liveness marker here, and no slice may be formed yet.
+        return true;
+    }
+    if state.in_0.is_null() || state.out.is_null() {
+        return false;
+    }
+    let input_len = state.size as usize;
+    let output_len = gz_output_buffer_len(state.size) as usize;
+    if output_len == 0
+        || gz_byte_ranges_overlap(state.in_0 as usize, input_len, state.out as usize, output_len)
+    {
+        return false;
+    }
+    let input_cursor_is_valid = if state.strm.next_in.is_null() {
+        state.strm.avail_in == 0
+    } else {
+        gz_read_storage_cursor_is_valid(
+            state.strm.next_in as usize,
+            state.in_0 as usize,
+            input_len,
+            state.strm.avail_in as usize,
+        )
+    };
+    let output_cursor_is_valid = if state.x.next.is_null() {
+        state.x.have == 0
+    } else {
+        gz_read_storage_cursor_is_valid(
+            state.x.next as usize,
+            state.out as usize,
+            output_len,
+            state.x.have as usize,
+        )
+    };
+    input_cursor_is_valid && output_cursor_is_valid
+}
+
 fn gzgets_remaining_capacity(len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     (len as ::core::ffi::c_uint).wrapping_sub(1)
 }
@@ -4492,6 +4549,52 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_storage_validation_accepts_uninitialized_or_live_disjoint_storage() {
+        let mut input = [0_u8; 4];
+        let mut output = [0_u8; 8];
+        let mut state: crate::gzguts_h::gz_state = unsafe { core::mem::zeroed() };
+
+        assert!(gz_read_storage_is_valid(&state));
+
+        state.size = 4;
+        state.in_0 = input.as_mut_ptr();
+        state.out = output.as_mut_ptr();
+        assert!(gz_read_storage_is_valid(&state));
+
+        state.strm.next_in = input.as_mut_ptr().wrapping_add(1);
+        state.strm.avail_in = 3;
+        state.x.next = output.as_mut_ptr().wrapping_add(2);
+        state.x.have = 6;
+        assert!(gz_read_storage_is_valid(&state));
+    }
+
+    #[test]
+    fn gz_read_storage_validation_rejects_overlaps_and_bad_cursors() {
+        let mut input = [0_u8; 4];
+        let mut output = [0_u8; 8];
+        let mut state: crate::gzguts_h::gz_state = unsafe { core::mem::zeroed() };
+
+        state.in_0 = input.as_mut_ptr();
+        assert!(gz_read_storage_is_valid(&state));
+
+        state.size = 4;
+        assert!(!gz_read_storage_is_valid(&state));
+        state.out = input.as_mut_ptr();
+        assert!(!gz_read_storage_is_valid(&state));
+
+        state.out = output.as_mut_ptr();
+        state.strm.next_in = input.as_mut_ptr().wrapping_add(3);
+        state.strm.avail_in = 2;
+        assert!(!gz_read_storage_is_valid(&state));
+
+        state.strm.next_in = ::core::ptr::null_mut();
+        state.strm.avail_in = 0;
+        state.x.next = output.as_mut_ptr().wrapping_add(7);
+        state.x.have = 2;
+        assert!(!gz_read_storage_is_valid(&state));
+    }
+
+    #[test]
     fn gzgets_remaining_capacity_reserves_the_terminator() {
         assert_eq!(gzgets_remaining_capacity(1), 0);
         assert_eq!(gzgets_remaining_capacity(2), 1);
@@ -4759,7 +4862,9 @@ pub unsafe extern "C" fn gzread_ffi(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again) {
+    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again)
+        || !gz_read_storage_is_valid(&*state)
+    {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -4827,7 +4932,9 @@ pub unsafe extern "C" fn gzfread_ffi(
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again) {
+    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again)
+        || !gz_read_storage_is_valid(&*state)
+    {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_error(
@@ -4883,7 +4990,9 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again) {
+    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again)
+        || !gz_read_storage_is_valid(&*state)
+    {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -4941,7 +5050,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_is_read_mode((*state).mode) {
+    if !gz_is_read_mode((*state).mode) || !gz_read_storage_is_valid(&*state) {
         return -1 as ::core::ffi::c_int;
     }
     if gz_read_needs_look(crate::gzguts_h::GZ_READ, (*state).how, (*state).x.have) {
@@ -5044,7 +5153,9 @@ pub unsafe extern "C" fn gzgets_ffi(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again) {
+    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again)
+        || !gz_read_storage_is_valid(&*state)
+    {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     crate::src::gzlib::gz_error(
@@ -5148,6 +5259,9 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
         return 0 as ::core::ffi::c_int;
     }
     let state = file as crate::gzguts_h::gz_statep;
+    if !gz_read_storage_is_valid(&*state) {
+        return 0 as ::core::ffi::c_int;
+    }
     if gz_read_needs_look((*state).mode, (*state).how, (*state).x.have) {
         gz_look(&mut *state);
     }
