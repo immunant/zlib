@@ -129,8 +129,7 @@ fn gz_load(
 }
 
 // This helper is internal and all of its callers have already bound the
-// validated gzip state. Only input-buffer compaction needs a raw operation;
-// descriptor I/O remains confined to `gz_load`.
+// validated gzip state. Descriptor I/O remains confined to `gz_load`.
 fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut got: ::core::ffi::c_uint = 0;
     let plan = match crate::src::gzlib::gz_avail_plan(state) {
@@ -148,14 +147,18 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 buffered,
                 input == state.in_0,
             ) {
-                // `next_in` points into the input buffer, so the source and
-                // destination may overlap.  `copy` preserves the translated
-                // forward-copy behavior for that compaction.
-                // SAFETY: `next_in` and `in_0` identify ranges within the
-                // initialized gzip input buffer. They may overlap, which is
-                // why this preserves the C implementation's `memmove`-like
-                // compaction operation.
-                unsafe { ::core::ptr::copy(input, state.in_0, buffered as usize) };
+                // `next_in` is a cursor in this initialized input allocation.
+                // Bind that allocation once and use the slice operation that
+                // explicitly permits the source and destination to overlap.
+                // SAFETY: `gz_avail` is reached only after `gz_look` has
+                // allocated `size` input bytes, and `next_in` plus `buffered`
+                // denotes the still-available portion of that allocation.
+                let input_start = (input as usize).wrapping_sub(state.in_0 as usize);
+                let input_end = input_start.wrapping_add(buffered as usize);
+                let buffer = unsafe {
+                    ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
+                };
+                buffer.copy_within(input_start..input_end, 0);
             }
         }
         let result = gz_load(state, state.in_0.wrapping_add(buffered as usize), requested);
