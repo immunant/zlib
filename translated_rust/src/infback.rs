@@ -73,12 +73,7 @@ fn set_back_error(strm: &mut crate::zlib_h::z_stream_s, message: &'static [u8]) 
     strm.msg = message.as_ptr() as *mut ::core::ffi::c_char;
 }
 
-fn copy_match_bytes(
-    window: &mut [u8],
-    source: usize,
-    destination: usize,
-    count: usize,
-) -> bool {
+fn copy_match_bytes(window: &mut [u8], source: usize, destination: usize, count: usize) -> bool {
     let Some(source_end) = source.checked_add(count) else {
         return false;
     };
@@ -301,8 +296,7 @@ where
                     continue;
                 } else {
                     while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                        let Some(byte) = input.next_byte()
-                        else {
+                        let Some(byte) = input.next_byte() else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         };
@@ -427,8 +421,7 @@ where
                     state.have = 0 as ::core::ffi::c_uint;
                     while state.have < state.ncode {
                         while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                            let Some(byte) = input.next_byte()
-                            else {
+                            let Some(byte) = input.next_byte() else {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             };
@@ -486,8 +479,7 @@ where
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
-                                let Some(byte) = input.next_byte()
-                                else {
+                                let Some(byte) = input.next_byte() else {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break '_inf_leave;
                                 };
@@ -507,14 +499,12 @@ where
                                             + 2 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = input.next_byte()
-                                        else {
+                                        let Some(byte) = input.next_byte() else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
-                                        hold = hold.wrapping_add(
-                                            (byte as ::core::ffi::c_ulong) << bits,
-                                        );
+                                        hold = hold
+                                            .wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
                                     hold >>= here.bits as ::core::ffi::c_int;
@@ -547,14 +537,12 @@ where
                                             + 3 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = input.next_byte()
-                                        else {
+                                        let Some(byte) = input.next_byte() else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
-                                        hold = hold.wrapping_add(
-                                            (byte as ::core::ffi::c_ulong) << bits,
-                                        );
+                                        hold = hold
+                                            .wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
                                     hold >>= here.bits as ::core::ffi::c_int;
@@ -576,14 +564,12 @@ where
                                             + 7 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = input.next_byte()
-                                        else {
+                                        let Some(byte) = input.next_byte() else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
-                                        hold = hold.wrapping_add(
-                                            (byte as ::core::ffi::c_ulong) << bits,
-                                        );
+                                        hold = hold
+                                            .wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
                                     hold >>= here.bits as ::core::ffi::c_int;
@@ -708,10 +694,100 @@ where
         // the optional fast path.  Keeping this path local avoids borrowing the
         // stream through the raw-pointer fast decoder in back-streaming mode.
         loop {
+            here = state.lencode.entry(
+                &state.codes,
+                (hold as ::core::ffi::c_uint
+                    & ((1 as ::core::ffi::c_uint) << state.lenbits)
+                        .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
+            );
+            if here.bits as ::core::ffi::c_uint <= bits {
+                break;
+            }
+            let Some(byte) = input.next_byte() else {
+                ret = crate::zlib_h::Z_BUF_ERROR;
+                break '_inf_leave;
+            };
+            hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
+            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+        }
+        if here.op as ::core::ffi::c_int != 0
+            && here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int == 0 as ::core::ffi::c_int
+        {
+            last = here;
+            loop {
                 here = state.lencode.entry(
                     &state.codes,
+                    (last.val as ::core::ffi::c_uint).wrapping_add(
+                        (hold as ::core::ffi::c_uint
+                            & ((1 as ::core::ffi::c_uint)
+                                << last.bits as ::core::ffi::c_int
+                                    + last.op as ::core::ffi::c_int)
+                                .wrapping_sub(1 as ::core::ffi::c_uint))
+                            >> last.bits as ::core::ffi::c_int,
+                    ) as usize,
+                );
+                if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
+                    as ::core::ffi::c_uint
+                    <= bits
+                {
+                    break;
+                }
+                let Some(byte) = input.next_byte() else {
+                    ret = crate::zlib_h::Z_BUF_ERROR;
+                    break '_inf_leave;
+                };
+                hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
+                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+            }
+            hold >>= last.bits as ::core::ffi::c_int;
+            bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
+        }
+        hold >>= here.bits as ::core::ffi::c_int;
+        bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+        state.length = here.val as ::core::ffi::c_uint;
+        if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+            if left == 0 as ::core::ffi::c_uint {
+                put = 0;
+                left = state.wsize;
+                state.whave = left;
+                if output.flush(&window[..left as usize]) {
+                    ret = crate::zlib_h::Z_BUF_ERROR;
+                    break;
+                }
+            }
+            window[put] = state.length as u8;
+            put += 1;
+            left = left.wrapping_sub(1);
+            state.mode = crate::src::inflate::LEN;
+        } else if here.op as ::core::ffi::c_int & 32 as ::core::ffi::c_int != 0 {
+            state.mode = crate::src::inflate::TYPE;
+        } else if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
+            set_back_error(strm, b"invalid literal/length code\0");
+            state.mode = crate::src::inflate::BAD;
+        } else {
+            state.extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
+            if state.extra != 0 as ::core::ffi::c_uint {
+                while bits < state.extra {
+                    let Some(byte) = input.next_byte() else {
+                        ret = crate::zlib_h::Z_BUF_ERROR;
+                        break '_inf_leave;
+                    };
+                    hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
+                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                }
+                state.length = state.length.wrapping_add(
+                    hold as ::core::ffi::c_uint
+                        & ((1 as ::core::ffi::c_uint) << state.extra)
+                            .wrapping_sub(1 as ::core::ffi::c_uint),
+                );
+                hold >>= state.extra;
+                bits = bits.wrapping_sub(state.extra);
+            }
+            loop {
+                here = state.distcode.entry(
+                    &state.codes,
                     (hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << state.lenbits)
+                        & ((1 as ::core::ffi::c_uint) << state.distbits)
                             .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
                 );
                 if here.bits as ::core::ffi::c_uint <= bits {
@@ -724,13 +800,11 @@ where
                 hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
             }
-            if here.op as ::core::ffi::c_int != 0
-                && here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
-                    == 0 as ::core::ffi::c_int
+            if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int == 0 as ::core::ffi::c_int
             {
                 last = here;
                 loop {
-                    here = state.lencode.entry(
+                    here = state.distcode.entry(
                         &state.codes,
                         (last.val as ::core::ffi::c_uint).wrapping_add(
                             (hold as ::core::ffi::c_uint
@@ -747,8 +821,7 @@ where
                     {
                         break;
                     }
-                    let Some(byte) = input.next_byte()
-                    else {
+                    let Some(byte) = input.next_byte() else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -760,39 +833,22 @@ where
             }
             hold >>= here.bits as ::core::ffi::c_int;
             bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-            state.length = here.val as ::core::ffi::c_uint;
-            if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-                if left == 0 as ::core::ffi::c_uint {
-                    put = 0;
-                    left = state.wsize;
-                    state.whave = left;
-                    if output.flush(&window[..left as usize]) {
-                        ret = crate::zlib_h::Z_BUF_ERROR;
-                        break;
-                    }
-                }
-                window[put] = state.length as u8;
-                put += 1;
-                left = left.wrapping_sub(1);
-                state.mode = crate::src::inflate::LEN;
-            } else if here.op as ::core::ffi::c_int & 32 as ::core::ffi::c_int != 0 {
-                state.mode = crate::src::inflate::TYPE;
-            } else if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                set_back_error(strm, b"invalid literal/length code\0");
+            if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
+                set_back_error(strm, b"invalid distance code\0");
                 state.mode = crate::src::inflate::BAD;
             } else {
+                state.offset = here.val as ::core::ffi::c_uint;
                 state.extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
                 if state.extra != 0 as ::core::ffi::c_uint {
                     while bits < state.extra {
-                        let Some(byte) = input.next_byte()
-                        else {
+                        let Some(byte) = input.next_byte() else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         };
                         hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    state.length = state.length.wrapping_add(
+                    state.offset = state.offset.wrapping_add(
                         hold as ::core::ffi::c_uint
                             & ((1 as ::core::ffi::c_uint) << state.extra)
                                 .wrapping_sub(1 as ::core::ffi::c_uint),
@@ -800,129 +856,52 @@ where
                     hold >>= state.extra;
                     bits = bits.wrapping_sub(state.extra);
                 }
-                loop {
-                    here = state.distcode.entry(
-                        &state.codes,
-                        (hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << state.distbits)
-                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                            as usize,
-                    );
-                    if here.bits as ::core::ffi::c_uint <= bits {
-                        break;
-                    }
-                    let Some(byte) = input.next_byte() else {
-                        ret = crate::zlib_h::Z_BUF_ERROR;
-                        break '_inf_leave;
-                    };
-                    hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                }
-                if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
-                    == 0 as ::core::ffi::c_int
+                if state.offset
+                    > state.wsize.wrapping_sub(if state.whave < state.wsize {
+                        left
+                    } else {
+                        0 as ::core::ffi::c_uint
+                    })
                 {
-                    last = here;
-                    loop {
-                        here = state.distcode.entry(
-                            &state.codes,
-                            (last.val as ::core::ffi::c_uint).wrapping_add(
-                                (hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint)
-                                        << last.bits as ::core::ffi::c_int
-                                            + last.op as ::core::ffi::c_int)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    >> last.bits as ::core::ffi::c_int,
-                            ) as usize,
-                        );
-                        if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
-                            as ::core::ffi::c_uint
-                            <= bits
-                        {
-                            break;
-                        }
-                        let Some(byte) = input.next_byte()
-                        else {
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break '_inf_leave;
-                        };
-                        hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
-                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                    }
-                    hold >>= last.bits as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
-                }
-                hold >>= here.bits as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                    set_back_error(strm, b"invalid distance code\0");
+                    set_back_error(strm, b"invalid distance too far back\0");
                     state.mode = crate::src::inflate::BAD;
                 } else {
-                    state.offset = here.val as ::core::ffi::c_uint;
-                    state.extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
-                    if state.extra != 0 as ::core::ffi::c_uint {
-                        while bits < state.extra {
-                            let Some(byte) = input.next_byte()
-                            else {
+                    loop {
+                        if left == 0 as ::core::ffi::c_uint {
+                            put = 0;
+                            left = state.wsize;
+                            state.whave = left;
+                            if output.flush(&window[..left as usize]) {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
-                            };
-                            hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
-                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            }
                         }
-                        state.offset = state.offset.wrapping_add(
-                            hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << state.extra)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                        );
-                        hold >>= state.extra;
-                        bits = bits.wrapping_sub(state.extra);
-                    }
-                    if state.offset
-                        > state.wsize.wrapping_sub(if state.whave < state.wsize {
-                            left
+                        let put_index = put;
+                        copy = state.wsize.wrapping_sub(state.offset);
+                        let from_index: usize;
+                        if copy < left {
+                            from_index = put_index + copy as usize;
+                            copy = left.wrapping_sub(copy);
                         } else {
-                            0 as ::core::ffi::c_uint
-                        })
-                    {
-                        set_back_error(strm, b"invalid distance too far back\0");
-                        state.mode = crate::src::inflate::BAD;
-                    } else {
-                        loop {
-                            if left == 0 as ::core::ffi::c_uint {
-                                put = 0;
-                                left = state.wsize;
-                                state.whave = left;
-                                if output.flush(&window[..left as usize]) {
-                                    ret = crate::zlib_h::Z_BUF_ERROR;
-                                    break '_inf_leave;
-                                }
-                            }
-                            let put_index = put;
-                            copy = state.wsize.wrapping_sub(state.offset);
-                            let from_index: usize;
-                            if copy < left {
-                                from_index = put_index + copy as usize;
-                                copy = left.wrapping_sub(copy);
-                            } else {
-                                from_index = put_index.wrapping_sub(state.offset as usize);
-                                copy = left;
-                            }
-                            if copy > state.length {
-                                copy = state.length;
-                            }
-                            if !copy_match_bytes(window, from_index, put_index, copy as usize) {
-                                ret = crate::zlib_h::Z_STREAM_ERROR;
-                                break '_inf_leave;
-                            }
-                            state.length = state.length.wrapping_sub(copy);
-                            left = left.wrapping_sub(copy);
-                            put = put_index + copy as usize;
-                            if state.length == 0 as ::core::ffi::c_uint {
-                                break;
-                            }
+                            from_index = put_index.wrapping_sub(state.offset as usize);
+                            copy = left;
+                        }
+                        if copy > state.length {
+                            copy = state.length;
+                        }
+                        if !copy_match_bytes(window, from_index, put_index, copy as usize) {
+                            ret = crate::zlib_h::Z_STREAM_ERROR;
+                            break '_inf_leave;
+                        }
+                        state.length = state.length.wrapping_sub(copy);
+                        left = left.wrapping_sub(copy);
+                        put = put_index + copy as usize;
+                        if state.length == 0 as ::core::ffi::c_uint {
+                            break;
                         }
                     }
                 }
+            }
         }
     }
     if left < state.wsize {
@@ -984,7 +963,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
         let Some(callback) = out else {
             return true;
         };
-        callback(out_desc, bytes.as_ptr() as *mut ::core::ffi::c_uchar, bytes.len() as u32) != 0
+        callback(
+            out_desc,
+            bytes.as_ptr() as *mut ::core::ffi::c_uchar,
+            bytes.len() as u32,
+        ) != 0
     });
     let result = inflate_back_impl(strm, state, window, &mut input, &mut output);
     match input.remaining() {

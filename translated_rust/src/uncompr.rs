@@ -138,19 +138,19 @@ impl Huffman {
 }
 
 const LENGTH_BASE: [usize; 29] = [
-    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99,
-    115, 131, 163, 195, 227, 258,
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258,
 ];
 const LENGTH_EXTRA: [u8; 29] = [
     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
 ];
 const DIST_BASE: [usize; 30] = [
-    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025,
-    1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
 ];
 const DIST_EXTRA: [u8; 30] = [
-    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
-    12, 12, 13, 13,
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
 ];
 
 fn fixed_trees() -> (Huffman, Huffman) {
@@ -240,7 +240,8 @@ fn decode_huffman_block(
                     + bits
                         .read(LENGTH_EXTRA[index] as u32)
                         .ok_or(crate::zlib_h::Z_DATA_ERROR)? as usize;
-                let distance_symbol = distances.decode(bits).ok_or(crate::zlib_h::Z_DATA_ERROR)? as usize;
+                let distance_symbol =
+                    distances.decode(bits).ok_or(crate::zlib_h::Z_DATA_ERROR)? as usize;
                 let Some(&base) = DIST_BASE.get(distance_symbol) else {
                     return Err(crate::zlib_h::Z_DATA_ERROR);
                 };
@@ -267,7 +268,11 @@ fn decode_zlib(dest: &mut [u8], source: &[u8]) -> (::core::ffi::c_int, usize) {
     let Some((&cmf, &flg)) = source.first().zip(source.get(1)) else {
         return (crate::zlib_h::Z_DATA_ERROR, 0);
     };
-    if cmf & 15 != 8 || cmf >> 4 > 7 || (u16::from(cmf) << 8 | u16::from(flg)) % 31 != 0 || flg & 32 != 0 {
+    if cmf & 15 != 8
+        || cmf >> 4 > 7
+        || (u16::from(cmf) << 8 | u16::from(flg)) % 31 != 0
+        || flg & 32 != 0
+    {
         return (crate::zlib_h::Z_DATA_ERROR, 0);
     }
     let mut bits = BitReader::new(&source[2..]);
@@ -282,10 +287,18 @@ fn decode_zlib(dest: &mut [u8], source: &[u8]) -> (::core::ffi::c_int, usize) {
         let result = match kind {
             0 => {
                 bits.align_byte();
-                let Some(len) = bits.read_byte().zip(bits.read_byte()).map(|(low, high)| u16::from_le_bytes([low, high])) else {
+                let Some(len) = bits
+                    .read_byte()
+                    .zip(bits.read_byte())
+                    .map(|(low, high)| u16::from_le_bytes([low, high]))
+                else {
                     return (crate::zlib_h::Z_DATA_ERROR, written);
                 };
-                let Some(nlen) = bits.read_byte().zip(bits.read_byte()).map(|(low, high)| u16::from_le_bytes([low, high])) else {
+                let Some(nlen) = bits
+                    .read_byte()
+                    .zip(bits.read_byte())
+                    .map(|(low, high)| u16::from_le_bytes([low, high]))
+                else {
                     return (crate::zlib_h::Z_DATA_ERROR, written);
                 };
                 if len != !nlen {
@@ -417,12 +430,7 @@ pub unsafe extern "C" fn uncompress2_z(
             ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
         };
         let output = ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize);
-        err = crate::src::inflate::inflate(
-            &mut stream,
-            crate::zlib_h::Z_NO_FLUSH,
-            input,
-            output,
-        );
+        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH, input, output);
         if err != crate::zlib_h::Z_OK {
             break;
         }

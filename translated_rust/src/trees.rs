@@ -2461,8 +2461,7 @@ fn init_block_impl(s: &mut crate::src::deflate::deflate_state) {
     s.matches = 0 as crate::stdlib::uInt;
     s.sym_next = s.matches;
 }
-pub unsafe extern "C" fn _tr_init(s: *mut crate::src::deflate::deflate_state) {
-    let s = &mut *s;
+pub fn tr_init(s: &mut crate::src::deflate::deflate_state) {
     tr_static_init();
     s.l_desc.static_kind = crate::src::deflate::STATIC_TREE_LITERAL;
     s.d_desc.static_kind = crate::src::deflate::STATIC_TREE_DISTANCE;
@@ -2470,7 +2469,11 @@ pub unsafe extern "C" fn _tr_init(s: *mut crate::src::deflate::deflate_state) {
     s.bi_buf = 0 as crate::zutil_h::ush;
     s.bi_valid = 0 as ::core::ffi::c_int;
     s.bi_used = 0 as ::core::ffi::c_int;
-    init_block(s);
+    init_block_impl(s);
+}
+
+pub unsafe extern "C" fn _tr_init(s: *mut crate::src::deflate::deflate_state) {
+    tr_init(&mut *s);
 }
 #[export_name = "_tr_init"]
 

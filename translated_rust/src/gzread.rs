@@ -52,10 +52,7 @@ enum GzLoadBuffer<'a> {
 
 /// Read from a descriptor that is owned by the gzip state for the duration of
 /// the call. The borrowed descriptor and slice cover exactly one `read`.
-fn gz_read_fd(
-    fd: &std::os::fd::OwnedFd,
-    buffer: &mut [u8],
-) -> Result<usize, std::io::Error> {
+fn gz_read_fd(fd: &std::os::fd::OwnedFd, buffer: &mut [u8]) -> Result<usize, std::io::Error> {
     rustix::io::read(fd, buffer).map_err(std::io::Error::from)
 }
 
@@ -505,8 +502,7 @@ unsafe fn gz_read_impl(
                     n = state.x.have;
                 }
                 let count = n as usize;
-                let Some(start) = state.x.next.addr().checked_sub(state.out.as_ptr().addr())
-                else {
+                let Some(start) = state.x.next.addr().checked_sub(state.out.as_ptr().addr()) else {
                     crate::src::gzlib::gz_error_state(
                         state,
                         crate::zlib_h::Z_STREAM_ERROR,
@@ -516,7 +512,9 @@ unsafe fn gz_read_impl(
                     err = -1;
                     break 's_28;
                 };
-                let Some(end) = start.checked_add(count).filter(|end| *end <= state.out.len())
+                let Some(end) = start
+                    .checked_add(count)
+                    .filter(|end| *end <= state.out.len())
                 else {
                     crate::src::gzlib::gz_error_state(
                         state,
@@ -545,7 +543,8 @@ unsafe fn gz_read_impl(
                     }
                     break 's_28;
                 } else if state.how == crate::gzguts_h::COPY {
-                    match gz_load_impl(state, GzLoadBuffer::Slice(&mut buf[out..out + n as usize])) {
+                    match gz_load_impl(state, GzLoadBuffer::Slice(&mut buf[out..out + n as usize]))
+                    {
                         Ok(got) => n = got as ::core::ffi::c_uint,
                         Err(()) => err = -1 as ::core::ffi::c_int,
                     }
@@ -974,9 +973,7 @@ pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ff
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     gzdirect(file)
 }
-pub unsafe fn gzclose_r(
-    mut owned: Box<crate::gzguts_h::gz_state>,
-) -> ::core::ffi::c_int {
+pub unsafe fn gzclose_r(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     let ret = {
         let state: &mut crate::gzguts_h::gz_state = &mut owned;
         if state.mode != crate::gzguts_h::GZ_READ {

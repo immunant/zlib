@@ -276,19 +276,13 @@ unsafe extern "C" fn gz_open(
     };
     let fd = std::os::fd::AsRawFd::as_raw_fd(fd);
     if state.mode == crate::gzguts_h::GZ_APPEND {
-        crate::stdlib::lseek64(
-            fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_END,
-        );
+        crate::stdlib::lseek64(fd, 0 as crate::stdlib::__off64_t, crate::stdlib::SEEK_END);
         state.mode = crate::gzguts_h::GZ_WRITE;
     }
     if state.mode == crate::gzguts_h::GZ_READ {
-        state.start = crate::stdlib::lseek64(
-            fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
+        state.start =
+            crate::stdlib::lseek64(fd, 0 as crate::stdlib::__off64_t, crate::stdlib::SEEK_CUR)
+                as crate::stdlib::off64_t;
         if state.start == -1 as crate::stdlib::off64_t {
             state.start = 0 as crate::stdlib::off64_t;
         }
@@ -431,7 +425,10 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     } else {
         let state = &mut *(file as crate::gzguts_h::gz_statep);
         gzrewind(
-            state.fd.as_ref().expect("open gzip state owns its descriptor"),
+            state
+                .fd
+                .as_ref()
+                .expect("open gzip state owns its descriptor"),
             state.start,
             &mut state.x.have,
             state.mode,
@@ -480,7 +477,10 @@ fn gzseek64_impl(
     {
         let delta = offset as crate::stdlib::__off64_t - state.x.have as crate::stdlib::__off64_t;
         if rustix::fs::seek(
-            state.fd.as_ref().expect("open gzip state owns its descriptor"),
+            state
+                .fd
+                .as_ref()
+                .expect("open gzip state owns its descriptor"),
             rustix::fs::SeekFrom::Current(delta),
         )
         .ok()
@@ -507,7 +507,10 @@ fn gzseek64_impl(
             return -1 as crate::stdlib::off64_t;
         }
         if gzrewind(
-            state.fd.as_ref().expect("open gzip state owns its descriptor"),
+            state
+                .fd
+                .as_ref()
+                .expect("open gzip state owns its descriptor"),
             state.start,
             &mut state.x.have,
             state.mode,

@@ -360,7 +360,8 @@ pub unsafe extern "C" fn inflate_fast(
                         (hold
                             & ((1 as ::core::ffi::c_uint) << op)
                                 .wrapping_sub(1 as ::core::ffi::c_uint)
-                                as ::core::ffi::c_ulong) as ::core::ffi::c_uint,
+                                as ::core::ffi::c_ulong)
+                            as ::core::ffi::c_uint,
                     ) as usize,
                 );
             } else if op & 32 as ::core::ffi::c_uint != 0 {
