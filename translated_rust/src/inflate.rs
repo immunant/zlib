@@ -2482,6 +2482,62 @@ fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[u8]) -> ::core::ffi::c_uint
     *have = got;
     next
 }
+
+/// Discard the partial byte in the bit accumulator and expose the remaining
+/// whole bytes for the sync-marker search.  The legacy state stores at most
+/// 32 bits, so a larger count is an incoherent internal state rather than a
+/// reason to index past this fixed scratch buffer.
+fn inflate_sync_aligned_bytes(
+    mut hold: ::core::ffi::c_ulong,
+    mut bits: ::core::ffi::c_uint,
+) -> Option<(::core::ffi::c_ulong, ::core::ffi::c_uint, [u8; 4], usize)> {
+    hold >>= bits & 7;
+    bits = bits.wrapping_sub(bits & 7);
+    let mut bytes = [0; 4];
+    let mut len = 0;
+    while bits >= 8 {
+        let slot = bytes.get_mut(len)?;
+        *slot = hold as u8;
+        hold >>= 8;
+        bits = bits.wrapping_sub(8);
+        len += 1;
+    }
+    Some((hold, bits, bytes, len))
+}
+
+fn inflate_sync_point(
+    mode: crate::src::inflate::inflate_mode,
+    bits: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    (mode == crate::src::inflate::STORED && bits == 0) as ::core::ffi::c_int
+}
+
+fn inflate_validate_wrap(
+    wrap: ::core::ffi::c_int,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if check != 0 && wrap != 0 {
+        wrap | 4
+    } else {
+        wrap & !4
+    }
+}
+
+fn inflate_mark(
+    back: ::core::ffi::c_int,
+    mode: crate::src::inflate::inflate_mode,
+    length: ::core::ffi::c_uint,
+    was: ::core::ffi::c_uint,
+) -> ::core::ffi::c_long {
+    (((back as ::core::ffi::c_long as ::core::ffi::c_ulong) << 16) as ::core::ffi::c_long)
+        + if mode == crate::src::inflate::COPY_1 {
+            length as ::core::ffi::c_long
+        } else if mode == crate::src::inflate::MATCH {
+            was.wrapping_sub(length) as ::core::ffi::c_long
+        } else {
+            0
+        }
+}
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
@@ -2512,15 +2568,15 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
         != crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         (*state).mode = crate::src::inflate::SYNC;
-        (*state).hold >>= (*state).bits & 7;
-        (*state).bits = (*state).bits.wrapping_sub((*state).bits & 7);
-        while (*state).bits >= 8 {
-            let next = len as usize;
-            len = len.wrapping_add(1);
-            buf[next] = (*state).hold as ::core::ffi::c_uchar;
-            (*state).hold >>= 8;
-            (*state).bits = (*state).bits.wrapping_sub(8);
-        }
+        let Some((hold, bits, aligned, aligned_len)) =
+            inflate_sync_aligned_bytes((*state).hold, (*state).bits)
+        else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        (*state).hold = hold;
+        (*state).bits = bits;
+        buf = aligned;
+        len = aligned_len as ::core::ffi::c_uint;
         (*state).have = 0;
         syncsearch(&mut (*state).have, &buf[..len as usize]);
     }
@@ -2556,9 +2612,7 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return ((*state).mode as ::core::ffi::c_uint
-        == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
-        && (*state).bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
+    inflate_sync_point((*state).mode, (*state).bits)
 }
 #[export_name = "inflateCopy"]
 pub unsafe extern "C" fn inflateCopy_ffi(
@@ -2680,12 +2734,8 @@ pub unsafe extern "C" fn inflateValidate_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if check != 0 && (*state).wrap != 0 {
-        (*state).wrap |= 4 as ::core::ffi::c_int;
-    } else {
-        (*state).wrap &= !(4 as ::core::ffi::c_int);
-    }
-    return crate::zlib_h::Z_OK;
+    (*state).wrap = inflate_validate_wrap((*state).wrap, check);
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateMark"]
 pub unsafe extern "C" fn inflateMark_ffi(
@@ -2697,21 +2747,7 @@ pub unsafe extern "C" fn inflateMark_ffi(
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return (((*state).back as ::core::ffi::c_long as ::core::ffi::c_ulong)
-        << 16 as ::core::ffi::c_int) as ::core::ffi::c_long
-        + (if (*state).mode as ::core::ffi::c_uint
-            == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            (*state).length
-        } else {
-            if (*state).mode as ::core::ffi::c_uint
-                == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                (*state).was.wrapping_sub((*state).length)
-            } else {
-                0 as ::core::ffi::c_uint
-            }
-        }) as ::core::ffi::c_long;
+    inflate_mark((*state).back, (*state).mode, (*state).length, (*state).was)
 }
 #[export_name = "inflateCodesUsed"]
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
