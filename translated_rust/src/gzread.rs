@@ -109,11 +109,7 @@ fn gz_load_read_len(
     max: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
     let get = len.wrapping_sub(have);
-    if get > max {
-        max
-    } else {
-        get
-    }
+    get.min(max)
 }
 
 fn gz_load_max_read_len() -> ::core::ffi::c_uint {
@@ -1415,6 +1411,7 @@ mod tests {
     #[test]
     fn gz_load_read_len_uses_remaining_bytes_below_cap() {
         assert_eq!(gz_load_read_len(10, 4, 8), 6);
+        assert_eq!(gz_load_read_len(4, 4, 8), 0);
     }
 
     #[test]

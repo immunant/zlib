@@ -2430,12 +2430,10 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
 }
 
 fn inflate_mode_data_type_flags(mode: inflate_mode) -> ::core::ffi::c_int {
-    if mode == TYPE {
-        128
-    } else if mode == LEN_ || mode == COPY_ {
-        256
-    } else {
-        0
+    match mode {
+        TYPE => 128,
+        LEN_ | COPY_ => 256,
+        _ => 0,
     }
 }
 
@@ -3008,6 +3006,7 @@ mod tests {
     #[test]
     fn inflate_mode_data_type_flags_match_mode() {
         assert_eq!(inflate_mode_data_type_flags(HEAD), 0);
+        assert_eq!(inflate_mode_data_type_flags(SYNC), 0);
         assert_eq!(inflate_mode_data_type_flags(TYPE), 128);
         assert_eq!(inflate_mode_data_type_flags(LEN_), 256);
         assert_eq!(inflate_mode_data_type_flags(COPY_), 256);

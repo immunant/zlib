@@ -504,11 +504,7 @@ fn fill_window_insert_after_slide(
     insert: crate::stdlib::uInt,
     strstart: crate::stdlib::uInt,
 ) -> crate::stdlib::uInt {
-    if insert > strstart {
-        strstart
-    } else {
-        insert
-    }
+    insert.min(strstart)
 }
 
 fn fill_window_cursor(
@@ -4070,6 +4066,10 @@ mod tests {
         assert_eq!(
             fill_window_insert_after_slide(crate::stdlib::uInt::MAX, 42),
             42,
+        );
+        assert_eq!(
+            fill_window_insert_after_slide(crate::stdlib::uInt::MAX, crate::stdlib::uInt::MAX),
+            crate::stdlib::uInt::MAX,
         );
     }
 
