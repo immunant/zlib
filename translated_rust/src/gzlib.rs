@@ -1167,6 +1167,56 @@ fn gz_open_init(state: &mut crate::gzguts_h::gz_state) {
     state.direct = 0;
 }
 
+// A gzip state is opaque to callers and is released only through the gzip
+// close APIs.  Constructing every field here lets the core open path retain
+// ordinary Rust ownership until the opaque handle is published.
+fn gz_open_state() -> crate::gzguts_h::gz_state {
+    crate::gzguts_h::gz_state {
+        x: crate::zlib_h::gzFile_s {
+            have: 0,
+            next: ::core::ptr::null_mut(),
+            pos: 0,
+        },
+        mode: crate::gzguts_h::GZ_NONE,
+        fd: -1,
+        path: ::core::ptr::null_mut(),
+        path_len: 0,
+        size: 0,
+        want: 0,
+        in_0: ::core::ptr::null_mut(),
+        out: ::core::ptr::null_mut(),
+        direct: 0,
+        junk: 0,
+        how: 0,
+        again: 0,
+        start: 0,
+        eof: 0,
+        past: 0,
+        level: 0,
+        strategy: 0,
+        reset: 0,
+        skip: 0,
+        err: crate::zlib_h::Z_OK,
+        msg: ::core::ptr::null_mut(),
+        strm: crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        },
+    }
+}
+
 // Apply one mode character without coupling interpretation to the raw mode
 // string cursor used by the public FFI constructor.
 fn gz_open_mode_byte(
@@ -1296,42 +1346,33 @@ fn gz_open(
     fd: ::core::ffi::c_int,
     mode: &::core::ffi::CStr,
 ) -> crate::zlib_h::gzFile {
-    // `malloc` accepts every `size_t` request. Keep allocation and its null
-    // result outside the narrower boundary that binds the returned state.
-    let state = crate::stdlib::malloc(::core::mem::size_of::<crate::gzguts_h::gz_state>())
-        as crate::gzguts_h::gz_statep;
-    if state.is_null() {
+    // Reserve the registry slot before opening a descriptor. Holding the
+    // registry lock until publication guarantees this cannot fail after the
+    // descriptor has become this state’s responsibility.
+    let mut owned_states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    if owned_states.try_reserve(1).is_err() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
+    let mut state = Box::new(gz_open_state());
     let len = path.to_bytes().len() as crate::stdlib::z_size_t;
     let mut options = GzOpenMode {
         oflag: 0,
         exclusive: 0,
     };
-    // SAFETY: `state` is the non-null allocation above. It is bound once and
-    // released on each failure path before the reference can be observed
-    // again.
-    let state_ref = unsafe { &mut *state };
+    let state_ref = state.as_mut();
     gz_open_init(state_ref);
     for &mode in mode.to_bytes() {
         if !gz_open_mode_byte(state_ref, &mut options, mode) {
-            // This state uses zlib's default allocator, so its safe matching
-            // adapter can release the still-owned allocation.
-            crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     }
     if !gz_open_finish_mode(state_ref) {
-        // This state uses zlib's default allocator, so its safe matching
-        // adapter can release the still-owned allocation.
-        crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     state_ref.path_len = len;
     // The registry owns the immutable C-compatible path and publishes its
     // stable byte buffer through the opaque C state.
     if !gz_register_owned_strings(state_ref, path) {
-        crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     let oflag = gz_open_flags(state_ref, &options);
@@ -1366,7 +1407,6 @@ fn gz_open(
         // The registry entry must be dropped before releasing the state it
         // is keyed by.
         gz_release_owned_strings(state_ref);
-        crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     match gz_open_position_plan(state_ref) {
@@ -1390,7 +1430,9 @@ fn gz_open(
     }
     gz_reset(state_ref);
     gz_error(state_ref, crate::zlib_h::Z_OK, None);
-    state as crate::zlib_h::gzFile
+    let state_ptr = ::core::ptr::from_mut(state.as_mut());
+    owned_states.push((state_ptr.addr(), GzOwnedState(state)));
+    state_ptr as crate::zlib_h::gzFile
 }
 #[export_name = "gzopen"]
 
@@ -1885,12 +1927,40 @@ static GZ_OWNED_STRINGS: ::std::sync::OnceLock<
     ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>>,
 > = ::std::sync::OnceLock::new();
 
+// The registry holds the allocation behind each opaque `gzFile` handle.  It
+// gives the core constructor an owned state without requiring a raw-pointer
+// bind; close removes the entry only after it has finished using the state.
+struct GzOwnedState(Box<crate::gzguts_h::gz_state>);
+
+// The registry only moves ownership of the opaque allocation. Access to the
+// pointee remains governed by zlib's `gzFile` contract, and the mutex guards
+// only registry insertion/removal, never a gzip operation on the state.
+unsafe impl Send for GzOwnedState {}
+
+static GZ_OWNED_STATES: ::std::sync::OnceLock<
+    ::std::sync::Mutex<Vec<(usize, GzOwnedState)>>,
+> = ::std::sync::OnceLock::new();
+
 fn gz_state_key(state: &crate::gzguts_h::gz_state) -> usize {
     ::core::ptr::from_ref(state).addr()
 }
 
 fn gz_owned_strings() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>> {
     GZ_OWNED_STRINGS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+fn gz_owned_states() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedState)>> {
+    GZ_OWNED_STATES.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+// Close has already completed all state access when it calls this function.
+// Removing the matching box returns the opaque handle's allocation to Rust.
+pub(crate) fn gz_release_owned_state(state: &mut crate::gzguts_h::gz_state) {
+    let state_key = ::core::ptr::from_mut(state).addr();
+    let mut states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    if let Some(index) = states.iter().position(|(key, _)| *key == state_key) {
+        states.swap_remove(index);
+    }
 }
 
 fn gz_register_owned_strings(

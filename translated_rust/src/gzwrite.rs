@@ -849,10 +849,7 @@ pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
-    crate::src::zutil::zcfree(
-        ::core::ptr::null_mut(),
-        state as *mut crate::gzguts_h::gz_state as crate::stdlib::voidpf,
-    );
+    crate::src::gzlib::gz_release_owned_state(state);
     return ret;
 }
 #[export_name = "gzclose_w"]

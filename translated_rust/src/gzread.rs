@@ -1073,10 +1073,7 @@ pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     // earlier buffered-error result, matching zlib's cleanup order.
     crate::src::gzlib::gz_release_owned_strings(state);
     ret = crate::stdlib::close(fd);
-    crate::src::zutil::zcfree(
-        ::core::ptr::null_mut(),
-        state as *mut crate::gzguts_h::gz_state as crate::stdlib::voidpf,
-    );
+    crate::src::gzlib::gz_release_owned_state(state);
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
