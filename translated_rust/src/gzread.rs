@@ -443,17 +443,17 @@ pub(crate) fn gz_consume(
     n
 }
 
-// Public entry points have already checked and bound the gzip state.  Keep
-// this internal reader reference-bound; the caller buffer copy remains its
-// only raw input boundary.
+// Public entry points have already checked and bound the gzip state and
+// caller buffer. Keep this internal reader reference-bound; its only raw
+// boundary is copying from gzip's owned output buffer.
 fn gz_read(
     state: &mut crate::gzguts_h::gz_state,
-    mut buf: crate::stdlib::voidp,
-    mut len: crate::stdlib::z_size_t,
+    buf: &mut [::core::ffi::c_uchar],
 ) -> crate::stdlib::z_size_t {
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut err: ::core::ffi::c_int = 0;
+    let mut len = buf.len() as crate::stdlib::z_size_t;
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -473,7 +473,7 @@ fn gz_read(
                 // `gz_read_plan` bounds this copy by both ranges.
                 unsafe {
                     crate::stdlib::memcpy(
-                        buf as *mut ::core::ffi::c_void,
+                        buf[got as usize..].as_mut_ptr() as *mut ::core::ffi::c_void,
                         state.x.next as *const ::core::ffi::c_void,
                         n as crate::__stddef_size_t_h::size_t,
                     );
@@ -498,20 +498,19 @@ fn gz_read(
             }
             crate::src::gzlib::GzReadPlan::Copy(chunk) => {
                 n = chunk;
-                let result = gz_load(state, buf as *mut ::core::ffi::c_uchar, n);
+                let result = gz_load(state, buf[got as usize..].as_mut_ptr(), n);
                 n = result.received;
                 err = result.status;
             }
             crate::src::gzlib::GzReadPlan::Decompress(chunk) => {
                 n = chunk;
                 state.strm.avail_out = n as crate::stdlib::uInt;
-                state.strm.next_out = buf as *mut crate::stdlib::Bytef;
+                state.strm.next_out = buf[got as usize..].as_mut_ptr();
                 err = gz_decomp(state);
                 n = crate::src::gzlib::gz_read_take_decompressed(state);
             }
         }
         crate::src::gzlib::gz_read_progress(state, &mut len, &mut got, n, consumed_buffered);
-        buf = (buf as *mut crate::stdlib::Bytef).wrapping_add(n as usize) as crate::stdlib::voidp;
         if !crate::src::gzlib::gz_read_should_continue(len, err) {
             break;
         }
@@ -519,13 +518,11 @@ fn gz_read(
     crate::src::gzlib::gz_read_mark_past(state, len);
     return got;
 }
-// The exported wrapper owns handle validation and binding. This coordinator
-// operates on that bound state; its caller buffer remains the scoped raw
-// boundary used by `gz_read`. Its sole errno/C-string bridge remains confined
-// to the already-existing raw operation below.
-pub extern "C" fn gzread(
+// The exported wrapper binds the caller buffer. This coordinator owns all
+// read-state validation, request/error handling, and result mapping.
+pub fn gzread(
     state: &mut crate::gzguts_h::gz_state,
-    mut buf: crate::stdlib::voidp,
+    buf: Option<&mut [::core::ffi::c_uchar]>,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     if !gz_begin_read_operation(state) {
@@ -539,7 +536,23 @@ pub extern "C" fn gzread(
         );
         return -1 as ::core::ffi::c_int;
     }
-    len = gz_read(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_uint;
+    let Some(buf) = buf else {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"request does not fit in a Rust slice\0"),
+        );
+        return -1 as ::core::ffi::c_int;
+    };
+    if buf.len() != len as usize {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"request does not match caller buffer\0"),
+        );
+        return -1 as ::core::ffi::c_int;
+    }
+    len = gz_read(state, buf) as ::core::ffi::c_uint;
     match crate::src::gzlib::gz_read_result(len, state.err, state.again) {
         crate::src::gzlib::GzReadResult::Count => {}
         crate::src::gzlib::GzReadResult::Error => return -1 as ::core::ffi::c_int,
@@ -568,10 +581,18 @@ pub unsafe extern "C" fn gzread_ffi(
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    gzread(&mut *(file as crate::gzguts_h::gz_statep), buf, len)
+    let buffer = match crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) {
+        Some(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
+        Some(len) if !buf.is_null() => Some(::core::slice::from_raw_parts_mut(
+            buf as *mut ::core::ffi::c_uchar,
+            len,
+        )),
+        _ => None,
+    };
+    gzread(&mut *(file as crate::gzguts_h::gz_statep), buffer, len)
 }
-pub extern "C" fn gzfread(
-    mut buf: crate::stdlib::voidp,
+pub fn gzfread(
+    buf: Option<&mut [::core::ffi::c_uchar]>,
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
     state: &mut crate::gzguts_h::gz_state,
@@ -589,9 +610,20 @@ pub extern "C" fn gzfread(
             );
             0 as crate::stdlib::z_size_t
         }
-        crate::src::gzlib::GzItemRequest::Bytes(len) => {
-            gz_read(state, buf, len).wrapping_div(size)
-        }
+        crate::src::gzlib::GzItemRequest::Bytes(len) => match (
+            crate::src::gzlib::gz_rust_slice_len(len),
+            buf,
+        ) {
+            (Some(len), Some(buf)) if buf.len() == len => gz_read(state, buf).wrapping_div(size),
+            _ => {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(b"request does not fit in a Rust slice\0"),
+                );
+                0 as crate::stdlib::z_size_t
+            }
+        },
     }
 }
 #[export_name = "gzfread"]
@@ -605,7 +637,15 @@ pub unsafe extern "C" fn gzfread_ffi(
     if file.is_null() {
         return 0 as crate::stdlib::z_size_t;
     }
-    gzfread(buf, size, nitems, &mut *(file as crate::gzguts_h::gz_statep))
+    let buffer = match crate::src::gzlib::gz_item_slice_len(size, nitems) {
+        Some(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
+        Some(len) if !buf.is_null() => Some(::core::slice::from_raw_parts_mut(
+            buf as *mut ::core::ffi::c_uchar,
+            len,
+        )),
+        _ => None,
+    };
+    gzfread(buffer, size, nitems, &mut *(file as crate::gzguts_h::gz_statep))
 }
 // Reading one byte through `gz_read` preserves the buffered and unbuffered
 // paths' cursor and EOF bookkeeping while keeping the internal buffer access
@@ -617,8 +657,7 @@ pub fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     return if gz_read(
         state,
-        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
-        1 as crate::stdlib::z_size_t,
+        &mut buf,
     ) < 1 as crate::stdlib::z_size_t
     {
         -1 as ::core::ffi::c_int

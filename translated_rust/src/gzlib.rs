@@ -180,6 +180,13 @@ pub(crate) fn gz_uint_request_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0
 }
 
+// Rust slices cannot describe a range larger than `isize::MAX`.  Classify
+// FFI request lengths before their caller pointers are bound to a slice.
+pub(crate) fn gz_rust_slice_len(len: crate::stdlib::z_size_t) -> Option<usize> {
+    let len = usize::try_from(len).ok()?;
+    (len <= isize::MAX as usize).then_some(len)
+}
+
 // `gzfread()` and `gzfwrite()` share C's wrapping item-count multiplication.
 // Classify it before either path reaches its raw caller-buffer adapter.
 pub(crate) enum GzItemRequest {
@@ -199,6 +206,19 @@ pub(crate) fn gz_item_request(
         GzItemRequest::Empty
     } else {
         GzItemRequest::Bytes(bytes)
+    }
+}
+
+// This is only the FFI buffer-binding size. The public operation still
+// classifies the request itself so it owns the C-visible error behavior.
+pub(crate) fn gz_item_slice_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<usize> {
+    match gz_item_request(size, nitems) {
+        GzItemRequest::Empty => Some(0),
+        GzItemRequest::TooLarge => None,
+        GzItemRequest::Bytes(len) => gz_rust_slice_len(len),
     }
 }
 
