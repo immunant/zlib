@@ -288,6 +288,19 @@ pub(crate) fn inflate_reset_bound(
 ) -> ::core::ffi::c_int {
     inflate_reset(strm, state)
 }
+
+// Internal callers that own a stream but not its raw state pointer can use
+// the validated stream/state binder above instead of dereferencing that
+// pointer themselves. This keeps the reset transition reference-bound at
+// those call sites while preserving inflateStateCheck as the one raw adapter.
+pub(crate) fn inflate_reset_stream_bound(
+    strm: &mut crate::zlib_h::z_stream,
+) -> ::core::ffi::c_int {
+    let Some((strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_reset_bound(strm, state)
+}
 #[export_name = "inflateResetKeep"]
 
 pub unsafe extern "C" fn inflateResetKeep_ffi(

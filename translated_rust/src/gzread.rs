@@ -258,10 +258,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.out = output.as_ptr();
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
-        // SAFETY: initialization above, or the existing read state, provides
-        // the live inflater state required by this reference-bound reset.
-        let inflater = state.strm.state as *mut crate::src::inflate::inflate_state;
-        unsafe { crate::src::inflate::inflate_reset_bound(&mut state.strm, &mut *inflater) };
+        crate::src::inflate::inflate_reset_stream_bound(&mut state.strm);
         crate::src::gzlib::gz_set_gzip_input(state, state.junk != -1 as ::core::ffi::c_int);
         return 0 as ::core::ffi::c_int;
     }
@@ -285,10 +282,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     match crate::src::gzlib::gz_look_plan(available, state.again != 0, gzip_header) {
         crate::src::gzlib::GzLookPlan::NeedMore => return 0 as ::core::ffi::c_int,
         crate::src::gzlib::GzLookPlan::Gzip => {
-            // SAFETY: `gz_look` has initialized the stream before classifying
-            // a gzip member, so its bound inflater state is valid here.
-            let inflater = state.strm.state as *mut crate::src::inflate::inflate_state;
-            unsafe { crate::src::inflate::inflate_reset_bound(&mut state.strm, &mut *inflater) };
+            crate::src::inflate::inflate_reset_stream_bound(&mut state.strm);
             crate::src::gzlib::gz_set_gzip_input(state, true);
             return 0 as ::core::ffi::c_int;
         }
