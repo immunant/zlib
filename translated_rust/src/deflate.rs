@@ -192,6 +192,23 @@ struct DeflateOwnedStorage {
     pending_buf: Vec<crate::stdlib::Bytef>,
 }
 
+/// Temporarily separate default-allocator storage from its containing state.
+///
+/// The opaque stream state must remain mutable while a streaming operation
+/// mutates the owned vectors.  Taking the owner for the duration makes that
+/// relationship explicit and guarantees that every return path puts the
+/// workspace back.  The full default-allocator streaming call can grow this
+/// scope later without reintroducing a raw workspace bridge.
+fn with_owned_deflate_storage<R>(
+    state: &mut crate::src::deflate::deflate_state,
+    action: impl FnOnce(&mut crate::src::deflate::deflate_state, &mut DeflateOwnedStorage) -> R,
+) -> Option<R> {
+    let mut storage = state.owned_storage.take()?;
+    let result = action(state, &mut storage);
+    state.owned_storage = Some(storage);
+    Some(result)
+}
+
 impl DeflateOwnedStorage {
     /// Check that an owned workspace still has exactly the geometry advertised
     /// by a deflate state.  The eventual allocator facade must make this
@@ -1107,13 +1124,15 @@ fn configure_allocated_deflate_state(
     if state.owned_storage.is_none() {
         return Ok(DeflateInitializationOutcome::ReadyForLegacyReset);
     }
-    let mut owned = state.owned_storage.take().expect("owned storage checked");
-    let result = if owned.matches_state(state) {
-        deflate_reset(strm, state, &mut owned.head)
-    } else {
-        crate::zlib_h::Z_STREAM_ERROR
+    let Some(result) = with_owned_deflate_storage(state, |state, owned| {
+        if owned.matches_state(state) {
+            deflate_reset(strm, state, &mut owned.head)
+        } else {
+            crate::zlib_h::Z_STREAM_ERROR
+        }
+    }) else {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
-    state.owned_storage = Some(owned);
     Ok(DeflateInitializationOutcome::Complete(result))
 }
 
@@ -1692,14 +1711,15 @@ pub(crate) fn deflate_reset_legacy_stream(
     // raw slice from the compatibility handle.  Take/reinstall the owner so
     // the state and the vector can be borrowed independently; the handle
     // stays stable for the legacy engine between calls.
-    if let Some(mut owned) = state.owned_storage.take() {
-        let result = if owned.matches_state(state) {
-            deflate_reset(stream, state, &mut owned.head)
-        } else {
-            crate::zlib_h::Z_STREAM_ERROR
-        };
-        state.owned_storage = Some(owned);
-        return result;
+    if state.owned_storage.is_some() {
+        return with_owned_deflate_storage(state, |state, owned| {
+            if owned.matches_state(state) {
+                deflate_reset(stream, state, &mut owned.head)
+            } else {
+                crate::zlib_h::Z_STREAM_ERROR
+            }
+        })
+        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
     }
     // Custom and mixed allocator streams retain callback-owned storage. Keep
     // their one raw borrowing boundary here until the allocator facade can
@@ -3202,15 +3222,12 @@ pub fn deflate(
             let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            let Some(mut owned) = state.owned_storage.take() else {
+            let Some(result) = with_owned_deflate_storage(state, |state, owned| {
+                let mut workspace = owned.workspace(state, input, output)?;
+                deflate_update(state, strm, &mut workspace, flush)
+            }) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            let result = if let Some(mut workspace) = owned.workspace(state, input, output) {
-                deflate_update(state, strm, &mut workspace, flush)
-            } else {
-                None
-            };
-            state.owned_storage = Some(owned);
             let Some(bstate) = result else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
