@@ -1171,6 +1171,7 @@ fn gz_avail(
     // A null pointer is never valid for Rust slice construction, including
     // for a zero-sized corrupt external state.
     if state.in_0.is_null() {
+        gz_fetch_note_state_corrupt(state);
         return -1 as ::core::ffi::c_int;
     }
     let input = unsafe { core::slice::from_raw_parts_mut(state.in_0, state.size as usize) };
@@ -1179,10 +1180,12 @@ fn gz_avail(
     let Some(input_offset) =
         gz_avail_input_offset(input_start as usize, q as usize, state.strm.avail_in)
     else {
+        gz_fetch_note_state_corrupt(state);
         return -1 as ::core::ffi::c_int;
     };
 
     let Some(mut input) = GzInputStorage::new(input, input_offset, state.strm.avail_in) else {
+        gz_fetch_note_state_corrupt(state);
         return -1 as ::core::ffi::c_int;
     };
 
@@ -1190,7 +1193,10 @@ fn gz_avail(
         let (buf, len, prior_avail_in) = {
             let refill = match input.prepare_refill(state.size, compact_input) {
                 Some(plan) => plan,
-                None => return -1 as ::core::ffi::c_int,
+                None => {
+                    gz_fetch_note_state_corrupt(state);
+                    return -1 as ::core::ffi::c_int;
+                }
             };
             (
                 refill.buffer.as_mut_ptr(),
@@ -1204,6 +1210,7 @@ fn gz_avail(
             Ok(GzAvailNextInAction::ResetToInputStart) => {
                 state.strm.next_in = state.in_0;
                 if input.set_cursor(0, state.strm.avail_in).is_none() {
+                    gz_fetch_note_state_corrupt(state);
                     return -1 as ::core::ffi::c_int;
                 }
             }
@@ -1213,7 +1220,10 @@ fn gz_avail(
     if let Some(header) = header {
         *header = match input.gzip_header() {
             Ok(header) => header,
-            Err(()) => return -1 as ::core::ffi::c_int,
+            Err(()) => {
+                gz_fetch_note_state_corrupt(state);
+                return -1 as ::core::ffi::c_int;
+            }
         };
     }
     0 as ::core::ffi::c_int
@@ -2220,6 +2230,22 @@ mod tests {
         assert_eq!(have, 0);
         assert_eq!(err, crate::zlib_h::Z_STREAM_ERROR);
         assert_eq!(state_corrupt, 1);
+    }
+
+    #[test]
+    fn gz_avail_reports_missing_input_storage_as_state_corruption() {
+        let mut state: crate::gzguts_h::gz_state = unsafe { core::mem::zeroed() };
+        state.size = 1;
+        state.err = crate::zlib_h::Z_OK;
+        state.x.have = 3;
+
+        assert_eq!(gz_avail(&mut state, None), -1);
+        assert_eq!(state.err, crate::zlib_h::Z_STREAM_ERROR);
+        assert_eq!(state.x.have, 0);
+        assert_eq!(
+            gz_take_deferred_read_error(&mut state),
+            Some((GzReadDeferredError::StateCorrupt, 0))
+        );
     }
 
     #[test]
