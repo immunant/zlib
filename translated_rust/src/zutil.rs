@@ -145,14 +145,7 @@ pub unsafe extern "C" fn zcalloc(
     mut items: ::core::ffi::c_uint,
     mut size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    return if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 as usize {
-        crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
-    } else {
-        crate::stdlib::calloc(
-            items as crate::__stddef_size_t_h::size_t,
-            size as crate::__stddef_size_t_h::size_t,
-        )
-    };
+    crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
 }
 #[export_name = "zcalloc"]
 
