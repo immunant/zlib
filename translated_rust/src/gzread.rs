@@ -677,6 +677,19 @@ fn gzgets_copy_len(
     }
 }
 
+fn gzgets_copy_buffered(
+    output: &mut [crate::stdlib::Bytef],
+    buffered: &[crate::stdlib::Bytef],
+    left: ::core::ffi::c_uint,
+) -> (::core::ffi::c_uint, bool) {
+    let n = gzgets_copy_len(buffered, left);
+    if n != 0 {
+        output[..n as usize].copy_from_slice(&buffered[..n as usize]);
+    }
+    let found_eol = n != 0 && buffered[n.wrapping_sub(1) as usize] == b'\n';
+    (n, found_eol)
+}
+
 fn gzclose_read_status(err: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if err == crate::zlib_h::Z_BUF_ERROR {
         crate::zlib_h::Z_BUF_ERROR
@@ -934,13 +947,12 @@ pub unsafe extern "C" fn gzgets_ffi(
                     (*state).x.next as *const crate::stdlib::Bytef,
                     (*state).x.have as usize,
                 );
-                n = gzgets_copy_len(buffered, left);
-                let found_eol = n != 0 && buffered[n.wrapping_sub(1) as usize] == b'\n';
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    (*state).x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
+                let output = ::core::slice::from_raw_parts_mut(
+                    buf as *mut crate::stdlib::Bytef,
+                    left as usize,
                 );
+                let found_eol;
+                (n, found_eol) = gzgets_copy_buffered(output, buffered, left);
                 gz_note_buffered_read(&mut *state, n);
                 left = left.wrapping_sub(n);
                 buf = buf.offset(n as isize);
