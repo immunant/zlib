@@ -946,31 +946,37 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     crate::src::trees::_tr_init_ffi(s as *mut crate::src::deflate::internal_state);
     return crate::zlib_h::Z_OK;
 }
-unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
-        .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
-    *(*s)
+unsafe fn lm_init(state: &mut crate::src::deflate::deflate_state) {
+    state.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
+        .wrapping_mul(state.w_size as crate::zutil_h::ulg);
+    *state
         .head
-        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
+        .offset(state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
         NIL as crate::src::deflate::Posf;
     crate::stdlib::memset(
-        (*s).head as *mut ::core::ffi::c_void,
+        state.head as *mut ::core::ffi::c_void,
         0 as ::core::ffi::c_int,
-        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as crate::__stddef_size_t_h::size_t)
+        (state.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
+            as crate::__stddef_size_t_h::size_t)
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
                 as crate::__stddef_size_t_h::size_t),
     );
-    (*s).slid = 0 as ::core::ffi::c_int;
-    let level = (*s).level;
-    deflate_params_apply_config(&mut *s, level);
-    (*s).strstart = 0 as crate::stdlib::uInt;
-    (*s).block_start = 0 as ::core::ffi::c_long;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).insert = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*s).ins_h = 0 as crate::stdlib::uInt;
+    deflate_lm_init_reset_fields(state);
+}
+
+fn deflate_lm_init_reset_fields(state: &mut crate::src::deflate::deflate_state) {
+    state.slid = 0 as ::core::ffi::c_int;
+    let level = state.level;
+    deflate_params_apply_config(state, level);
+    state.strstart = 0 as crate::stdlib::uInt;
+    state.block_start = 0 as ::core::ffi::c_long;
+    state.lookahead = 0 as crate::stdlib::uInt;
+    state.insert = 0 as crate::stdlib::uInt;
+    state.prev_length =
+        (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    state.match_length = state.prev_length;
+    state.match_available = 0 as ::core::ffi::c_int;
+    state.ins_h = 0 as crate::stdlib::uInt;
 }
 #[export_name = "deflateReset"]
 
@@ -980,7 +986,7 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let mut ret: ::core::ffi::c_int = 0;
     ret = deflateResetKeep_ffi(strm);
     if ret == crate::zlib_h::Z_OK {
-        lm_init((*strm).state as *mut crate::src::deflate::deflate_state);
+        lm_init(&mut *((*strm).state as *mut crate::src::deflate::deflate_state));
     }
     return ret;
 }
