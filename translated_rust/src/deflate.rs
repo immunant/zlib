@@ -2451,6 +2451,15 @@ pub unsafe extern "C" fn deflateCopy(
         source as *const ::core::ffi::c_void,
         ::core::mem::size_of::<crate::zlib_h::z_stream>(),
     );
+    // Snapshot every source-derived allocation request before any callback.
+    // A custom allocator is allowed to inspect the destination stream, so
+    // later requests must not need to revisit the source state through raw
+    // pointers.
+    let pending_offset = (*ss)
+        .pending_out
+        .addr()
+        .wrapping_sub((*ss).pending_buf.addr());
+    let plan = deflate_copy_plan(&*ss, pending_offset);
     ds = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
@@ -2469,26 +2478,26 @@ pub unsafe extern "C" fn deflateCopy(
     let window = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
-        (*ss).w_size,
+        plan.window_items,
         (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
             as crate::stdlib::uInt,
     ) as *mut crate::stdlib::Bytef;
     let prev = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
-        (*ss).w_size,
+        plan.prev_items,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
     let head = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
-        (*ss).hash_size,
+        plan.head_items,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
     let pending_buf = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
-        (*ss).lit_bufsize,
+        plan.pending_buf_items,
         4 as crate::stdlib::uInt,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
@@ -2498,11 +2507,6 @@ pub unsafe extern "C" fn deflateCopy(
     // `pending_out` is an offset into the source pending allocation. Retain
     // that byte offset while rebinding it to the destination allocation
     // without requiring raw-pointer in-bounds arithmetic.
-    let pending_offset = (*ss)
-        .pending_out
-        .addr()
-        .wrapping_sub((*ss).pending_buf.addr());
-    let plan = deflate_copy_plan(&*ss, pending_offset);
     (*ds).window = window;
     (*ds).prev = prev;
     (*ds).head = head;
@@ -2558,6 +2562,10 @@ fn deflate_copy_state(
 // Keep all byte-count and range policy here, separate from the raw binding in
 // `deflateCopy()`, so the actual copies below are checked slice operations.
 struct DeflateCopyPlan {
+    window_items: crate::stdlib::uInt,
+    prev_items: crate::stdlib::uInt,
+    head_items: crate::stdlib::uInt,
+    pending_buf_items: crate::stdlib::uInt,
     window_len: usize,
     prev_len: usize,
     head_len: usize,
@@ -2579,6 +2587,10 @@ fn deflate_copy_plan(
             source.strstart.wrapping_sub(source.insert)
         };
     DeflateCopyPlan {
+        window_items: source.w_size,
+        prev_items: source.w_size,
+        head_items: source.hash_size,
+        pending_buf_items: source.lit_bufsize,
         window_len: source.high_water as usize,
         prev_len: (prev_entries as usize)
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
