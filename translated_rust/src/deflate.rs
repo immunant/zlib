@@ -3108,12 +3108,11 @@ unsafe extern "C" fn deflate_fast(
             };
             hash_head = previous;
         }
-        if hash_head != NIL as crate::src::deflate::IPos
-            && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= (*s)
-                    .w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-        {
+        if hash_match_is_usable(
+            (*s).strstart as crate::src::deflate::IPos,
+            hash_head,
+            (*s).w_size,
+        ) {
             (*s).match_length = longest_match(s, hash_head);
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
@@ -3395,23 +3394,20 @@ unsafe extern "C" fn deflate_slow(
         (*s).prev_match = (*s).match_start as crate::src::deflate::IPos;
         (*s).match_length =
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        if hash_head != NIL as crate::src::deflate::IPos
-            && (*s).prev_length < (*s).max_lazy_match
-            && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= (*s)
-                    .w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-        {
+        if lazy_hash_match_is_usable(
+            (*s).strstart as crate::src::deflate::IPos,
+            hash_head,
+            (*s).prev_length,
+            (*s).max_lazy_match,
+            (*s).w_size,
+        ) {
             (*s).match_length = longest_match(s, hash_head);
-            if (*s).match_length <= 5 as crate::stdlib::uInt
-                && ((*s).strategy == crate::zlib_h::Z_FILTERED
-                    || (*s).match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                        && (*s).strstart.wrapping_sub((*s).match_start)
-                            > TOO_FAR as crate::stdlib::uInt)
-            {
-                (*s).match_length =
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-            }
+            (*s).match_length = filtered_match_length(
+                (*s).match_length,
+                (*s).strategy,
+                (*s).strstart,
+                (*s).match_start,
+            );
         }
         if (*s).prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             && (*s).match_length <= (*s).prev_length
@@ -3735,6 +3731,43 @@ fn tally_symbol_state(
         lc,
     );
     Some(s.sym_next == s.sym_end)
+}
+
+fn hash_match_is_usable(
+    strstart: crate::src::deflate::IPos,
+    hash_head: crate::src::deflate::IPos,
+    w_size: crate::stdlib::uInt,
+) -> bool {
+    hash_head != NIL as crate::src::deflate::IPos
+        && strstart.wrapping_sub(hash_head)
+            <= w_size.wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
+}
+
+fn lazy_hash_match_is_usable(
+    strstart: crate::src::deflate::IPos,
+    hash_head: crate::src::deflate::IPos,
+    prev_length: crate::stdlib::uInt,
+    max_lazy_match: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+) -> bool {
+    prev_length < max_lazy_match && hash_match_is_usable(strstart, hash_head, w_size)
+}
+
+fn filtered_match_length(
+    match_length: crate::stdlib::uInt,
+    strategy: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    match_start: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    if match_length <= 5
+        && (strategy == crate::zlib_h::Z_FILTERED
+            || match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                && strstart.wrapping_sub(match_start) > TOO_FAR as crate::stdlib::uInt)
+    {
+        (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt
+    } else {
+        match_length
+    }
 }
 
 unsafe extern "C" fn deflate_rle(
