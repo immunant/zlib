@@ -207,12 +207,20 @@ pub const finish_started: block_state = 2;
 
 pub const need_more: block_state = 0;
 
-pub type compress_func = Option<
-    unsafe extern "C" fn(
-        *mut crate::src::deflate::deflate_state,
-        ::core::ffi::c_int,
-    ) -> block_state,
->;
+#[derive(PartialEq, Eq)]
+pub enum DeflateAlgorithm {
+    Stored,
+    Fast,
+    Slow,
+}
+
+impl Copy for DeflateAlgorithm {}
+
+impl Clone for DeflateAlgorithm {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
 
 pub type config = config_s;
 #[repr(C)]
@@ -222,7 +230,7 @@ pub struct config_s {
     pub max_lazy: crate::zutil_h::ush,
     pub nice_length: crate::zutil_h::ush,
     pub max_chain: crate::zutil_h::ush,
-    pub func: compress_func,
+    pub algorithm: DeflateAlgorithm,
 }
 const fn c_char_bytes(bytes: [u8; 70]) -> [::core::ffi::c_char; 70] {
     let mut chars = [0; 70];
@@ -248,130 +256,70 @@ static configuration_table: [config; 10] = [
         max_lazy: 0 as crate::zutil_h::ush,
         nice_length: 0 as crate::zutil_h::ush,
         max_chain: 0 as crate::zutil_h::ush,
-        func: Some(
-            deflate_stored
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Stored,
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 4 as crate::zutil_h::ush,
         nice_length: 8 as crate::zutil_h::ush,
         max_chain: 4 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Fast,
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 5 as crate::zutil_h::ush,
         nice_length: 16 as crate::zutil_h::ush,
         max_chain: 8 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Fast,
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 6 as crate::zutil_h::ush,
         nice_length: 32 as crate::zutil_h::ush,
         max_chain: 32 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Fast,
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 4 as crate::zutil_h::ush,
         nice_length: 16 as crate::zutil_h::ush,
         max_chain: 16 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Slow,
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 16 as crate::zutil_h::ush,
         nice_length: 32 as crate::zutil_h::ush,
         max_chain: 32 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Slow,
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 16 as crate::zutil_h::ush,
         nice_length: 128 as crate::zutil_h::ush,
         max_chain: 128 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Slow,
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 32 as crate::zutil_h::ush,
         nice_length: 128 as crate::zutil_h::ush,
         max_chain: 256 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Slow,
     },
     config_s {
         good_length: 32 as crate::zutil_h::ush,
         max_lazy: 128 as crate::zutil_h::ush,
         nice_length: 258 as crate::zutil_h::ush,
         max_chain: 1024 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Slow,
     },
     config_s {
         good_length: 32 as crate::zutil_h::ush,
         max_lazy: 258 as crate::zutil_h::ush,
         nice_length: 258 as crate::zutil_h::ush,
         max_chain: 4096 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        algorithm: DeflateAlgorithm::Slow,
     },
 ];
 
@@ -1151,7 +1099,7 @@ pub unsafe extern "C" fn deflateParams(
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut func: compress_func = None;
+    let mut algorithm: DeflateAlgorithm;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1166,8 +1114,8 @@ pub unsafe extern "C" fn deflateParams(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    func = configuration_table[(*s).level as usize].func;
-    if (strategy != (*s).strategy || func != configuration_table[level as usize].func)
+    algorithm = configuration_table[(*s).level as usize].algorithm;
+    if (strategy != (*s).strategy || algorithm != configuration_table[level as usize].algorithm)
         && (*s).last_flush != -2 as ::core::ffi::c_int
     {
         let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
@@ -1903,12 +1851,12 @@ pub unsafe extern "C" fn deflate(
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, flush) as ::core::ffi::c_uint
         } else {
-            Some(
-                (*(&raw const configuration_table as *const config).offset((*s).level as isize))
-                    .func
-                    .expect("non-null function pointer"),
-            )
-            .expect("non-null function pointer")(s, flush) as ::core::ffi::c_uint
+            let func = match configuration_table[(*s).level as usize].algorithm {
+                DeflateAlgorithm::Stored => deflate_stored,
+                DeflateAlgorithm::Fast => deflate_fast,
+                DeflateAlgorithm::Slow => deflate_slow,
+            };
+            func(s, flush) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
