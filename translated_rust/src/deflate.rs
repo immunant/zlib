@@ -3451,9 +3451,6 @@ unsafe extern "C" fn deflate_fast(
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let state = &mut *s;
-            let length = state.match_length;
-            let len = length.wrapping_sub(3) as crate::zutil_h::uch;
-            let dist = state.strstart.wrapping_sub(state.match_start);
             let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                 return need_more;
             };
@@ -3465,11 +3462,10 @@ unsafe extern "C" fn deflate_fast(
             } else {
                 ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
             };
-            let Some(flush_now) = tally_symbol_state(state, symbols, dist, len.into()) else {
+            let Some((flush_now, length)) = fast_tally_match_state(state, symbols) else {
                 return need_more;
             };
             bflush = flush_now as ::core::ffi::c_int;
-            state.lookahead = state.lookahead.wrapping_sub(length);
             if length <= state.max_lazy_match
                 && state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             {
@@ -4073,6 +4069,24 @@ fn tally_current_literal_state(
     s.lookahead = s.lookahead.wrapping_sub(1);
     s.strstart = s.strstart.wrapping_add(1);
     Some(flush_now)
+}
+
+/// Record the current fast-mode match and apply the corresponding input
+/// consumption.  Hash insertion remains in the legacy adapter, since its
+/// tables are still callback-owned.
+fn fast_tally_match_state(
+    s: &mut crate::src::deflate::deflate_state,
+    symbols: &mut [crate::zutil_h::uch],
+) -> Option<(bool, crate::stdlib::uInt)> {
+    let length = s.match_length;
+    if length < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        return None;
+    }
+    let len = length.wrapping_sub(3) as crate::zutil_h::uch;
+    let dist = s.strstart.wrapping_sub(s.match_start);
+    let flush_now = tally_symbol_state(s, symbols, dist, len.into())?;
+    s.lookahead = s.lookahead.wrapping_sub(length);
+    Some((flush_now, length))
 }
 
 /// Select the current literal for Huffman-only mode without borrowing the
