@@ -1686,22 +1686,25 @@ pub unsafe fn inflate(
                                                                                             break 's_1689;
                                                                                         }
                                                                                     }
-                                                                                    if (*state).havedict == 0 as ::core::ffi::c_int {
-                                                                                        (*strm).next_out = put as *mut crate::stdlib::Bytef;
-                                                                                        (*strm).avail_out = left as crate::stdlib::uInt;
-                                                                                        (*strm).next_in = next as *mut crate::stdlib::Bytef;
-                                                                                        (*strm).avail_in = have as crate::stdlib::uInt;
-                                                                                        (*state).hold = hold;
-                                                                                        (*state).bits = bits;
+                                                                                    // The dictionary transition only publishes
+                                                                                    // already-established cursors and scalar state.
+                                                                                    // Adopt both compatibility records once rather
+                                                                                    // than repeatedly traversing their raw pointers.
+                                                                                    let strm_ref = &mut *strm;
+                                                                                    let state_ref = &mut *state;
+                                                                                    if state_ref.havedict == 0 as ::core::ffi::c_int {
+                                                                                        strm_ref.next_out = put as *mut crate::stdlib::Bytef;
+                                                                                        strm_ref.avail_out = left as crate::stdlib::uInt;
+                                                                                        strm_ref.next_in = next as *mut crate::stdlib::Bytef;
+                                                                                        strm_ref.avail_in = have as crate::stdlib::uInt;
+                                                                                        state_ref.hold = hold;
+                                                                                        state_ref.bits = bits;
                                                                                         return crate::zlib_h::Z_NEED_DICT;
                                                                                     }
-                                                                                    (*state).check = crate::src::adler32::ADLER32_INITIAL
+                                                                                    state_ref.check = crate::src::adler32::ADLER32_INITIAL
                                                                                         as ::core::ffi::c_ulong;
-                                                                                    (*strm).adler =
-                                                                                        (*state)
-                                                                                            .check
-                                                                                            as crate::stdlib::uLong;
-                                                                                    (*state).mode =
+                                                                                    strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+                                                                                    state_ref.mode =
                                                                                         crate::src::inflate::TYPE;
                                                                                     break 'c_2339;
                                                                                 }
@@ -1719,17 +1722,19 @@ pub unsafe fn inflate(
                                                                                         );
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
-                                                                                if !(*state)
-                                                                                    .head
-                                                                                    .is_null()
+                                                                                // TIME has no cursor lend or callback. Keep the
+                                                                                // retained header update and checksum commit on
+                                                                                // one short-lived state borrow.
+                                                                                let state_ref = &mut *state;
+                                                                                if !state_ref.head.is_null()
                                                                                 {
-                                                                                    (*(*state)
+                                                                                    (*state_ref
                                                                                         .head)
                                                                                         .time = hold
                                                                                         as crate::stdlib::uLong;
                                                                                 }
-                                                                                if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                                                                                    && (*state).wrap & 4 as ::core::ffi::c_int != 0
+                                                                                if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
+                                                                                    && state_ref.wrap & 4 as ::core::ffi::c_int != 0
                                                                                 {
                                                                                     hbuf[0 as ::core::ffi::c_int as usize] = hold
                                                                                         as ::core::ffi::c_uchar;
@@ -1739,14 +1744,14 @@ pub unsafe fn inflate(
                                                                                         >> 16 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
                                                                                     hbuf[3 as ::core::ffi::c_int as usize] = (hold
                                                                                         >> 24 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                    (*state).check = inflate_header_crc_update(
-                                                                                        (*state).check,
+                                                                                    state_ref.check = inflate_header_crc_update(
+                                                                                        state_ref.check,
                                                                                         &hbuf[..4],
                                                                                     );
                                                                                 }
                                                                                 hold = 0 as ::core::ffi::c_ulong;
                                                                                 bits = 0 as ::core::ffi::c_uint;
-                                                                                (*state).mode = crate::src::inflate::OS;
+                                                                                state_ref.mode = crate::src::inflate::OS;
                                                                                 break 's_519;
                                                                             }
                                                                             (*state).mode = crate::src::inflate::COPY_1;
@@ -2087,19 +2092,23 @@ pub unsafe fn inflate(
                                                                         8 as ::core::ffi::c_uint,
                                                                     );
                                                                 }
-                                                                if !(*state).head.is_null() {
-                                                                    (*(*state).head).xflags = (hold
+                                                                // OS follows TIME without any callback or cursor lend.
+                                                                // Reuse one adopted state record for the retained header,
+                                                                // optional header CRC, and mode transition.
+                                                                let state_ref = &mut *state;
+                                                                if !state_ref.head.is_null() {
+                                                                    (*state_ref.head).xflags = (hold
                                                                         & 0xff
                                                                             as ::core::ffi::c_ulong)
                                                                         as ::core::ffi::c_int;
-                                                                    (*(*state).head).os = (hold
+                                                                    (*state_ref.head).os = (hold
                                                                         >> 8 as ::core::ffi::c_int)
                                                                         as ::core::ffi::c_int;
                                                                 }
-                                                                if (*state).flags
+                                                                if state_ref.flags
                                                                     & 0x200 as ::core::ffi::c_int
                                                                     != 0
-                                                                    && (*state).wrap
+                                                                    && state_ref.wrap
                                                                         & 4 as ::core::ffi::c_int
                                                                         != 0
                                                                 {
@@ -2110,15 +2119,15 @@ pub unsafe fn inflate(
                                                                         as usize] = (hold
                                                                         >> 8 as ::core::ffi::c_int)
                                                                         as ::core::ffi::c_uchar;
-                                                                    (*state).check =
+                                                                    state_ref.check =
                                                                         inflate_header_crc_update(
-                                                                            (*state).check,
+                                                                            state_ref.check,
                                                                             &hbuf[..2],
                                                                         );
                                                                 }
                                                                 hold = 0 as ::core::ffi::c_ulong;
                                                                 bits = 0 as ::core::ffi::c_uint;
-                                                                (*state).mode =
+                                                                state_ref.mode =
                                                                     crate::src::inflate::EXLEN;
                                                                 break 'c_2317;
                                                             }
