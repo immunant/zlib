@@ -1,15 +1,13 @@
 pub use crate::__stddef_size_t_h::size_t;
 pub use crate::stdlib::__off_t;
 
-
-
 pub use crate::stdlib::off_t;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
-#[no_mangle]
 
+#[no_mangle]
 pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
     b"need dictionary\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
     b"stream end\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
@@ -22,133 +20,113 @@ pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
     b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
     b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
 ];
-pub unsafe extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
-    return crate::zlib_h::ZLIB_VERSION.as_ptr();
+
+fn zlib_version() -> &'static [::core::ffi::c_char; 15] {
+    &crate::zlib_h::ZLIB_VERSION
 }
+
 #[export_name = "zlibVersion"]
-
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
-    zlibVersion()
+    zlib_version().as_ptr()
 }
-pub unsafe extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
-    let mut flags: crate::stdlib::uLong = 0;
-    flags = 0 as crate::stdlib::uLong;
-    match ::core::mem::size_of::<crate::stdlib::uInt>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(1 as crate::stdlib::uLong);
-        }
-        8 => {
-            flags = flags.wrapping_add(2 as crate::stdlib::uLong);
-        }
-        _ => {
-            flags = flags.wrapping_add(3 as crate::stdlib::uLong);
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::uLong>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::voidpf>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::off_t>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    return flags;
-}
-#[export_name = "zlibCompileFlags"]
 
-pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
-    zlibCompileFlags()
-}
-pub unsafe extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    return z_errmsg[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
-        9 as ::core::ffi::c_int
-    } else {
-        2 as ::core::ffi::c_int - err
-    }) as usize];
-}
-#[export_name = "zError"]
-
-pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    zError(err)
-}
-pub unsafe extern "C" fn zcalloc(
-    mut _opaque: crate::stdlib::voidpf,
-    mut items: ::core::ffi::c_uint,
-    mut size: ::core::ffi::c_uint,
-) -> crate::stdlib::voidpf {
-    return if ::core::mem::size_of::<crate::stdlib::uInt>() as usize > 2 as usize {
-        crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
-    } else {
-        crate::stdlib::calloc(
-            items as crate::__stddef_size_t_h::size_t,
-            size as crate::__stddef_size_t_h::size_t,
-        )
+fn size_flag<T>(shift: u32) -> crate::stdlib::uLong {
+    let flag = match ::core::mem::size_of::<T>() {
+        2 => 0,
+        4 => 1,
+        8 => 2,
+        _ => 3,
     };
+
+    (flag as crate::stdlib::uLong) << shift
 }
+
+fn zlib_compile_flags() -> crate::stdlib::uLong {
+    size_flag::<crate::stdlib::uInt>(0)
+        .wrapping_add(size_flag::<crate::stdlib::uLong>(2))
+        .wrapping_add(size_flag::<usize>(4))
+        .wrapping_add(size_flag::<crate::stdlib::off_t>(6))
+}
+
+#[export_name = "zlibCompileFlags"]
+pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
+    zlib_compile_flags()
+}
+
+fn error_message_index(err: ::core::ffi::c_int) -> usize {
+    if !(-6..=2).contains(&err) {
+        9
+    } else {
+        (2 - err) as usize
+    }
+}
+
+#[export_name = "zError"]
+pub unsafe extern "C" fn zError_ffi(err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+    z_errmsg[error_message_index(err)]
+}
+
+enum AllocationRequest {
+    Malloc(size_t),
+    Calloc { items: size_t, size: size_t },
+}
+
+fn allocation_request(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> AllocationRequest {
+    if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 {
+        AllocationRequest::Malloc(items.wrapping_mul(size) as size_t)
+    } else {
+        AllocationRequest::Calloc {
+            items: items as size_t,
+            size: size as size_t,
+        }
+    }
+}
+
 #[export_name = "zcalloc"]
-
 pub unsafe extern "C" fn zcalloc_ffi(
-    mut opaque: crate::stdlib::voidpf,
-    mut items: ::core::ffi::c_uint,
-    mut size: ::core::ffi::c_uint,
+    opaque: crate::stdlib::voidpf,
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    zcalloc(opaque, items, size)
+    let _ = opaque;
+    match allocation_request(items, size) {
+        AllocationRequest::Malloc(bytes) => crate::stdlib::malloc(bytes),
+        AllocationRequest::Calloc { items, size } => crate::stdlib::calloc(items, size),
+    }
 }
-pub unsafe extern "C" fn zcfree(mut _opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
-    crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
-}
-#[export_name = "zcfree"]
 
-pub unsafe extern "C" fn zcfree_ffi(
-    mut opaque: crate::stdlib::voidpf,
-    mut ptr: crate::stdlib::voidpf,
-) {
-    zcfree(opaque, ptr)
+#[export_name = "zcfree"]
+pub unsafe extern "C" fn zcfree_ffi(opaque: crate::stdlib::voidpf, ptr: crate::stdlib::voidpf) {
+    let _ = opaque;
+    crate::stdlib::free(ptr);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{allocation_request, error_message_index, zlib_version, AllocationRequest};
+
+    #[test]
+    fn error_messages_use_zlib_error_indexing() {
+        assert_eq!(error_message_index(2), 0);
+        assert_eq!(error_message_index(0), 2);
+        assert_eq!(error_message_index(-6), 8);
+        assert_eq!(error_message_index(-7), 9);
+        assert_eq!(error_message_index(3), 9);
+    }
+
+    #[test]
+    fn version_is_nul_terminated() {
+        assert_eq!(zlib_version().last(), Some(&0));
+    }
+
+    #[test]
+    fn allocation_request_preserves_the_platform_choice() {
+        match allocation_request(3, 4) {
+            AllocationRequest::Malloc(bytes) => assert_eq!(bytes, 12),
+            AllocationRequest::Calloc { items, size } => {
+                assert_eq!(items, 3);
+                assert_eq!(size, 4);
+            }
+        }
+    }
 }

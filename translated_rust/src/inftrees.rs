@@ -2749,7 +2749,6 @@ pub mod inffixed_h {
             val: 0 as ::core::ffi::c_ushort,
         },
     ];
-    
 }
 
 pub use crate::__stddef_null_h::NULL;

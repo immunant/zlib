@@ -106,7 +106,6 @@ pub struct inflate_state {
 }
 pub use crate::__stddef_size_t_h::size_t;
 
-
 pub use crate::src::adler32::adler32;
 pub use crate::src::crc32::crc32;
 pub use crate::src::deflate::internal_state;
@@ -120,9 +119,8 @@ pub use crate::src::inftrees::ENOUGH;
 pub use crate::src::inftrees::ENOUGH_DISTS;
 pub use crate::src::inftrees::ENOUGH_LENS;
 pub use crate::src::inftrees::LENS;
-pub use crate::src::zutil::zcalloc;
-pub use crate::src::zutil::zcfree;
-
+pub use crate::src::zutil::zcalloc_ffi;
+pub use crate::src::zutil::zcfree_ffi;
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -299,7 +297,7 @@ pub unsafe extern "C" fn inflateInit2_(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
+            crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
                     ::core::ffi::c_uint,
@@ -310,7 +308,7 @@ pub unsafe extern "C" fn inflateInit2_(
     }
     if (*strm).zfree.is_none() {
         (*strm).zfree = Some(
-            crate::src::zutil::zcfree
+            crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
@@ -639,7 +637,7 @@ pub unsafe extern "C" fn inflate(
                             } else {
                                 (*state).dmax = (1 as ::core::ffi::c_uint) << len;
                                 (*state).flags = 0 as ::core::ffi::c_int;
-                                (*state).check = crate::src::adler32::adler32(
+                                (*state).check = crate::src::adler32::adler32_ffi(
                                     0 as crate::stdlib::uLong,
                                     ::core::ptr::null::<crate::stdlib::Bytef>(),
                                     0 as crate::stdlib::uInt,
@@ -902,7 +900,7 @@ pub unsafe extern "C" fn inflate(
                                 out as crate::stdlib::uInt,
                             )
                         } else {
-                            crate::src::adler32::adler32(
+                            crate::src::adler32::adler32_ffi(
                                 (*state).check as crate::stdlib::uLong,
                                 put.offset(-(out as isize)),
                                 out as crate::stdlib::uInt,
@@ -1047,7 +1045,7 @@ pub unsafe extern "C" fn inflate(
                     (*state).bits = bits;
                     return crate::zlib_h::Z_NEED_DICT;
                 }
-                (*state).check = crate::src::adler32::adler32(
+                (*state).check = crate::src::adler32::adler32_ffi(
                     0 as crate::stdlib::uLong,
                     ::core::ptr::null::<crate::stdlib::Bytef>(),
                     0 as crate::stdlib::uInt,
@@ -1971,7 +1969,7 @@ pub unsafe extern "C" fn inflate(
                 out as crate::stdlib::uInt,
             )
         } else {
-            crate::src::adler32::adler32(
+            crate::src::adler32::adler32_ffi(
                 (*state).check as crate::stdlib::uLong,
                 (*strm).next_out.offset(-(out as isize)),
                 out as crate::stdlib::uInt,
@@ -2103,14 +2101,16 @@ pub unsafe extern "C" fn inflateSetDictionary(
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
-        dictid = crate::src::adler32::adler32(
+        dictid = crate::src::adler32::adler32_ffi(
             0 as crate::stdlib::uLong,
             ::core::ptr::null::<crate::stdlib::Bytef>(),
             0 as crate::stdlib::uInt,
         ) as ::core::ffi::c_ulong;
-        dictid =
-            crate::src::adler32::adler32(dictid as crate::stdlib::uLong, dictionary, dictLength)
-                as ::core::ffi::c_ulong;
+        dictid = crate::src::adler32::adler32_ffi(
+            dictid as crate::stdlib::uLong,
+            dictionary,
+            dictLength,
+        ) as ::core::ffi::c_ulong;
         if dictid != (*state).check {
             return crate::zlib_h::Z_DATA_ERROR;
         }

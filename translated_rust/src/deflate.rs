@@ -161,10 +161,9 @@ pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
-pub use crate::src::zutil::zcalloc;
-pub use crate::src::zutil::zcfree;
+pub use crate::src::zutil::zcalloc_ffi;
+pub use crate::src::zutil::zcfree_ffi;
 pub use crate::stdlib::charf;
-
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -447,7 +446,7 @@ unsafe extern "C" fn read_buf(
     );
     if (*(*strm).state).wrap == 1 as ::core::ffi::c_int {
         (*strm).adler =
-            crate::src::adler32::adler32((*strm).adler, buf, len as crate::stdlib::uInt);
+            crate::src::adler32::adler32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
     } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
         (*strm).adler = crate::src::crc32::crc32((*strm).adler, buf, len as crate::stdlib::uInt);
     }
@@ -632,7 +631,7 @@ pub unsafe extern "C" fn deflateInit2_(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
+            crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
                     ::core::ffi::c_uint,
@@ -643,7 +642,7 @@ pub unsafe extern "C" fn deflateInit2_(
     }
     if (*strm).zfree.is_none() {
         (*strm).zfree = Some(
-            crate::src::zutil::zcfree
+            crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
@@ -832,7 +831,7 @@ pub unsafe extern "C" fn deflateSetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32((*strm).adler, dictionary, dictLength);
+        (*strm).adler = crate::src::adler32::adler32_ffi((*strm).adler, dictionary, dictLength);
     }
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
@@ -980,7 +979,7 @@ pub unsafe extern "C" fn deflateResetKeep(
             0 as crate::stdlib::uInt,
         )
     } else {
-        crate::src::adler32::adler32(
+        crate::src::adler32::adler32_ffi(
             0 as crate::stdlib::uLong,
             ::core::ptr::null::<crate::stdlib::Bytef>(),
             0 as crate::stdlib::uInt,
@@ -1582,7 +1581,7 @@ pub unsafe extern "C" fn deflate(
                 ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
             );
         }
-        (*strm).adler = crate::src::adler32::adler32(
+        (*strm).adler = crate::src::adler32::adler32_ffi(
             0 as crate::stdlib::uLong,
             ::core::ptr::null::<crate::stdlib::Bytef>(),
             0 as crate::stdlib::uInt,
