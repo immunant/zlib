@@ -891,7 +891,7 @@ pub unsafe extern "C" fn deflateInit2_(
             2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
         }) as usize]
             .load(::core::sync::atomic::Ordering::Relaxed);
-        deflateEnd(strm);
+        deflateEnd_from_stream_pointer(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     (*s).sym_buf = (*s).lit_bufsize as usize;
@@ -2186,51 +2186,76 @@ pub unsafe extern "C" fn deflate_ffi(
 ) -> ::core::ffi::c_int {
     deflate(strm, flush)
 }
-pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut status: ::core::ffi::c_int = 0;
-    if deflateStateCheck(strm) != 0 {
+pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    let stream = core::ptr::from_mut(strm);
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    status = (*(*strm).state).status;
-    gzip_header_remove((*(*strm).state).gzhead);
-    if !(*(*strm).state).pending_buf.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).pending_buf as crate::stdlib::voidpf,
-        );
+    let (status, gzhead, allocations, state_allocation) = {
+        // The state was installed by the initialization boundary and is only
+        // retained while this stream owns it.  All later cleanup uses the
+        // reference and the allocator that belong to this stream.
+        let Some(state) = (unsafe { strm.state.as_mut() }) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if !core::ptr::eq(state.strm, stream)
+            || (state.status != crate::src::deflate::INIT_STATE
+                && state.status != crate::src::deflate::GZIP_STATE
+                && state.status != crate::src::deflate::EXTRA_STATE
+                && state.status != crate::src::deflate::NAME_STATE
+                && state.status != crate::src::deflate::COMMENT_STATE
+                && state.status != crate::src::deflate::HCRC_STATE
+                && state.status != crate::src::deflate::BUSY_STATE
+                && state.status != crate::src::deflate::FINISH_STATE)
+        {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        (
+            state.status,
+            state.gzhead,
+            [
+                state.pending_buf.cast::<::core::ffi::c_void>(),
+                state.head.cast::<::core::ffi::c_void>(),
+                state.prev.cast::<::core::ffi::c_void>(),
+                state.window.cast::<::core::ffi::c_void>(),
+            ],
+            strm.state.cast::<::core::ffi::c_void>(),
+        )
+    };
+    gzip_header_remove(gzhead);
+    let zfree = strm.zfree.expect("non-null function pointer");
+    for allocation in allocations {
+        if !allocation.is_null() {
+            unsafe { zfree(strm.opaque, allocation) };
+        }
     }
-    if !(*(*strm).state).head.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).head as crate::stdlib::voidpf,
-        );
-    }
-    if !(*(*strm).state).prev.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).prev as crate::stdlib::voidpf,
-        );
-    }
-    if !(*(*strm).state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).window as crate::stdlib::voidpf,
-        );
-    }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    unsafe { zfree(strm.opaque, state_allocation) };
+    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
     } else {
         crate::zlib_h::Z_OK
     };
 }
+
+/// Adapt legacy internal callers that still carry the ABI stream pointer.
+/// The exported boundary converts the pointer directly; this adapter keeps
+/// those callers from spreading another raw-to-reference conversion around
+/// their cleanup paths.
+unsafe fn deflateEnd_from_stream_pointer(
+    strm: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflateEnd(strm)
+}
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateEnd(strm)
 }
 pub unsafe extern "C" fn deflateCopy(
@@ -2305,7 +2330,7 @@ pub unsafe extern "C" fn deflateCopy(
         || (*ds).head.is_null()
         || (*ds).pending_buf.is_null()
     {
-        deflateEnd(dest);
+        deflateEnd_from_stream_pointer(dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     crate::stdlib::memcpy(

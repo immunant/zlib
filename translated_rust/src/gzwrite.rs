@@ -672,9 +672,7 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     }
     if (*state).size != 0 {
         if (*state).direct == 0 {
-            crate::src::deflate::deflateEnd(
-                &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
+            crate::src::deflate::deflateEnd(&mut (*state).strm);
         }
         crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
     }
