@@ -2857,378 +2857,6 @@ pub static inflate_copyright: [::core::ffi::c_char; 49] = [
     b' ' as ::core::ffi::c_char,
     0,
 ];
-pub unsafe extern "C" fn inflate_table(
-    mut type_0: crate::src::inftrees::codetype,
-    mut lens: *mut ::core::ffi::c_ushort,
-    mut codes: ::core::ffi::c_uint,
-    mut table: *mut *mut crate::src::inftrees::code,
-    mut bits: *mut ::core::ffi::c_uint,
-    mut work: *mut ::core::ffi::c_ushort,
-) -> ::core::ffi::c_int {
-    let mut len: ::core::ffi::c_uint = 0;
-    let mut sym: ::core::ffi::c_uint = 0;
-    let mut min: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = 0;
-    let mut root: ::core::ffi::c_uint = 0;
-    let mut curr: ::core::ffi::c_uint = 0;
-    let mut drop_0: ::core::ffi::c_uint = 0;
-    let mut left: ::core::ffi::c_int = 0;
-    let mut used: ::core::ffi::c_uint = 0;
-    let mut huff: ::core::ffi::c_uint = 0;
-    let mut incr: ::core::ffi::c_uint = 0;
-    let mut fill: ::core::ffi::c_uint = 0;
-    let mut low: ::core::ffi::c_uint = 0;
-    let mut mask: ::core::ffi::c_uint = 0;
-    let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
-        op: 0,
-        bits: 0,
-        val: 0,
-    };
-    let mut next: *mut crate::src::inftrees::code =
-        ::core::ptr::null_mut::<crate::src::inftrees::code>();
-    let mut base: &[::core::ffi::c_ushort] = &[];
-    let mut extra: &[::core::ffi::c_ushort] = &[];
-    let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
-    let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
-    let mut offs: [::core::ffi::c_ushort; 16] = [0; 16];
-    static LBASE: [::core::ffi::c_ushort; 31] = [
-        3 as ::core::ffi::c_ushort,
-        4 as ::core::ffi::c_ushort,
-        5 as ::core::ffi::c_ushort,
-        6 as ::core::ffi::c_ushort,
-        7 as ::core::ffi::c_ushort,
-        8 as ::core::ffi::c_ushort,
-        9 as ::core::ffi::c_ushort,
-        10 as ::core::ffi::c_ushort,
-        11 as ::core::ffi::c_ushort,
-        13 as ::core::ffi::c_ushort,
-        15 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        19 as ::core::ffi::c_ushort,
-        23 as ::core::ffi::c_ushort,
-        27 as ::core::ffi::c_ushort,
-        31 as ::core::ffi::c_ushort,
-        35 as ::core::ffi::c_ushort,
-        43 as ::core::ffi::c_ushort,
-        51 as ::core::ffi::c_ushort,
-        59 as ::core::ffi::c_ushort,
-        67 as ::core::ffi::c_ushort,
-        83 as ::core::ffi::c_ushort,
-        99 as ::core::ffi::c_ushort,
-        115 as ::core::ffi::c_ushort,
-        131 as ::core::ffi::c_ushort,
-        163 as ::core::ffi::c_ushort,
-        195 as ::core::ffi::c_ushort,
-        227 as ::core::ffi::c_ushort,
-        258 as ::core::ffi::c_ushort,
-        0 as ::core::ffi::c_ushort,
-        0 as ::core::ffi::c_ushort,
-    ];
-    static LEXT: [::core::ffi::c_ushort; 31] = [
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_ushort,
-        19 as ::core::ffi::c_ushort,
-        19 as ::core::ffi::c_ushort,
-        19 as ::core::ffi::c_ushort,
-        19 as ::core::ffi::c_ushort,
-        20 as ::core::ffi::c_ushort,
-        20 as ::core::ffi::c_ushort,
-        20 as ::core::ffi::c_ushort,
-        20 as ::core::ffi::c_ushort,
-        21 as ::core::ffi::c_ushort,
-        21 as ::core::ffi::c_ushort,
-        21 as ::core::ffi::c_ushort,
-        21 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        68 as ::core::ffi::c_ushort,
-        193 as ::core::ffi::c_ushort,
-    ];
-    static DBASE: [::core::ffi::c_ushort; 32] = [
-        1 as ::core::ffi::c_ushort,
-        2 as ::core::ffi::c_ushort,
-        3 as ::core::ffi::c_ushort,
-        4 as ::core::ffi::c_ushort,
-        5 as ::core::ffi::c_ushort,
-        7 as ::core::ffi::c_ushort,
-        9 as ::core::ffi::c_ushort,
-        13 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        25 as ::core::ffi::c_ushort,
-        33 as ::core::ffi::c_ushort,
-        49 as ::core::ffi::c_ushort,
-        65 as ::core::ffi::c_ushort,
-        97 as ::core::ffi::c_ushort,
-        129 as ::core::ffi::c_ushort,
-        193 as ::core::ffi::c_ushort,
-        257 as ::core::ffi::c_ushort,
-        385 as ::core::ffi::c_ushort,
-        513 as ::core::ffi::c_ushort,
-        769 as ::core::ffi::c_ushort,
-        1025 as ::core::ffi::c_ushort,
-        1537 as ::core::ffi::c_ushort,
-        2049 as ::core::ffi::c_ushort,
-        3073 as ::core::ffi::c_ushort,
-        4097 as ::core::ffi::c_ushort,
-        6145 as ::core::ffi::c_ushort,
-        8193 as ::core::ffi::c_ushort,
-        12289 as ::core::ffi::c_ushort,
-        16385 as ::core::ffi::c_ushort,
-        24577 as ::core::ffi::c_ushort,
-        0 as ::core::ffi::c_ushort,
-        0 as ::core::ffi::c_ushort,
-    ];
-    static DEXT: [::core::ffi::c_ushort; 32] = [
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        16 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_ushort,
-        19 as ::core::ffi::c_ushort,
-        19 as ::core::ffi::c_ushort,
-        20 as ::core::ffi::c_ushort,
-        20 as ::core::ffi::c_ushort,
-        21 as ::core::ffi::c_ushort,
-        21 as ::core::ffi::c_ushort,
-        22 as ::core::ffi::c_ushort,
-        22 as ::core::ffi::c_ushort,
-        23 as ::core::ffi::c_ushort,
-        23 as ::core::ffi::c_ushort,
-        24 as ::core::ffi::c_ushort,
-        24 as ::core::ffi::c_ushort,
-        25 as ::core::ffi::c_ushort,
-        25 as ::core::ffi::c_ushort,
-        26 as ::core::ffi::c_ushort,
-        26 as ::core::ffi::c_ushort,
-        27 as ::core::ffi::c_ushort,
-        27 as ::core::ffi::c_ushort,
-        28 as ::core::ffi::c_ushort,
-        28 as ::core::ffi::c_ushort,
-        29 as ::core::ffi::c_ushort,
-        29 as ::core::ffi::c_ushort,
-        64 as ::core::ffi::c_ushort,
-        64 as ::core::ffi::c_ushort,
-    ];
-    len = 0 as ::core::ffi::c_uint;
-    while len <= MAXBITS as ::core::ffi::c_uint {
-        count[len as usize] = 0 as ::core::ffi::c_ushort;
-        len = len.wrapping_add(1);
-    }
-    sym = 0 as ::core::ffi::c_uint;
-    while sym < codes {
-        count[*lens.offset(sym as isize) as usize] =
-            count[*lens.offset(sym as isize) as usize].wrapping_add(1);
-        sym = sym.wrapping_add(1);
-    }
-    root = *bits;
-    max = MAXBITS as ::core::ffi::c_uint;
-    while max >= 1 as ::core::ffi::c_uint {
-        if count[max as usize] as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            break;
-        }
-        max = max.wrapping_sub(1);
-    }
-    if root > max {
-        root = max;
-    }
-    if max == 0 as ::core::ffi::c_uint {
-        here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-        here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-        here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-        let c2rust_fresh0 = *table;
-        *table = (*table).offset(1);
-        *c2rust_fresh0 = here;
-        let c2rust_fresh1 = *table;
-        *table = (*table).offset(1);
-        *c2rust_fresh1 = here;
-        *bits = 1 as ::core::ffi::c_uint;
-        return 0 as ::core::ffi::c_int;
-    }
-    min = 1 as ::core::ffi::c_uint;
-    while min < max {
-        if count[min as usize] as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            break;
-        }
-        min = min.wrapping_add(1);
-    }
-    if root < min {
-        root = min;
-    }
-    left = 1 as ::core::ffi::c_int;
-    len = 1 as ::core::ffi::c_uint;
-    while len <= MAXBITS as ::core::ffi::c_uint {
-        left <<= 1 as ::core::ffi::c_int;
-        left -= count[len as usize] as ::core::ffi::c_int;
-        if left < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        len = len.wrapping_add(1);
-    }
-    if left > 0 as ::core::ffi::c_int
-        && (type_0 as ::core::ffi::c_uint
-            == crate::src::inftrees::CODES as ::core::ffi::c_int as ::core::ffi::c_uint
-            || max != 1 as ::core::ffi::c_uint)
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    offs[1 as usize] = 0 as ::core::ffi::c_ushort;
-    len = 1 as ::core::ffi::c_uint;
-    while len < MAXBITS as ::core::ffi::c_uint {
-        offs[len.wrapping_add(1 as ::core::ffi::c_uint) as usize] =
-            (offs[len as usize] as ::core::ffi::c_int + count[len as usize] as ::core::ffi::c_int)
-                as ::core::ffi::c_ushort;
-        len = len.wrapping_add(1);
-    }
-    sym = 0 as ::core::ffi::c_uint;
-    while sym < codes {
-        if *lens.offset(sym as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            let c2rust_fresh2 = offs[*lens.offset(sym as isize) as usize];
-            offs[*lens.offset(sym as isize) as usize] =
-                offs[*lens.offset(sym as isize) as usize].wrapping_add(1);
-            *work.offset(c2rust_fresh2 as isize) = sym as ::core::ffi::c_ushort;
-        }
-        sym = sym.wrapping_add(1);
-    }
-    match type_0 as ::core::ffi::c_uint {
-        0 => {
-            match_0 = 20 as ::core::ffi::c_uint;
-        }
-        1 => {
-            base = &LBASE;
-            extra = &LEXT;
-            match_0 = 257 as ::core::ffi::c_uint;
-        }
-        2 => {
-            base = &DBASE;
-            extra = &DEXT;
-        }
-        _ => {}
-    }
-    huff = 0 as ::core::ffi::c_uint;
-    sym = 0 as ::core::ffi::c_uint;
-    len = min;
-    next = *table;
-    curr = root;
-    drop_0 = 0 as ::core::ffi::c_uint;
-    low = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-    used = (1 as ::core::ffi::c_uint) << root;
-    mask = used.wrapping_sub(1 as ::core::ffi::c_uint);
-    if type_0 as ::core::ffi::c_uint
-        == crate::src::inftrees::LENS as ::core::ffi::c_int as ::core::ffi::c_uint
-        && used > crate::src::inftrees::ENOUGH_LENS as ::core::ffi::c_uint
-        || type_0 as ::core::ffi::c_uint
-            == crate::src::inftrees::DISTS as ::core::ffi::c_int as ::core::ffi::c_uint
-            && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
-    {
-        return 1 as ::core::ffi::c_int;
-    }
-    loop {
-        here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
-        if (*work.offset(sym as isize) as ::core::ffi::c_uint)
-            .wrapping_add(1 as ::core::ffi::c_uint)
-            < match_0
-        {
-            here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-            here.val = *work.offset(sym as isize);
-        } else if *work.offset(sym as isize) as ::core::ffi::c_uint >= match_0 {
-            let index =
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as usize;
-            here.op = extra[index] as ::core::ffi::c_uchar;
-            here.val = base[index];
-        } else {
-            here.op = (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-            here.val = 0 as ::core::ffi::c_ushort;
-        }
-        incr = (1 as ::core::ffi::c_uint) << len.wrapping_sub(drop_0);
-        fill = (1 as ::core::ffi::c_uint) << curr;
-        min = fill;
-        loop {
-            fill = fill.wrapping_sub(incr);
-            *next.offset((huff >> drop_0).wrapping_add(fill) as isize) = here;
-            if fill == 0 as ::core::ffi::c_uint {
-                break;
-            }
-        }
-        incr = (1 as ::core::ffi::c_uint) << len.wrapping_sub(1 as ::core::ffi::c_uint);
-        while huff & incr != 0 {
-            incr >>= 1 as ::core::ffi::c_int;
-        }
-        if incr != 0 as ::core::ffi::c_uint {
-            huff &= incr.wrapping_sub(1 as ::core::ffi::c_uint);
-            huff = huff.wrapping_add(incr);
-        } else {
-            huff = 0 as ::core::ffi::c_uint;
-        }
-        sym = sym.wrapping_add(1);
-        count[len as usize] = count[len as usize].wrapping_sub(1);
-        if count[len as usize] as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-            if len == max {
-                break;
-            }
-            len = *lens.offset(*work.offset(sym as isize) as isize) as ::core::ffi::c_uint;
-        }
-        if len > root && huff & mask != low {
-            if drop_0 == 0 as ::core::ffi::c_uint {
-                drop_0 = root;
-            }
-            next = next.offset(min as isize);
-            curr = len.wrapping_sub(drop_0);
-            left = (1 as ::core::ffi::c_int) << curr;
-            while curr.wrapping_add(drop_0) < max {
-                left -= count[curr.wrapping_add(drop_0) as usize] as ::core::ffi::c_int;
-                if left <= 0 as ::core::ffi::c_int {
-                    break;
-                }
-                curr = curr.wrapping_add(1);
-                left <<= 1 as ::core::ffi::c_int;
-            }
-            used = used.wrapping_add((1 as ::core::ffi::c_uint) << curr);
-            if type_0 as ::core::ffi::c_uint
-                == crate::src::inftrees::LENS as ::core::ffi::c_int as ::core::ffi::c_uint
-                && used > crate::src::inftrees::ENOUGH_LENS as ::core::ffi::c_uint
-                || type_0 as ::core::ffi::c_uint
-                    == crate::src::inftrees::DISTS as ::core::ffi::c_int as ::core::ffi::c_uint
-                    && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
-            {
-                return 1 as ::core::ffi::c_int;
-            }
-            low = huff & mask;
-            (*(*table).offset(low as isize)).op = curr as ::core::ffi::c_uchar;
-            (*(*table).offset(low as isize)).bits = root as ::core::ffi::c_uchar;
-            (*(*table).offset(low as isize)).val =
-                (next.addr().wrapping_sub((*table).addr())
-                    / ::core::mem::size_of::<crate::src::inftrees::code>())
-                    as ::core::ffi::c_ushort;
-        }
-    }
-    if huff != 0 as ::core::ffi::c_uint {
-        here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-        here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
-        here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-        *next.offset(huff as isize) = here;
-    }
-    *table = (*table).offset(used as isize);
-    *bits = root;
-    return 0 as ::core::ffi::c_int;
-}
-
-/// Build a Huffman decode table in a bounded state-owned arena.
 ///
 /// The exported `inflate_table` ABI keeps its pointer cursor for C callers.
 /// Rust decoders own their lens, work, and code arenas, so they can use this
@@ -3474,6 +3102,24 @@ pub fn inflate_table_slice(
     *bits = root;
     0
 }
+
+/// The C-only entry point is used with these fixed alphabet sizes.  The table
+/// cursor has no capacity in its ABI, so its exact output range is exposed
+/// only after the safe builder has determined it.
+fn inflate_table_ffi_limits(
+    type_0: crate::src::inftrees::codetype,
+    codes: usize,
+    bits: ::core::ffi::c_uint,
+) -> bool {
+    let maximum_codes = match type_0 {
+        CODES => 19,
+        LENS => 288,
+        DISTS => 32,
+        _ => return false,
+    };
+    codes <= maximum_codes && bits <= MAXBITS as u32
+}
+
 #[export_name = "inflate_table"]
 
 pub unsafe extern "C" fn inflate_table_ffi(
@@ -3484,7 +3130,60 @@ pub unsafe extern "C" fn inflate_table_ffi(
     mut bits: *mut ::core::ffi::c_uint,
     mut work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
-    inflate_table(type_0, lens, codes, table, bits, work)
+    let codes = codes as usize;
+    let (Some(table_out), Some(bits)) = (table.as_mut(), bits.as_mut()) else {
+        return 1;
+    };
+    if !inflate_table_ffi_limits(type_0, codes, *bits) {
+        return 1;
+    }
+    if (codes != 0 && (lens.is_null() || work.is_null())) || (*table_out).is_null() {
+        return 1;
+    }
+
+    // Copy lens before borrowing work mutably, so the two C buffers never
+    // become overlapping Rust borrows.  The conversion is bounded by the
+    // type-specific alphabet limit checked above.
+    let mut lens_copy = [0u16; 288];
+    if codes != 0 {
+        let source = ::core::slice::from_raw_parts(lens, codes);
+        lens_copy[..codes].copy_from_slice(source);
+    }
+    let work = if codes == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(work, codes)
+    };
+    let table_cursor = *table_out;
+    let mut table = Vec::new();
+    const MAX_TABLE_ENTRIES: usize = 1 << MAXBITS as usize;
+    if table.try_reserve_exact(MAX_TABLE_ENTRIES).is_err() {
+        return 1;
+    }
+    table.resize(
+        MAX_TABLE_ENTRIES,
+        crate::src::inftrees::code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        },
+    );
+    let mut next = 0;
+    let result = inflate_table_slice(
+        type_0,
+        &lens_copy[..codes],
+        codes,
+        &mut table,
+        &mut next,
+        bits,
+        work,
+    );
+    if result == 0 {
+        let output = ::core::slice::from_raw_parts_mut(table_cursor, next);
+        output.copy_from_slice(&table[..next]);
+        *table_out = table_cursor.wrapping_add(next);
+    }
+    result
 }
 pub fn inflate_fixed(
     lencode: &mut crate::src::inflate::length_table,

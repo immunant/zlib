@@ -227,7 +227,6 @@ pub use crate::src::deflate::internal_state;
 pub use crate::src::inftrees::code;
 pub use crate::src::inftrees::codetype;
 pub use crate::src::inftrees::inflate_fixed;
-pub use crate::src::inftrees::inflate_table;
 pub use crate::src::inftrees::CODES;
 pub use crate::src::inftrees::DISTS;
 pub use crate::src::inftrees::ENOUGH;
