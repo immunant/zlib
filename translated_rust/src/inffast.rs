@@ -89,6 +89,12 @@ impl InflateFastProgress {
     }
 }
 
+/// Return the low-bit mask used by a DEFLATE table entry without relying on
+/// a potentially invalid shift count from malformed decoder state.
+fn inflate_fast_mask(bits: u32) -> Option<u64> {
+    1u64.checked_shl(bits).map(|mask| mask.wrapping_sub(1))
+}
+
 /// Decode the fast-path portion of a deflate stream using only bounded
 /// buffers.  The ABI adapter owns construction of these views and commits the
 /// resulting cursors, so this core cannot retain or dereference foreign
@@ -114,7 +120,7 @@ fn inflate_fast_core(
     if input.len() < 6 || output.len() < 258 {
         return InflateFastProgress::no_progress(hold, bits);
     }
-    if lenbits >= u32::BITS || distbits >= u32::BITS {
+    if lenbits >= u32::BITS || distbits >= u32::BITS || bits >= u64::BITS {
         return InflateFastProgress::invalid(hold, bits, 14);
     }
     if wsize > window.len() || whave > wsize || wnext > wsize {
@@ -123,9 +129,12 @@ fn inflate_fast_core(
     let Ok(output_capacity) = u32::try_from(output.len()) else {
         return InflateFastProgress::invalid(hold, bits, 17);
     };
-    let Some(output_origin) = start.checked_sub(output_capacity) else {
+    // The legacy fast loop receives the output availability at entry as
+    // `start`, so its distance accounting is relative to this output slice.
+    // A future bounded caller must preserve that same contract.
+    if start != output_capacity {
         return InflateFastProgress::invalid(hold, bits, 17);
-    };
+    }
     let mut input_at = 0usize;
     let mut output_at = 0usize;
     let lmask = (1u32 << lenbits).wrapping_sub(1) as u64;
@@ -180,7 +189,12 @@ fn inflate_fast_core(
                         hold = hold.wrapping_add((byte as u64) << bits);
                         bits += 8;
                     }
-                    len = len.wrapping_add((hold as u32 & (1u32 << op).wrapping_sub(1)) as usize);
+                    let Some(mask) = inflate_fast_mask(op) else {
+                        mode = Some(crate::src::inflate::BAD);
+                        error = Some(14);
+                        break 'fast;
+                    };
+                    len = len.wrapping_add((hold & mask) as usize);
                     hold >>= op;
                     bits -= op;
                 }
@@ -221,9 +235,12 @@ fn inflate_fast_core(
                             hold = hold.wrapping_add((byte as u64) << bits);
                             bits += 8;
                         }
-                        dist = dist.wrapping_add(
-                            (hold as u32 & (1u32 << dist_op).wrapping_sub(1)) as usize,
-                        );
+                        let Some(mask) = inflate_fast_mask(dist_op) else {
+                            mode = Some(crate::src::inflate::BAD);
+                            error = Some(15);
+                            break 'fast;
+                        };
+                        dist = dist.wrapping_add((hold & mask) as usize);
                         hold >>= dist_op;
                         bits -= dist_op;
                         break dist;
@@ -233,8 +250,12 @@ fn inflate_fast_core(
                         error = Some(15);
                         break 'fast;
                     }
-                    let index = dist_here.val as usize
-                        + (hold as u32 & (1u32 << dist_op).wrapping_sub(1)) as usize;
+                    let Some(mask) = inflate_fast_mask(dist_op) else {
+                        mode = Some(crate::src::inflate::BAD);
+                        error = Some(15);
+                        break 'fast;
+                    };
+                    let index = dist_here.val as usize + (hold & mask) as usize;
                     let Some(&next) = dcode.get(index) else {
                         mode = Some(crate::src::inflate::BAD);
                         error = Some(15);
@@ -243,9 +264,8 @@ fn inflate_fast_core(
                     dist_here = next;
                 };
 
-                let produced = output_origin.wrapping_add(output_at as u32) as usize;
-                if dist > produced {
-                    let mut back = dist - produced;
+                if dist > output_at {
+                    let mut back = dist - output_at;
                     if back > whave || back > wsize || wsize > window.len() {
                         if sane {
                             mode = Some(crate::src::inflate::BAD);
@@ -284,7 +304,7 @@ fn inflate_fast_core(
                     }
                     len -= take;
                     back -= take;
-                    if len != 0 && wnext != 0 && wnext < dist - produced {
+                    if len != 0 && wnext != 0 && wnext < dist - output_at {
                         from = 0;
                         let take = wnext.min(len);
                         for _ in 0..take {
@@ -331,8 +351,12 @@ fn inflate_fast_core(
                 break 'code;
             }
             if op & 64 == 0 {
-                let index =
-                    here.val as usize + (hold as u32 & (1u32 << op).wrapping_sub(1)) as usize;
+                let Some(mask) = inflate_fast_mask(op) else {
+                    mode = Some(crate::src::inflate::BAD);
+                    error = Some(14);
+                    break 'fast;
+                };
+                let index = here.val as usize + (hold & mask) as usize;
                 let Some(&next) = lcode.get(index) else {
                     mode = Some(crate::src::inflate::BAD);
                     error = Some(14);
@@ -358,7 +382,10 @@ fn inflate_fast_core(
     if rollback <= input_at {
         input_at -= rollback;
         bits -= (rollback as u32) << 3;
-        hold &= (1u64 << bits).wrapping_sub(1);
+        let Some(mask) = inflate_fast_mask(bits) else {
+            return InflateFastProgress::invalid(hold, bits, 14);
+        };
+        hold &= mask;
     } else {
         mode = Some(crate::src::inflate::BAD);
         error = Some(14);
