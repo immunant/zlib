@@ -592,11 +592,70 @@ fn gz_read(
                 err = result.status;
             }
             crate::src::gzlib::GzReadPlan::Decompress(chunk) => {
-                n = chunk;
-                state.strm.avail_out = n as crate::stdlib::uInt;
-                state.strm.next_out = buf[got as usize..].as_mut_ptr();
+                // Bulk reads used to direct the inflater at `buf`.  Keep the
+                // decoder's output in gzip's registry-owned allocation
+                // instead, then copy the produced prefix to the already
+                // bound caller slice.  This leaves the inflater with only
+                // its own stable output cursor and makes the caller buffer a
+                // normal slice-only concern of this read coordinator.
+                let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+                let requested =
+                    crate::src::gzlib::gz_with_owned_output_buffer(state_key, |output| {
+                        (state.out == output.as_mut_ptr()).then(|| output.len().min(chunk as usize))
+                    })
+                    .flatten();
+                let Some(requested) =
+                    requested.and_then(|len| ::core::ffi::c_uint::try_from(len).ok())
+                else {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(b"state corrupt\0"),
+                    );
+                    err = -1;
+                    break 's_140;
+                };
+                if requested == 0 {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(b"state corrupt\0"),
+                    );
+                    err = -1;
+                    break 's_140;
+                }
+                state.strm.avail_out = requested as crate::stdlib::uInt;
+                state.strm.next_out = state.out;
                 err = gz_decomp(state);
                 n = crate::src::gzlib::gz_read_take_decompressed(state);
+                let copied = crate::src::gzlib::gz_with_owned_output_buffer(state_key, |output| {
+                    if state.out != output.as_mut_ptr() || n > requested {
+                        return false;
+                    }
+                    let Some(source) = gz_buffered_input_range(
+                        output.as_ptr().addr(),
+                        state.x.next.addr(),
+                        n,
+                        output.len(),
+                    ) else {
+                        return false;
+                    };
+                    let end = match (got as usize).checked_add(n as usize) {
+                        Some(end) if end <= buf.len() => end,
+                        _ => return false,
+                    };
+                    buf[got as usize..end].copy_from_slice(&output[source]);
+                    true
+                });
+                if copied != Some(true) {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(b"state corrupt\0"),
+                    );
+                    err = -1;
+                    break 's_140;
+                }
             }
         }
         crate::src::gzlib::gz_read_progress(state, &mut len, &mut got, n, consumed_buffered);
