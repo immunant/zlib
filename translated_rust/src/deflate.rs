@@ -213,6 +213,15 @@ impl<'a> PendingStorageView<'a> {
     }
 }
 
+pub(crate) fn with_pending_storage<Result>(
+    bytes: &mut [crate::stdlib::Bytef],
+    layout: PendingStorageLayout,
+    callback: impl FnOnce(&mut PendingStorageView<'_>) -> Result,
+) -> Option<Result> {
+    let mut storage = PendingStorageView::new(bytes, layout)?;
+    Some(callback(&mut storage))
+}
+
 pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
     crate::zutil_h::MAX_MATCH + crate::zutil_h::MIN_MATCH + 1 as ::core::ffi::c_int;
 
@@ -6240,6 +6249,32 @@ mod tests {
         assert_eq!(
             deflate_reset_status_and_adler(0),
             (crate::src::deflate::INIT_STATE, 1),
+        );
+    }
+
+    #[test]
+    fn with_pending_storage_limits_the_callback_to_the_pending_layout() {
+        let layout = pending_storage_layout(2);
+        let mut bytes = [0; 10];
+
+        let result = crate::src::deflate::with_pending_storage(&mut bytes, layout, |storage| {
+            storage.pending_bytes()[1] = 0x12;
+            storage.symbol_bytes()[0] = 0x34;
+            (storage.pending_bytes().len(), storage.symbol_bytes().len())
+        });
+
+        assert_eq!(result, Some((8, 6)));
+        assert_eq!(bytes, [0, 0x12, 0x34, 0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn with_pending_storage_rejects_short_backing_storage() {
+        let layout = pending_storage_layout(2);
+        let mut bytes = [0; 7];
+
+        assert_eq!(
+            crate::src::deflate::with_pending_storage(&mut bytes, layout, |_| ()),
+            None
         );
     }
 

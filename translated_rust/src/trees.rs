@@ -5100,14 +5100,15 @@ pub unsafe extern "C" fn _tr_stored_block(
     let pending_buffer =
         core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
-    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, layout)
-        .expect("pending storage layout matches its allocation");
     let stored_data = if stored_len == 0 {
         &[]
     } else {
         core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
     };
-    tr_stored_block_core(&mut storage, state, stored_data, stored_len, last);
+    crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
+        tr_stored_block_core(storage, state, stored_data, stored_len, last);
+    })
+    .expect("pending storage layout matches its allocation");
 }
 #[export_name = "_tr_stored_block"]
 
@@ -5126,14 +5127,15 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     let pending_buffer =
         core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
-    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, layout)
-        .expect("pending storage layout matches its allocation");
-    assert!(tr_flush_bits_core(
-        &mut storage,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-    ));
+    crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
+        assert!(tr_flush_bits_core(
+            storage,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+        ));
+    })
+    .expect("pending storage layout matches its allocation");
 }
 fn tr_align_core(
     storage: &mut crate::src::deflate::PendingStorageView<'_>,
@@ -5178,14 +5180,15 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let pending_buffer =
         core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
-    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, layout)
-        .expect("pending storage layout matches its allocation");
-    let _ = tr_align_core(
-        &mut storage,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-    );
+    crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
+        let _ = tr_align_core(
+            storage,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+        );
+    })
+    .expect("pending storage layout matches its allocation");
 }
 
 fn compress_block(
@@ -5394,8 +5397,6 @@ pub unsafe extern "C" fn _tr_flush_block(
     let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
     let pending_buffer =
         core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, layout)
-        .expect("pending storage layout matches its allocation");
     let stored_data = if buf.is_null() {
         None
     } else if stored_len == 0 {
@@ -5406,7 +5407,10 @@ pub unsafe extern "C" fn _tr_flush_block(
             stored_len as usize,
         ))
     };
-    tr_flush_block_core(&mut storage, state, strm, stored_data, stored_len, last);
+    crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
+        tr_flush_block_core(storage, state, strm, stored_data, stored_len, last);
+    })
+    .expect("pending storage layout matches its allocation");
 }
 #[export_name = "_tr_flush_block"]
 
@@ -5461,18 +5465,19 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     let pending_layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
     let pending_buffer =
         core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, pending_layout)
-        .expect("pending storage layout matches its allocation");
-    tr_tally_core(
-        &mut storage,
-        &mut state.sym_next,
-        state.sym_end,
-        &mut state.matches,
-        &mut state.dyn_ltree,
-        &mut state.dyn_dtree,
-        dist,
-        lc,
-    )
+    crate::src::deflate::with_pending_storage(pending_buffer, pending_layout, |storage| {
+        tr_tally_core(
+            storage,
+            &mut state.sym_next,
+            state.sym_end,
+            &mut state.matches,
+            &mut state.dyn_ltree,
+            &mut state.dyn_dtree,
+            dist,
+            lc,
+        )
+    })
+    .expect("pending storage layout matches its allocation")
 }
 
 #[cfg(test)]
