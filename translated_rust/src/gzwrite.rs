@@ -136,9 +136,7 @@ unsafe fn gz_comp(
             ) as ::core::ffi::c_int;
             if writ < 0 as ::core::ffi::c_int {
                 let errno = *crate::stdlib::__errno_location();
-                if gz_errno_is_retryable(errno) {
-                    state.again = 1 as ::core::ffi::c_int;
-                }
+                state.again = gz_write_errno_again(errno);
                 crate::src::gzlib::gz_error(
                     state_ptr,
                     crate::zlib_h::Z_ERRNO,
@@ -176,9 +174,7 @@ unsafe fn gz_comp(
                 ) as ::core::ffi::c_int;
                 if writ < 0 as ::core::ffi::c_int {
                     let errno = *crate::stdlib::__errno_location();
-                    if gz_errno_is_retryable(errno) {
-                        state.again = 1 as ::core::ffi::c_int;
-                    }
+                    state.again = gz_write_errno_again(errno);
                     crate::src::gzlib::gz_error(
                         state_ptr,
                         crate::zlib_h::Z_ERRNO,
@@ -330,6 +326,14 @@ fn gz_write_error_return(
         requested.wrapping_sub(remaining)
     } else {
         0 as crate::stdlib::z_size_t
+    }
+}
+
+fn gz_write_errno_again(errno: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if gz_errno_is_retryable(errno) {
+        1 as ::core::ffi::c_int
+    } else {
+        0 as ::core::ffi::c_int
     }
 }
 

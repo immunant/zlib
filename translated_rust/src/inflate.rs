@@ -483,6 +483,18 @@ fn inflate_gzip_header_crc_update_enabled(
     flags & 0x200 as ::core::ffi::c_int != 0 && wrap & 4 as ::core::ffi::c_int != 0
 }
 
+fn inflate_update_output_check(
+    check: crate::stdlib::uLong,
+    flags: ::core::ffi::c_int,
+    output: &[crate::stdlib::Bytef],
+) -> crate::stdlib::uLong {
+    if flags != 0 {
+        crate::src::crc32::crc32_update(check, output)
+    } else {
+        crate::src::adler32::adler32_update(check, output)
+    }
+}
+
 enum InflateZlibHeaderError {
     IncorrectHeaderCheck,
     UnknownCompressionMethod,
@@ -1338,19 +1350,15 @@ pub unsafe extern "C" fn inflate_ffi(
                     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
                     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
-                        (*state).check = (if (*state).flags != 0 {
-                            crate::src::crc32::crc32_ffi(
-                                (*state).check as crate::stdlib::uLong,
-                                put.offset(-(out as isize)),
-                                out as crate::stdlib::uInt,
-                            )
-                        } else {
-                            crate::src::adler32::adler32_ffi(
-                                (*state).check as crate::stdlib::uLong,
-                                put.offset(-(out as isize)),
-                                out as crate::stdlib::uInt,
-                            )
-                        }) as ::core::ffi::c_ulong;
+                        let output = ::core::slice::from_raw_parts(
+                            put.offset(-(out as isize)),
+                            out as usize,
+                        );
+                        (*state).check = inflate_update_output_check(
+                            (*state).check as crate::stdlib::uLong,
+                            (*state).flags,
+                            output,
+                        ) as ::core::ffi::c_ulong;
                         (*strm).adler = (*state).check as crate::stdlib::uLong;
                     }
                     out = left;
@@ -2278,19 +2286,13 @@ pub unsafe extern "C" fn inflate_ffi(
     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
-        (*state).check = (if (*state).flags != 0 {
-            crate::src::crc32::crc32_ffi(
-                (*state).check as crate::stdlib::uLong,
-                (*strm).next_out.offset(-(out as isize)),
-                out as crate::stdlib::uInt,
-            )
-        } else {
-            crate::src::adler32::adler32_ffi(
-                (*state).check as crate::stdlib::uLong,
-                (*strm).next_out.offset(-(out as isize)),
-                out as crate::stdlib::uInt,
-            )
-        }) as ::core::ffi::c_ulong;
+        let output =
+            ::core::slice::from_raw_parts((*strm).next_out.offset(-(out as isize)), out as usize);
+        (*state).check = inflate_update_output_check(
+            (*state).check as crate::stdlib::uLong,
+            (*state).flags,
+            output,
+        ) as ::core::ffi::c_ulong;
         (*strm).adler = (*state).check as crate::stdlib::uLong;
     }
     (*strm).data_type = inflate_data_type((*state).bits, (*state).last, (*state).mode);
