@@ -26,6 +26,46 @@ pub use crate::zlib_h::Z_NULL;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+// Chunk selection is independent of the raw stream cursor.  Keep the
+// one-shot decompressor's pointer-bearing implementation focused on the
+// actual inflate calls.
+fn uncompress_chunk(
+    remaining: crate::stdlib::z_size_t,
+    max: crate::stdlib::uInt,
+) -> (crate::stdlib::uInt, crate::stdlib::z_size_t) {
+    let chunk = if remaining > max as crate::stdlib::z_size_t {
+        max
+    } else {
+        remaining as crate::stdlib::uInt
+    };
+    (chunk, remaining.wrapping_sub(chunk as crate::stdlib::z_size_t))
+}
+
+fn uncompress_buffers_valid(
+    source_is_null: bool,
+    source_len: crate::stdlib::z_size_t,
+    dest_is_null: bool,
+    dest_len: crate::stdlib::z_size_t,
+) -> bool {
+    !(source_len != 0 && source_is_null || dest_len != 0 && dest_is_null)
+}
+
+fn uncompress_result(
+    err: ::core::ffi::c_int,
+    remaining_input: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_int {
+    if err == crate::zlib_h::Z_STREAM_END {
+        crate::zlib_h::Z_OK
+    } else if err == crate::zlib_h::Z_NEED_DICT {
+        crate::zlib_h::Z_DATA_ERROR
+    } else if err == crate::zlib_h::Z_BUF_ERROR && remaining_input == 0 {
+        crate::zlib_h::Z_DATA_ERROR
+    } else {
+        err
+    }
+}
+
 pub unsafe extern "C" fn uncompress2_z(
     mut dest: *mut crate::stdlib::Bytef,
     destLen: &mut crate::stdlib::z_size_t,
@@ -52,9 +92,7 @@ pub unsafe extern "C" fn uncompress2_z(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut len: crate::stdlib::z_size_t = 0;
     let mut left: crate::stdlib::z_size_t = 0;
-    if *sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
+    if !uncompress_buffers_valid(source.is_null(), *sourceLen, dest.is_null(), *destLen) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     len = *sourceLen;
@@ -79,20 +117,10 @@ pub unsafe extern "C" fn uncompress2_z(
     stream.avail_out = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
+            (stream.avail_out, left) = uncompress_chunk(left, max);
         }
         if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if len > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                len as crate::stdlib::uInt
-            };
-            len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
+            (stream.avail_in, len) = uncompress_chunk(len, max);
         }
         err = crate::src::inflate::inflate(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
@@ -107,15 +135,7 @@ pub unsafe extern "C" fn uncompress2_z(
     *sourceLen = (*sourceLen).wrapping_sub(len);
     *destLen = (*destLen).wrapping_sub(left);
     crate::src::inflate::inflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
-    return if err == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else if err == crate::zlib_h::Z_NEED_DICT {
-        crate::zlib_h::Z_DATA_ERROR
-    } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        err
-    };
+    uncompress_result(err, len)
 }
 #[export_name = "uncompress2_z"]
 
