@@ -334,6 +334,28 @@ fn inflate_fast_cursor_lengths(
     Some((used, output_len))
 }
 
+// A regular inflater establishes these scalar invariants before entering the
+// fast loop. Keep them explicit for the raw adapter as well: unlike the
+// bounded table views below, a malformed root width or window cursor would
+// otherwise reach a shift or modulo operation before it can be rejected.
+fn inflate_fast_state_is_usable(state: &crate::src::inflate::inflate_state) -> bool {
+    let word_bits = ::core::ffi::c_uint::BITS;
+    if state.bits > 32 || state.lenbits == 0 || state.distbits == 0 {
+        return false;
+    }
+    if state.lenbits >= word_bits || state.distbits >= word_bits {
+        return false;
+    }
+    if state.wsize == 0 {
+        // Without a window, the normal distance check must reject every
+        // reference that reaches behind the output produced in this pass.
+        // An undermined stream deliberately bypasses that check, so it still
+        // needs an initialized window before the fast path can run.
+        return state.whave == 0 && state.sane != 0;
+    }
+    state.wnext < state.wsize
+}
+
 // Once its caller has bound the stream cursors, the fast decoder is entirely
 // reference- and slice-based. Keeping the cursor binding in the adapter
 // below removes raw pointer work from this core implementation.
@@ -399,6 +421,9 @@ pub fn inflate_fast(
     let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
         return;
     };
+    if !inflate_fast_state_is_usable(state) {
+        return;
+    }
     let Some((used, output_len)) = inflate_fast_cursor_lengths(strm, start) else {
         return;
     };
