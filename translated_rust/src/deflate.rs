@@ -432,6 +432,13 @@ enum DeflateMatchRefillAction {
     EndBlock,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeflateHuffRefillAction {
+    Continue,
+    NeedMore,
+    Done,
+}
+
 fn deflate_match_refill_action(
     lookahead: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
@@ -461,6 +468,19 @@ fn deflate_rle_refill_action(
         }
     } else {
         DeflateRleRefillAction::Continue
+    }
+}
+
+fn deflate_huff_refill_action(
+    lookahead: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> DeflateHuffRefillAction {
+    if lookahead != 0 {
+        DeflateHuffRefillAction::Continue
+    } else if flush == crate::zlib_h::Z_NO_FLUSH {
+        DeflateHuffRefillAction::NeedMore
+    } else {
+        DeflateHuffRefillAction::Done
     }
 }
 
@@ -4019,11 +4039,10 @@ unsafe fn deflate_huff(
     loop {
         if (*s).lookahead == 0 as crate::stdlib::uInt {
             fill_window(s);
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
-                if flush == crate::zlib_h::Z_NO_FLUSH {
-                    return need_more;
-                }
-                break;
+            match deflate_huff_refill_action((*s).lookahead, flush) {
+                DeflateHuffRefillAction::Continue => {}
+                DeflateHuffRefillAction::NeedMore => return need_more,
+                DeflateHuffRefillAction::Done => break,
             }
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
@@ -4390,6 +4409,22 @@ mod tests {
         assert!(super::deflate_slow_should_emit_previous_match(3, 3));
         assert!(super::deflate_slow_should_emit_previous_match(4, 3));
         assert!(!super::deflate_slow_should_emit_previous_match(3, 4));
+    }
+
+    #[test]
+    fn deflate_huff_refill_action_preserves_empty_input_behavior() {
+        assert_eq!(
+            super::deflate_huff_refill_action(1, crate::zlib_h::Z_NO_FLUSH),
+            super::DeflateHuffRefillAction::Continue,
+        );
+        assert_eq!(
+            super::deflate_huff_refill_action(0, crate::zlib_h::Z_NO_FLUSH),
+            super::DeflateHuffRefillAction::NeedMore,
+        );
+        assert_eq!(
+            super::deflate_huff_refill_action(0, crate::zlib_h::Z_FINISH),
+            super::DeflateHuffRefillAction::Done,
+        );
     }
 
     #[test]

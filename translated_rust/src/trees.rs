@@ -3730,6 +3730,13 @@ fn supplemental_tree_opt_len(opt_len: crate::zutil_h::ulg) -> crate::zutil_h::ul
     opt_len.wrapping_sub(1)
 }
 
+fn supplemental_tree_static_len(
+    static_len: crate::zutil_h::ulg,
+    static_bit_length: crate::zutil_h::ush,
+) -> crate::zutil_h::ulg {
+    static_len.wrapping_sub(static_bit_length as crate::zutil_h::ulg)
+}
+
 fn rebalance_overflowed_bit_lengths(
     bl_count: &mut [crate::zutil_h::ush; 16],
     max_length: ::core::ffi::c_int,
@@ -4330,9 +4337,10 @@ unsafe fn build_tree(
         (*s).depth[node as usize] = 0 as crate::zutil_h::uch;
         (*s).opt_len = supplemental_tree_opt_len((*s).opt_len);
         if !stree.is_null() {
-            (*s).static_len = (*s)
-                .static_len
-                .wrapping_sub((*stree.wrapping_add(node as usize)).dl.len as crate::zutil_h::ulg);
+            (*s).static_len = supplemental_tree_static_len(
+                (*s).static_len,
+                (*stree.wrapping_add(node as usize)).dl.len,
+            );
         }
     }
     (*desc).max_code = max_code;
@@ -5556,12 +5564,13 @@ mod tests {
         pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
         reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
         static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
-        symbol_buffer_is_full, symbol_triplet_cursors, tally_match_tree_indices,
-        tally_scan_tree_action, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
-        tree_bit_length_totals_after_node, tree_heap_has_pair, tree_next_cursor, tree_parent_depth,
-        tree_run_continues, tree_run_extra_bits, tree_run_limits, BlockEncoding,
-        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
+        supplemental_tree_static_len, symbol_buffer_is_full, symbol_triplet_cursors,
+        tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
+        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_heap_has_pair,
+        tree_next_cursor, tree_parent_depth, tree_run_continues, tree_run_extra_bits,
+        tree_run_limits, BlockEncoding, GenBitlenOverflowNode, GenBitlenOverflowReassignment,
+        HeapChild, ScanTreeAction, TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6140,6 +6149,12 @@ mod tests {
     fn supplemental_tree_opt_len_preserves_wrapping_cost_adjustment() {
         assert_eq!(supplemental_tree_opt_len(8), 7);
         assert_eq!(supplemental_tree_opt_len(0), crate::zutil_h::ulg::MAX);
+    }
+
+    #[test]
+    fn supplemental_tree_static_len_preserves_wrapping_cost_adjustment() {
+        assert_eq!(supplemental_tree_static_len(8, 3), 5);
+        assert_eq!(supplemental_tree_static_len(0, 1), crate::zutil_h::ulg::MAX,);
     }
 
     #[test]

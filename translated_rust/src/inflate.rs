@@ -575,6 +575,15 @@ fn window_allocation_plan(has_window: bool, wbits: crate::stdlib::uInt) -> Windo
     }
 }
 
+fn window_allocation_request_for_plan(
+    plan: WindowAllocationPlan,
+) -> Option<(crate::stdlib::uInt, crate::stdlib::uInt)> {
+    match plan {
+        WindowAllocationPlan::Allocate { items, size } => Some((items, size)),
+        WindowAllocationPlan::Existing => None,
+    }
+}
+
 fn window_allocation_failed(plan: WindowAllocationPlan, has_window: bool) -> bool {
     matches!(plan, WindowAllocationPlan::Allocate { .. }) && !has_window
 }
@@ -1060,7 +1069,7 @@ unsafe fn updatewindow(
 ) -> ::core::ffi::c_int {
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     let allocation_plan = window_allocation_plan(!(*state).window.is_null(), (*state).wbits);
-    if let WindowAllocationPlan::Allocate { items, size } = allocation_plan {
+    if let Some((items, size)) = window_allocation_request_for_plan(allocation_plan) {
         (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*strm).opaque, items, size
@@ -3132,13 +3141,13 @@ mod tests {
         inflate_zlib_header_error, inflate_zlib_header_transition, inflate_zlib_window_params,
         initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
         update_window_core, update_window_produced_len, window_allocation_failed,
-        window_allocation_plan, window_allocation_request, window_needs_allocation,
-        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
-        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
-        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
-        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams,
-        WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        window_allocation_plan, window_allocation_request, window_allocation_request_for_plan,
+        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
+        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
+        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
+        InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
+        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4296,6 +4305,18 @@ mod tests {
                 items: 256,
                 size: 1,
             }
+        );
+    }
+
+    #[test]
+    fn window_allocation_request_for_plan_preserves_allocation_branch() {
+        assert_eq!(
+            window_allocation_request_for_plan(window_allocation_plan(false, 8)),
+            Some((256, 1))
+        );
+        assert_eq!(
+            window_allocation_request_for_plan(window_allocation_plan(true, 15)),
+            None
         );
     }
 

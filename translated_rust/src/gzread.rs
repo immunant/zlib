@@ -767,6 +767,10 @@ fn gz_look_window_bits() -> ::core::ffi::c_int {
     15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int
 }
 
+fn gz_look_allocations_failed(input_allocated: bool, output_allocated: bool) -> bool {
+    !input_allocated || !output_allocated
+}
+
 enum GzLookGzipSource {
     Forced { junk_is_known: bool },
     Header,
@@ -832,7 +836,7 @@ unsafe fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         (*state).out = crate::stdlib::malloc(
             gz_output_buffer_len((*state).want) as crate::__stddef_size_t_h::size_t
         ) as *mut ::core::ffi::c_uchar;
-        if (*state).in_0.is_null() || (*state).out.is_null() {
+        if gz_look_allocations_failed(!(*state).in_0.is_null(), !(*state).out.is_null()) {
             crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
             crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
             crate::src::gzlib::gz_error(
@@ -1715,6 +1719,14 @@ mod tests {
     #[test]
     fn gz_look_window_bits_selects_the_gzip_wrapper() {
         assert_eq!(gz_look_window_bits(), 31);
+    }
+
+    #[test]
+    fn gz_look_allocations_failed_requires_both_buffers() {
+        assert!(!gz_look_allocations_failed(true, true));
+        assert!(gz_look_allocations_failed(false, true));
+        assert!(gz_look_allocations_failed(true, false));
+        assert!(gz_look_allocations_failed(false, false));
     }
 
     #[test]
