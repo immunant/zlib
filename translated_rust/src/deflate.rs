@@ -2176,23 +2176,15 @@ pub unsafe extern "C" fn deflate_ffi(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *(*s)
-                        .head
-                        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                        NIL as crate::src::deflate::Posf;
-                    crate::stdlib::memset(
-                        (*s).head as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                            as crate::__stddef_size_t_h::size_t)
-                            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
-                                as crate::__stddef_size_t_h::size_t),
-                    );
-                    (*s).slid = 0 as ::core::ffi::c_int;
-                    if (*s).lookahead == 0 as crate::stdlib::uInt {
-                        (*s).strstart = 0 as crate::stdlib::uInt;
-                        (*s).block_start = 0 as ::core::ffi::c_long;
-                        (*s).insert = 0 as crate::stdlib::uInt;
+                    let state = &mut *s;
+                    let head =
+                        ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+                    deflate_clear_hash_head(head);
+                    state.slid = 0 as ::core::ffi::c_int;
+                    if state.lookahead == 0 as crate::stdlib::uInt {
+                        state.strstart = 0 as crate::stdlib::uInt;
+                        state.block_start = 0 as ::core::ffi::c_long;
+                        state.insert = 0 as crate::stdlib::uInt;
                     }
                 }
             }
