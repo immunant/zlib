@@ -448,6 +448,51 @@ pub unsafe extern "C" fn inflatePrime_ffi(
 ) -> ::core::ffi::c_int {
     inflatePrime(strm, bits, value)
 }
+fn copy_history_window(
+    window: &mut [u8],
+    input: &[u8],
+    wnext: &mut ::core::ffi::c_uint,
+    whave: &mut ::core::ffi::c_uint,
+) {
+    let wsize = window.len() as ::core::ffi::c_uint;
+    if wsize == 0 {
+        *wnext = 0;
+        *whave = 0;
+        return;
+    }
+    let mut copy = input.len() as ::core::ffi::c_uint;
+    if copy >= wsize {
+        window.copy_from_slice(&input[input.len() - window.len()..]);
+        *wnext = 0;
+        *whave = wsize;
+        return;
+    }
+
+    let mut dist = wsize.wrapping_sub(*wnext);
+    if dist > copy {
+        dist = copy;
+    }
+    let input_start = input.len() - copy as usize;
+    let window_start = *wnext as usize;
+    window[window_start..window_start + dist as usize]
+        .copy_from_slice(&input[input_start..input_start + dist as usize]);
+    copy = copy.wrapping_sub(dist);
+    if copy != 0 {
+        let input_start = input.len() - copy as usize;
+        window[..copy as usize].copy_from_slice(&input[input_start..]);
+        *wnext = copy;
+        *whave = wsize;
+    } else {
+        *wnext = wnext.wrapping_add(dist);
+        if *wnext == wsize {
+            *wnext = 0;
+        }
+        if *whave < wsize {
+            *whave = whave.wrapping_add(dist);
+        }
+    }
+}
+
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
@@ -455,7 +500,6 @@ unsafe extern "C" fn updatewindow(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut dist: ::core::ffi::c_uint = 0;
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).window.is_none() {
         (*state).window = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
@@ -468,49 +512,21 @@ unsafe extern "C" fn updatewindow(
             return 1 as ::core::ffi::c_int;
         }
     }
-    let window = (*state).window.expect("window allocated").as_ptr();
     if (*state).wsize == 0 as ::core::ffi::c_uint {
         (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
         (*state).wnext = 0 as ::core::ffi::c_uint;
         (*state).whave = 0 as ::core::ffi::c_uint;
     }
-    if copy >= (*state).wsize {
-        ::core::ptr::copy_nonoverlapping(
-            end.offset(-((*state).wsize as isize)),
-            window,
-            (*state).wsize as usize,
-        );
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = (*state).wsize;
+    let window = ::core::slice::from_raw_parts_mut(
+        (*state).window.expect("window allocated").as_ptr(),
+        (*state).wsize as usize,
+    );
+    let input = if copy == 0 {
+        &[]
     } else {
-        dist = (*state).wsize.wrapping_sub((*state).wnext);
-        if dist > copy {
-            dist = copy;
-        }
-        ::core::ptr::copy_nonoverlapping(
-            end.offset(-(copy as isize)),
-            window.offset((*state).wnext as isize),
-            dist as usize,
-        );
-        copy = copy.wrapping_sub(dist);
-        if copy != 0 {
-            ::core::ptr::copy_nonoverlapping(
-                end.offset(-(copy as isize)),
-                window,
-                copy as usize,
-            );
-            (*state).wnext = copy;
-            (*state).whave = (*state).wsize;
-        } else {
-            (*state).wnext = (*state).wnext.wrapping_add(dist);
-            if (*state).wnext == (*state).wsize {
-                (*state).wnext = 0 as ::core::ffi::c_uint;
-            }
-            if (*state).whave < (*state).wsize {
-                (*state).whave = (*state).whave.wrapping_add(dist);
-            }
-        }
-    }
+        ::core::slice::from_raw_parts(end.sub(copy as usize), copy as usize)
+    };
+    copy_history_window(window, input, &mut (*state).wnext, &mut (*state).whave);
     return 0 as ::core::ffi::c_int;
 }
 pub unsafe extern "C" fn inflate(
