@@ -293,20 +293,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 return 0 as ::core::ffi::c_int;
             }
         };
-    // `inflateInit_` above created this stream.  Check its allocator pair and
-    // handle before following the state pointer, so a malformed gzip handle
-    // is rejected before the one remaining raw conversion.
-    if state.strm.zalloc.is_none() || state.strm.zfree.is_none() || state.strm.state.is_null() {
-        crate::src::gzlib::gz_static_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"internal inflate stream corrupt\0",
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    let inflate_state =
-        unsafe { &mut *(state.strm.state as *mut crate::src::inflate::inflate_state) };
-    if crate::src::inflate::inflateReset(&mut state.strm, inflate_state) != crate::zlib_h::Z_OK {
+    if crate::src::inflate::inflate_reset_stream(&mut state.strm) != crate::zlib_h::Z_OK {
         crate::src::gzlib::gz_static_error(
             state,
             crate::zlib_h::Z_STREAM_ERROR,

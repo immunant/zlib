@@ -378,6 +378,26 @@ pub fn inflateReset(
     state.wnext = 0 as ::core::ffi::c_uint;
     return inflateResetKeep(strm, state);
 }
+
+/// Reset a stream whose opaque state is still represented by the ABI handle.
+///
+/// This is the sole internal bridge for users that own a validated stream but
+/// not its typed inflate state.  Keeping the conversion here leaves gzip
+/// setup in terms of the same named reset implementation as other callers.
+pub(crate) fn inflate_reset_stream(
+    strm: &mut crate::zlib_h::z_stream,
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) =
+        (unsafe { (strm.state as *mut crate::src::inflate::inflate_state).as_mut() })
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflateReset(strm, state)
+}
+
 #[export_name = "inflateReset"]
 
 pub unsafe extern "C" fn inflateReset_ffi(
