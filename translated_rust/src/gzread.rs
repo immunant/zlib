@@ -339,7 +339,14 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
-        crate::src::inflate::inflate_reset_gzip(&mut state.strm);
+        if let Some(inflate_state) = state
+            .strm
+            .state
+            .cast::<crate::src::inflate::inflate_state>()
+            .as_mut()
+        {
+            crate::src::inflate::inflate_reset_gzip(&mut state.strm, inflate_state);
+        }
         state.how = crate::gzguts_h::GZIP;
         state.junk = (state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
         state.direct = 0 as ::core::ffi::c_int;
@@ -369,7 +376,14 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     let input = &state.in_0[input_start..input_start + input_len];
     if input.len() > 3 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32 {
-        crate::src::inflate::inflate_reset_gzip(&mut state.strm);
+        if let Some(inflate_state) = state
+            .strm
+            .state
+            .cast::<crate::src::inflate::inflate_state>()
+            .as_mut()
+        {
+            crate::src::inflate::inflate_reset_gzip(&mut state.strm, inflate_state);
+        }
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
         state.direct = 0 as ::core::ffi::c_int;
