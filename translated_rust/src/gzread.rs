@@ -357,6 +357,77 @@ unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_i
     return 0 as ::core::ffi::c_int;
 }
 
+/// The safe portion of one gzip inflate step after the boundary has invoked
+/// the legacy codec.  The codec's dynamic data-error text is deliberately
+/// left to that boundary: it is a temporary view of `strm.msg` and must not
+/// escape the call that created it.
+enum GzDecompInflateStep {
+    Continue,
+    Break(::core::ffi::c_int),
+    DataError,
+}
+
+fn gz_decomp_after_inflate(
+    state: &mut crate::gzguts_h::gz_state,
+    had: ::core::ffi::c_uint,
+    ret: ::core::ffi::c_int,
+) -> GzDecompInflateStep {
+    if state.strm.avail_out < had {
+        state.junk = 0;
+    }
+    match ret {
+        crate::zlib_h::Z_STREAM_ERROR | crate::zlib_h::Z_NEED_DICT => {
+            crate::src::gzlib::gz_error_static(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal error: inflate stream corrupt\0",
+            );
+            GzDecompInflateStep::Break(ret)
+        }
+        crate::zlib_h::Z_MEM_ERROR => {
+            crate::src::gzlib::gz_error_static(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                b"out of memory\0",
+            );
+            GzDecompInflateStep::Break(ret)
+        }
+        crate::zlib_h::Z_DATA_ERROR if state.junk == 1 => {
+            state.strm.avail_in = 0;
+            state.eof = 1;
+            state.how = crate::gzguts_h::LOOK;
+            GzDecompInflateStep::Break(crate::zlib_h::Z_OK)
+        }
+        crate::zlib_h::Z_DATA_ERROR => GzDecompInflateStep::DataError,
+        _ if state.strm.avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END => {
+            GzDecompInflateStep::Continue
+        }
+        _ => GzDecompInflateStep::Break(ret),
+    }
+}
+
+/// Commit the common post-loop decompression result after a safe transition
+/// or the transitional codec boundary has stopped the loop.
+fn gz_decomp_finish(
+    state: &mut crate::gzguts_h::gz_state,
+    had: ::core::ffi::c_uint,
+    ret: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    state.x.have = had.wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
+    // Callers establish `x.next` as the start of this output span before
+    // entering the codec.  Keeping that origin avoids reconstructing it by
+    // subtracting from the raw post-inflate cursor.
+    if ret == crate::zlib_h::Z_STREAM_END {
+        state.junk = 0;
+        state.how = crate::gzguts_h::LOOK;
+        0
+    } else if ret != crate::zlib_h::Z_OK {
+        -1
+    } else {
+        0
+    }
+}
+
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let had = state.strm.avail_out as ::core::ffi::c_uint;
@@ -380,31 +451,13 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 &mut state.strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );
-            if state.strm.avail_out < had {
-                state.junk = 0 as ::core::ffi::c_int;
-            }
-            if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
-                crate::src::gzlib::gz_error_static(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"internal error: inflate stream corrupt\0",
-                );
-                break;
-            } else if ret == crate::zlib_h::Z_MEM_ERROR {
-                crate::src::gzlib::gz_error_static(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0",
-                );
-                break;
-            } else if ret == crate::zlib_h::Z_DATA_ERROR {
-                if state.junk == 1 as ::core::ffi::c_int {
-                    state.strm.avail_in = 0 as crate::stdlib::uInt;
-                    state.eof = 1 as ::core::ffi::c_int;
-                    state.how = crate::gzguts_h::LOOK;
-                    ret = crate::zlib_h::Z_OK;
+            match gz_decomp_after_inflate(state, had, ret) {
+                GzDecompInflateStep::Continue => {}
+                GzDecompInflateStep::Break(next_ret) => {
+                    ret = next_ret;
                     break;
-                } else {
+                }
+                GzDecompInflateStep::DataError => {
                     let message = if state.strm.msg.is_null() {
                         ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0").ok()
                     } else {
@@ -419,26 +472,10 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                     );
                     break;
                 }
-            } else if !(state.strm.avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END) {
-                break;
             }
         }
     }
-    state.x.have =
-        (had as crate::stdlib::uInt).wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
-    // Callers establish `x.next` as the start of this output span before
-    // entering the codec.  Keeping that origin avoids reconstructing it by
-    // subtracting from the raw post-inflate cursor.
-    if ret == crate::zlib_h::Z_STREAM_END {
-        state.junk = 0 as ::core::ffi::c_int;
-        state.how = crate::gzguts_h::LOOK;
-        return 0 as ::core::ffi::c_int;
-    }
-    return if ret != crate::zlib_h::Z_OK {
-        -1 as ::core::ffi::c_int
-    } else {
-        0 as ::core::ffi::c_int
-    };
+    gz_decomp_finish(state, had, ret)
 }
 
 unsafe fn gz_fetch(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
