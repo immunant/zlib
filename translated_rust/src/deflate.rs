@@ -2116,6 +2116,21 @@ fn flush_pending_state(
     Some((len, *pending == 0))
 }
 
+/// Copy a bounded pending-output span into the caller's output span.  The
+/// legacy adapter validates the two non-overlapping ABI lends; this core only
+/// deals with ordinary slices so it cannot retain or dereference either
+/// cursor.
+fn flush_pending_copy_state(
+    output: &mut [crate::stdlib::Byte],
+    pending: &[crate::stdlib::Byte],
+) -> bool {
+    if output.len() != pending.len() {
+        return false;
+    }
+    output.copy_from_slice(pending);
+    true
+}
+
 fn set_stored_block_length_state(
     pending_buf: &mut [crate::stdlib::Byte],
     pending: crate::zutil_h::ulg,
@@ -2178,11 +2193,31 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     {
         return;
     }
-    crate::stdlib::memcpy(
-        strm.next_out as *mut ::core::ffi::c_void,
-        s.pending_out as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
-    );
+    // `memcpy` required raw cursors even after their bounds had been
+    // validated.  Keep the ABI lends here, reject aliasing just as C
+    // `memcpy` requires, then perform the actual copy in the slice core.
+    let Some(output_end) = (strm.next_out as usize).checked_add(len) else {
+        return;
+    };
+    let Some(pending_end) = (s.pending_out as usize).checked_add(len) else {
+        return;
+    };
+    if (strm.next_out as usize) < pending_end && (s.pending_out as usize) < output_end {
+        return;
+    }
+    let Some(pending_start) = (s.pending_out as usize).checked_sub(s.pending_buf as usize) else {
+        return;
+    };
+    let Some(pending_end) = pending_start.checked_add(len) else {
+        return;
+    };
+    let Some(pending) = pending_buf.get(pending_start..pending_end) else {
+        return;
+    };
+    let output = ::core::slice::from_raw_parts_mut(strm.next_out, len);
+    if !flush_pending_copy_state(output, pending) {
+        return;
+    }
     // The copied length is bounded by the validated output and pending
     // spans above. Preserve zlib's cursor advance without an unsafe pointer
     // offset operation in this transitional ABI adapter.
