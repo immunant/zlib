@@ -388,6 +388,13 @@ fn slide_hash_entry(position: ::core::ffi::c_uint, window_size: crate::stdlib::u
     }) as crate::src::deflate::Pos as Posf
 }
 
+fn clamped_copy_len(
+    available: crate::zutil_h::ulg,
+    requested: crate::zutil_h::ulg,
+) -> ::core::ffi::c_uint {
+    available.min(requested) as ::core::ffi::c_uint
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut m: ::core::ffi::c_uint = 0;
@@ -423,11 +430,10 @@ fn read_buf_len(
     available: ::core::ffi::c_uint,
     requested: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    if available > requested {
-        requested
-    } else {
-        available
-    }
+    clamped_copy_len(
+        available as crate::zutil_h::ulg,
+        requested as crate::zutil_h::ulg,
+    )
 }
 
 unsafe extern "C" fn read_buf(
@@ -1469,11 +1475,7 @@ fn pending_output_len(
     pending: crate::zutil_h::ulg,
     avail_out: crate::stdlib::uInt,
 ) -> ::core::ffi::c_uint {
-    if pending > avail_out as crate::zutil_h::ulg {
-        avail_out as ::core::ffi::c_uint
-    } else {
-        pending as ::core::ffi::c_uint
-    }
+    clamped_copy_len(pending, avail_out as crate::zutil_h::ulg)
 }
 
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
@@ -3620,10 +3622,10 @@ unsafe extern "C" fn deflate_huff(
 #[cfg(test)]
 mod tests {
     use super::{
-        deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_prime_bits_valid,
-        deflate_version_matches, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
-        read_buf_len, slide_hash_entry, stored_block_min_size, zlib_header,
+        clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
+        deflate_prime_bits_valid, deflate_version_matches, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
+        pending_output_len, read_buf_len, slide_hash_entry, stored_block_min_size, zlib_header,
     };
 
     #[test]
@@ -3766,6 +3768,20 @@ mod tests {
         assert_eq!(read_buf_len(9, 8), 8);
         assert_eq!(
             read_buf_len(::core::ffi::c_uint::MAX, ::core::ffi::c_uint::MAX - 1),
+            ::core::ffi::c_uint::MAX - 1,
+        );
+    }
+
+    #[test]
+    fn clamped_copy_len_returns_the_smaller_scalar_input() {
+        assert_eq!(clamped_copy_len(0, 0), 0);
+        assert_eq!(clamped_copy_len(3, 8), 3);
+        assert_eq!(clamped_copy_len(8, 3), 3);
+        assert_eq!(
+            clamped_copy_len(
+                ::core::ffi::c_uint::MAX as crate::zutil_h::ulg,
+                (::core::ffi::c_uint::MAX - 1) as crate::zutil_h::ulg,
+            ),
             ::core::ffi::c_uint::MAX - 1,
         );
     }

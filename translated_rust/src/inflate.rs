@@ -366,19 +366,24 @@ fn inflate_mark_value(
     length: crate::stdlib::uInt,
     was: crate::stdlib::uInt,
 ) -> ::core::ffi::c_long {
+    let progress = inflate_mark_progress(mode, length, was);
     (((back as ::core::ffi::c_long as ::core::ffi::c_ulong) << 16 as ::core::ffi::c_int)
         as ::core::ffi::c_long)
-        + (if mode as ::core::ffi::c_uint
-            == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            length
-        } else if mode as ::core::ffi::c_uint
-            == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            was.wrapping_sub(length)
-        } else {
-            0 as ::core::ffi::c_uint
-        }) as ::core::ffi::c_long
+        + progress as ::core::ffi::c_long
+}
+
+fn inflate_mark_progress(
+    mode: inflate_mode,
+    length: crate::stdlib::uInt,
+    was: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    if mode == crate::src::inflate::COPY_1 {
+        length
+    } else if mode == crate::src::inflate::MATCH {
+        was.wrapping_sub(length)
+    } else {
+        0
+    }
 }
 
 fn inflate_reset2_params(
@@ -2685,6 +2690,7 @@ mod tests {
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts, inflate_copy_limit,
         inflate_data_type_value, inflate_header_wrap_allows_capture, inflate_mark_value,
+        inflate_mark_progress,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update, inflate_undermine_core,
         inflate_reset2_params, inflate_state_metadata_is_valid, inflate_sync_point_value,
         inflate_sync_search_core, inflate_should_update_window, inflate_validate_wrap, initial_window_metadata,
@@ -3001,6 +3007,17 @@ mod tests {
         assert_eq!(
             inflate_mark_value(0, MATCH, 5, 2),
             (2_u32.wrapping_sub(5)) as ::core::ffi::c_long
+        );
+    }
+
+    #[test]
+    fn inflate_mark_progress_isolated_from_backtracking_prefix() {
+        assert_eq!(inflate_mark_progress(COPY_1, 7, 99), 7);
+        assert_eq!(inflate_mark_progress(MATCH, 7, 10), 3);
+        assert_eq!(inflate_mark_progress(HEAD, 7, 10), 0);
+        assert_eq!(
+            inflate_mark_progress(MATCH, 5, 2),
+            2_u32.wrapping_sub(5)
         );
     }
 

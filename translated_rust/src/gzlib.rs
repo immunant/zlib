@@ -231,17 +231,19 @@ fn gzseek_adjust_offset(
     if whence == crate::stdlib::SEEK_SET {
         offset - position
     } else {
-        offset
-            + if past != 0 {
-                0 as crate::stdlib::off64_t
-            } else {
-                skip
-            }
+        offset + gzseek_effective_skip(past, skip)
     }
 }
 
 fn gzseek_clears_pending_skip(whence: ::core::ffi::c_int) -> bool {
     whence == crate::stdlib::SEEK_CUR
+}
+
+fn gzseek_effective_skip(
+    past: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    if past != 0 { 0 } else { skip }
 }
 
 fn gzseek_can_fast_forward(
@@ -828,7 +830,7 @@ fn gztell64_core(
     past: ::core::ffi::c_int,
     skip: crate::stdlib::off64_t,
 ) -> crate::stdlib::off64_t {
-    pos + if past != 0 { 0 } else { skip }
+    pos + gzseek_effective_skip(past, skip)
 }
 
 fn gztell64_result(
@@ -1089,7 +1091,7 @@ mod tests {
         gzbuffer_normalized_want, gzclearerr_core, gzerror_core, gzeof_core, gzeof_result,
         gzdopen_has_valid_descriptor, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
         gzrewind_request_is_valid,
-        gzseek_adjust_offset,
+        gzseek_adjust_offset, gzseek_effective_skip,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
         gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
@@ -1549,6 +1551,16 @@ mod tests {
             gzseek_adjust_offset(30, crate::stdlib::SEEK_CUR, 12, 1, 7),
             30
         );
+    }
+
+    #[test]
+    fn gzseek_effective_skip_preserves_pending_skip_before_past_end() {
+        assert_eq!(gzseek_effective_skip(0, 7), 7);
+    }
+
+    #[test]
+    fn gzseek_effective_skip_clears_pending_skip_after_past_end() {
+        assert_eq!(gzseek_effective_skip(1, 7), 0);
     }
 
     #[test]
