@@ -196,6 +196,13 @@ fn gz_read_action(
     }
 }
 
+fn gz_read_fetch_failed_without_buffer(
+    fetch_result: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+) -> bool {
+    fetch_result == -1 as ::core::ffi::c_int && have == 0
+}
+
 fn gz_read_progress(
     len: crate::stdlib::z_size_t,
     got: crate::stdlib::z_size_t,
@@ -1134,6 +1141,18 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_fetch_failed_without_buffer_requires_both_conditions() {
+        assert!(gz_read_fetch_failed_without_buffer(-1, 0));
+        assert!(!gz_read_fetch_failed_without_buffer(-1, 1));
+    }
+
+    #[test]
+    fn gz_read_fetch_failed_without_buffer_ignores_successful_fetches() {
+        assert!(!gz_read_fetch_failed_without_buffer(0, 0));
+        assert!(!gz_read_fetch_failed_without_buffer(1, 0));
+    }
+
+    #[test]
     fn gz_read_should_continue_requires_remaining_output_without_errors() {
         assert!(gz_read_should_continue(1, 0));
         assert!(!gz_read_should_continue(0, 0));
@@ -1393,9 +1412,7 @@ unsafe extern "C" fn gz_read(
             }
             GzReadAction::StopAtEof => break,
             GzReadAction::Fetch => {
-                if gz_fetch(state) == -1 as ::core::ffi::c_int
-                    && (*state).x.have == 0 as ::core::ffi::c_uint
-                {
+                if gz_read_fetch_failed_without_buffer(gz_fetch(state), (*state).x.have) {
                     err = -1 as ::core::ffi::c_int;
                 }
                 false

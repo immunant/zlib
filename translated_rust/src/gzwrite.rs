@@ -204,6 +204,11 @@ fn gz_comp_skips_empty_flush(
     reset != 0 && avail_in == 0 && flush == crate::zlib_h::Z_NO_FLUSH
 }
 
+fn gz_comp_max_write_chunk() -> ::core::ffi::c_uint {
+    (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2 as ::core::ffi::c_int)
+        .wrapping_add(1 as ::core::ffi::c_uint)
+}
+
 fn gz_write_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
     errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
 }
@@ -303,9 +308,7 @@ unsafe extern "C" fn gz_comp(
     let mut writ: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
+    let mut max: ::core::ffi::c_uint = gz_comp_max_write_chunk();
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
@@ -845,13 +848,13 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
-        gz_comp_remaining_direct_input, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
-        gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_progress,
-        gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
-        gz_write_error_result, gz_write_uses_buffered_path, gz_zero_apply_progress,
-        gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int,
-        gzputs_result, gzwrite_len_fits_int,
+        gz_buffered_have, gz_comp_max_write_chunk, gz_comp_needs_output_write, gz_comp_needs_reset,
+        gz_comp_output_produced, gz_comp_remaining_direct_input, gz_comp_skips_empty_flush,
+        gz_comp_write_chunk_len, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
+        gz_write_buffered_progress, gz_write_chunk_consumed_len, gz_write_chunk_len,
+        gz_write_errno_is_retryable, gz_write_error_result, gz_write_uses_buffered_path,
+        gz_zero_apply_progress, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
+        gzputc_result, gzputs_len_fits_int, gzputs_result, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -979,6 +982,22 @@ mod tests {
     fn gz_comp_skips_empty_no_flush_when_reset_is_pending() {
         assert!(gz_comp_skips_empty_flush(1, 0, crate::zlib_h::Z_NO_FLUSH));
         assert!(gz_comp_skips_empty_flush(-1, 0, crate::zlib_h::Z_NO_FLUSH));
+    }
+
+    #[test]
+    fn gz_comp_max_write_chunk_matches_the_quarter_range_boundary() {
+        assert_eq!(
+            gz_comp_max_write_chunk(),
+            (::core::ffi::c_uint::MAX >> 2).wrapping_add(1)
+        );
+    }
+
+    #[test]
+    fn gz_comp_max_write_chunk_caps_large_available_input() {
+        assert_eq!(
+            gz_comp_write_chunk_len(usize::MAX, gz_comp_max_write_chunk()),
+            gz_comp_max_write_chunk()
+        );
     }
 
     #[test]

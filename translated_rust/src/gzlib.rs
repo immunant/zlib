@@ -17,7 +17,6 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
-pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -34,6 +33,7 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
+pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -230,6 +230,10 @@ fn gzseek_adjust_offset(
                 skip
             }
     }
+}
+
+fn gzseek_clears_pending_skip(whence: ::core::ffi::c_int) -> bool {
+    whence == crate::stdlib::SEEK_CUR
 }
 
 fn gzseek_can_fast_forward(
@@ -714,7 +718,7 @@ pub unsafe extern "C" fn gzseek64(
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     offset = gzseek_adjust_offset(offset, whence, (*state).x.pos, (*state).past, (*state).skip);
-    if whence == crate::stdlib::SEEK_CUR {
+    if gzseek_clears_pending_skip(whence) {
         (*state).skip = 0 as crate::stdlib::off64_t;
     }
     if gzseek_can_fast_forward((*state).mode, (*state).how, (*state).x.pos, offset) {
@@ -1037,11 +1041,11 @@ mod tests {
         gz_open_offset_plan, gz_open_recorded_offset, gz_parse_open_mode, gz_post_open_metadata,
         gz_prepare_open, gz_reset_core, gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
         gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
-        gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
-        gzseek_plan_remaining_offset, gzseek_read_buffer_consumed, gzseek_request_is_valid,
-        gztell64_core, GzErrorMessage, GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan,
-        GzSeekReadBufferPlan,
+        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
+        gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
+        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
+        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
+        GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1420,6 +1424,13 @@ mod tests {
             gzseek_adjust_offset(30, crate::stdlib::SEEK_CUR, 12, 1, 7),
             30
         );
+    }
+
+    #[test]
+    fn gzseek_clears_pending_skip_only_for_current_relative_seeks() {
+        assert!(gzseek_clears_pending_skip(crate::stdlib::SEEK_CUR));
+        assert!(!gzseek_clears_pending_skip(crate::stdlib::SEEK_SET));
+        assert!(!gzseek_clears_pending_skip(crate::stdlib::SEEK_END));
     }
 
     #[test]
