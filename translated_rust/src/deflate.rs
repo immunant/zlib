@@ -1224,6 +1224,81 @@ pub unsafe extern "C" fn deflateTune_ffi(
     let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     deflateTune(state, good_length, max_lazy, nice_length, max_chain)
 }
+
+fn deflate_bound_overflow() -> crate::stdlib::z_size_t {
+    -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
+}
+
+fn deflate_bound_add(
+    bound: crate::stdlib::z_size_t,
+    extra: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    if bound.wrapping_add(extra) < bound {
+        deflate_bound_overflow()
+    } else {
+        bound.wrapping_add(extra)
+    }
+}
+
+fn deflate_bound_fixed_len(source_len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
+    let fixed_len = source_len
+        .wrapping_add(source_len >> 3 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 8 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 9 as ::core::ffi::c_int)
+        .wrapping_add(4 as crate::stdlib::z_size_t);
+    if fixed_len < source_len {
+        deflate_bound_overflow()
+    } else {
+        fixed_len
+    }
+}
+
+fn deflate_bound_store_len(source_len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
+    let store_len = source_len
+        .wrapping_add(source_len >> 5 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 7 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 11 as ::core::ffi::c_int)
+        .wrapping_add(7 as crate::stdlib::z_size_t);
+    if store_len < source_len {
+        deflate_bound_overflow()
+    } else {
+        store_len
+    }
+}
+
+fn deflate_bound_for_state(
+    source_len: crate::stdlib::z_size_t,
+    fixed_len: crate::stdlib::z_size_t,
+    store_len: crate::stdlib::z_size_t,
+    wrap_len: crate::stdlib::z_size_t,
+    w_bits: crate::stdlib::uInt,
+    hash_bits: crate::stdlib::uInt,
+    level: ::core::ffi::c_int,
+) -> crate::stdlib::z_size_t {
+    if w_bits != 15 as crate::stdlib::uInt
+        || hash_bits != (8 as ::core::ffi::c_int + 7 as ::core::ffi::c_int) as crate::stdlib::uInt
+    {
+        let bound = if w_bits <= hash_bits && level != 0 {
+            fixed_len
+        } else {
+            store_len
+        };
+        return deflate_bound_add(bound, wrap_len);
+    }
+    let bound = source_len
+        .wrapping_add(source_len >> 12 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 14 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 25 as ::core::ffi::c_int)
+        .wrapping_add(13 as crate::stdlib::z_size_t)
+        .wrapping_sub(6 as crate::stdlib::z_size_t)
+        .wrapping_add(wrap_len);
+    if bound < source_len {
+        deflate_bound_overflow()
+    } else {
+        bound
+    }
+}
+
 #[export_name = "deflateBound_z"]
 pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -1231,37 +1306,17 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
 ) -> crate::stdlib::z_size_t {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut fixedlen: crate::stdlib::z_size_t = 0;
-    let mut storelen: crate::stdlib::z_size_t = 0;
+    let mut fixedlen: crate::stdlib::z_size_t = deflate_bound_fixed_len(sourceLen);
+    let mut storelen: crate::stdlib::z_size_t = deflate_bound_store_len(sourceLen);
     let mut wraplen: crate::stdlib::z_size_t = 0;
     let mut bound: crate::stdlib::z_size_t = 0;
-    fixedlen = sourceLen
-        .wrapping_add(sourceLen >> 3 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 8 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 9 as ::core::ffi::c_int)
-        .wrapping_add(4 as crate::stdlib::z_size_t);
-    if fixedlen < sourceLen {
-        fixedlen = -1 as ::core::ffi::c_int as crate::stdlib::z_size_t;
-    }
-    storelen = sourceLen
-        .wrapping_add(sourceLen >> 5 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 7 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 11 as ::core::ffi::c_int)
-        .wrapping_add(7 as crate::stdlib::z_size_t);
-    if storelen < sourceLen {
-        storelen = -1 as ::core::ffi::c_int as crate::stdlib::z_size_t;
-    }
     if deflateStateCheck(strm) != 0 {
         bound = if fixedlen > storelen {
             fixedlen
         } else {
             storelen
         };
-        return if bound.wrapping_add(18 as crate::stdlib::z_size_t) < bound {
-            -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
-        } else {
-            bound.wrapping_add(18 as crate::stdlib::z_size_t)
-        };
+        return deflate_bound_add(bound, 18 as crate::stdlib::z_size_t);
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     match if (*s).wrap < 0 as ::core::ffi::c_int {
@@ -1322,33 +1377,15 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
             wraplen = 18 as crate::stdlib::z_size_t;
         }
     }
-    if (*s).w_bits != 15 as crate::stdlib::uInt
-        || (*s).hash_bits
-            != (8 as ::core::ffi::c_int + 7 as ::core::ffi::c_int) as crate::stdlib::uInt
-    {
-        bound = if (*s).w_bits <= (*s).hash_bits && (*s).level != 0 {
-            fixedlen
-        } else {
-            storelen
-        };
-        return if bound.wrapping_add(wraplen) < bound {
-            -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
-        } else {
-            bound.wrapping_add(wraplen)
-        };
-    }
-    bound = sourceLen
-        .wrapping_add(sourceLen >> 12 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 14 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 25 as ::core::ffi::c_int)
-        .wrapping_add(13 as crate::stdlib::z_size_t)
-        .wrapping_sub(6 as crate::stdlib::z_size_t)
-        .wrapping_add(wraplen);
-    return if bound < sourceLen {
-        -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
-    } else {
-        bound
-    };
+    return deflate_bound_for_state(
+        sourceLen,
+        fixedlen,
+        storelen,
+        wraplen,
+        (*s).w_bits,
+        (*s).hash_bits,
+        (*s).level,
+    );
 }
 #[export_name = "deflateBound"]
 

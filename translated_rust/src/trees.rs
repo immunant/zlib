@@ -2915,6 +2915,31 @@ fn scan_tree(
     }
 }
 
+fn finish_bl_tree(
+    bl_tree: &[crate::src::deflate::ct_data; 39],
+    opt_len: crate::zutil_h::ulg,
+) -> (::core::ffi::c_int, crate::zutil_h::ulg) {
+    let mut max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
+    while max_blindex >= 3 as ::core::ffi::c_int {
+        if bl_tree[bl_order[max_blindex as usize] as usize].dad as ::core::ffi::c_int
+            != 0 as ::core::ffi::c_int
+        {
+            break;
+        }
+        max_blindex -= 1;
+    }
+    let opt_len = opt_len.wrapping_add(
+        (3 as crate::zutil_h::ulg)
+            .wrapping_mul(
+                (max_blindex as crate::zutil_h::ulg).wrapping_add(1 as crate::zutil_h::ulg),
+            )
+            .wrapping_add(5 as crate::zutil_h::ulg)
+            .wrapping_add(5 as crate::zutil_h::ulg)
+            .wrapping_add(4 as crate::zutil_h::ulg),
+    );
+    (max_blindex, opt_len)
+}
+
 unsafe extern "C" fn send_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
@@ -3204,7 +3229,6 @@ unsafe extern "C" fn send_tree(
 unsafe extern "C" fn build_bl_tree(
     mut s: *mut crate::src::deflate::deflate_state,
 ) -> ::core::ffi::c_int {
-    let mut max_blindex: ::core::ffi::c_int = 0;
     let state = &mut *s;
     scan_tree(
         &mut state.bl_tree,
@@ -3220,25 +3244,10 @@ unsafe extern "C" fn build_bl_tree(
         s,
         &raw mut (*s).bl_desc as *mut crate::src::deflate::tree_desc,
     );
-    max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
-    while max_blindex >= 3 as ::core::ffi::c_int {
-        if (*s).bl_tree[bl_order[max_blindex as usize] as usize].dad as ::core::ffi::c_int
-            != 0 as ::core::ffi::c_int
-        {
-            break;
-        }
-        max_blindex -= 1;
-    }
-    (*s).opt_len = (*s).opt_len.wrapping_add(
-        (3 as crate::zutil_h::ulg)
-            .wrapping_mul(
-                (max_blindex as crate::zutil_h::ulg).wrapping_add(1 as crate::zutil_h::ulg),
-            )
-            .wrapping_add(5 as crate::zutil_h::ulg)
-            .wrapping_add(5 as crate::zutil_h::ulg)
-            .wrapping_add(4 as crate::zutil_h::ulg),
-    );
-    return max_blindex;
+    let state = &mut *s;
+    let (max_blindex, opt_len) = finish_bl_tree(&state.bl_tree, state.opt_len);
+    state.opt_len = opt_len;
+    max_blindex
 }
 
 unsafe extern "C" fn send_all_trees(
