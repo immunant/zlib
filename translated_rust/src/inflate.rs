@@ -2363,7 +2363,7 @@ pub unsafe extern "C" fn inflate(
                 break;
             }
         }
-        if (*state).length == 0 as ::core::ffi::c_uint {
+        if inflate_match_is_complete((*state).length) {
             (*state).mode = crate::src::inflate::LEN;
         }
     }
@@ -2674,6 +2674,10 @@ fn inflate_cursor_progress(
     remaining: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
     initial.wrapping_sub(remaining)
+}
+
+fn inflate_match_is_complete(remaining_length: ::core::ffi::c_uint) -> bool {
+    remaining_length == 0
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -3105,25 +3109,25 @@ mod tests {
         inflate_gzip_header_has_extra, inflate_gzip_header_has_name, inflate_gzip_window_bits,
         inflate_head_skip_mode, inflate_header_crc_enabled, inflate_header_wrap_allows_capture,
         inflate_is_gzip_header, inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
-        inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_mode_on_entry,
-        inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
-        inflate_reset2_discards_window, inflate_reset2_params, inflate_reset_keep_adler,
-        inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
-        inflate_state_is_usable, inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
-        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
-        inflate_sync_search_core, inflate_trailer_checksum_from_hold, inflate_undermine_core,
-        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
-        inflate_zlib_header_transition, inflate_zlib_window_params, initial_window_metadata,
-        reset_window_history, stored_block_length, syncsearch_safe, update_window_core,
-        update_window_produced_len, window_allocation_failed, window_allocation_plan,
-        window_allocation_request, window_needs_allocation, window_update_plan,
-        DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress, InflateGzipExtraProgress,
-        InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource,
-        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
-        InflateZlibHeaderTransition, InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
-        TYPEDO,
+        inflate_match_is_complete, inflate_mode_data_type_flags, inflate_mode_is_valid,
+        inflate_mode_on_entry, inflate_needs_buffer_error, inflate_output_checksum,
+        inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
+        inflate_reset_keep_adler, inflate_should_update_window, inflate_state_check_impl,
+        inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
+        inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
+        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
+        inflate_sync_remaining_input, inflate_sync_search_core, inflate_trailer_checksum_from_hold,
+        inflate_undermine_core, inflate_validate_core, inflate_validate_wrap,
+        inflate_zlib_header_error, inflate_zlib_header_transition, inflate_zlib_window_params,
+        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
+        update_window_core, update_window_produced_len, window_allocation_failed,
+        window_allocation_plan, window_allocation_request, window_needs_allocation,
+        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
+        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
+        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
+        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams,
+        WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -3273,6 +3277,13 @@ mod tests {
                 remaining_length: 0,
             }
         );
+    }
+
+    #[test]
+    fn inflate_match_completion_requires_no_remaining_length() {
+        assert!(inflate_match_is_complete(0));
+        assert!(!inflate_match_is_complete(1));
+        assert!(!inflate_match_is_complete(::core::ffi::c_uint::MAX));
     }
 
     #[test]

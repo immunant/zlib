@@ -311,6 +311,15 @@ struct GzReadDrainPlan {
     next_advance: usize,
 }
 
+fn gz_read_apply_drain_plan(
+    have: &mut ::core::ffi::c_uint,
+    err: &mut ::core::ffi::c_int,
+    plan: &GzReadDrainPlan,
+) {
+    *have = plan.remaining_have;
+    *err = plan.err;
+}
+
 fn gz_read_drain_plan(
     have: ::core::ffi::c_uint,
     state_err: ::core::ffi::c_int,
@@ -2107,6 +2116,22 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_apply_drain_plan_commits_buffer_and_error_scalars() {
+        let plan = GzReadDrainPlan {
+            remaining_have: 6,
+            err: crate::zlib_h::Z_DATA_ERROR,
+            next_advance: 4,
+        };
+        let mut have = 10;
+        let mut err = crate::zlib_h::Z_OK;
+
+        gz_read_apply_drain_plan(&mut have, &mut err, &plan);
+
+        assert_eq!(have, 6);
+        assert_eq!(err, crate::zlib_h::Z_DATA_ERROR);
+    }
+
+    #[test]
     fn gz_read_drain_plan_wraps_and_reports_state_errors() {
         let plan = gz_read_drain_plan(0, crate::zlib_h::Z_DATA_ERROR, 1);
         assert_eq!(plan.remaining_have, ::core::ffi::c_uint::MAX);
@@ -2936,8 +2961,7 @@ unsafe fn gz_read(
                 );
                 let state_ref = &mut *state;
                 state_ref.x.next = state_ref.x.next.wrapping_add(plan.next_advance);
-                state_ref.x.have = plan.remaining_have;
-                err = plan.err;
+                gz_read_apply_drain_plan(&mut state_ref.x.have, &mut err, &plan);
                 true
             }
             GzReadAction::StopAtEof => break,

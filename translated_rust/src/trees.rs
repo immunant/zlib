@@ -3958,6 +3958,18 @@ fn block_header_bits(
     (block_type << 1 as ::core::ffi::c_int) + last
 }
 
+fn dynamic_tree_header_counts(
+    lcodes: ::core::ffi::c_int,
+    dcodes: ::core::ffi::c_int,
+    blcodes: ::core::ffi::c_int,
+) -> (::core::ffi::c_int, ::core::ffi::c_int, ::core::ffi::c_int) {
+    (
+        lcodes - 257 as ::core::ffi::c_int,
+        dcodes - 1 as ::core::ffi::c_int,
+        blcodes - 4 as ::core::ffi::c_int,
+    )
+}
+
 fn bi_windup_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -4817,9 +4829,11 @@ unsafe fn send_all_trees(
     mut blcodes: ::core::ffi::c_int,
 ) {
     let mut rank: ::core::ffi::c_int = 0;
+    let (lcode_count, dcode_count, blcode_count) =
+        dynamic_tree_header_counts(lcodes, dcodes, blcodes);
     let mut len: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
     if bit_buffer_would_overflow((*s).bi_valid, len) {
-        let mut val: ::core::ffi::c_int = lcodes - 257 as ::core::ffi::c_int;
+        let mut val: ::core::ffi::c_int = lcode_count;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;
@@ -4837,13 +4851,13 @@ unsafe fn send_all_trees(
         (*s).bi_valid += len - crate::src::deflate::Buf_size;
     } else {
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | ((lcodes - 257 as ::core::ffi::c_int) as crate::zutil_h::ush as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush;
+            | (lcode_count as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+            as crate::zutil_h::ush;
         (*s).bi_valid += len;
     }
     let mut len_0: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
     if bit_buffer_would_overflow((*s).bi_valid, len_0) {
-        let mut val_0: ::core::ffi::c_int = dcodes - 1 as ::core::ffi::c_int;
+        let mut val_0: ::core::ffi::c_int = dcode_count;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;
@@ -4861,13 +4875,13 @@ unsafe fn send_all_trees(
         (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
     } else {
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | ((dcodes - 1 as ::core::ffi::c_int) as crate::zutil_h::ush as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush;
+            | (dcode_count as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+            as crate::zutil_h::ush;
         (*s).bi_valid += len_0;
     }
     let mut len_1: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
     if bit_buffer_would_overflow((*s).bi_valid, len_1) {
-        let mut val_1: ::core::ffi::c_int = blcodes - 4 as ::core::ffi::c_int;
+        let mut val_1: ::core::ffi::c_int = blcode_count;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_1 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;
@@ -4885,8 +4899,8 @@ unsafe fn send_all_trees(
         (*s).bi_valid += len_1 - crate::src::deflate::Buf_size;
     } else {
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | ((blcodes - 4 as ::core::ffi::c_int) as crate::zutil_h::ush as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush;
+            | (blcode_count as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+            as crate::zutil_h::ush;
         (*s).bi_valid += len_1;
     }
     rank = 0 as ::core::ffi::c_int;
@@ -5510,13 +5524,14 @@ mod tests {
         bit_length_correction, bl_order, bl_tree_header_bit_length, block_bit_length_bytes,
         block_header_bits, canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
         combined_tree_frequency, detect_data_type_from_ltree, dist_code_index,
-        gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
-        last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes,
-        pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
-        reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
-        static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
-        symbol_buffer_is_full, symbol_triplet_cursors, tally_match_tree_indices,
-        tally_scan_tree_action, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
+        dynamic_tree_header_counts, gen_bitlen_node_plan, gen_bitlen_overflow_reassignment,
+        heap_node_precedes, last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank,
+        next_code_for_len, next_codes, pending_cursor_after_bytes, pqdownheap_child_to_promote,
+        rebalance_overflowed_bit_lengths, reset_bit_length_counts, reset_block_trees,
+        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        supplemental_tree_node, supplemental_tree_opt_len, symbol_buffer_is_full,
+        symbol_triplet_cursors, tally_match_tree_indices, tally_scan_tree_action,
+        tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
         tree_run_extra_bits, tree_run_limits, BlockEncoding, GenBitlenOverflowNode,
         GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
@@ -6188,6 +6203,12 @@ mod tests {
         assert_eq!(block_header_bits(1, 1), 3);
         assert_eq!(block_header_bits(2, 0), 4);
         assert_eq!(block_header_bits(2, 1), 5);
+    }
+
+    #[test]
+    fn dynamic_tree_header_counts_encode_deflate_minimums() {
+        assert_eq!(dynamic_tree_header_counts(257, 1, 4), (0, 0, 0));
+        assert_eq!(dynamic_tree_header_counts(286, 30, 19), (29, 29, 15));
     }
 
     #[test]
