@@ -2648,6 +2648,34 @@ struct DeflateCopyLayout {
     pending: Option<PendingRegions>,
 }
 
+impl DeflateCopyLayout {
+    // Keep every range check for the callback-owned buffers in the
+    // pointer-free copy plan.  `deflateCopy()` performs raw copies only after
+    // this validates the scalar geometry supplied by the source state.
+    fn fits_storage(&self, storage: &DeflateStorageLayout) -> bool {
+        let Some(window_bytes) = storage.window.byte_len() else {
+            return false;
+        };
+        let Some(prev_entries) = storage.prev.element_len::<crate::src::deflate::Posf>() else {
+            return false;
+        };
+        let Some(head_entries) = storage.head.element_len::<crate::src::deflate::Posf>() else {
+            return false;
+        };
+        let Some(pending_bytes) = storage.pending.byte_len() else {
+            return false;
+        };
+
+        self.window_bytes <= window_bytes
+            && self.prev_entries <= prev_entries
+            && self.head_entries <= head_entries
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|regions| regions.fits_within(pending_bytes))
+    }
+}
+
 // Keep every scalar-derived decision for a deep copy in one pointer-free
 // value.  The callback-owned allocation handles still cross the ABI boundary,
 // but a future allocation broker can consume this plan without recovering
@@ -2889,6 +2917,10 @@ impl PendingRegions {
             return;
         };
         destination_symbols.copy_from_slice(symbols);
+    }
+
+    fn fits_within(&self, len: usize) -> bool {
+        self.queued.end <= len && self.symbols.end <= len
     }
 }
 
@@ -3732,6 +3764,17 @@ pub unsafe extern "C" fn deflateCopy(
         storage,
         layout: copy_layout,
     } = payload.copy_plan();
+    // The source state owns callback-allocated buffers, so do not construct
+    // any raw view until its scalar capacity records agree with the copy
+    // plan.  Normal initialized states always satisfy these equalities;
+    // rejecting a malformed opaque state prevents an oversized metadata
+    // value from widening a raw view below.
+    if !copy_layout.fits_storage(&storage)
+        || usize::try_from(payload.window_size).ok() != storage.window.byte_len()
+        || usize::try_from(payload.pending_buf_size).ok() != storage.pending.byte_len()
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
 
     // Do not byte-copy the ABI stream: that made this boundary depend on the
     // layout of a caller-visible owner and obscured which fields are retained
