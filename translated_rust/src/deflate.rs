@@ -3339,8 +3339,12 @@ pub fn deflateCopy(
     dest_stream.state = ds as *mut crate::src::deflate::internal_state;
     // `ds` is fresh callback-allocated storage, so initialize rather than
     // assign (assignment would try to drop an uninitialized header snapshot).
-    unsafe { ::core::ptr::write(ds, source_state.clone()) };
-    let dest_state = unsafe { &mut *ds };
+    // Convert the callback allocation once to an uninitialized slot, then
+    // establish the first Rust value with `MaybeUninit::write`.
+    let ds_slot = unsafe {
+        &mut *ds.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>()
+    };
+    let dest_state = ds_slot.write(source_state.clone());
     dest_state.strm = stream_identity(dest_stream);
     let storage = DeflateStorageLayout::from_state(dest_state);
     dest_state.window = unsafe {
