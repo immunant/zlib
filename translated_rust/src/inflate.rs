@@ -3118,7 +3118,6 @@ pub fn inflateCopy(
     dest: &mut crate::zlib_h::z_stream,
     source: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
-    let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     // Derive all source-state information needed after allocation before
     // calling the source allocator. This value snapshot prevents a Rust
     // reference to source state from spanning that user callback.
@@ -3142,7 +3141,7 @@ pub fn inflateCopy(
     // Once the allocation succeeds, retain its non-null invariant in the
     // type. This keeps the rest of the copy path from carrying a nullable
     // raw state cursor after the allocator boundary.
-    let mut copy = match ::core::ptr::NonNull::new(
+    let copy = match ::core::ptr::NonNull::new(
         Some(initial_zalloc).expect("non-null function pointer")(
         initial_opaque,
         1 as crate::stdlib::uInt,
@@ -3152,8 +3151,7 @@ pub fn inflateCopy(
         Some(copy) => copy,
         None => return crate::zlib_h::Z_MEM_ERROR,
     };
-    window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if let Some(window_len) = plan.window_len {
+    let window = if let Some(window_len) = plan.window_len {
         // The first allocation callback may have changed the source stream's
         // callbacks or opaque value. Rebind it after that callback, then
         // snapshot the next allocation request before invoking it.
@@ -3166,12 +3164,12 @@ pub fn inflateCopy(
                 source.opaque,
             )
         };
-        window = Some(zalloc).expect("non-null function pointer")(
+        let window = Some(zalloc).expect("non-null function pointer")(
             opaque,
             window_len as crate::stdlib::uInt,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
-        if window.is_null() {
+        let Some(window) = ::core::ptr::NonNull::new(window) else {
             // Match zlib's post-callback free lookup: the failed allocation
             // itself may have replaced the source release callback or opaque
             // value.
@@ -3181,8 +3179,11 @@ pub fn inflateCopy(
             Some(source.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(source.opaque, copy.as_ptr() as crate::stdlib::voidpf);
             return crate::zlib_h::Z_MEM_ERROR;
-        }
-    }
+        };
+        Some(window)
+    } else {
+        None
+    };
     // The allocator callbacks have completed. Reuse the checked stream/state
     // binding for the final stream copy instead of reopening `source` through
     // a raw dereference.
@@ -3199,9 +3200,7 @@ pub fn inflateCopy(
     // binding. All other stream and window access below stays reference- or
     // slice-based.
     let copy = unsafe { &mut *copy.as_ptr() };
-    if window.is_null() {
-        inflate_copy_state(dest, &source_stream, copy, &source_state, &plan);
-    } else {
+    if let Some(window) = window {
         updatewindow(
             source,
             &mut source_state,
@@ -3214,7 +3213,7 @@ pub fn inflateCopy(
                 // populate its already-allocated storage through the shared
                 // owned-window binder. This avoids reopening `window` here
                 // as another raw slice.
-                copy.window = window;
+                copy.window = window.as_ptr();
                 updatewindow(
                     dest,
                     copy,
@@ -3225,6 +3224,8 @@ pub fn inflateCopy(
             },
         )
         .expect("a copied source window is already allocated");
+    } else {
+        inflate_copy_state(dest, &source_stream, copy, &source_state, &plan);
     }
     dest.state =
         copy as *mut crate::src::inflate::inflate_state as *mut crate::src::deflate::internal_state;
