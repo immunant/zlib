@@ -81,6 +81,27 @@ fn gzeof_impl(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi
     }
 }
 
+fn gzbuffer_want(
+    mode: ::core::ffi::c_int,
+    current_size: ::core::ffi::c_uint,
+    requested_size: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    if mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE {
+        return None;
+    }
+    if current_size != 0 as ::core::ffi::c_uint {
+        return None;
+    }
+    if requested_size.wrapping_shl(1) < requested_size {
+        return None;
+    }
+    Some(if requested_size < 8 as ::core::ffi::c_uint {
+        8 as ::core::ffi::c_uint
+    } else {
+        requested_size
+    })
+}
+
 unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
     (*state).x.have = 0 as ::core::ffi::c_uint;
     if (*state).mode == crate::gzguts_h::GZ_READ {
@@ -356,26 +377,17 @@ pub unsafe extern "C" fn gzbuffer(
     mut file: crate::zlib_h::gzFile,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return -1 as ::core::ffi::c_int;
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    match gzbuffer_want(state.mode, state.size, size) {
+        Some(want) => {
+            state.want = want;
+            0 as ::core::ffi::c_int
+        }
+        None => -1 as ::core::ffi::c_int,
     }
-    if (*state).size != 0 as ::core::ffi::c_uint {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (size << 1 as ::core::ffi::c_int) < size {
-        return -1 as ::core::ffi::c_int;
-    }
-    if size < 8 as ::core::ffi::c_uint {
-        size = 8 as ::core::ffi::c_uint;
-    }
-    (*state).want = size;
-    return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzbuffer"]
 
