@@ -1316,6 +1316,59 @@ impl DeflateAllocationPlan {
 mod callback_owner {
     use super::*;
 
+    // Completion work needs to reset or copy the scalar codec state that was
+    // published with the callback allocation, but it must not regain access
+    // to callback allocation handles.  This facade deliberately contains
+    // only ordinary scalar/tree borrows and the pointer-free lifecycle
+    // ledger.  The owner constructs it after it has made the one complete
+    // storage request, so finish callbacks can neither reopen a raw storage
+    // projection nor retain an ABI state borrow.
+    pub(super) struct DeflateCallbackScalarState<'state> {
+        pub(super) data_type: &'state mut ::core::ffi::c_int,
+        pub(super) status: &'state mut ::core::ffi::c_int,
+        pub(super) pending_buf_size: &'state mut crate::zutil_h::ulg,
+        pub(super) pending_out: &'state mut usize,
+        pub(super) pending: &'state mut crate::zutil_h::ulg,
+        pub(super) callback_storage: DeflateCallbackStorageOwner,
+        pub(super) wrap: &'state mut ::core::ffi::c_int,
+        pub(super) method: &'state mut crate::stdlib::Byte,
+        pub(super) last_flush: &'state mut ::core::ffi::c_int,
+        pub(super) w_size: crate::stdlib::uInt,
+        pub(super) window_size: &'state mut crate::zutil_h::ulg,
+        pub(super) ins_h: &'state mut crate::stdlib::uInt,
+        pub(super) block_start: &'state mut ::core::ffi::c_long,
+        pub(super) match_length: &'state mut crate::stdlib::uInt,
+        pub(super) match_available: &'state mut ::core::ffi::c_int,
+        pub(super) strstart: &'state mut crate::stdlib::uInt,
+        pub(super) lookahead: &'state mut crate::stdlib::uInt,
+        pub(super) prev_length: &'state mut crate::stdlib::uInt,
+        pub(super) max_chain_length: &'state mut crate::stdlib::uInt,
+        pub(super) max_lazy_match: &'state mut crate::stdlib::uInt,
+        pub(super) level: &'state mut ::core::ffi::c_int,
+        pub(super) strategy: &'state mut ::core::ffi::c_int,
+        pub(super) good_match: &'state mut crate::stdlib::uInt,
+        pub(super) nice_match: &'state mut ::core::ffi::c_int,
+        pub(super) dyn_ltree: &'state mut [crate::src::deflate::ct_data_s; 573],
+        pub(super) dyn_dtree: &'state mut [crate::src::deflate::ct_data_s; 61],
+        pub(super) bl_tree: &'state mut [crate::src::deflate::ct_data_s; 39],
+        pub(super) l_desc: &'state mut crate::src::deflate::tree_desc_s,
+        pub(super) d_desc: &'state mut crate::src::deflate::tree_desc_s,
+        pub(super) bl_desc: &'state mut crate::src::deflate::tree_desc_s,
+        pub(super) sym_buf_start: &'state mut usize,
+        pub(super) lit_bufsize: &'state mut crate::stdlib::uInt,
+        pub(super) sym_next: &'state mut crate::stdlib::uInt,
+        pub(super) sym_end: &'state mut crate::stdlib::uInt,
+        pub(super) opt_len: &'state mut crate::zutil_h::ulg,
+        pub(super) static_len: &'state mut crate::zutil_h::ulg,
+        pub(super) matches: &'state mut crate::stdlib::uInt,
+        pub(super) insert: &'state mut crate::stdlib::uInt,
+        pub(super) bi_buf: &'state mut crate::zutil_h::ush,
+        pub(super) bi_valid: &'state mut ::core::ffi::c_int,
+        pub(super) bi_used: &'state mut ::core::ffi::c_int,
+        pub(super) high_water: &'state mut crate::zutil_h::ulg,
+        pub(super) slid: &'state mut ::core::ffi::c_int,
+    }
+
     // Allocate, publish, and (on failure) release one complete deflate
     // callback lifecycle.  The constructor supplies only a complete Rust
     // value with empty callback slots; this owner alone publishes the state
@@ -1327,7 +1380,7 @@ mod callback_owner {
         plan: DeflateAllocationPlan,
         build: impl FnOnce(DeflateCallbackStorageOwner) -> crate::src::deflate::internal_state,
         finish: impl for<'storage> FnOnce(
-            &'storage mut crate::src::deflate::deflate_state,
+            DeflateCallbackScalarState<'storage>,
             DeflateCallbackStorageRequest<'storage>,
         ) -> R,
     ) -> Option<R> {
@@ -1407,7 +1460,56 @@ mod callback_owner {
             // callback buffers a second time.
             let (state, storage) =
                 storage_views(state.as_mut(), &DeflateStorageProjection::Complete);
-            Some(finish(state, storage))
+            // Keep this complete scalar projection inside the same unsafe
+            // owner that made the sole callback-buffer views.  The finish
+            // callback receives no `internal_state` carrier and therefore
+            // cannot recover a raw callback allocation handle.
+            let scalar_state = DeflateCallbackScalarState {
+                data_type: &mut state.data_type,
+                status: &mut state.status,
+                pending_buf_size: &mut state.pending_buf_size,
+                pending_out: &mut state.pending_out,
+                pending: &mut state.pending,
+                callback_storage: state.callback_storage,
+                wrap: &mut state.wrap,
+                method: &mut state.method,
+                last_flush: &mut state.last_flush,
+                w_size: state.w_size,
+                window_size: &mut state.window_size,
+                ins_h: &mut state.ins_h,
+                block_start: &mut state.block_start,
+                match_length: &mut state.match_length,
+                match_available: &mut state.match_available,
+                strstart: &mut state.strstart,
+                lookahead: &mut state.lookahead,
+                prev_length: &mut state.prev_length,
+                max_chain_length: &mut state.max_chain_length,
+                max_lazy_match: &mut state.max_lazy_match,
+                level: &mut state.level,
+                strategy: &mut state.strategy,
+                good_match: &mut state.good_match,
+                nice_match: &mut state.nice_match,
+                dyn_ltree: &mut state.dyn_ltree,
+                dyn_dtree: &mut state.dyn_dtree,
+                bl_tree: &mut state.bl_tree,
+                l_desc: &mut state.l_desc,
+                d_desc: &mut state.d_desc,
+                bl_desc: &mut state.bl_desc,
+                sym_buf_start: &mut state.sym_buf_start,
+                lit_bufsize: &mut state.lit_bufsize,
+                sym_next: &mut state.sym_next,
+                sym_end: &mut state.sym_end,
+                opt_len: &mut state.opt_len,
+                static_len: &mut state.static_len,
+                matches: &mut state.matches,
+                insert: &mut state.insert,
+                bi_buf: &mut state.bi_buf,
+                bi_valid: &mut state.bi_valid,
+                bi_used: &mut state.bi_used,
+                high_water: &mut state.high_water,
+                slid: &mut state.slid,
+            };
+            Some(finish(scalar_state, storage))
         } else {
             // Release consumes the same typed state handle that carried each
             // storage publication.  Do not rebuild a caller-side state view
@@ -2133,23 +2235,23 @@ pub unsafe fn deflateInit2_(
             high_water: 0,
             slid: 0,
         },
-        |state, storage_request| {
+        |mut state, storage_request| {
             let storage = storage_request
                 .into_dispatch_storage()
                 .expect("complete callback storage has complete bounded views");
             {
-                state.data_type = crate::zlib_h::Z_UNKNOWN;
-                state.high_water = 0 as crate::zutil_h::ulg;
-                state.lit_bufsize = initialization.layout.lit_bufsize;
-                state.pending_buf_size = storage.pending_buf.len() as crate::zutil_h::ulg;
-                state.sym_buf_start = state.lit_bufsize as usize;
-                state.sym_end = state
+                *state.data_type = crate::zlib_h::Z_UNKNOWN;
+                *state.high_water = 0 as crate::zutil_h::ulg;
+                *state.lit_bufsize = initialization.layout.lit_bufsize;
+                *state.pending_buf_size = storage.pending_buf.len() as crate::zutil_h::ulg;
+                *state.sym_buf_start = *state.lit_bufsize as usize;
+                *state.sym_end = state
                     .lit_bufsize
                     .wrapping_sub(1 as crate::stdlib::uInt)
                     .wrapping_mul(3 as crate::stdlib::uInt);
-                state.level = initialization.layout.level;
-                state.strategy = initialization.strategy;
-                state.method = initialization.method as crate::stdlib::Byte;
+                *state.level = initialization.layout.level;
+                *state.strategy = initialization.strategy;
+                *state.method = initialization.method as crate::stdlib::Byte;
             }
             // The state is installed and all callback results are now
             // validated. The owner builds each of the four bounded views
@@ -2179,7 +2281,7 @@ pub unsafe fn deflateInit2_(
                 &mut state.bi_used,
             );
             let w_size = state.w_size;
-            let config = &configuration_table[state.level as usize];
+            let config = &configuration_table[*state.level as usize];
             DeflateResetCore {
                 window_size: &mut state.window_size,
                 slid: &mut state.slid,
