@@ -3256,9 +3256,9 @@ fn get_fixed_tables() -> FixedTables {
 pub unsafe fn inflate_fixed(state: *mut crate::src::inflate::inflate_state) {
     let tables = get_fixed_tables();
     let state = &mut *state;
-    state.lencode = tables.len.as_ptr();
+    state.lencode = crate::src::inflate::CodeTableRef::FixedLen;
     state.lenbits = tables.lenbits;
-    state.distcode = tables.dist.as_ptr();
+    state.distcode = crate::src::inflate::CodeTableRef::FixedDist;
     state.distbits = tables.distbits;
 }
 #[export_name = "inflate_fixed"]

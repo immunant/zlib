@@ -65,14 +65,11 @@ pub unsafe extern "C" fn inflate_fast(
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
-    let mut lcode: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
-    let mut dcode: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
+    let mut lcode = crate::src::inflate::CodeTableRef::Dynamic(0);
+    let mut dcode = crate::src::inflate::CodeTableRef::Dynamic(0);
     let mut lmask: ::core::ffi::c_uint = 0;
     let mut dmask: ::core::ffi::c_uint = 0;
-    let mut here: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
+    let mut here = crate::src::inftrees::code { op: 0, bits: 0, val: 0 };
     let mut op: ::core::ffi::c_uint = 0;
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
@@ -105,19 +102,22 @@ pub unsafe extern "C" fn inflate_fast(
             hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
         }
-        here = lcode.offset((hold & lmask as ::core::ffi::c_ulong) as isize);
+        here = crate::src::inftrees::code::copied_from(lcode.get(
+            &(*state).codes,
+            (hold & lmask as ::core::ffi::c_ulong) as isize,
+        ));
         's_92: loop {
-            op = (*here).bits as ::core::ffi::c_uint;
+            op = here.bits as ::core::ffi::c_uint;
             hold >>= op;
             bits = bits.wrapping_sub(op);
-            op = (*here).op as ::core::ffi::c_uint;
+            op = here.op as ::core::ffi::c_uint;
             if op == 0 as ::core::ffi::c_uint {
                 let c2rust_fresh2 = out;
                 out = out.offset(1);
-                *c2rust_fresh2 = (*here).val as ::core::ffi::c_uchar;
+                *c2rust_fresh2 = here.val as ::core::ffi::c_uchar;
                 break;
             } else if op & 16 as ::core::ffi::c_uint != 0 {
-                len = (*here).val as ::core::ffi::c_uint;
+                len = here.val as ::core::ffi::c_uint;
                 op &= 15 as ::core::ffi::c_uint;
                 if op != 0 {
                     if bits < op {
@@ -144,14 +144,17 @@ pub unsafe extern "C" fn inflate_fast(
                     hold = hold.wrapping_add((*c2rust_fresh5 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                here = dcode.offset((hold & dmask as ::core::ffi::c_ulong) as isize);
+                here = crate::src::inftrees::code::copied_from(dcode.get(
+                    &(*state).codes,
+                    (hold & dmask as ::core::ffi::c_ulong) as isize,
+                ));
                 loop {
-                    op = (*here).bits as ::core::ffi::c_uint;
+                    op = here.bits as ::core::ffi::c_uint;
                     hold >>= op;
                     bits = bits.wrapping_sub(op);
-                    op = (*here).op as ::core::ffi::c_uint;
+                    op = here.op as ::core::ffi::c_uint;
                     if op & 16 as ::core::ffi::c_uint != 0 {
-                        dist = (*here).val as ::core::ffi::c_uint;
+                        dist = here.val as ::core::ffi::c_uint;
                         op &= 15 as ::core::ffi::c_uint;
                         if bits < op {
                             let c2rust_fresh6 = in_0;
@@ -330,15 +333,14 @@ pub unsafe extern "C" fn inflate_fast(
                             break 's_92;
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                        here = dcode
-                            .offset((*here).val as ::core::ffi::c_int as isize)
-                            .offset(
-                                (hold
+                        here = crate::src::inftrees::code::copied_from(dcode.get(
+                            &(*state).codes,
+                            (here.val as ::core::ffi::c_int as isize)
+                                + (hold
                                     & ((1 as ::core::ffi::c_uint) << op)
                                         .wrapping_sub(1 as ::core::ffi::c_uint)
-                                        as ::core::ffi::c_ulong)
-                                    as isize,
-                            );
+                                        as ::core::ffi::c_ulong) as isize,
+                        ));
                     } else {
                         (*strm).msg = b"invalid distance code\0".as_ptr()
                             as *const ::core::ffi::c_char
@@ -348,14 +350,14 @@ pub unsafe extern "C" fn inflate_fast(
                     }
                 }
             } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                here = lcode
-                    .offset((*here).val as ::core::ffi::c_int as isize)
-                    .offset(
-                        (hold
+                here = crate::src::inftrees::code::copied_from(lcode.get(
+                    &(*state).codes,
+                    (here.val as ::core::ffi::c_int as isize)
+                        + (hold
                             & ((1 as ::core::ffi::c_uint) << op)
                                 .wrapping_sub(1 as ::core::ffi::c_uint)
                                 as ::core::ffi::c_ulong) as isize,
-                    );
+                ));
             } else if op & 32 as ::core::ffi::c_uint != 0 {
                 (*state).mode = crate::src::inflate::TYPE;
                 break 's_627;
