@@ -3105,9 +3105,12 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    // Bind foreign arguments only. State validation stays in the named
-    // dispatcher, alongside the header transition it protects.
-    inflateGetHeader(strm.as_mut(), head.as_mut())
+    // Bind the two foreign objects only at the ABI boundary. The named
+    // implementation owns stream/state validation and the retained-header
+    // transition; it does not publish any header fields here.
+    let strm = unsafe { strm.as_mut() };
+    let head = unsafe { head.as_mut() };
+    inflateGetHeader(strm, head)
 }
 
 fn inflateGetHeader(
