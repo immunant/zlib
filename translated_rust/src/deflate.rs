@@ -5023,6 +5023,30 @@ fn rle_tally_symbol_state(
     }
 }
 
+/// Decide the common RLE/Huffman tail operation while committing the one
+/// parser-state update that must happen before either kind of final block.
+/// The callers keep the tree call and pending-output boundary separate: both
+/// still require the legacy callback-owned buffers.
+enum DeflateTailAction {
+    Finish,
+    FlushSymbols,
+    Done,
+}
+
+fn deflate_tail_action_state(
+    s: &mut crate::src::deflate::deflate_state,
+    flush: ::core::ffi::c_int,
+) -> DeflateTailAction {
+    s.insert = 0;
+    if flush == crate::zlib_h::Z_FINISH {
+        DeflateTailAction::Finish
+    } else if s.sym_next != 0 {
+        DeflateTailAction::FlushSymbols
+    } else {
+        DeflateTailAction::Done
+    }
+}
+
 fn hash_match_is_usable(
     strstart: crate::src::deflate::IPos,
     hash_head: crate::src::deflate::IPos,
@@ -5149,11 +5173,11 @@ unsafe fn deflate_rle(
             }
         }
     }
-    {
+    let tail_action = {
         let state = &mut *s;
-        state.insert = 0 as crate::stdlib::uInt;
-    }
-    if flush == crate::zlib_h::Z_FINISH {
+        deflate_tail_action_state(state, flush)
+    };
+    if matches!(tail_action, DeflateTailAction::Finish) {
         let (block_start, strstart, window) = {
             let state = &mut *s;
             (state.block_start, state.strstart, state.window)
@@ -5184,11 +5208,7 @@ unsafe fn deflate_rle(
         }
         return finish_done;
     }
-    let has_symbols = {
-        let state = &mut *s;
-        state.sym_next != 0
-    };
-    if has_symbols {
+    if matches!(tail_action, DeflateTailAction::FlushSymbols) {
         let (block_start, strstart, window) = {
             let state = &mut *s;
             (state.block_start, state.strstart, state.window)
@@ -5307,11 +5327,11 @@ unsafe fn deflate_huff(
             }
         }
     }
-    {
+    let tail_action = {
         let state = &mut *s;
-        state.insert = 0 as crate::stdlib::uInt;
-    }
-    if flush == crate::zlib_h::Z_FINISH {
+        deflate_tail_action_state(state, flush)
+    };
+    if matches!(tail_action, DeflateTailAction::Finish) {
         let (block_start, strstart, window) = {
             let state = &mut *s;
             (state.block_start, state.strstart, state.window)
@@ -5342,11 +5362,7 @@ unsafe fn deflate_huff(
         }
         return finish_done;
     }
-    let has_symbols = {
-        let state = &mut *s;
-        state.sym_next != 0
-    };
-    if has_symbols {
+    if matches!(tail_action, DeflateTailAction::FlushSymbols) {
         let (block_start, strstart, window) = {
             let state = &mut *s;
             (state.block_start, state.strstart, state.window)
