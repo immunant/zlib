@@ -1371,6 +1371,7 @@ impl GzZeroCore {
     }
 }
 
+
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let buffer = if state.size == 0 {
         &mut []

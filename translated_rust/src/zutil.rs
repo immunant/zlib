@@ -165,6 +165,10 @@ fn error_message(err: ::core::ffi::c_int) -> &'static [::core::ffi::c_char] {
     ERROR_MESSAGES[error_message_index(err)]
 }
 
+pub(crate) fn z_error_message(err: ::core::ffi::c_int) -> &'static [::core::ffi::c_char] {
+    error_message(err)
+}
+
 pub(crate) fn z_errmsg_index(err: ::core::ffi::c_int) -> usize {
     error_message_index(err)
 }

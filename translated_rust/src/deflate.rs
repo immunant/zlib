@@ -163,7 +163,7 @@ pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
-pub use crate::src::zutil::z_errmsg;
+use crate::src::zutil::z_error_message;
 pub use crate::src::zutil::zcalloc_ffi;
 pub use crate::src::zutil::zcfree_ffi;
 pub use crate::stdlib::charf;
@@ -1244,8 +1244,7 @@ pub unsafe extern "C" fn deflateInit2_(
         || (*s).pending_buf.is_null()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
-        (*strm).msg = z_errmsg[crate::src::zutil::z_errmsg_index(-4 as ::core::ffi::c_int)]
-            .load(::core::sync::atomic::Ordering::Relaxed);
+        (*strm).msg = z_error_message(-4 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -2456,13 +2455,11 @@ pub unsafe extern "C" fn deflate(
         flush,
     ) {
         DeflatePreflight::StreamError => {
-            (*strm).msg = z_errmsg[crate::src::zutil::z_errmsg_index(-2 as ::core::ffi::c_int)]
-                .load(::core::sync::atomic::Ordering::Relaxed);
+            (*strm).msg = z_error_message(-2 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
             return -2 as ::core::ffi::c_int;
         }
         DeflatePreflight::BufError => {
-            (*strm).msg = z_errmsg[crate::src::zutil::z_errmsg_index(-5 as ::core::ffi::c_int)]
-                .load(::core::sync::atomic::Ordering::Relaxed);
+            (*strm).msg = z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
             return -5 as ::core::ffi::c_int;
         }
         DeflatePreflight::Continue => {}
@@ -2476,15 +2473,13 @@ pub unsafe extern "C" fn deflate(
             return crate::zlib_h::Z_OK;
         }
     } else if deflate_should_return_buf_error((*strm).avail_in, flush, old_flush) {
-        (*strm).msg = z_errmsg[crate::src::zutil::z_errmsg_index(-5 as ::core::ffi::c_int)]
-            .load(::core::sync::atomic::Ordering::Relaxed);
+        (*strm).msg = z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
     if (*s).status == crate::src::deflate::FINISH_STATE
         && (*strm).avail_in != 0 as crate::stdlib::uInt
     {
-        (*strm).msg = z_errmsg[crate::src::zutil::z_errmsg_index(-5 as ::core::ffi::c_int)]
-            .load(::core::sync::atomic::Ordering::Relaxed);
+        (*strm).msg = z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
     if (*s).status == crate::src::deflate::INIT_STATE && (*s).wrap == 0 as ::core::ffi::c_int {
