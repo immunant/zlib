@@ -96,11 +96,10 @@ fn copy_gzip_header(header: &GzipHeader) -> GzipHeader {
 #[repr(C)]
 
 pub struct internal_state {
-    // The legacy `_tr_flush_block` FFI adapter receives only this opaque
-    // state, yet must update the ABI stream's `data_type`.  Retain that one
-    // scalar slot rather than the entire caller-owned stream backlink.
-    // State validation compares this slot's address with the current stream.
-    pub strm: ::core::ptr::NonNull<::core::ffi::c_int>,
+    // Keep the legacy tree adapter's detected data type in opaque state.
+    // Normal deflate dispatches publish their stream value directly, while
+    // `_tr_flush_block()` has only this state handle available.
+    pub data_type: ::core::ffi::c_int,
     pub status: ::core::ffi::c_int,
     // This allocation is released through the stream's zfree callback, so it
     // cannot yet become a Box. NonNull makes the initialized-owner invariant
@@ -963,7 +962,7 @@ pub unsafe extern "C" fn deflateInit2_(
     // observe the same installed stream state without first writing invalid
     // all-zero bytes into Rust enum fields.
     s.write(crate::src::deflate::internal_state {
-        strm: ::core::ptr::NonNull::from(&mut stream.data_type),
+        data_type: stream.data_type,
         status: initial_state.status,
         pending_buf: None,
         pending_buf_size: initial_state.pending_buf_size,
@@ -1049,6 +1048,7 @@ pub unsafe extern "C" fn deflateInit2_(
         allocated
     });
     let state = &mut *s;
+    state.data_type = crate::zlib_h::Z_UNKNOWN;
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = layout.lit_bufsize;
     state.pending_buf_size = storage
@@ -1184,9 +1184,7 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     let state = &*s;
-    if state.strm != ::core::ptr::NonNull::from(&strm_ref.data_type)
-        || !deflate_state_status_is_valid(state.status)
-    {
+    if !deflate_state_status_is_valid(state.status) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -1674,6 +1672,7 @@ pub unsafe extern "C" fn deflateResetKeep(
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
     let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    state.data_type = strm.data_type;
     strm.adler = reset_keep_core(
         &mut state.pending,
         &mut state.pending_out,
@@ -2277,8 +2276,7 @@ unsafe fn deflate_bound_state_for_stream(
         return None;
     }
     let state = (stream.state as *const crate::src::deflate::deflate_state).as_ref()?;
-    if state.strm != ::core::ptr::NonNull::from(&stream.data_type)
-        || state.status != crate::src::deflate::INIT_STATE
+    if state.status != crate::src::deflate::INIT_STATE
             && state.status != crate::src::deflate::GZIP_STATE
             && state.status != crate::src::deflate::EXTRA_STATE
             && state.status != crate::src::deflate::NAME_STATE
@@ -2684,6 +2682,7 @@ struct DeflateTreeCopy {
 // deep-copy payload separate prevents an eventual owned allocation broker
 // from having to copy an `internal_state` and then repair aliased owners.
 struct DeflateCopyPayload {
+    data_type: ::core::ffi::c_int,
     status: ::core::ffi::c_int,
     pending_buf_size: crate::zutil_h::ulg,
     pending_out: usize,
@@ -3642,13 +3641,12 @@ pub unsafe extern "C" fn deflateCopy(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let ss = &*source_state;
-    if ss.strm != ::core::ptr::NonNull::from(&source.data_type)
-        || !deflate_state_status_is_valid(ss.status)
-    {
+    if !deflate_state_status_is_valid(ss.status) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let dest = &mut *dest;
     let payload = DeflateCopyPayload {
+        data_type: source.data_type,
         status: ss.status,
         pending_buf_size: ss.pending_buf_size,
         pending_out: ss.pending_out,
@@ -3748,7 +3746,7 @@ pub unsafe extern "C" fn deflateCopy(
     ::core::ptr::write(
         ds,
         crate::src::deflate::internal_state {
-            strm: ::core::ptr::NonNull::from(&mut dest.data_type),
+            data_type: payload.data_type,
             status: payload.status,
             pending_buf: ss.pending_buf,
             pending_buf_size: payload.pending_buf_size,
