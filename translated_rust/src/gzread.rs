@@ -660,7 +660,13 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_read_impl(
+/// Read into a caller-bounded buffer while keeping the legacy state
+/// transitions behind this safe slice-based operation.
+///
+/// The gzip state still carries the ABI inflater stream, but its only
+/// remaining unsafe crossings are confined to the skip/fetch operations
+/// below.  Callers only provide a checked output slice.
+fn gz_read_buffer(
     state: &mut crate::gzguts_h::gz_state,
     buf: &mut [u8],
 ) -> crate::stdlib::z_size_t {
@@ -669,7 +675,7 @@ unsafe fn gz_read_impl(
     let mut err: ::core::ffi::c_int = 0;
     let mut len = buf.len();
     let mut out = 0usize;
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && unsafe { gz_skip(state) } == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -736,7 +742,7 @@ unsafe fn gz_read_impl(
                     Some(GzFetchOutput::Direct(&mut buf[out..out + n as usize]))
                 };
                 if let Some(fetch_output) = fetch_output {
-                    let fetched = gz_fetch(state, fetch_output);
+                    let fetched = unsafe { gz_fetch(state, fetch_output) };
                     if direct {
                         err = fetched;
                         n = state.x.have;
@@ -765,6 +771,16 @@ unsafe fn gz_read_impl(
     }
     return got;
 }
+
+/// Legacy stream-facing entry retained while gzip's ABI stream is migrated.
+/// Internal slice callers use `gz_read_buffer()` directly.
+unsafe fn gz_read_impl(
+    state: &mut crate::gzguts_h::gz_state,
+    buf: &mut [u8],
+) -> crate::stdlib::z_size_t {
+    gz_read_buffer(state, buf)
+}
+
 pub unsafe extern "C" fn gzread(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidp,
@@ -861,7 +877,7 @@ fn gzfread_impl(
             return 0;
         }
     };
-    unsafe { gz_read_impl(state, buffer) }.wrapping_div(size)
+    gz_read_buffer(state, buffer).wrapping_div(size)
 }
 #[export_name = "gzfread"]
 
@@ -917,7 +933,7 @@ fn gzgetc_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return byte as ::core::ffi::c_int;
     }
     let mut buf = [0u8; 1];
-    if unsafe { gz_read_impl(state, &mut buf) } < 1 as crate::stdlib::z_size_t {
+    if gz_read_buffer(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
         buf[0] as ::core::ffi::c_int
