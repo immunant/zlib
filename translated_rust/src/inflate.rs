@@ -694,9 +694,12 @@ pub(crate) enum InflateCallbackInitRequest {
 // while version/size acceptance remains coupled to callback allocation and
 // publication below.  The distinction lets that transaction operate on a
 // pointer-free byte without changing its validation precedence.
-pub(crate) enum InflateAbiVersion<'a> {
+pub(crate) enum InflateAbiVersion {
     Unchecked,
-    Observed(Option<&'a ::core::ffi::c_char>),
+    // Initialization observes only zlib's leading ABI version byte.  Keep
+    // that value, rather than a borrowed foreign byte, across the callback
+    // allocation transaction.
+    Observed(Option<::core::ffi::c_char>),
 }
 
 enum InflateCallbackInitUpdate {
@@ -748,7 +751,7 @@ impl InflateCallbackInitRequest {
 pub(crate) unsafe fn inflate_publish_callback_owner(
     strm: Option<&mut crate::zlib_h::z_stream_s>,
     request: Option<InflateCallbackInitRequest>,
-    version: InflateAbiVersion<'_>,
+    version: InflateAbiVersion,
     stream_size: ::core::ffi::c_int,
     copy_source: Option<&inflate_state>,
     destination_identity: usize,
@@ -759,7 +762,7 @@ pub(crate) unsafe fn inflate_publish_callback_owner(
     // Z_VERSION_ERROR-before-Z_STREAM_ERROR behavior.
     if let InflateAbiVersion::Observed(version) = version {
         if version.is_none_or(|version| {
-            *version as ::core::ffi::c_int != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
+            version as ::core::ffi::c_int != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
         }) || stream_size
             != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
         {
@@ -1062,7 +1065,7 @@ pub unsafe extern "C" fn inflateInit2_(
     let mut copied_state = None;
     // Observe only the leading ABI version byte before the allocation seam;
     // that seam retains the comparison and its version/size precedence.
-    let version = InflateAbiVersion::Observed(version.as_ref());
+    let version = InflateAbiVersion::Observed(version.as_ref().copied());
     inflate_publish_callback_owner(
         strm,
         Some(InflateCallbackInitRequest::Normal {

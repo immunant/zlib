@@ -111,7 +111,8 @@ pub unsafe extern "C" fn inflateBackInit_(
     // scanning the caller's C string).
     let version_matches = version
         .as_ref()
-        .is_some_and(|version| *version == crate::zlib_h::ZLIB_VERSION[0]);
+        .copied()
+        .is_some_and(|version| version == crate::zlib_h::ZLIB_VERSION[0]);
     let plan = match InflateBackInitPlan::new(version_matches, windowBits, stream_size) {
         Ok(plan) => plan,
         Err(status) => return status,
