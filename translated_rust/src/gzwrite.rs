@@ -204,13 +204,16 @@ unsafe fn gz_comp(
 
 // Callers have already validated and bound the gzip state.  Keep this as an
 // internal Rust helper so its progress bookkeeping does not need to recover a
-// mutable reference from a raw pointer.
-unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// mutable reference from a raw pointer.  Zero-fill and compression remain
+// explicit raw-boundary operations below.
+fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
     if state.strm.avail_in != 0
-        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+        // SAFETY: the validated gzip state owns the initialized stream and
+        // buffers required by the compression adapter.
+        && unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) } == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -218,16 +221,22 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         n = crate::src::gzlib::gz_skip_chunk(state.size, state.skip);
         if first != 0 {
-            crate::stdlib::memset(
-                state.in_0 as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                n as crate::__stddef_size_t_h::size_t,
-            );
+            // SAFETY: `gz_init` allocated `in_0` with at least `size` bytes,
+            // and this first sparse-write chunk is bounded by that size.
+            unsafe {
+                crate::stdlib::memset(
+                    state.in_0 as *mut ::core::ffi::c_void,
+                    0 as ::core::ffi::c_int,
+                    n as crate::__stddef_size_t_h::size_t,
+                );
+            }
             first = 0 as ::core::ffi::c_int;
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
         state.strm.next_in = state.in_0;
-        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+        // SAFETY: the validated gzip state owns the stream and the `in_0`
+        // range configured immediately above for this compression request.
+        ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
         crate::src::gzlib::gz_zero_progress(state, n);
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
