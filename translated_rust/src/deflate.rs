@@ -1731,6 +1731,54 @@ pub unsafe extern "C" fn deflatePrime_ffi(
 ) -> ::core::ffi::c_int {
     deflatePrime(strm, bits, value)
 }
+
+// Level changes have a small amount of hash-table cleanup policy, but none
+// of that policy depends on ABI cursors or callback-owned pointers.  Keep it
+// in a slice/scalar core so the raw allocation views stay at the caller's
+// boundary.  `tables` is present exactly for the level-zero match history
+// case that needs it; the caller establishes those bounded views first.
+fn update_deflate_parameters(
+    current_level: &mut ::core::ffi::c_int,
+    current_strategy: &mut ::core::ffi::c_int,
+    matches: &mut crate::stdlib::uInt,
+    slid: &mut ::core::ffi::c_int,
+    max_lazy_match: &mut crate::stdlib::uInt,
+    good_match: &mut crate::stdlib::uInt,
+    nice_match: &mut ::core::ffi::c_int,
+    max_chain_length: &mut crate::stdlib::uInt,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    w_size: crate::stdlib::uInt,
+    tables: Option<(
+        &mut [crate::src::deflate::Posf],
+        Option<&mut [crate::src::deflate::Posf]>,
+    )>,
+) {
+    if *current_level != level {
+        if *current_level == 0 && *matches != 0 {
+            let (head, prev) = tables.expect("level-zero matches require hash tables");
+            if *matches == 1 {
+                slide_hash_table(head, w_size);
+                slide_hash_table(
+                    prev.expect("single level-zero match requires previous table"),
+                    w_size,
+                );
+                *slid = 1;
+            } else {
+                clear_hash_table(head);
+                *slid = 0;
+            }
+            *matches = 0;
+        }
+        *current_level = level;
+        *max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
+        *good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
+        *nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
+        *max_chain_length = configuration_table[level as usize].max_chain as crate::stdlib::uInt;
+    }
+    *current_strategy = strategy;
+}
+
 pub unsafe extern "C" fn deflateParams(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
@@ -1779,42 +1827,39 @@ pub unsafe extern "C" fn deflateParams(
     }
     let stream = &mut *strm;
     let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
-    if state.level != level {
-        if state.level == 0 as ::core::ffi::c_int && state.matches != 0 as crate::stdlib::uInt {
-            if state.matches == 1 as crate::stdlib::uInt {
-                // `head` and `prev` are allocated at these exact element
-                // counts in `deflateInit2_()` and `deflateCopy()`.
-                let head = ::core::slice::from_raw_parts_mut(
-                    state.head.expect("initialized head table").as_ptr(),
-                    state.hash_size as usize,
-                );
-                let prev = ::core::slice::from_raw_parts_mut(
-                    state.prev.expect("initialized prev table").as_ptr(),
-                    state.w_size as usize,
-                );
-                slide_hash_table(head, state.w_size);
-                slide_hash_table(prev, state.w_size);
-                state.slid = 1 as ::core::ffi::c_int;
-            } else {
-                // `head` has exactly `hash_size` elements from
-                // `deflateInit2_()` or `deflateCopy()`.
-                let head = ::core::slice::from_raw_parts_mut(
-                    state.head.expect("initialized head table").as_ptr(),
-                    state.hash_size as usize,
-                );
-                clear_hash_table(head);
-                state.slid = 0 as ::core::ffi::c_int;
-            }
-            state.matches = 0 as crate::stdlib::uInt;
-        }
-        state.level = level;
-        state.max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        state.good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        state.nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        state.max_chain_length =
-            configuration_table[level as usize].max_chain as crate::stdlib::uInt;
-    }
-    state.strategy = strategy;
+    let tables = if state.level != level && state.level == 0 && state.matches != 0 {
+        // `head` and (for the single-match case) `prev` have their exact
+        // allocation geometry from `deflateInit2_()` or `deflateCopy()`.
+        let head = ::core::slice::from_raw_parts_mut(
+            state.head.expect("initialized head table").as_ptr(),
+            state.hash_size as usize,
+        );
+        let prev = if state.matches == 1 {
+            Some(::core::slice::from_raw_parts_mut(
+                state.prev.expect("initialized prev table").as_ptr(),
+                state.w_size as usize,
+            ))
+        } else {
+            None
+        };
+        Some((head, prev))
+    } else {
+        None
+    };
+    update_deflate_parameters(
+        &mut state.level,
+        &mut state.strategy,
+        &mut state.matches,
+        &mut state.slid,
+        &mut state.max_lazy_match,
+        &mut state.good_match,
+        &mut state.nice_match,
+        &mut state.max_chain_length,
+        level,
+        strategy,
+        state.w_size,
+        tables,
+    );
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateParams"]
