@@ -5399,10 +5399,7 @@ fn tr_tally_core(
 ) -> ::core::ffi::c_int {
     let symbol_bytes = tally_symbol_bytes(dist, lc);
     let (cursors, next_sym_next) = symbol_triplet_cursors(*sym_next);
-    let symbols = storage.symbol_bytes();
-    for (cursor, byte) in cursors.into_iter().zip(symbol_bytes) {
-        symbols[cursor as usize] = byte;
-    }
+    assert!(storage.write_symbol_triplet(cursors, symbol_bytes));
     *sym_next = next_sym_next;
     match tally_tree_update(dist, lc) {
         TallyTreeUpdate::Literal { literal_index } => {

@@ -229,6 +229,30 @@ impl<'a> PendingStorageView<'a> {
         *pending = pending.wrapping_add(bytes.len() as crate::zutil_h::ulg);
         true
     }
+
+    pub(crate) fn write_symbol_triplet(
+        &mut self,
+        cursors: [crate::stdlib::uInt; 3],
+        bytes: [crate::zutil_h::uchf; 3],
+    ) -> bool {
+        let Ok(first) = usize::try_from(cursors[0]) else {
+            return false;
+        };
+        let Ok(second) = usize::try_from(cursors[1]) else {
+            return false;
+        };
+        let Ok(third) = usize::try_from(cursors[2]) else {
+            return false;
+        };
+        let symbols = self.symbol_bytes();
+        if first >= symbols.len() || second >= symbols.len() || third >= symbols.len() {
+            return false;
+        }
+        symbols[first] = bytes[0];
+        symbols[second] = bytes[1];
+        symbols[third] = bytes[2];
+        true
+    }
 }
 
 pub(crate) fn with_pending_storage<Result>(
@@ -5511,6 +5535,19 @@ mod tests {
         assert_eq!(storage.symbol_bytes().len(), 12);
         assert!(!storage.append_pending(&mut pending, &[0; 14]));
         assert_eq!(pending, 3);
+    }
+
+    #[test]
+    fn pending_storage_view_writes_symbol_triplets_atomically() {
+        let layout = pending_storage_layout(4);
+        let mut bytes = [0; 16];
+        let mut storage = super::PendingStorageView::new(&mut bytes, layout).unwrap();
+
+        assert!(storage.write_symbol_triplet([0, 1, 2], [7, 8, 9]));
+        assert_eq!(&storage.symbol_bytes()[..3], &[7, 8, 9]);
+
+        assert!(!storage.write_symbol_triplet([2, 12, 3], [1, 2, 3]));
+        assert_eq!(&storage.symbol_bytes()[..3], &[7, 8, 9]);
     }
 
     #[test]
