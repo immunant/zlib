@@ -7,8 +7,6 @@ pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
 
-use core::sync::atomic::AtomicPtr;
-
 const fn c_chars<const N: usize>(bytes: [u8; N]) -> [::core::ffi::c_char; N] {
     let mut chars = [0; N];
     let mut index = 0;
@@ -92,17 +90,17 @@ static ERROR_MESSAGES: [&[::core::ffi::c_char]; ERROR_MESSAGE_COUNT] = [
 ];
 
 #[no_mangle]
-pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; ERROR_MESSAGE_COUNT] = [
-    AtomicPtr::new(NEED_DICTIONARY.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(STREAM_END.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(FILE_ERROR.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(STREAM_ERROR.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(DATA_ERROR.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(INSUFFICIENT_MEMORY.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(BUFFER_ERROR.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(INCOMPATIBLE_VERSION.as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char),
+pub static z_errmsg: [&::core::ffi::c_char; ERROR_MESSAGE_COUNT] = [
+    &NEED_DICTIONARY[0],
+    &STREAM_END[0],
+    &EMPTY_ERROR[0],
+    &FILE_ERROR[0],
+    &STREAM_ERROR[0],
+    &DATA_ERROR[0],
+    &INSUFFICIENT_MEMORY[0],
+    &BUFFER_ERROR[0],
+    &INCOMPATIBLE_VERSION[0],
+    &EMPTY_ERROR[0],
 ];
 
 fn zlib_version() -> &'static [::core::ffi::c_char; 15] {
@@ -307,8 +305,7 @@ mod tests {
 
         for error in [-7, -6, -1, 0, 1, 2, 3] {
             assert_eq!(
-                z_errmsg[z_errmsg_index(error)].load(::core::sync::atomic::Ordering::Relaxed)
-                    as *const ::core::ffi::c_char,
+                z_errmsg[z_errmsg_index(error)] as *const ::core::ffi::c_char,
                 error_message(error).as_ptr()
             );
         }
