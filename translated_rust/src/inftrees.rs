@@ -3378,6 +3378,21 @@ pub unsafe extern "C" fn inflate_table_ffi(
     bits: *mut ::core::ffi::c_uint,
     work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
+    // Check alignment before dereferencing the caller's output pointers or
+    // converting its buffers to Rust references.  A non-null, misaligned C
+    // pointer is invalid for this API, but rejecting it here keeps the FFI
+    // boundary from invoking Rust's alignment requirements on it.
+    if table_out.align_offset(core::mem::align_of::<*mut crate::src::inftrees::code>()) != 0
+        || bits.align_offset(core::mem::align_of::<::core::ffi::c_uint>()) != 0
+    {
+        return -1;
+    }
+    if codes != 0
+        && (lens.align_offset(core::mem::align_of::<::core::ffi::c_ushort>()) != 0
+            || work.align_offset(core::mem::align_of::<::core::ffi::c_ushort>()) != 0)
+    {
+        return -1;
+    }
     let Some(table_capacity) = ffi_table_capacity(
         type_0,
         codes,
@@ -3389,7 +3404,9 @@ pub unsafe extern "C" fn inflate_table_ffi(
         return -1;
     };
     let table_start = *table_out;
-    if table_start.is_null() {
+    if table_start.is_null()
+        || table_start.align_offset(core::mem::align_of::<crate::src::inftrees::code>()) != 0
+    {
         return -1;
     }
 
@@ -3687,6 +3704,66 @@ mod tests {
         );
         assert_eq!(ffi_table_capacity(CODES, 1, true, true, false, true), None);
         assert_eq!(ffi_table_capacity(3, 0, true, true, false, false), None);
+    }
+
+    #[test]
+    fn ffi_table_rejects_misaligned_pointers_before_creating_views() {
+        #[repr(align(8))]
+        struct AlignedBytes([u8; 16]);
+
+        let mut table = [code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        }; 128];
+        let mut table_out = table.as_mut_ptr();
+        let mut bits = 7u32;
+        let mut bytes = AlignedBytes([0; 16]);
+
+        let misaligned_table_out = bytes.0[1..].as_mut_ptr().cast::<*mut code>();
+        assert_eq!(
+            unsafe {
+                inflate_table_ffi(
+                    CODES,
+                    core::ptr::null_mut(),
+                    0,
+                    misaligned_table_out,
+                    &mut bits,
+                    core::ptr::null_mut(),
+                )
+            },
+            -1
+        );
+
+        let misaligned_bits = bytes.0[1..].as_mut_ptr().cast::<u32>();
+        assert_eq!(
+            unsafe {
+                inflate_table_ffi(
+                    CODES,
+                    core::ptr::null_mut(),
+                    0,
+                    &mut table_out,
+                    misaligned_bits,
+                    core::ptr::null_mut(),
+                )
+            },
+            -1
+        );
+
+        let misaligned_lens = bytes.0[1..].as_mut_ptr().cast::<u16>();
+        assert_eq!(
+            unsafe {
+                inflate_table_ffi(
+                    CODES,
+                    misaligned_lens,
+                    1,
+                    &mut table_out,
+                    &mut bits,
+                    core::ptr::null_mut(),
+                )
+            },
+            -1
+        );
     }
 
     #[test]
