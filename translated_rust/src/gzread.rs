@@ -6,8 +6,8 @@ pub use crate::gzguts_h::COPY;
 pub use crate::gzguts_h::GZIP;
 pub use crate::gzguts_h::GZ_READ;
 pub use crate::gzguts_h::LOOK;
-pub use crate::src::gzlib::gz_intmax;
 pub use crate::src::gzlib::gz_error;
+pub use crate::src::gzlib::gz_intmax;
 
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;
@@ -1023,7 +1023,7 @@ fn gzdirect_state(direct: ::core::ffi::c_int) -> ::core::ffi::c_int {
 
 /// Map the read-side saved stream status and descriptor-close result to the
 /// public close status.  Resource release remains at the raw boundary.
-fn gzclose_read_result(
+pub(crate) fn gzclose_read_result(
     state_err: ::core::ffi::c_int,
     close_result: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -1051,36 +1051,8 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     }
     gzdirect_state(state.direct)
 }
-pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if (*state).size != 0 {
-        crate::src::inflate::inflateEnd(
-            &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
-        crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-        crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
-    }
-    let state_err = (*state).err;
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-    let close_result = crate::stdlib::close((*state).fd);
-    crate::stdlib::free(state as *mut ::core::ffi::c_void);
-    gzclose_read_result(state_err, close_result)
-}
 #[export_name = "gzclose_r"]
 
 pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_r(file)
+    crate::src::gzclose::gzclose_read_at_boundary!(file)
 }

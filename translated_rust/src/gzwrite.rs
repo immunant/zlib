@@ -3,8 +3,8 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::gzguts_h::gz_state;
 pub use crate::gzguts_h::gz_statep;
 pub use crate::gzguts_h::GZ_WRITE;
-pub use crate::src::gzlib::gz_intmax;
 pub use crate::src::gzlib::gz_error;
+pub use crate::src::gzlib::gz_intmax;
 
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;
@@ -108,7 +108,7 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_comp(
+pub(crate) unsafe extern "C" fn gz_comp(
     mut state: crate::gzguts_h::gz_statep,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -382,7 +382,7 @@ fn gzsetparams_needs_update(
 
 /// Apply the descriptor-close outcome to the write-side close result.  The
 /// compressor, descriptor, and owned buffers remain at the raw boundary.
-fn gzclose_write_result(
+pub(crate) fn gzclose_write_result(
     close_result: ::core::ffi::c_int,
     result_before_close: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -393,7 +393,9 @@ fn gzclose_write_result(
     }
 }
 
-unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+pub(crate) unsafe extern "C" fn gz_zero(
+    mut state: crate::gzguts_h::gz_statep,
+) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
@@ -761,44 +763,8 @@ pub unsafe extern "C" fn gzsetparams_ffi(
 ) -> ::core::ffi::c_int {
     gzsetparams(file, level, strategy)
 }
-pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
-    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
-    if (*state).size != 0 {
-        if (*state).direct == 0 {
-            crate::src::deflate::deflateEnd(
-                &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-        }
-        crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
-    }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-    let close_result = crate::stdlib::close((*state).fd);
-    crate::stdlib::free(state as *mut ::core::ffi::c_void);
-    gzclose_write_result(close_result, ret)
-}
 #[export_name = "gzclose_w"]
 
 pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_w(file)
+    crate::src::gzclose::gzclose_write_at_boundary!(file)
 }
