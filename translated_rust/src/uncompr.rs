@@ -60,6 +60,27 @@ fn uncompress_result(
     }
 }
 
+/// Finalize one-shot input/output accounting after the ABI boundary has
+/// committed the stream cursors.  Keeping the wrapping subtraction here
+/// makes the exported wrappers responsible only for reading and publishing
+/// their width-specific length arguments.
+struct UncompressProgress {
+    source_used: crate::stdlib::z_size_t,
+    dest_used: crate::stdlib::z_size_t,
+}
+
+fn uncompress_progress(
+    source_total: crate::stdlib::z_size_t,
+    dest_total: crate::stdlib::z_size_t,
+    source_remaining: crate::stdlib::z_size_t,
+    dest_remaining: crate::stdlib::z_size_t,
+) -> UncompressProgress {
+    UncompressProgress {
+        source_used: source_total.wrapping_sub(source_remaining),
+        dest_used: dest_total.wrapping_sub(dest_remaining),
+    }
+}
+
 // This macro intentionally expands only in exported functions.  It owns the
 // one-shot stream's raw cursors and legacy inflate calls until C3 has a safe
 // stream-call adapter.  Keeping it here avoids private unsafe forwarding
@@ -98,8 +119,10 @@ macro_rules! uncompress2_z_at_boundary {
             {
                 break 'uncompress2_z_result crate::zlib_h::Z_STREAM_ERROR;
             }
-            len = *source_len;
-            left = *dest_len;
+            let source_total = *source_len;
+            let dest_total = *dest_len;
+            len = source_total;
+            left = dest_total;
             if left == 0 as crate::stdlib::z_size_t && dest.is_null() {
                 dest = &raw mut stream.reserved as *mut crate::stdlib::Bytef;
             }
@@ -140,8 +163,9 @@ macro_rules! uncompress2_z_at_boundary {
             }
             len = len.wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
             left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
-            *source_len = (*source_len).wrapping_sub(len);
-            *dest_len = (*dest_len).wrapping_sub(left);
+            let progress = uncompress_progress(source_total, dest_total, len, left);
+            *source_len = progress.source_used;
+            *dest_len = progress.dest_used;
             crate::src::inflate::inflate_end_at_boundary!(
                 &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
