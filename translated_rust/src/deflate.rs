@@ -360,6 +360,38 @@ fn clear_window_bytes(
     window[start..start + len as usize].fill(0);
 }
 
+// Keep high-water initialization independent of the ABI state.  The caller
+// supplies the one bounded window view and writes the returned cursor back to
+// its opaque state.
+fn initialize_window_high_water(
+    window: &mut [crate::stdlib::Bytef],
+    high_water: crate::zutil_h::ulg,
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> crate::zutil_h::ulg {
+    let window_size = window.len() as crate::zutil_h::ulg;
+    let curr = (strstart as crate::zutil_h::ulg).wrapping_add(lookahead as crate::zutil_h::ulg);
+    if high_water < curr {
+        let mut init = window_size.wrapping_sub(curr);
+        if init > crate::src::deflate::WIN_INIT as crate::zutil_h::ulg {
+            init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
+        }
+        clear_window_bytes(window, curr, init);
+        curr.wrapping_add(init)
+    } else if high_water < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg) {
+        let mut init = curr
+            .wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
+            .wrapping_sub(high_water);
+        if init > window_size.wrapping_sub(high_water) {
+            init = window_size.wrapping_sub(high_water);
+        }
+        clear_window_bytes(window, high_water, init);
+        high_water.wrapping_add(init)
+    } else {
+        high_water
+    }
+}
+
 fn read_buf_checksum(
     checksum: crate::stdlib::uLong,
     wrap: ::core::ffi::c_int,
@@ -495,32 +527,12 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         }
     }
     if state.high_water < state.window_size {
-        let mut curr: crate::zutil_h::ulg = (state.strstart as crate::zutil_h::ulg)
-            .wrapping_add(state.lookahead as crate::zutil_h::ulg);
-        let mut init: crate::zutil_h::ulg = 0;
-        if state.high_water < curr {
-            init = state.window_size.wrapping_sub(curr);
-            if init > crate::src::deflate::WIN_INIT as crate::zutil_h::ulg {
-                init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
-            }
-            let window =
-                ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-            clear_window_bytes(window, curr, init);
-            state.high_water = curr.wrapping_add(init);
-        } else if state.high_water
-            < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-        {
-            init = curr
-                .wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-                .wrapping_sub(state.high_water);
-            if init > state.window_size.wrapping_sub(state.high_water) {
-                init = state.window_size.wrapping_sub(state.high_water);
-            }
-            let window =
-                ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-            clear_window_bytes(window, state.high_water, init);
-            state.high_water = state.high_water.wrapping_add(init);
-        }
+        // `window` has exactly `window_size` bytes by construction.  Form
+        // that bounded view once; the initialization policy itself is fully
+        // pointer-free.
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        state.high_water =
+            initialize_window_high_water(window, state.high_water, state.strstart, state.lookahead);
     }
 }
 pub unsafe extern "C" fn deflateInit_(
