@@ -1163,23 +1163,23 @@ fn deflate_state_status_is_valid(status: ::core::ffi::c_int) -> bool {
         || status == crate::src::deflate::FINISH_STATE
 }
 
-unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return 1 as ::core::ffi::c_int;
+// The caller first checks and borrows the ABI stream, then this short-lived
+// projection validates its opaque state.  Keeping both references tied to
+// that stream borrow prevents a state reference from escaping the ABI call.
+unsafe fn deflate_stream_and_state<'stream>(
+    strm: &'stream mut crate::zlib_h::z_stream_s,
+) -> Option<(
+    &'stream mut crate::zlib_h::z_stream_s,
+    &'stream mut crate::src::deflate::deflate_state,
+)> {
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return None;
     }
-    let strm_ref = &*strm;
-    if strm_ref.zalloc.is_none() || strm_ref.zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let s = strm_ref.state as *mut crate::src::deflate::deflate_state;
-    if s.is_null() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let state = &*s;
+    let state = (strm.state as *mut crate::src::deflate::deflate_state).as_mut()?;
     if !deflate_state_status_is_valid(state.status) {
-        return 1 as ::core::ffi::c_int;
+        return None;
     }
-    return 0 as ::core::ffi::c_int;
+    Some((strm, state))
 }
 
 // Insert the initial dictionary strings into the hash chains.  The caller
@@ -1453,12 +1453,16 @@ pub unsafe extern "C" fn deflateSetDictionary(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || dictionary.is_null() {
+    if dictionary.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let Some((strm, s)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let dictionary = ::core::slice::from_raw_parts(dictionary, dictLength as usize);
-    let strm = &mut *strm;
-    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     let window = ::core::slice::from_raw_parts_mut(
         s.window.expect("initialized window").as_ptr(),
         s.window_size as usize,
@@ -1524,10 +1528,12 @@ pub unsafe extern "C" fn deflateGetDictionary(
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
     let mut len: crate::stdlib::uInt = 0;
-    if deflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    };
     len = state.strstart.wrapping_add(state.lookahead);
     if len > state.w_size {
         len = state.w_size;
@@ -1655,15 +1661,16 @@ impl DeflateResetCore<'_> {
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    let Some((strm, state)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let strm = &mut *strm;
+    };
     strm.total_out = 0;
     strm.total_in = 0;
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
-    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     state.data_type = strm.data_type;
     strm.adler = reset_keep_core(
         &mut state.pending,
@@ -1754,14 +1761,14 @@ pub unsafe extern "C" fn deflateSetHeader(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // The state is valid after `deflateStateCheck()`.  Project the two ABI
-    // owners once, then keep mode selection and replacement in the
-    // pointer-free header core below.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    };
+    // Keep the state projection at this ABI boundary; header replacement
+    // below is entirely pointer-free once the caller-owned bytes are copied.
     let header = if head.is_null() {
         None
     } else {
@@ -1830,10 +1837,12 @@ pub unsafe extern "C" fn deflatePending(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &*((*strm).state as *const crate::src::deflate::deflate_state);
+    };
     let (pending_value, bits_value, status) = deflate_pending_impl(state.pending, state.bi_valid);
     if !bits.is_null() {
         *bits = bits_value;
@@ -1868,10 +1877,12 @@ pub unsafe extern "C" fn deflateUsed(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &*((*strm).state as *const crate::src::deflate::deflate_state);
+    };
     let bits = if bits.is_null() {
         None
     } else {
@@ -1929,10 +1940,12 @@ pub unsafe extern "C" fn deflatePrime(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    };
     let pending_buf = ::core::slice::from_raw_parts_mut(
         state
             .pending_buf
@@ -2013,9 +2026,6 @@ pub unsafe extern "C" fn deflateParams(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
@@ -2031,8 +2041,12 @@ pub unsafe extern "C" fn deflateParams(
     // borrow across that call; reproject afterwards instead of indexing the
     // raw cursors throughout the parameter policy.
     let needs_flush = {
-        let stream = &mut *strm;
-        let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+        let Some((_stream, state)) = strm
+            .as_mut()
+            .and_then(|strm| deflate_stream_and_state(strm))
+        else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         let algorithm = configuration_table[state.level as usize].algorithm;
         (strategy != state.strategy || algorithm != configuration_table[level as usize].algorithm)
             && state.last_flush != -2 as ::core::ffi::c_int
@@ -2043,8 +2057,12 @@ pub unsafe extern "C" fn deflateParams(
             return err;
         }
         let flush_left_input = {
-            let stream = &mut *strm;
-            let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+            let Some((stream, state)) = strm
+                .as_mut()
+                .and_then(|strm| deflate_stream_and_state(strm))
+            else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
             stream.avail_in != 0
                 || state.strstart as ::core::ffi::c_long - state.block_start
                     + state.lookahead as ::core::ffi::c_long
@@ -2054,8 +2072,12 @@ pub unsafe extern "C" fn deflateParams(
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    let stream = &mut *strm;
-    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    let Some((_stream, state)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let tables = if state.level != level && state.level == 0 && state.matches != 0 {
         // `head` and (for the single-match case) `prev` have their exact
         // allocation geometry from `deflateInit2_()` or `deflateCopy()`.
@@ -2126,10 +2148,12 @@ pub unsafe extern "C" fn deflateTune(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    let Some((_strm, s)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let s = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    };
     let (good_match, max_lazy_match, nice_match, max_chain_length) =
         deflate_tune_values(good_length, max_lazy, nice_length, max_chain);
     s.good_match = good_match;
@@ -2269,13 +2293,13 @@ unsafe fn deflate_bound_state_for_stream(
     }
     let state = (stream.state as *const crate::src::deflate::deflate_state).as_ref()?;
     if state.status != crate::src::deflate::INIT_STATE
-            && state.status != crate::src::deflate::GZIP_STATE
-            && state.status != crate::src::deflate::EXTRA_STATE
-            && state.status != crate::src::deflate::NAME_STATE
-            && state.status != crate::src::deflate::COMMENT_STATE
-            && state.status != crate::src::deflate::HCRC_STATE
-            && state.status != crate::src::deflate::BUSY_STATE
-            && state.status != crate::src::deflate::FINISH_STATE
+        && state.status != crate::src::deflate::GZIP_STATE
+        && state.status != crate::src::deflate::EXTRA_STATE
+        && state.status != crate::src::deflate::NAME_STATE
+        && state.status != crate::src::deflate::COMMENT_STATE
+        && state.status != crate::src::deflate::HCRC_STATE
+        && state.status != crate::src::deflate::BUSY_STATE
+        && state.status != crate::src::deflate::FINISH_STATE
     {
         return None;
     }
@@ -2702,10 +2726,7 @@ impl DeflateCopyPreparation {
     // boundary is still responsible for preserving zalloc/zfree pairing, but
     // once it has supplied owned storage it need not repeat the geometry or
     // range validation performed while preparing the copy.
-    fn copy_into_owned(
-        &self,
-        source: &DeflateOwnedStorage,
-    ) -> Option<DeflateOwnedStorage> {
+    fn copy_into_owned(&self, source: &DeflateOwnedStorage) -> Option<DeflateOwnedStorage> {
         let mut destination = self.plan.storage.allocate_owned()?;
         self.copy_storage(source.source_views(), destination.destination_views())
             .then_some(destination)
@@ -2764,7 +2785,6 @@ impl DeflateOwnedStorage {
             pending: self.pending.as_mut(),
         }
     }
-
 }
 
 // Copy exactly the initialized logical ranges of a deflate state.  Both
@@ -3116,14 +3136,8 @@ fn flush_pending(
     output: &mut [crate::stdlib::Bytef],
     output_pos: &mut usize,
 ) -> ::core::ffi::c_uint {
-    crate::src::trees::flush_pending_bits(
-        pending_buf,
-        pending,
-        bi_buf,
-        bi_valid,
-    );
-    let len = (*pending)
-        .min(output.len().saturating_sub(*output_pos) as crate::zutil_h::ulg)
+    crate::src::trees::flush_pending_bits(pending_buf, pending, bi_buf, bi_valid);
+    let len = (*pending).min(output.len().saturating_sub(*output_pos) as crate::zutil_h::ulg)
         as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
         return 0;
@@ -3142,16 +3156,17 @@ pub unsafe extern "C" fn deflate(
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut old_flush: ::core::ffi::c_int = 0;
-    if deflateStateCheck(strm) != 0
-        || flush > crate::zlib_h::Z_BLOCK
-        || flush < 0 as ::core::ffi::c_int
-    {
+    if flush > crate::zlib_h::Z_BLOCK || flush < 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // Keep the ABI projections at this boundary. The lower-level block
     // routines receive these scoped stream/state borrows directly.
-    let strm = &mut *strm;
-    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    let Some((strm, s)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     if strm.next_out.is_null()
         || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.is_null()
         || s.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
@@ -3198,7 +3213,15 @@ pub unsafe extern "C" fn deflate(
     old_flush = s.last_flush;
     s.last_flush = flush;
     if s.pending != 0 as crate::zutil_h::ulg {
-        let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+        let len = flush_pending(
+            pending_buf,
+            &mut s.pending,
+            &mut s.bi_buf,
+            &mut s.bi_valid,
+            &mut s.pending_out,
+            output,
+            &mut output_pos,
+        );
         strm.next_out = strm.next_out.wrapping_add(len as usize);
         strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
         strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3261,7 +3284,15 @@ pub unsafe extern "C" fn deflate(
             );
         }
         s.status = crate::src::deflate::BUSY_STATE;
-        let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+        let len = flush_pending(
+            pending_buf,
+            &mut s.pending,
+            &mut s.bi_buf,
+            &mut s.bi_valid,
+            &mut s.pending_out,
+            output,
+            &mut output_pos,
+        );
         strm.next_out = strm.next_out.wrapping_add(len as usize);
         strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
         strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3284,7 +3315,15 @@ pub unsafe extern "C" fn deflate(
         ) {
             None => {
                 state.status = crate::src::deflate::BUSY_STATE;
-                let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                let len = flush_pending(
+                    pending_buf,
+                    &mut s.pending,
+                    &mut s.bi_buf,
+                    &mut s.bi_valid,
+                    &mut s.pending_out,
+                    output,
+                    &mut output_pos,
+                );
                 strm.next_out = strm.next_out.wrapping_add(len as usize);
                 strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
                 strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3326,7 +3365,15 @@ pub unsafe extern "C" fn deflate(
                 if complete {
                     break;
                 }
-                let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                let len = flush_pending(
+                    pending_buf,
+                    &mut s.pending,
+                    &mut s.bi_buf,
+                    &mut s.bi_valid,
+                    &mut s.pending_out,
+                    output,
+                    &mut output_pos,
+                );
                 strm.next_out = strm.next_out.wrapping_add(len as usize);
                 strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
                 strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3360,7 +3407,15 @@ pub unsafe extern "C" fn deflate(
             };
             loop {
                 if s.pending == s.pending_buf_size {
-                    let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                    let len = flush_pending(
+                        pending_buf,
+                        &mut s.pending,
+                        &mut s.bi_buf,
+                        &mut s.bi_valid,
+                        &mut s.pending_out,
+                        output,
+                        &mut output_pos,
+                    );
                     strm.next_out = strm.next_out.wrapping_add(len as usize);
                     strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
                     strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3411,7 +3466,15 @@ pub unsafe extern "C" fn deflate(
             };
             loop {
                 if s.pending == s.pending_buf_size {
-                    let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                    let len = flush_pending(
+                        pending_buf,
+                        &mut s.pending,
+                        &mut s.bi_buf,
+                        &mut s.bi_valid,
+                        &mut s.pending_out,
+                        output,
+                        &mut output_pos,
+                    );
                     strm.next_out = strm.next_out.wrapping_add(len as usize);
                     strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
                     strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3444,7 +3507,15 @@ pub unsafe extern "C" fn deflate(
     if s.status == crate::src::deflate::HCRC_STATE {
         if s.gzhead.as_ref().is_some_and(|header| header.hcrc) {
             if s.pending.wrapping_add(2 as crate::zutil_h::ulg) > s.pending_buf_size {
-                let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                let len = flush_pending(
+                    pending_buf,
+                    &mut s.pending,
+                    &mut s.bi_buf,
+                    &mut s.bi_valid,
+                    &mut s.pending_out,
+                    output,
+                    &mut output_pos,
+                );
                 strm.next_out = strm.next_out.wrapping_add(len as usize);
                 strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
                 strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3469,7 +3540,15 @@ pub unsafe extern "C" fn deflate(
             strm.adler = crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None);
         }
         s.status = crate::src::deflate::BUSY_STATE;
-        let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+        let len = flush_pending(
+            pending_buf,
+            &mut s.pending,
+            &mut s.bi_buf,
+            &mut s.bi_valid,
+            &mut s.pending_out,
+            output,
+            &mut output_pos,
+        );
         strm.next_out = strm.next_out.wrapping_add(len as usize);
         strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
         strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3736,7 +3815,15 @@ pub unsafe extern "C" fn deflate(
                     }
                 }
             }
-            let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+            let len = flush_pending(
+                pending_buf,
+                &mut s.pending,
+                &mut s.bi_buf,
+                &mut s.bi_valid,
+                &mut s.pending_out,
+                output,
+                &mut output_pos,
+            );
             strm.next_out = strm.next_out.wrapping_add(len as usize);
             strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
             strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3763,7 +3850,15 @@ pub unsafe extern "C" fn deflate(
         strm.adler,
         strm.total_in,
     );
-    let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+    let len = flush_pending(
+        pending_buf,
+        &mut s.pending,
+        &mut s.bi_buf,
+        &mut s.bi_valid,
+        &mut s.pending_out,
+        output,
+        &mut output_pos,
+    );
     strm.next_out = strm.next_out.wrapping_add(len as usize);
     strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
     strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -3785,22 +3880,23 @@ pub unsafe extern "C" fn deflate_ffi(
     deflate(strm, flush)
 }
 pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    let Some((strm, state)) = strm
+        .as_mut()
+        .and_then(|strm| deflate_stream_and_state(strm))
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
     // Keep the ABI projection at the release boundary.  Everything after
     // this uses the two scoped views and the exact callback pairing that was
     // established by deflateInit2_().
-    let strm = &mut *strm;
-    let state_ptr = strm.state;
-    let zfree = strm.zfree.expect("validated by deflateStateCheck");
+    let state_ptr = state as *mut crate::src::deflate::deflate_state;
+    let zfree = strm.zfree.expect("validated by deflate_stream_and_state");
     let opaque = strm.opaque;
     // Snapshot every callback-owned allocation before the first release.
     // Besides retaining zlib's pending/head/prev/window/state release order,
     // this ends the mutable state projection before a re-entrant zfree()
     // callback can observe the stream.
     let (status, allocations) = {
-        let state = &mut *state_ptr;
         let status = state.status;
         // The state itself is released through the caller's zfree callback,
         // so drop the owned gzip-header snapshot before that allocation.
@@ -3959,71 +4055,69 @@ unsafe fn deflate_copy_from_abi(
     // retained until their replacements are installed below, preserving the
     // C copy path's callback-visible allocation order.  Header registration
     // is independently deep-copied before any callback can observe `ds`.
-    ds.write(
-        crate::src::deflate::internal_state {
-            data_type: payload.data_type,
-            status: payload.status,
-            pending_buf: ss.pending_buf,
-            pending_buf_size: payload.pending_buf_size,
-            pending_out: payload.pending_out,
-            pending: payload.pending,
-            wrap: payload.wrap,
-            gzhead: payload.gzhead,
-            gzindex: payload.gzindex,
-            method: payload.method,
-            last_flush: payload.last_flush,
-            w_size: payload.w_size,
-            w_bits: payload.w_bits,
-            w_mask: payload.w_mask,
-            window: ss.window,
-            window_size: payload.window_size,
-            prev: ss.prev,
-            head: ss.head,
-            ins_h: payload.ins_h,
-            hash_size: payload.hash_size,
-            hash_bits: payload.hash_bits,
-            hash_mask: payload.hash_mask,
-            hash_shift: payload.hash_shift,
-            block_start: payload.block_start,
-            match_length: payload.match_length,
-            prev_match: payload.prev_match,
-            match_available: payload.match_available,
-            strstart: payload.strstart,
-            match_start: payload.match_start,
-            lookahead: payload.lookahead,
-            prev_length: payload.prev_length,
-            max_chain_length: payload.max_chain_length,
-            max_lazy_match: payload.max_lazy_match,
-            level: payload.level,
-            strategy: payload.strategy,
-            good_match: payload.good_match,
-            nice_match: payload.nice_match,
-            dyn_ltree: payload.tree.dyn_ltree,
-            dyn_dtree: payload.tree.dyn_dtree,
-            bl_tree: payload.tree.bl_tree,
-            l_desc: payload.tree.l_desc,
-            d_desc: payload.tree.d_desc,
-            bl_desc: payload.tree.bl_desc,
-            bl_count: payload.tree.bl_count,
-            heap: payload.tree.heap,
-            heap_len: payload.tree.heap_len,
-            heap_max: payload.tree.heap_max,
-            depth: payload.tree.depth,
-            sym_buf_start: payload.sym_buf_start,
-            lit_bufsize: payload.lit_bufsize,
-            sym_next: payload.sym_next,
-            sym_end: payload.sym_end,
-            opt_len: payload.opt_len,
-            static_len: payload.static_len,
-            matches: payload.matches,
-            insert: payload.insert,
-            bi_buf: payload.bi_buf,
-            bi_valid: payload.bi_valid,
-            bi_used: payload.bi_used,
-            high_water: payload.high_water,
-            slid: payload.slid,
-        },
-    );
+    ds.write(crate::src::deflate::internal_state {
+        data_type: payload.data_type,
+        status: payload.status,
+        pending_buf: ss.pending_buf,
+        pending_buf_size: payload.pending_buf_size,
+        pending_out: payload.pending_out,
+        pending: payload.pending,
+        wrap: payload.wrap,
+        gzhead: payload.gzhead,
+        gzindex: payload.gzindex,
+        method: payload.method,
+        last_flush: payload.last_flush,
+        w_size: payload.w_size,
+        w_bits: payload.w_bits,
+        w_mask: payload.w_mask,
+        window: ss.window,
+        window_size: payload.window_size,
+        prev: ss.prev,
+        head: ss.head,
+        ins_h: payload.ins_h,
+        hash_size: payload.hash_size,
+        hash_bits: payload.hash_bits,
+        hash_mask: payload.hash_mask,
+        hash_shift: payload.hash_shift,
+        block_start: payload.block_start,
+        match_length: payload.match_length,
+        prev_match: payload.prev_match,
+        match_available: payload.match_available,
+        strstart: payload.strstart,
+        match_start: payload.match_start,
+        lookahead: payload.lookahead,
+        prev_length: payload.prev_length,
+        max_chain_length: payload.max_chain_length,
+        max_lazy_match: payload.max_lazy_match,
+        level: payload.level,
+        strategy: payload.strategy,
+        good_match: payload.good_match,
+        nice_match: payload.nice_match,
+        dyn_ltree: payload.tree.dyn_ltree,
+        dyn_dtree: payload.tree.dyn_dtree,
+        bl_tree: payload.tree.bl_tree,
+        l_desc: payload.tree.l_desc,
+        d_desc: payload.tree.d_desc,
+        bl_desc: payload.tree.bl_desc,
+        bl_count: payload.tree.bl_count,
+        heap: payload.tree.heap,
+        heap_len: payload.tree.heap_len,
+        heap_max: payload.tree.heap_max,
+        depth: payload.tree.depth,
+        sym_buf_start: payload.sym_buf_start,
+        lit_bufsize: payload.lit_bufsize,
+        sym_next: payload.sym_next,
+        sym_end: payload.sym_end,
+        opt_len: payload.opt_len,
+        static_len: payload.static_len,
+        matches: payload.matches,
+        insert: payload.insert,
+        bi_buf: payload.bi_buf,
+        bi_valid: payload.bi_valid,
+        bi_used: payload.bi_used,
+        high_water: payload.high_water,
+        slid: payload.slid,
+    });
     let ds = &mut *ds.as_ptr();
     // Preserve the source implementation's callback-visible order.  Reload
     // the callback and opaque value for every request: a re-entrant custom
@@ -4085,7 +4179,11 @@ unsafe fn deflate_copy_from_abi(
         ds.pending_buf.expect("initialized pending buffer").as_ptr(),
         ds.pending_buf_size as usize,
     );
-    copy_pending_regions(source_pending, destination_pending, copy_layout.pending.as_ref());
+    copy_pending_regions(
+        source_pending,
+        destination_pending,
+        copy_layout.pending.as_ref(),
+    );
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
