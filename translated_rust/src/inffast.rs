@@ -221,9 +221,8 @@ pub fn inflate_fast(
 ) {
     let mut in_index: usize = 0;
     let mut last: usize = 0;
-    let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut beg: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut end: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut out_index: usize = 0;
+    let mut end_index: usize = 0;
     let mut wsize: ::core::ffi::c_uint = 0;
     let mut whave: ::core::ffi::c_uint = 0;
     let mut wnext: ::core::ffi::c_uint = 0;
@@ -243,14 +242,16 @@ pub fn inflate_fast(
     // reads, rather than repeatedly dereferencing the raw input cursor.
     let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) };
     last = input.len().wrapping_sub(5);
-    out = strm.next_out as *mut ::core::ffi::c_uchar;
-    beg = out
-        .wrapping_offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
-    // This is the same caller output extent represented by `beg` and `start`
-    // below.  Keep it local to the fast engine, which already relies on the
-    // five-byte/257-byte entry bounds before indexing this range.
-    let output = unsafe { ::core::slice::from_raw_parts_mut(beg, start as usize) };
-    end = out.wrapping_offset(strm.avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
+    out_index = (start as usize).wrapping_sub(strm.avail_out as usize);
+    // This is the same caller output extent represented by the old `beg`
+    // cursor and `start` below. Keep its cursors as indexes while the fast
+    // engine relies on its existing five-byte/257-byte entry bounds.
+    let output_start = strm.next_out.wrapping_sub(out_index);
+    let output = unsafe { ::core::slice::from_raw_parts_mut(output_start, start as usize) };
+    end_index = out_index.wrapping_add(
+        strm.avail_out
+            .wrapping_sub(257 as crate::stdlib::uInt) as usize,
+    );
     wsize = state.wsize;
     whave = state.whave;
     wnext = state.wnext;
@@ -294,15 +295,13 @@ pub fn inflate_fast(
             bits = bits.wrapping_sub(op);
             op = here_code.op as ::core::ffi::c_uint;
             if op == 0 as ::core::ffi::c_uint {
-                let output_index = out.addr().wrapping_sub(beg.addr());
+                let output_index = out_index;
                 let Some(byte) = output.get_mut(output_index) else {
                     state.mode = crate::src::inflate::BAD;
                     break 's_627;
                 };
                 *byte = here_code.val as ::core::ffi::c_uchar;
-                out = output
-                    .as_mut_ptr()
-                    .wrapping_add(output_index.wrapping_add(1));
+                out_index = output_index.wrapping_add(1);
                 break;
             } else if op & 16 as ::core::ffi::c_uint != 0 {
                 len = here_code.val as ::core::ffi::c_uint;
@@ -367,7 +366,7 @@ pub fn inflate_fast(
                         );
                         hold >>= op;
                         bits = bits.wrapping_sub(op);
-                        op = out.addr().wrapping_sub(beg.addr()) as ::core::ffi::c_uint;
+                        op = out_index as ::core::ffi::c_uint;
                         if dist > op {
                             op = dist.wrapping_sub(op);
                             if op > whave {
@@ -383,7 +382,7 @@ pub fn inflate_fast(
                                 // inflateBack uses its caller window as output.  Copy from
                                 // that one mutable window view with indexes, rather than
                                 // creating an aliasing history slice alongside `output`.
-                                let mut output_index = out.addr().wrapping_sub(beg.addr());
+                                let mut output_index = out_index;
                                 if !copy_aliasing_window_history(
                                     output,
                                     &mut output_index,
@@ -395,14 +394,14 @@ pub fn inflate_fast(
                                     state.mode = crate::src::inflate::BAD;
                                     break 's_627;
                                 }
-                                out = output.as_mut_ptr().wrapping_add(output_index);
+                                out_index = output_index;
                             } else {
                                 let history = if window.is_null() || wsize == 0 {
                                     &[]
                                 } else {
                                     unsafe { ::core::slice::from_raw_parts(window, wsize as usize) }
                                 };
-                                let mut output_index = out.addr().wrapping_sub(beg.addr());
+                                let mut output_index = out_index;
                                 let mut remaining = len as usize;
                                 if wnext == 0 as ::core::ffi::c_uint {
                                     let count = remaining.min(op as usize);
@@ -468,15 +467,15 @@ pub fn inflate_fast(
                                     state.mode = crate::src::inflate::BAD;
                                     break 's_627;
                                 }
-                                out = output.as_mut_ptr().wrapping_add(output_index);
+                                out_index = output_index;
                             }
                             break 's_92;
                         } else {
-                            // `dist <= out - beg` on this branch, so this is a
+                            // `dist <= out_index` on this branch, so this is a
                             // same-allocation match source. Use a bounded
                             // sequential copy so overlapping matches keep
                             // their DEFLATE repeat semantics.
-                            let mut output_index = out.addr().wrapping_sub(beg.addr());
+                            let mut output_index = out_index;
                             if !copy_output_match(
                                 output,
                                 &mut output_index,
@@ -486,7 +485,7 @@ pub fn inflate_fast(
                                 state.mode = crate::src::inflate::BAD;
                                 break 's_627;
                             }
-                            out = output.as_mut_ptr().wrapping_add(output_index);
+                            out_index = output_index;
                             break 's_92;
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
@@ -530,7 +529,7 @@ pub fn inflate_fast(
                 break 's_627;
             }
         }
-        if !(in_index < last && out < end) {
+        if !(in_index < last && out_index < end_index) {
             break;
         }
     }
@@ -542,12 +541,12 @@ pub fn inflate_fast(
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
     strm.next_in = input.as_ptr().wrapping_add(in_index) as *mut crate::stdlib::Bytef;
-    strm.next_out = out as *mut crate::stdlib::Bytef;
+    strm.next_out = output.as_mut_ptr().wrapping_add(out_index);
     strm.avail_in = input.len().wrapping_sub(in_index) as crate::stdlib::uInt;
-    strm.avail_out = (if out < end {
-        (257usize).wrapping_add(end.addr().wrapping_sub(out.addr()))
+    strm.avail_out = (if out_index < end_index {
+        (257usize).wrapping_add(end_index.wrapping_sub(out_index))
     } else {
-        (257usize).wrapping_sub(out.addr().wrapping_sub(end.addr()))
+        (257usize).wrapping_sub(out_index.wrapping_sub(end_index))
     }) as ::core::ffi::c_uint as crate::stdlib::uInt;
     state.hold = hold;
     state.bits = bits;
