@@ -2816,6 +2816,27 @@ macro_rules! flush_block_from_raw {
     }};
 }
 
+fn write_stored_block_length(
+    state: &crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    len: ::core::ffi::c_uint,
+) -> bool {
+    let Some(pending) = usize::try_from(state.pending).ok() else {
+        return false;
+    };
+    let Some(start) = pending.checked_sub(4) else {
+        return false;
+    };
+    let Some(header) = pending_buf.get_mut(start..pending) else {
+        return false;
+    };
+    header[0] = len as crate::stdlib::Bytef;
+    header[1] = (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+    header[2] = !len as crate::stdlib::Bytef;
+    header[3] = (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+    true
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -2878,22 +2899,9 @@ unsafe extern "C" fn deflate_stored(
             0 as crate::zutil_h::ulg,
             last,
         );
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            !len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+        if !write_stored_block_length(state, pending_buf, len) {
+            return need_more;
+        }
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {
