@@ -154,7 +154,6 @@ pub unsafe extern "C" fn inflateBack(
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -1061,30 +1060,42 @@ pub unsafe extern "C" fn inflateBack(
                                     break '_inf_leave;
                                 }
                             }
-                            copy = (*state).wsize.wrapping_sub((*state).offset);
-                            if copy < left {
-                                from = put.offset(copy as isize);
-                                copy = left.wrapping_sub(copy);
+                            // `offset` was checked against the amount of
+                            // history represented by this caller window.
+                            // Rebuild that bounded window only for this
+                            // copy, so the overlapping match uses Rust's
+                            // memmove-equivalent slice operation.
+                            let window = ::core::slice::from_raw_parts_mut(
+                                (*state).window.expect("inflateBack window").as_ptr(),
+                                (*state).wsize as usize,
+                            );
+                            let put_index = window.len().wrapping_sub(left as usize);
+                            let back = (*state).wsize.wrapping_sub((*state).offset) as usize;
+                            let (from_index, available) = if back < left as usize {
+                                (put_index.wrapping_add(back), (left as usize).wrapping_sub(back))
                             } else {
-                                from = put.offset(-((*state).offset as isize));
-                                copy = left;
+                                (
+                                    put_index.wrapping_sub((*state).offset as usize),
+                                    left as usize,
+                                )
+                            };
+                            let count = available.min((*state).length as usize);
+                            let Some(from_end) = from_index.checked_add(count) else {
+                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                break '_inf_leave;
+                            };
+                            let Some(put_end) = put_index.checked_add(count) else {
+                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                break '_inf_leave;
+                            };
+                            if from_end > window.len() || put_end > window.len() {
+                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                break '_inf_leave;
                             }
-                            if copy > (*state).length {
-                                copy = (*state).length;
-                            }
-                            (*state).length = (*state).length.wrapping_sub(copy);
-                            left = left.wrapping_sub(copy);
-                            loop {
-                                let c2rust_fresh20 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh21 = put;
-                                put = put.offset(1);
-                                *c2rust_fresh21 = *c2rust_fresh20;
-                                copy = copy.wrapping_sub(1);
-                                if copy == 0 {
-                                    break;
-                                }
-                            }
+                            window.copy_within(from_index..from_end, put_index);
+                            (*state).length = (*state).length.wrapping_sub(count as u32);
+                            left = left.wrapping_sub(count as u32);
+                            put = window.as_mut_ptr().wrapping_add(put_end);
                             if (*state).length == 0 as ::core::ffi::c_uint {
                                 break;
                             }
