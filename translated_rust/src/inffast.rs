@@ -185,7 +185,7 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                             }
                             from = window;
                             if wnext == 0 as ::core::ffi::c_uint {
-                                from = from.offset(wsize.wrapping_sub(op) as isize);
+                                from = from.wrapping_add(wsize.wrapping_sub(op) as usize);
                                 if op < len {
                                     len = len.wrapping_sub(op);
                                     loop {
@@ -202,8 +202,9 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                                     from = out.offset(-(dist as isize));
                                 }
                             } else if wnext < op {
-                                from = from
-                                    .offset(wsize.wrapping_add(wnext).wrapping_sub(op) as isize);
+                                from = from.wrapping_add(
+                                    wsize.wrapping_add(wnext).wrapping_sub(op) as usize,
+                                );
                                 op = op.wrapping_sub(wnext);
                                 if op < len {
                                     len = len.wrapping_sub(op);
@@ -237,7 +238,7 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                                     }
                                 }
                             } else {
-                                from = from.offset(wnext.wrapping_sub(op) as isize);
+                                from = from.wrapping_add(wnext.wrapping_sub(op) as usize);
                                 if op < len {
                                     len = len.wrapping_sub(op);
                                     loop {
