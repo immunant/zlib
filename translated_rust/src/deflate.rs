@@ -616,10 +616,10 @@ pub unsafe extern "C" fn deflateInit2_(
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    static mut my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
+    const MY_VERSION: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
         || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
+            != MY_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
         || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>()
     {
         return crate::zlib_h::Z_VERSION_ERROR;
