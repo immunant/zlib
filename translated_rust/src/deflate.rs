@@ -4320,12 +4320,8 @@ unsafe fn deflate_fast(
                 let strm = state.strm;
                 flush_pending(strm)
             };
-            if avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+            if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                return result;
             }
         }
     }
@@ -4361,12 +4357,8 @@ unsafe fn deflate_fast(
             let strm = state.strm;
             flush_pending(strm)
         };
-        if avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        if let Some(result) = deflate_post_flush_result(avail_out, true) {
+            return result;
         }
         return finish_done;
     }
@@ -4396,12 +4388,8 @@ unsafe fn deflate_fast(
             let strm = state.strm;
             flush_pending(strm)
         };
-        if avail_out == 0 as crate::stdlib::uInt {
-            return (if false {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        if let Some(result) = deflate_post_flush_result(avail_out, false) {
+            return result;
         }
     }
     return block_done;
@@ -5047,6 +5035,21 @@ fn deflate_tail_action_state(
     }
 }
 
+/// Map the output capacity left by a pending-buffer flush to the block-mode
+/// result.  This is deliberately scalar-only: the legacy modes still perform
+/// the pending-buffer work at their existing compatibility boundary, while
+/// the shared status decision cannot accidentally re-adopt a raw stream.
+fn deflate_post_flush_result(
+    avail_out: crate::stdlib::uInt,
+    finishing: bool,
+) -> Option<block_state> {
+    if avail_out == 0 {
+        Some(if finishing { finish_started } else { need_more })
+    } else {
+        None
+    }
+}
+
 fn hash_match_is_usable(
     strstart: crate::src::deflate::IPos,
     hash_head: crate::src::deflate::IPos,
@@ -5164,12 +5167,8 @@ unsafe fn deflate_rle(
                 let strm = state.strm;
                 flush_pending(strm)
             };
-            if avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+            if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                return result;
             }
         }
     }
@@ -5199,12 +5198,8 @@ unsafe fn deflate_rle(
             let strm = state.strm;
             flush_pending(strm)
         };
-        if avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        if let Some(result) = deflate_post_flush_result(avail_out, true) {
+            return result;
         }
         return finish_done;
     }
@@ -5230,12 +5225,8 @@ unsafe fn deflate_rle(
             let strm = state.strm;
             flush_pending(strm)
         };
-        if avail_out == 0 as crate::stdlib::uInt {
-            return (if false {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        if let Some(result) = deflate_post_flush_result(avail_out, false) {
+            return result;
         }
     }
     return block_done;
