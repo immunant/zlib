@@ -2410,80 +2410,87 @@ fn set_stored_block_length_state(
 ///
 /// The stream is adopted once here, so callers that need the capacity do not
 /// need to dereference its raw compatibility pointer a second time.
-unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate::stdlib::uInt {
-    if strm.is_null() {
-        return 0;
+fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate::stdlib::uInt {
+    // Raw ABI stream/state adoption and the temporary cursor lends are the
+    // only unsafe part of this adapter.  Keep that boundary explicit so
+    // callers do not inherit an unsafe-function requirement merely to flush
+    // already-validated pending bytes.
+    unsafe {
+        if strm.is_null() {
+            return 0;
+        }
+        let strm = &mut *strm;
+        let state = strm.state as *mut crate::src::deflate::deflate_state;
+        if state.is_null() {
+            return strm.avail_out;
+        }
+        let s = &mut *state;
+        let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
+            return strm.avail_out;
+        };
+        if pending_len != 0 && s.pending_buf.is_null() {
+            return strm.avail_out;
+        }
+        let pending_buf = if pending_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
+        };
+        crate::src::trees::flush_bits_state(s, pending_buf);
+        let Some((len, reset_pending_out)) =
+            flush_pending_state(s.pending_buf_size, &mut s.pending, strm.avail_out)
+        else {
+            return strm.avail_out;
+        };
+        if len == 0 {
+            return strm.avail_out;
+        }
+        let Ok(len) = usize::try_from(len) else {
+            return strm.avail_out;
+        };
+        if (len != 0 && (strm.next_out.is_null() || s.pending_out.is_null()))
+            || len > strm.avail_out as usize
+        {
+            return strm.avail_out;
+        }
+        // `memcpy` required raw cursors even after their bounds had been
+        // validated.  Keep the ABI lends here, reject aliasing just as C
+        // `memcpy` requires, then perform the actual copy in the slice core.
+        let Some(output_end) = (strm.next_out as usize).checked_add(len) else {
+            return strm.avail_out;
+        };
+        let Some(pending_end) = (s.pending_out as usize).checked_add(len) else {
+            return strm.avail_out;
+        };
+        if (strm.next_out as usize) < pending_end && (s.pending_out as usize) < output_end {
+            return strm.avail_out;
+        }
+        let Some(pending_start) = (s.pending_out as usize).checked_sub(s.pending_buf as usize)
+        else {
+            return strm.avail_out;
+        };
+        let Some(pending_end) = pending_start.checked_add(len) else {
+            return strm.avail_out;
+        };
+        let Some(pending) = pending_buf.get(pending_start..pending_end) else {
+            return strm.avail_out;
+        };
+        let output = ::core::slice::from_raw_parts_mut(strm.next_out, len);
+        if !flush_pending_copy_state(output, pending) {
+            return strm.avail_out;
+        }
+        // The copied length is bounded by the validated output and pending
+        // spans above. Preserve zlib's cursor advance without an unsafe pointer
+        // offset operation in this transitional ABI adapter.
+        strm.next_out = strm.next_out.wrapping_add(len);
+        s.pending_out = s.pending_out.wrapping_add(len);
+        strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+        strm.avail_out = strm.avail_out.wrapping_sub(len as crate::stdlib::uInt);
+        if reset_pending_out {
+            s.pending_out = s.pending_buf;
+        }
+        strm.avail_out
     }
-    let strm = &mut *strm;
-    let state = strm.state as *mut crate::src::deflate::deflate_state;
-    if state.is_null() {
-        return strm.avail_out;
-    }
-    let s = &mut *state;
-    let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
-        return strm.avail_out;
-    };
-    if pending_len != 0 && s.pending_buf.is_null() {
-        return strm.avail_out;
-    }
-    let pending_buf = if pending_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
-    };
-    crate::src::trees::flush_bits_state(s, pending_buf);
-    let Some((len, reset_pending_out)) =
-        flush_pending_state(s.pending_buf_size, &mut s.pending, strm.avail_out)
-    else {
-        return strm.avail_out;
-    };
-    if len == 0 {
-        return strm.avail_out;
-    }
-    let Ok(len) = usize::try_from(len) else {
-        return strm.avail_out;
-    };
-    if (len != 0 && (strm.next_out.is_null() || s.pending_out.is_null()))
-        || len > strm.avail_out as usize
-    {
-        return strm.avail_out;
-    }
-    // `memcpy` required raw cursors even after their bounds had been
-    // validated.  Keep the ABI lends here, reject aliasing just as C
-    // `memcpy` requires, then perform the actual copy in the slice core.
-    let Some(output_end) = (strm.next_out as usize).checked_add(len) else {
-        return strm.avail_out;
-    };
-    let Some(pending_end) = (s.pending_out as usize).checked_add(len) else {
-        return strm.avail_out;
-    };
-    if (strm.next_out as usize) < pending_end && (s.pending_out as usize) < output_end {
-        return strm.avail_out;
-    }
-    let Some(pending_start) = (s.pending_out as usize).checked_sub(s.pending_buf as usize) else {
-        return strm.avail_out;
-    };
-    let Some(pending_end) = pending_start.checked_add(len) else {
-        return strm.avail_out;
-    };
-    let Some(pending) = pending_buf.get(pending_start..pending_end) else {
-        return strm.avail_out;
-    };
-    let output = ::core::slice::from_raw_parts_mut(strm.next_out, len);
-    if !flush_pending_copy_state(output, pending) {
-        return strm.avail_out;
-    }
-    // The copied length is bounded by the validated output and pending
-    // spans above. Preserve zlib's cursor advance without an unsafe pointer
-    // offset operation in this transitional ABI adapter.
-    strm.next_out = strm.next_out.wrapping_add(len);
-    s.pending_out = s.pending_out.wrapping_add(len);
-    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
-    strm.avail_out = strm.avail_out.wrapping_sub(len as crate::stdlib::uInt);
-    if reset_pending_out {
-        s.pending_out = s.pending_buf;
-    }
-    strm.avail_out
 }
 
 /// Build the big-endian words emitted at the start of a zlib-wrapped stream.
