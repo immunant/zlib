@@ -1903,46 +1903,6 @@ fn update_window_state_core(
     Some(())
 }
 
-fn updatewindow(
-    mut strm: crate::zlib_h::z_streamp,
-    mut end: *const crate::stdlib::Bytef,
-    mut copy: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    unsafe {
-        let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-        let Some(plan) = update_window_state_plan(state, copy) else {
-            return 1;
-        };
-        if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
-            state.window = Some((*strm).zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                (*strm).opaque, items, size
-            ) as *mut crate::stdlib::Byte;
-            if !state.window.is_null() {
-                state.window_ownership = WindowOwnership::CallbackOwned.raw();
-            }
-        }
-        let Some(ownership) = state_window_ownership(state) else {
-            return 1;
-        };
-        let slices = match update_window_slices_after_allocation(plan, ownership) {
-            Ok(slices) => slices,
-            Err(status) => return status,
-        };
-        let window = core::slice::from_raw_parts_mut(state.window, slices.window_len);
-        let produced = match slices.produced_len {
-            Some(produced_len) => {
-                core::slice::from_raw_parts(end.wrapping_sub(produced_len), produced_len)
-            }
-            None => update_window_produced_slice(None),
-        };
-        match update_window_state_core(state, window, produced) {
-            Some(()) => 0,
-            None => 1,
-        }
-    }
-}
-
 #[export_name = "inflate"]
 pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -3220,12 +3180,40 @@ pub unsafe extern "C" fn inflate_ffi(
     (*state).hold = hold;
     (*state).bits = bits;
     if inflate_should_update_window((*state).wsize, out, left, (*state).mode, flush) {
-        if updatewindow(
-            strm,
-            put as *const crate::stdlib::Bytef,
-            inflate_cursor_progress(out, left),
-        ) != 0
-        {
+        let copy = inflate_cursor_progress(out, left);
+        let Some(plan) = update_window_state_plan(&*state, copy) else {
+            (*state).mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
+            (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                (*strm).opaque, items, size
+            ) as *mut crate::stdlib::Byte;
+            if !(*state).window.is_null() {
+                (*state).window_ownership = WindowOwnership::CallbackOwned.raw();
+            }
+        }
+        let Some(ownership) = state_window_ownership(&*state) else {
+            (*state).mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        let slices = match update_window_slices_after_allocation(plan, ownership) {
+            Ok(slices) => slices,
+            Err(_) => {
+                (*state).mode = crate::src::inflate::MEM;
+                return crate::zlib_h::Z_MEM_ERROR;
+            }
+        };
+        let window = core::slice::from_raw_parts_mut((*state).window, slices.window_len);
+        let produced = match slices.produced_len {
+            Some(produced_len) => core::slice::from_raw_parts(
+                put.sub(produced_len),
+                produced_len,
+            ),
+            None => update_window_produced_slice(None),
+        };
+        if update_window_state_core(&mut *state, window, produced).is_none() {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -3352,12 +3340,32 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     if inflate_dictionary_checksum((*state).mode, (*state).check, dictionary_bytes).is_err() {
         return crate::zlib_h::Z_DATA_ERROR;
     }
-    if updatewindow(
-        strm,
-        dictionary.wrapping_add(dictLength as usize),
-        dictLength,
-    ) != 0
-    {
+    let Some(plan) = update_window_state_plan(&*state, dictLength) else {
+        (*state).mode = crate::src::inflate::MEM;
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
+        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*strm).opaque, items, size
+        ) as *mut crate::stdlib::Byte;
+        if !(*state).window.is_null() {
+            (*state).window_ownership = WindowOwnership::CallbackOwned.raw();
+        }
+    }
+    let Some(ownership) = state_window_ownership(&*state) else {
+        (*state).mode = crate::src::inflate::MEM;
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let slices = match update_window_slices_after_allocation(plan, ownership) {
+        Ok(slices) => slices,
+        Err(_) => {
+            (*state).mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+    };
+    let window = core::slice::from_raw_parts_mut((*state).window, slices.window_len);
+    if update_window_state_core(&mut *state, window, dictionary_bytes).is_none() {
         (*state).mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -5211,6 +5219,68 @@ mod tests {
         assert_eq!(
             unsafe { super::inflateSetDictionary_ffi(&mut stream, core::ptr::null(), 1) },
             crate::zlib_h::Z_STREAM_ERROR
+        );
+
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut stream) },
+            crate::zlib_h::Z_OK
+        );
+    }
+
+    #[test]
+    fn inflate_set_dictionary_ffi_allocates_and_updates_the_history_window() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: core::ptr::null_mut(),
+            state: core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+        let dictionary = *b"dictionary";
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+        unsafe {
+            (*(stream.state as *mut crate::src::inflate::inflate_state)).wrap = 0;
+        }
+
+        assert_eq!(
+            unsafe {
+                super::inflateSetDictionary_ffi(
+                    &mut stream,
+                    dictionary.as_ptr(),
+                    dictionary.len() as crate::stdlib::uInt,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+
+        let state = unsafe { &*(stream.state as *mut crate::src::inflate::inflate_state) };
+        assert_eq!(state.wsize, 1 << crate::zutil_h::DEF_WBITS);
+        assert_eq!(state.whave, dictionary.len() as crate::stdlib::uInt);
+        assert_eq!(state.wnext, dictionary.len() as crate::stdlib::uInt);
+        assert_eq!(state.window_ownership, WindowOwnership::CallbackOwned.raw());
+        assert_eq!(
+            unsafe { core::slice::from_raw_parts(state.window, dictionary.len()) },
+            dictionary
         );
 
         assert_eq!(
