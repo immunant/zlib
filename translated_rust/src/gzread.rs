@@ -1010,12 +1010,14 @@ unsafe fn gz_avail(
     }
 
     let input = core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
-    let p = input.as_mut_ptr();
+    let input_start = input.as_mut_ptr();
     let q = state.strm.next_in;
-    let Some(input_offset) = gz_avail_input_offset(p as usize, q as usize, state.strm.avail_in)
+    let Some(input_offset) =
+        gz_avail_input_offset(input_start as usize, q as usize, state.strm.avail_in)
     else {
         return -1 as ::core::ffi::c_int;
     };
+
     let Some(mut input) = GzInputStorage::new(input, input_offset, state.strm.avail_in) else {
         return -1 as ::core::ffi::c_int;
     };

@@ -1473,16 +1473,16 @@ fn deflate_state_check_references(
     }
 }
 
-unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1;
     }
-    let stream = &*strm;
+    let stream = unsafe { &*strm };
     let state = stream.state as *mut crate::src::deflate::deflate_state;
     if state.is_null() {
         return 1;
     }
-    let state = &*state;
+    let state = unsafe { &*state };
     deflate_state_check_references(stream, state, state.strm == strm)
 }
 
