@@ -671,6 +671,38 @@ fn inflate_window_update_plan(
     }
 }
 
+fn updatewindow_impl(
+    wbits: ::core::ffi::c_uint,
+    wsize: &mut ::core::ffi::c_uint,
+    wnext: &mut ::core::ffi::c_uint,
+    whave: &mut ::core::ffi::c_uint,
+    window: &mut [crate::stdlib::Bytef],
+    end: &[crate::stdlib::Bytef],
+    copy: ::core::ffi::c_uint,
+) {
+    if *wsize == 0 as ::core::ffi::c_uint {
+        *wsize = (1 as ::core::ffi::c_uint) << wbits;
+        *wnext = 0 as ::core::ffi::c_uint;
+        *whave = 0 as ::core::ffi::c_uint;
+    }
+    let plan = inflate_window_update_plan(*wsize, *wnext, *whave, copy);
+    let mut apply_copy = |copy: InflateWindowCopy| {
+        let len = copy.len as usize;
+        if len == 0 {
+            return;
+        }
+        let dst = copy.dst as usize;
+        let src = end.len() - copy.src_back as usize;
+        window[dst..dst + len].copy_from_slice(&end[src..src + len]);
+    };
+    apply_copy(plan.first);
+    if let Some(second) = plan.second {
+        apply_copy(second);
+    }
+    *wnext = plan.wnext;
+    *whave = plan.whave;
+}
+
 fn inflate_finish_return(
     ret: ::core::ffi::c_int,
     consumed: ::core::ffi::c_uint,
@@ -963,47 +995,6 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     }
     let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
     inflatePrime(state, bits, value)
-}
-unsafe fn updatewindow(
-    mut strm: crate::zlib_h::z_streamp,
-    mut end: *const crate::stdlib::Bytef,
-    mut copy: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).window.is_null() {
-        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*strm).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
-        if (*state).window.is_null() {
-            return 1 as ::core::ffi::c_int;
-        }
-    }
-    if (*state).wsize == 0 as ::core::ffi::c_uint {
-        (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = 0 as ::core::ffi::c_uint;
-    }
-    let plan = inflate_window_update_plan((*state).wsize, (*state).wnext, (*state).whave, copy);
-    crate::stdlib::memcpy(
-        (*state).window.offset(plan.first.dst as isize) as *mut ::core::ffi::c_void,
-        end.offset(-(plan.first.src_back as isize)) as *const ::core::ffi::c_void,
-        plan.first.len as crate::__stddef_size_t_h::size_t,
-    );
-    if let Some(second) = plan.second {
-        crate::stdlib::memcpy(
-            (*state).window.offset(second.dst as isize) as *mut ::core::ffi::c_void,
-            end.offset(-(second.src_back as isize)) as *const ::core::ffi::c_void,
-            second.len as crate::__stddef_size_t_h::size_t,
-        );
-    }
-    (*state).wnext = plan.wnext;
-    (*state).whave = plan.whave;
-    return 0 as ::core::ffi::c_int;
 }
 #[export_name = "inflate"]
 pub unsafe extern "C" fn inflate_ffi(
@@ -2275,10 +2266,38 @@ pub unsafe extern "C" fn inflate_ffi(
     (*state).bits = bits;
     let produced = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
     if inflate_should_update_window((*state).wsize, produced, (*state).mode, flush) {
-        if updatewindow(strm, (*strm).next_out, produced) != 0 {
-            (*state).mode = crate::src::inflate::MEM;
-            return crate::zlib_h::Z_MEM_ERROR;
+        let state_ref = &mut *state;
+        if state_ref.window.is_null() {
+            state_ref.window = Some((*strm).zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                (*strm).opaque,
+                (1 as crate::stdlib::uInt) << state_ref.wbits,
+                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            ) as *mut ::core::ffi::c_uchar;
+            if state_ref.window.is_null() {
+                state_ref.mode = crate::src::inflate::MEM;
+                return crate::zlib_h::Z_MEM_ERROR;
+            }
         }
+        let window_len = ((1 as crate::stdlib::uInt) << state_ref.wbits) as usize;
+        let window = ::core::slice::from_raw_parts_mut(state_ref.window, window_len);
+        let output = if produced == 0 as ::core::ffi::c_uint {
+            &[][..]
+        } else {
+            ::core::slice::from_raw_parts(
+                (*strm).next_out.offset(-(produced as isize)),
+                produced as usize,
+            )
+        };
+        updatewindow_impl(
+            state_ref.wbits,
+            &mut state_ref.wsize,
+            &mut state_ref.wnext,
+            &mut state_ref.whave,
+            window,
+            output,
+            produced,
+        );
     }
     in_0 = in_0.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
     out = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
@@ -2402,7 +2421,6 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut dictid: ::core::ffi::c_ulong = 0;
-    let mut ret: ::core::ffi::c_int = 0;
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2427,16 +2445,36 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         }
         InflateDictionaryState::Accept => {}
     }
-    ret = updatewindow(
-        strm,
-        dictionary.offset(dictLength as isize),
+    let state_ref = &mut *state;
+    if state_ref.window.is_null() {
+        state_ref.window = Some((*strm).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*strm).opaque,
+            (1 as crate::stdlib::uInt) << state_ref.wbits,
+            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+        ) as *mut ::core::ffi::c_uchar;
+        if state_ref.window.is_null() {
+            state_ref.mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+    }
+    let window_len = ((1 as crate::stdlib::uInt) << state_ref.wbits) as usize;
+    let window = ::core::slice::from_raw_parts_mut(state_ref.window, window_len);
+    let dictionary_slice = if dictLength == 0 as crate::stdlib::uInt {
+        &[][..]
+    } else {
+        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
+    };
+    updatewindow_impl(
+        state_ref.wbits,
+        &mut state_ref.wsize,
+        &mut state_ref.wnext,
+        &mut state_ref.whave,
+        window,
+        dictionary_slice,
         dictLength as ::core::ffi::c_uint,
     );
-    if ret != 0 {
-        (*state).mode = crate::src::inflate::MEM;
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    (*state).havedict = 1 as ::core::ffi::c_int;
+    state_ref.havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
 fn inflate_get_header_allowed(state: &crate::src::inflate::inflate_state) -> bool {
