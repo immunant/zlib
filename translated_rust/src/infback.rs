@@ -99,59 +99,6 @@ impl InflateBackInitPlan {
     }
 }
 
-// zalloc() may hand back uninitialized bytes.  Build the complete initial
-// decoder state as a value before publishing it into that allocation, rather
-// than taking references to individual uninitialized fields.  The caller
-// retains the raw callback window only at this ABI allocation boundary.
-unsafe fn inflate_back_initial_state(
-    plan: &InflateBackInitPlan,
-    stream_identity: usize,
-    window: *mut ::core::ffi::c_uchar,
-) -> crate::src::inflate::inflate_state {
-    crate::src::inflate::inflate_state {
-        stream_identity,
-        mode: crate::src::inflate::TYPE,
-        last: 0,
-        wrap: 0,
-        havedict: 0,
-        flags: 0,
-        dmax: 32768,
-        check: 0,
-        total: 0,
-        head: None,
-        wbits: plan.wbits,
-        wsize: plan.wsize,
-        whave: 0,
-        wnext: 0,
-        window: Some(::core::ptr::NonNull::new(window).expect("validated caller window")),
-        owned_window: None,
-        hold: 0,
-        bits: 0,
-        length: 0,
-        offset: 0,
-        extra: 0,
-        lencode: crate::src::inflate::CodeTableRef::Dynamic(0),
-        distcode: crate::src::inflate::CodeTableRef::Dynamic(0),
-        lenbits: 0,
-        distbits: 0,
-        ncode: 0,
-        nlen: 0,
-        ndist: 0,
-        have: 0,
-        next: 0,
-        lens: [0; 320],
-        work: [0; 288],
-        codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
-            op: 0,
-            bits: 0,
-            val: 0,
-        }),
-        sane: 1,
-        back: 0,
-        was: 0,
-    }
-}
-
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -204,10 +151,54 @@ pub unsafe extern "C" fn inflateBackInit_(
     strm.state = state as *mut crate::src::deflate::internal_state;
     // Back-mode state uses the same allocation/release contract as normal
     // inflate.  Publish one fully initialized value into the callback-owned
-    // allocation, whose returned bytes need not have been initialized.
+    // allocation, whose returned bytes need not have been initialized. Keep
+    // this construction at its sole raw publication site: a separate unsafe
+    // constructor added an unsafe call and an unsafe function without making
+    // the callback window any safer.
     ::core::ptr::write(
         state,
-        inflate_back_initial_state(&plan, stream_identity, window),
+        crate::src::inflate::inflate_state {
+            stream_identity,
+            mode: crate::src::inflate::TYPE,
+            last: 0,
+            wrap: 0,
+            havedict: 0,
+            flags: 0,
+            dmax: 32768,
+            check: 0,
+            total: 0,
+            head: None,
+            wbits: plan.wbits,
+            wsize: plan.wsize,
+            whave: 0,
+            wnext: 0,
+            window: Some(::core::ptr::NonNull::new(window).expect("validated caller window")),
+            owned_window: None,
+            hold: 0,
+            bits: 0,
+            length: 0,
+            offset: 0,
+            extra: 0,
+            lencode: crate::src::inflate::CodeTableRef::Dynamic(0),
+            distcode: crate::src::inflate::CodeTableRef::Dynamic(0),
+            lenbits: 0,
+            distbits: 0,
+            ncode: 0,
+            nlen: 0,
+            ndist: 0,
+            have: 0,
+            next: 0,
+            lens: [0; 320],
+            work: [0; 288],
+            codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
+                op: 0,
+                bits: 0,
+                val: 0,
+            }),
+            sane: 1,
+            back: 0,
+            was: 0,
+        },
     );
     return crate::zlib_h::Z_OK;
 }
