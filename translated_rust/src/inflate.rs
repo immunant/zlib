@@ -3602,7 +3602,22 @@ fn inflate_match_copy_plan(
     } else {
         InflateMatchSource::Output { offset }
     };
-    let count = length.min(left);
+    let requested = length.min(left);
+    let count = match source {
+        InflateMatchSource::Window { index } => {
+            // The window is circular, but its allocation is not.  Limit this
+            // pass to one initialized contiguous segment; after the caller
+            // copies that suffix, its output progress changes and the next
+            // plan either starts at the prefix or uses newly written output.
+            // Preserve the old scalar fallback for malformed opaque state,
+            // whose validation remains at the FFI/state boundary.
+            WindowHistory::new(wsize, wnext, whave)
+                .and_then(|history| history.match_step(index, requested))
+                .and_then(|step| ::core::ffi::c_uint::try_from(step.segment.len).ok())
+                .unwrap_or(requested)
+        }
+        InflateMatchSource::Output { .. } => requested,
+    };
 
     InflateMatchPlan::Copy {
         source,
@@ -4349,9 +4364,9 @@ mod tests {
             inflate_match_copy_plan(9, 2, 8, 6, 8, 3, 5, true),
             InflateMatchPlan::Copy {
                 source: InflateMatchSource::Window { index: 7 },
-                count: 3,
-                remaining_output: 2,
-                remaining_length: 0,
+                count: 1,
+                remaining_output: 4,
+                remaining_length: 2,
             }
         );
         assert_eq!(
@@ -4361,6 +4376,35 @@ mod tests {
                 count: 4,
                 remaining_output: 0,
                 remaining_length: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn inflate_match_copy_plan_replans_wrapped_window_after_each_segment() {
+        // This is the same match as the wrapped case above after its one-byte
+        // allocation suffix has been copied.  The next pass begins at the
+        // initialized prefix, rather than reading beyond the window backing.
+        assert_eq!(
+            inflate_match_copy_plan(9, 3, 8, 6, 8, 2, 4, true),
+            InflateMatchPlan::Copy {
+                source: InflateMatchSource::Window { index: 0 },
+                count: 2,
+                remaining_output: 2,
+                remaining_length: 0,
+            }
+        );
+
+        // Once enough output exists, the same distance must instead read
+        // byte-by-byte from output so overlapping matches keep zlib's
+        // sequential-copy behavior.
+        assert_eq!(
+            inflate_match_copy_plan(9, 9, 8, 6, 8, 3, 4, true),
+            InflateMatchPlan::Copy {
+                source: InflateMatchSource::Output { offset: 9 },
+                count: 3,
+                remaining_output: 1,
+                remaining_length: 0,
             }
         );
     }
