@@ -202,7 +202,13 @@ pub unsafe extern "C" fn zcalloc(
     if allocation.try_reserve_exact(units).is_err() {
         return ::core::ptr::null_mut();
     }
-    let pointer: crate::stdlib::voidpf = allocation.as_mut_ptr().cast();
+    allocation.resize_with(units, || ZcallocUnit([0; 64]));
+    let Some(first) = allocation.first_mut() else {
+        return ::core::ptr::null_mut();
+    };
+    let pointer = std::ptr::NonNull::from(first)
+        .cast::<::core::ffi::c_void>()
+        .as_ptr();
     if retain_zcalloc_allocation(pointer.addr(), allocation) {
         pointer
     } else {
