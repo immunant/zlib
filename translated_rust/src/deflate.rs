@@ -1813,15 +1813,17 @@ fn flush_pending_bound(
     }
 }
 
-// The validated deflate dispatch is the only caller. Bind its state-owned
-// pending allocation and the caller output once, then keep flushing bounded
-// and reference-based in `flush_pending_bound()`.
+// The validated deflate dispatch is the only caller. Reuse its narrow state
+// checker to bind the stream and live state, then keep the transfer itself
+// bounded and reference-based in `flush_pending_bound()`.
 fn flush_pending(strm: crate::zlib_h::z_streamp) {
-    // SAFETY: `deflate()` validates `strm`, its state link, and its non-null
-    // output cursor before any path that can call this private adapter.
-    unsafe {
-        let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
-        let stream = &mut *strm;
+    let Some((stream, state)) = deflateStateCheck(strm) else {
+        unreachable!("deflate() validated this stream before flushing");
+    };
+    // SAFETY: the validated deflater owns `pending_buf` for
+    // `pending_buf_size` bytes, and a nonempty output cursor has `avail_out`
+    // writable bytes for this call.
+    let (pending_buf, output) = unsafe {
         let pending_buf =
             ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
         let output = if stream.avail_out == 0 {
@@ -1832,8 +1834,9 @@ fn flush_pending(strm: crate::zlib_h::z_streamp) {
                 stream.avail_out as usize,
             ))
         };
-        flush_pending_bound(state, stream, pending_buf, output);
-    }
+        (pending_buf, output)
+    };
+    flush_pending_bound(state, stream, pending_buf, output);
 }
 
 fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
