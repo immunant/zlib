@@ -85,7 +85,10 @@ pub struct internal_state {
     pub status: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
-    pub pending_out: *mut crate::stdlib::Bytef,
+    // These are offsets into `pending_buf`, not independently owned pointers.
+    // Keeping interior cursors as indexes is the first step toward owned
+    // pending storage while preserving the opaque C stream-state ABI.
+    pub pending_out: usize,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
     pub gzhead: crate::zlib_h::gz_headerp,
@@ -138,7 +141,7 @@ pub struct internal_state {
     pub heap_len: ::core::ffi::c_int,
     pub heap_max: ::core::ffi::c_int,
     pub depth: [crate::zutil_h::uch; 573],
-    pub sym_buf: *mut crate::zutil_h::uchf,
+    pub sym_buf: usize,
     pub lit_bufsize: crate::stdlib::uInt,
     pub sym_next: crate::stdlib::uInt,
     pub sym_end: crate::stdlib::uInt,
@@ -693,7 +696,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
         status: 0,
         pending_buf: ::core::ptr::null_mut(),
         pending_buf_size: 0,
-        pending_out: ::core::ptr::null_mut(),
+        pending_out: 0,
         pending: 0,
         wrap: 0,
         gzhead: ::core::ptr::null_mut(),
@@ -752,7 +755,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
         heap_len: 0,
         heap_max: 0,
         depth: [0; 573],
-        sym_buf: ::core::ptr::null_mut(),
+        sym_buf: 0,
         lit_bufsize: 0,
         sym_next: 0,
         sym_end: 0,
@@ -835,8 +838,7 @@ fn initialize_allocated_deflate_state(
             deflateEnd(strm);
             return crate::zlib_h::Z_MEM_ERROR;
         }
-        state.sym_buf =
-            state.pending_buf.wrapping_add(state.lit_bufsize as usize) as *mut crate::zutil_h::uchf;
+        state.sym_buf = state.lit_bufsize as usize;
         state.sym_end = state
             .lit_bufsize
             .wrapping_sub(1 as crate::stdlib::uInt)
@@ -1249,7 +1251,7 @@ fn deflate_reset_keep(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     (*strm).data_type = crate::zlib_h::Z_UNKNOWN;
     state.pending = 0 as crate::zutil_h::ulg;
-    state.pending_out = state.pending_buf;
+    state.pending_out = 0;
     if state.wrap < 0 as ::core::ffi::c_int {
         state.wrap = -state.wrap;
     }
@@ -1553,20 +1555,8 @@ fn deflate_prime(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(pending_out) = state
-        .pending_out
-        .addr()
-        .checked_sub(pending_buf.as_ptr().addr())
-    else {
-        return crate::zlib_h::Z_BUF_ERROR;
-    };
-    let Some(sym_buf) = state
-        .sym_buf
-        .addr()
-        .checked_sub(pending_buf.as_ptr().addr())
-    else {
-        return crate::zlib_h::Z_BUF_ERROR;
-    };
+    let pending_out = state.pending_out;
+    let sym_buf = state.sym_buf;
     if pending_out > pending_buf.len() || sym_buf > pending_buf.len() {
         return crate::zlib_h::Z_BUF_ERROR;
     }
@@ -2232,12 +2222,12 @@ fn flush_pending_impl(
     };
     output[..len].copy_from_slice(&pending_buf[pending_start..source_end]);
     strm.next_out = output.as_mut_ptr().wrapping_add(len);
-    state.pending_out = pending_buf.as_mut_ptr().wrapping_add(source_end);
+    state.pending_out = source_end;
     strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
     strm.avail_out -= len as crate::stdlib::uInt;
     state.pending -= len as crate::zutil_h::ulg;
     if state.pending == 0 {
-        state.pending_out = pending_buf.as_mut_ptr();
+        state.pending_out = 0;
     }
     true
 }
@@ -2248,16 +2238,10 @@ fn flush_pending(
     pending_buf: &mut [crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
 ) {
-    if state.pending_out.is_null() || output.len() != strm.avail_out as usize {
+    if state.pending_out > pending_buf.len() || output.len() != strm.avail_out as usize {
         return;
     }
-    let Some(pending_start) = state
-        .pending_out
-        .addr()
-        .checked_sub(pending_buf.as_ptr().addr())
-    else {
-        return;
-    };
+    let pending_start = state.pending_out;
     let _ = flush_pending_impl(strm, state, pending_buf, pending_start, output);
 }
 
@@ -2858,7 +2842,7 @@ pub fn deflate(
     if state.wrap <= 0 {
         return crate::zlib_h::Z_STREAM_END;
     }
-    if state.pending_out.is_null() || strm.avail_out != 0 && strm.next_out.is_null() {
+    if state.pending_out > pending_buffer.len() || strm.avail_out != 0 && strm.next_out.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let Some(output) = output_tail(strm, &mut output_buffer) else {
@@ -2927,18 +2911,28 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
 }
 
 fn pending_buffer_offset(
-    pending_buf_addr: usize,
-    pending_out_addr: usize,
+    pending_out: usize,
     pending_buf_len: crate::zutil_h::ulg,
     pending_len: crate::zutil_h::ulg,
 ) -> Option<usize> {
     let pending_buf_len = usize::try_from(pending_buf_len).ok()?;
     let pending_len = usize::try_from(pending_len).ok()?;
-    let offset = pending_out_addr.checked_sub(pending_buf_addr)?;
-    offset
+    pending_out
         .checked_add(pending_len)
         .filter(|&end| end <= pending_buf_len)?;
-    Some(offset)
+    Some(pending_out)
+}
+
+fn pending_buffer_range(
+    start: usize,
+    len: crate::stdlib::uInt,
+    pending_buf_len: crate::zutil_h::ulg,
+) -> Option<usize> {
+    let pending_buf_len = usize::try_from(pending_buf_len).ok()?;
+    let len = usize::try_from(len).ok()?;
+    start
+        .checked_add(len)
+        .filter(|&end| end <= pending_buf_len)
 }
 
 pub fn deflateCopy(
@@ -2964,17 +2958,25 @@ pub fn deflateCopy(
     if !deflate_stream_state_valid(Some(source_stream), Some(source_state)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if source_state.pending_buf.is_null() || source_state.pending_out.is_null() {
+    if source_state.pending_buf.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let Some(pending_offset) = pending_buffer_offset(
-        source_state.pending_buf.addr(),
-        source_state.pending_out.addr(),
+        source_state.pending_out,
         source_state.pending_buf_size,
         source_state.pending,
     ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    if pending_buffer_range(
+        source_state.sym_buf,
+        source_state.sym_next,
+        source_state.pending_buf_size,
+    )
+    .is_none()
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     crate::zlib_h::copy_z_stream(dest_stream, source_stream);
     ds = unsafe {
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -3062,22 +3064,22 @@ pub fn deflateCopy(
                 .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
         )
     };
-    dest_state.pending_out = dest_state.pending_buf.wrapping_add(pending_offset);
+    dest_state.pending_out = pending_offset;
     unsafe {
         crate::stdlib::memcpy(
-            dest_state.pending_out as *mut ::core::ffi::c_void,
-            source_state.pending_out as *const ::core::ffi::c_void,
+            dest_state.pending_buf.wrapping_add(dest_state.pending_out) as *mut ::core::ffi::c_void,
+            source_state
+                .pending_buf
+                .wrapping_add(source_state.pending_out) as *const ::core::ffi::c_void,
             source_state.pending as crate::__stddef_size_t_h::size_t,
         )
     };
-    dest_state.sym_buf = dest_state
-        .pending_buf
-        .wrapping_add(dest_state.lit_bufsize as usize)
-        as *mut crate::zutil_h::uchf;
+    dest_state.sym_buf = dest_state.lit_bufsize as usize;
     unsafe {
         crate::stdlib::memcpy(
-            dest_state.sym_buf as *mut ::core::ffi::c_void,
-            source_state.sym_buf as *const ::core::ffi::c_void,
+            dest_state.pending_buf.wrapping_add(dest_state.sym_buf) as *mut ::core::ffi::c_void,
+            source_state.pending_buf.wrapping_add(source_state.sym_buf)
+                as *const ::core::ffi::c_void,
             source_state.sym_next as crate::__stddef_size_t_h::size_t,
         )
     };
@@ -4175,13 +4177,7 @@ fn flush_strategy_pending(
     pending_buf: &mut [crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
 ) -> bool {
-    let Some(pending_start) = state
-        .pending_out
-        .addr()
-        .checked_sub(pending_buf.as_ptr().addr())
-    else {
-        return false;
-    };
+    let pending_start = state.pending_out;
     if pending_start > pending_buf.len() {
         return false;
     }
