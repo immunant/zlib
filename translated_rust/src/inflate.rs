@@ -298,34 +298,28 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
-// This raw-state adapter is used only by translated Rust implementations.
-// It validates the two associated allocations and then returns their bound
-// references, so small inflater operations do not need to repeat raw stream
-// and state dereferences after checking them.
+// This state adapter is used only by translated Rust implementations.  Its
+// callers have already bound the stream at their ABI boundary; it validates
+// the associated state allocation before returning both references.
 pub(crate) fn inflateStateCheck<'a>(
-    mut strm: crate::zlib_h::z_streamp,
+    strm: &'a mut crate::zlib_h::z_stream,
 ) -> Option<(
     &'a mut crate::zlib_h::z_stream,
     &'a mut crate::src::inflate::inflate_state,
 )> {
-    if strm.is_null() {
+    let strm_ptr = ::core::ptr::from_mut(strm);
+    let state_ptr = strm.state as *mut crate::src::inflate::inflate_state;
+    if state_ptr.is_null() {
         return None;
     }
-    // SAFETY: this private adapter first rejects null stream and state
-    // pointers, then validates their reciprocal link and state range before
-    // exposing either allocation to its reference-only callers.
-    unsafe {
-        let strm_ref = &mut *strm;
-        let state_ptr = strm_ref.state as *mut crate::src::inflate::inflate_state;
-        if state_ptr.is_null() {
-            return None;
-        }
-        let state = &mut *state_ptr;
-        if !inflate_state_is_valid(strm_ref, state, state.strm == strm) {
-            return None;
-        }
-        Some((strm_ref, state))
+    // SAFETY: the stream reference is already bound by the caller. Its
+    // non-null state pointer is checked for the reciprocal stream link and
+    // state invariants before the reference is exposed.
+    let state = unsafe { &mut *state_ptr };
+    if !inflate_state_is_valid(strm, state, state.strm == strm_ptr) {
+        return None;
     }
+    Some((strm, state))
 }
 
 fn inflate_state_is_valid(
@@ -400,7 +394,7 @@ pub(crate) fn inflate_reset_bound(
 pub(crate) fn inflate_reset_stream_bound(
     strm: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_reset_bound(strm, state)
@@ -409,7 +403,7 @@ pub(crate) fn inflate_reset_stream_bound(
 // Keep reset validation in named implementations so the exported ABI
 // forwarders below only bind the caller's stream pointer and dispatch.
 pub fn inflateResetKeep(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_reset_keep(strm, state)
@@ -450,7 +444,7 @@ pub fn inflateReset2(
     strm: &mut crate::zlib_h::z_stream,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let (wrap, window_bits) = match inflate_window_bits(windowBits) {
@@ -675,7 +669,7 @@ pub fn inflatePrime(
     bits: ::core::ffi::c_int,
     value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_prime(state, bits, value)
@@ -969,7 +963,7 @@ pub fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    let Some((strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if strm.next_out.is_null()
@@ -2676,7 +2670,7 @@ pub unsafe extern "C" fn inflate_ffi(
     inflate(strm, flush)
 }
 pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm as *mut _) else {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // Snapshot the release plan before invoking a user-supplied deallocator,
@@ -2701,7 +2695,7 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
 // needed before either allocation is released.
 pub(crate) fn inflate_end_default_bound(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     let (window, state_ptr) = {
-        let Some((bound_strm, state)) = inflateStateCheck(strm as *mut _) else {
+        let Some((bound_strm, state)) = inflateStateCheck(strm) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         (state.window, bound_strm.state)
@@ -2775,6 +2769,9 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     // The ABI boundary validates the stream and binds optional caller output
     // storage. The named implementation binds its own state-owned window.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2797,7 +2794,7 @@ pub fn inflateSetDictionary(
     strm: &mut crate::zlib_h::z_stream,
     dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm as *mut _) else {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_set_dictionary(strm, state, dictionary)
@@ -2904,7 +2901,7 @@ fn inflateGetHeader(
     let Some(head) = head else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((_strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_get_header(state, head)
@@ -3035,6 +3032,9 @@ fn inflate_sync(
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3050,6 +3050,9 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3059,8 +3062,8 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
 // implementation callable through that dispatcher without exposing its raw
 // allocation and cursor work as an unsafe-function contract to Rust callers.
 pub fn inflateCopy(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
+    dest: &mut crate::zlib_h::z_stream,
+    source: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
     // SAFETY: this implementation preserves zlib's raw stream and allocator
     // protocol. Each raw allocation or stream binding is validated before it
@@ -3077,9 +3080,6 @@ pub fn inflateCopy(
         let Some((source, state)) = inflateStateCheck(source) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if dest.is_null() {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
         let Some(plan) = inflate_copy_plan(state) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -3138,7 +3138,6 @@ pub fn inflateCopy(
     let Some((source, _live_state)) = inflateStateCheck(source) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let dest = &mut *dest;
     let copy = &mut *copy;
     let window = if window.is_null() {
         None
@@ -3365,6 +3364,13 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    // The ABI adapter binds both foreign stream pointers; the named
+    // implementation owns validation of their associated inflater states.
+    if dest.is_null() || source.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dest = unsafe { &mut *dest };
+    let source = unsafe { &mut *source };
     inflateCopy(dest, source)
 }
 #[export_name = "inflateUndermine"]
@@ -3373,6 +3379,9 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
     _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3384,6 +3393,9 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3435,6 +3447,9 @@ fn inflate_mark(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_lo
 pub unsafe extern "C" fn inflateMark_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_long {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
+    };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
@@ -3445,6 +3460,9 @@ pub unsafe extern "C" fn inflateMark_ffi(
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
+    };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };

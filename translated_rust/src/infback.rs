@@ -1111,7 +1111,7 @@ fn inflateBackInit_(
         return ret;
     }
     let Some((strm, state)) =
-        crate::src::inflate::inflateStateCheck(strm as *mut crate::zlib_h::z_stream)
+        crate::src::inflate::inflateStateCheck(strm)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -1152,7 +1152,7 @@ pub(crate) fn inflateBack(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some((strm, state)) =
-        crate::src::inflate::inflateStateCheck(strm as *mut crate::zlib_h::z_stream)
+        crate::src::inflate::inflateStateCheck(strm)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
