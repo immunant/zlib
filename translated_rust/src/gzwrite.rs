@@ -362,7 +362,14 @@ fn gz_comp(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) -> 
             };
             Some(&input[..])
         };
-        ret = crate::src::deflate::deflate(strm, flush, input);
+        let output = {
+            let start = strm.next_out.addr().checked_sub(state.out.as_ptr().addr());
+            start
+                .and_then(|start| start.checked_add(strm.avail_out as usize))
+                .and_then(|end| state.out.get_mut(..end))
+                .and_then(|output| start.and_then(|start| output.get_mut(start..)))
+        };
+        ret = crate::src::deflate::deflate(strm, flush, input, output);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_static_error(
                 state,
@@ -769,10 +776,22 @@ fn gzsetparams(
             };
             Some(&input[..])
         };
+        let output = {
+            let start = state
+                .strm
+                .next_out
+                .addr()
+                .checked_sub(state.out.as_ptr().addr());
+            start
+                .and_then(|start| start.checked_add(state.strm.avail_out as usize))
+                .and_then(|end| state.out.get_mut(..end))
+                .and_then(|output| start.and_then(|start| output.get_mut(start..)))
+        };
         let _ = crate::src::deflate::deflateParams(
             &mut state.strm,
             deflate_state,
             input,
+            output,
             hash_tables,
             level,
             strategy,

@@ -24,7 +24,7 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub fn compress2_z(
-    dest: Option<&mut [crate::stdlib::Bytef]>,
+    mut dest: Option<&mut [crate::stdlib::Bytef]>,
     source: Option<&[crate::stdlib::Bytef]>,
     mut level: ::core::ffi::c_int,
 ) -> (::core::ffi::c_int, crate::stdlib::z_size_t) {
@@ -63,7 +63,9 @@ pub fn compress2_z(
     if err != crate::zlib_h::Z_OK {
         return (err, 0);
     }
-    stream.next_out = dest.map_or(::core::ptr::null_mut(), |dest| dest.as_mut_ptr());
+    stream.next_out = dest
+        .as_ref()
+        .map_or(::core::ptr::null_mut(), |dest| dest.as_ptr().cast_mut());
     stream.avail_out = 0 as crate::stdlib::uInt;
     stream.next_in = source.map_or(::core::ptr::null_mut(), |source| {
         source.as_ptr() as *mut crate::stdlib::Bytef
@@ -101,9 +103,14 @@ pub fn compress2_z(
                         start
                             .checked_add(stream.avail_in as usize)
                             .and_then(|end| source.get(start..end))
-                    })
+                })
             })
         };
+        let output = dest.as_deref_mut().and_then(|dest| {
+            let start = stream.next_out.addr().checked_sub(dest.as_ptr().addr())?;
+            let end = start.checked_add(stream.avail_out as usize)?;
+            dest.get_mut(start..end)
+        });
         err = crate::src::deflate::deflate(
             &mut stream,
             if source_len != 0 {
@@ -112,6 +119,7 @@ pub fn compress2_z(
                 crate::zlib_h::Z_FINISH
             },
             input,
+            output,
         );
         written = written
             .wrapping_add(avail_out.wrapping_sub(stream.avail_out) as crate::stdlib::z_size_t);
