@@ -509,16 +509,16 @@ pub unsafe extern "C" fn gzputc_ffi(
         c,
     )
 }
-pub unsafe extern "C" fn gzputs(
-    mut file: crate::zlib_h::gzFile,
-    mut s: *const ::core::ffi::c_char,
+unsafe fn gzputs(
+    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    text: &[u8],
 ) -> ::core::ffi::c_int {
     let mut len: crate::stdlib::z_size_t = 0;
     let mut put: crate::stdlib::z_size_t = 0;
-    if file.is_null() {
+    let Some(mut state) = state else {
         return -1 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    };
+    let state = state.as_mut();
     if state.mode != crate::gzguts_h::GZ_WRITE
         || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
@@ -529,7 +529,7 @@ pub unsafe extern "C" fn gzputs(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
+    len = text.len() as crate::stdlib::z_size_t;
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
         || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
     {
@@ -540,7 +540,7 @@ pub unsafe extern "C" fn gzputs(
         );
         return -1 as ::core::ffi::c_int;
     }
-    put = gz_write(state, s as crate::stdlib::voidpc, len);
+    put = gz_write(state, text.as_ptr().cast(), len);
     return if len != 0 && put == 0 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
@@ -553,7 +553,14 @@ pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    gzputs(file, s)
+    if file.is_null() || s.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    let text = ::core::ffi::CStr::from_ptr(s).to_bytes();
+    gzputs(
+        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
+        text,
+    )
 }
 pub unsafe extern "C" fn gzflush(
     mut file: crate::zlib_h::gzFile,
