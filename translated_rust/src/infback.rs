@@ -285,6 +285,21 @@ fn inflate_back_match_copy(
     }
 }
 
+fn inflate_back_stored_copy_count(
+    length: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    length.min(have).min(left)
+}
+
+fn inflate_back_can_use_fast_path(
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+) -> bool {
+    have >= 6 && left >= 258
+}
+
 fn inflate_back_push_code_length(
     lens: &mut [::core::ffi::c_ushort; 320],
     have: &mut ::core::ffi::c_uint,
@@ -556,12 +571,7 @@ pub unsafe extern "C" fn inflateBack(
                                 break '_inf_leave;
                             }
                         }
-                        if copy > have {
-                            copy = have;
-                        }
-                        if copy > left {
-                            copy = left;
-                        }
+                        copy = inflate_back_stored_copy_count(copy, have, left);
                         crate::stdlib::memcpy(
                             put as *mut ::core::ffi::c_void,
                             next as *const ::core::ffi::c_void,
@@ -840,7 +850,7 @@ pub unsafe extern "C" fn inflateBack(
                 break;
             }
         }
-        if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
+        if inflate_back_can_use_fast_path(have, left) {
             (*strm).next_out = put as *mut crate::stdlib::Bytef;
             (*strm).avail_out = left as crate::stdlib::uInt;
             (*strm).next_in = next as *mut crate::stdlib::Bytef;
