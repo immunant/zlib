@@ -73,17 +73,17 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         return -1;
     };
     state_ref.buffers = Some(buffers);
-    if (*state).direct == 0 {
-        (*strm).zalloc = None;
-        (*strm).zfree = None;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    if state_ref.direct == 0 {
+        state_ref.strm.zalloc = None;
+        state_ref.strm.zfree = None;
+        state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         ret = crate::src::deflate::deflateInit2_(
             strm as *mut crate::zlib_h::z_stream_s,
-            (*state).level,
+            state_ref.level,
             8 as ::core::ffi::c_int,
             15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
             8 as ::core::ffi::c_int,
-            (*state).strategy,
+            state_ref.strategy,
             crate::zlib_h::ZLIB_VERSION.as_ptr(),
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
@@ -96,10 +96,10 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             );
             return -1 as ::core::ffi::c_int;
         }
-        (*strm).next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+        state_ref.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
-    (*state).size = (*state).want;
-    if (*state).direct == 0 {
+    state_ref.size = state_ref.want;
+    if state_ref.direct == 0 {
         let Some(output) = state_ref
             .buffers
             .as_mut()
@@ -107,9 +107,9 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         else {
             return -1;
         };
-        (*strm).avail_out = (*state).size as crate::stdlib::uInt;
-        (*strm).next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
-        (*state).x.next = (*strm).next_out as *mut ::core::ffi::c_uchar;
+        state_ref.strm.avail_out = state_ref.size as crate::stdlib::uInt;
+        state_ref.strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
+        state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
     }
     return 0 as ::core::ffi::c_int;
 }
