@@ -3500,6 +3500,7 @@ unsafe fn flush_block_data(
 
 pub(crate) unsafe fn tr_flush_block_impl(
     s: &mut crate::src::deflate::deflate_state,
+    strm: Option<&mut crate::zlib_h::z_stream_s>,
     buf: Option<&[u8]>,
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
@@ -3508,14 +3509,10 @@ pub(crate) unsafe fn tr_flush_block_impl(
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     if s.level > 0 as ::core::ffi::c_int {
-        // `strm` is validated once before we use it.  Keeping the resulting
-        // borrow avoids a second raw-pointer dereference when publishing the
-        // detected type below.
-        let mut strm = unsafe { s.strm.as_mut() };
-        let unknown_data_type = strm
+        if strm
             .as_ref()
-            .is_some_and(|strm| strm.data_type == crate::zlib_h::Z_UNKNOWN);
-        if unknown_data_type {
+            .is_some_and(|strm| strm.data_type == crate::zlib_h::Z_UNKNOWN)
+        {
             let data_type = detect_data_type_impl(s);
             if let Some(strm) = strm {
                 strm.data_type = data_type;
@@ -3620,21 +3617,18 @@ pub unsafe extern "C" fn _tr_flush_block(
         return;
     };
     let buf = unsafe { flush_block_data(s, buf, stored_len) };
-    unsafe { tr_flush_block_impl(s, buf.as_deref(), stored_len, last) };
+    let strm = unsafe { s.strm.as_mut() };
+    unsafe { tr_flush_block_impl(s, strm, buf.as_deref(), stored_len, last) };
 }
 #[export_name = "_tr_flush_block"]
 
 pub unsafe extern "C" fn _tr_flush_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
+    s: *mut crate::src::deflate::deflate_state,
+    buf: *mut crate::stdlib::charf,
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
 ) {
-    let Some(s) = (unsafe { s.as_mut() }) else {
-        return;
-    };
-    let buf = unsafe { flush_block_data(s, buf, stored_len) };
-    unsafe { tr_flush_block_impl(s, buf.as_deref(), stored_len, last) };
+    unsafe { _tr_flush_block(s, buf, stored_len, last) };
 }
 pub unsafe fn _tr_tally(
     s: &mut crate::src::deflate::deflate_state,

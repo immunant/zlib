@@ -2499,13 +2499,13 @@ pub unsafe fn deflate(
         bstate = (if (*s).level == 0 as ::core::ffi::c_int {
             deflate_stored(&mut *s, strm, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(&mut *s, flush) as ::core::ffi::c_uint
+            deflate_huff(&mut *s, strm, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
-            deflate_rle(s, flush) as ::core::ffi::c_uint
+            deflate_rle(s, strm, flush) as ::core::ffi::c_uint
         } else {
             (match configuration_table[(*s).level as usize].func {
                 CompressionEngine::Stored => deflate_stored(&mut *s, strm, flush),
-                CompressionEngine::Fast => deflate_fast(s, flush),
+                CompressionEngine::Fast => deflate_fast(s, strm, flush),
                 CompressionEngine::Slow => deflate_slow(&mut *s, flush),
             }) as ::core::ffi::c_uint
         }) as block_state;
@@ -3232,6 +3232,7 @@ unsafe fn deflate_stored(
 
 unsafe fn deflate_fast(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
@@ -3324,7 +3325,7 @@ unsafe fn deflate_fast(
             } else {
                 None
             };
-            crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 0);
+            crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
             s.block_start = s.strstart as ::core::ffi::c_long;
             flush_pending(s.strm);
             if s.avail_out() == Some(0) {
@@ -3346,7 +3347,7 @@ unsafe fn deflate_fast(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 1);
+        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending(s.strm);
         if s.avail_out() == Some(0) {
@@ -3361,7 +3362,7 @@ unsafe fn deflate_fast(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 0);
+        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending(s.strm);
         if s.avail_out() == Some(0) {
@@ -3591,6 +3592,7 @@ unsafe fn deflate_slow(
 
 unsafe fn deflate_rle(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream_s,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
@@ -3664,7 +3666,7 @@ unsafe fn deflate_rle(
             } else {
                 None
             };
-            crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 0);
+            crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
             s.block_start = s.strstart as ::core::ffi::c_long;
             flush_pending(s.strm);
             if s.avail_out() == Some(0) {
@@ -3680,7 +3682,7 @@ unsafe fn deflate_rle(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 1);
+        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending(s.strm);
         if s.avail_out() == Some(0) {
@@ -3695,7 +3697,7 @@ unsafe fn deflate_rle(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 0);
+        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending(s.strm);
         if s.avail_out() == Some(0) {
@@ -3707,6 +3709,7 @@ unsafe fn deflate_rle(
 
 unsafe fn deflate_huff(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream_s,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
@@ -3738,7 +3741,7 @@ unsafe fn deflate_huff(
             } else {
                 None
             };
-            crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 0);
+            crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
             s.block_start = s.strstart as ::core::ffi::c_long;
             flush_pending(s.strm);
             if s.avail_out() == Some(0) {
@@ -3754,7 +3757,7 @@ unsafe fn deflate_huff(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 1);
+        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending(s.strm);
         if s.avail_out() == Some(0) {
@@ -3769,7 +3772,7 @@ unsafe fn deflate_huff(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 0);
+        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending(s.strm);
         if s.avail_out() == Some(0) {
