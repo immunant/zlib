@@ -132,10 +132,7 @@ pub unsafe extern "C" fn uncompress2_z(
         if stream.avail_in == 0 as crate::stdlib::uInt {
             (stream.avail_in, len) = uncompress_chunk(len, max);
         }
-        err = crate::src::inflate::inflate(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            crate::zlib_h::Z_NO_FLUSH,
-        );
+        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH);
         if err != crate::zlib_h::Z_OK {
             break;
         }

@@ -683,6 +683,59 @@ fn update_window(
     }
 }
 
+// Copy one pending match into the caller's output buffer.  The decoder loop
+// supplies only reference-bound state and already-validated buffer slices,
+// keeping the match-distance arithmetic independent of its raw cursors.
+enum InflateMatchCopy {
+    Copied(usize),
+    InvalidDistance,
+}
+
+fn inflate_match_copy(
+    state: &mut crate::src::inflate::inflate_state,
+    output: &mut [crate::stdlib::Bytef],
+    written: usize,
+    window: Option<&[crate::stdlib::Bytef]>,
+) -> InflateMatchCopy {
+    let mut copy = state.offset.wrapping_sub(written as ::core::ffi::c_uint);
+    let from_window = state.offset > written as ::core::ffi::c_uint;
+    let source_start;
+    if from_window {
+        if copy > state.whave && state.sane != 0 {
+            return InflateMatchCopy::InvalidDistance;
+        }
+        if copy > state.wnext {
+            copy = copy.wrapping_sub(state.wnext);
+            source_start = state.wsize.wrapping_sub(copy) as usize;
+        } else {
+            source_start = state.wnext.wrapping_sub(copy) as usize;
+        }
+        if copy > state.length {
+            copy = state.length;
+        }
+    } else {
+        source_start = 0;
+        copy = state.length;
+    }
+    copy = copy.min((output.len() - written) as ::core::ffi::c_uint);
+    let copy_len = copy as usize;
+    if from_window {
+        let window = window.expect("window-backed match requires a window");
+        output[written..written + copy_len]
+            .copy_from_slice(&window[source_start..source_start + copy_len]);
+    } else {
+        let distance = state.offset as usize;
+        for index in written..written + copy_len {
+            output[index] = output[index - distance];
+        }
+    }
+    state.length = state.length.wrapping_sub(copy);
+    if state.length == 0 {
+        state.mode = crate::src::inflate::LEN;
+    }
+    InflateMatchCopy::Copied(copy_len)
+}
+
 // The inflater's window is an internal allocation.  Keep allocation, update,
 // and read-only inspection behind this existing implementation boundary so
 // ABI wrappers never need to bind that state-owned raw pointer themselves.
@@ -748,12 +801,10 @@ pub(crate) fn updatewindow<T>(
         InflateWindowAccess::Existing => Ok(operation(state, window)),
     }
 }
-pub unsafe extern "C" fn inflate(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn inflate(
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
@@ -763,8 +814,6 @@ pub unsafe extern "C" fn inflate(
     let mut in_0: ::core::ffi::c_uint = 0;
     let mut out: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut from_window: bool = false;
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -801,13 +850,14 @@ pub unsafe extern "C" fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if inflateStateCheck(strm).is_none()
-        || (*strm).next_out.is_null()
-        || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
+    let Some((strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if strm.next_out.is_null()
+        || strm.next_in.is_null() && strm.avail_in != 0 as crate::stdlib::uInt
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
     {
@@ -2390,65 +2440,45 @@ pub unsafe extern "C" fn inflate(
         if left == 0 as ::core::ffi::c_uint {
             break;
         }
-        copy = out.wrapping_sub(left);
-        from_window = false;
-        if (*state).offset > copy {
-            from_window = true;
-            copy = (*state).offset.wrapping_sub(copy);
-            if copy > (*state).whave {
-                if (*state).sane != 0 {
-                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
-                    continue;
-                }
-            }
-            if copy > (*state).wnext {
-                copy = copy.wrapping_sub((*state).wnext);
-                from = (*state)
-                    .window
-                    .wrapping_add((*state).wsize.wrapping_sub(copy) as usize);
+        let written = output_capacity - left as usize;
+        // SAFETY: the entry checks accepted the caller's output pointer and
+        // capacity. `written` is derived from the same capacity and cursor.
+        let output = ::core::slice::from_raw_parts_mut(
+            output_start as *mut crate::stdlib::Bytef,
+            output_capacity,
+        );
+        let copied = {
+            let state_ref = &mut *state;
+            let window = if state_ref.window.is_null() {
+                None
             } else {
-                from = (*state)
-                    .window
-                    .wrapping_add((*state).wnext.wrapping_sub(copy) as usize);
+                // SAFETY: an initialized inflater window has `wsize` bytes;
+                // this is the same allocation and extent used by the former
+                // raw-cursor match copy.
+                Some(::core::slice::from_raw_parts(
+                    state_ref.window,
+                    state_ref.wsize as usize,
+                ))
+            };
+            inflate_match_copy(state_ref, output, written, window)
+        };
+        match copied {
+            InflateMatchCopy::Copied(copied) => {
+                left = left.wrapping_sub(copied as ::core::ffi::c_uint);
+                put = output[written + copied..].as_mut_ptr();
             }
-            if copy > (*state).length {
-                copy = (*state).length;
+            InflateMatchCopy::InvalidDistance => {
+                (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                    as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char;
+                (*state).mode = crate::src::inflate::BAD;
+                continue '_inf_leave;
             }
-        } else {
-            from = put.wrapping_sub((*state).offset as usize);
-            copy = (*state).length;
-        }
-        if copy > left {
-            copy = left;
-        }
-        left = left.wrapping_sub(copy);
-        (*state).length = (*state).length.wrapping_sub(copy);
-        let copy_len = copy as usize;
-        if from_window {
-            let source = ::core::slice::from_raw_parts(from, copy_len);
-            let output = ::core::slice::from_raw_parts_mut(put, copy_len);
-            output.copy_from_slice(source);
-            put = output[copy_len..].as_mut_ptr();
-        } else {
-            let distance = (*state).offset as usize;
-            let output = ::core::slice::from_raw_parts_mut(from, distance + copy_len);
-            for index in distance..distance + copy_len {
-                output[index] = output[index - distance];
-            }
-            put = output[distance + copy_len..].as_mut_ptr();
-        }
-        if (*state).length == 0 as ::core::ffi::c_uint {
-            (*state).mode = crate::src::inflate::LEN;
         }
     }
     // The decoder loop is complete. Bind the already-validated stream/state
     // pair once for the publication tail, so cursor updates, the optional
     // window allocation, and final accounting remain reference-bound.
-    let strm = &mut *strm;
-    let state = &mut *state;
     strm.next_out = put as *mut crate::stdlib::Bytef;
     strm.avail_out = left as crate::stdlib::uInt;
     strm.next_in = next as *mut crate::stdlib::Bytef;
@@ -2528,7 +2558,10 @@ pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflate(strm, flush)
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    unsafe { inflate(strm, flush) }
 }
 pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflateStateCheck(strm as *mut _) else {
