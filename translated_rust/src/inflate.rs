@@ -209,17 +209,37 @@ pub struct inflate_state {
     // the codec state.  This is an identity token only; stream access is
     // always supplied by the caller.
     pub stream_identity: usize,
-    // These two handles are ABI-boundary state.  Normal inflate never needs
-    // to carry them through its decoder core: `head` is projected for one
-    // call and `window` belongs exclusively to inflateBack().
+    // Header registration remains an ABI-boundary handle.  Back-mode's
+    // workspace, on the other hand, is owned here: the caller-supplied
+    // window establishes the API mode but is never read before back-mode
+    // produces each byte, so it need not remain a persistent foreign borrow.
     pub head: Option<::core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
-    pub window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>>,
+    pub(crate) back_window: Option<InflateBackWindow>,
     // The normal codec and its scalar completion form one pointer-free
     // owner.  The callback-owned record retains only the two persistent ABI
     // registrations plus this owner; later stream adapters can hand the
     // owner directly to bounded decoder requests without rebuilding a
     // second scalar snapshot.
     pub(crate) decoder: InflateOwnedDecoder,
+}
+
+// `inflateBackInit_()` receives a caller-owned work area, but inflateBack's
+// decoder always starts with an empty history and fills that area before any
+// byte is consumed from it.  Retaining an owned, zeroed workspace therefore
+// removes the cross-call foreign borrow without manufacturing a long-lived
+// reference to the caller buffer.  The full maximum window is retained so
+// the configured `wsize` stays a bounded prefix selected at call time.
+#[derive(Clone)]
+pub(crate) struct InflateBackWindow {
+    pub(crate) bytes: Box<[u8; 32768]>,
+}
+
+impl InflateBackWindow {
+    pub(crate) fn new() -> Self {
+        Self {
+            bytes: Box::new([0; 32768]),
+        }
+    }
 }
 
 // All resumable normal-inflate data is pointer-free.  Keeping it separate
@@ -647,7 +667,7 @@ unsafe fn inflate_publish_callback_owner(
         crate::src::inflate::inflate_state {
             stream_identity: ::core::ptr::from_mut(strm).addr(),
             head: None,
-            window: None,
+            back_window: None,
             decoder: InflateOwnedDecoder::from_normal(owner.normal),
         },
     );
@@ -3643,7 +3663,7 @@ pub unsafe extern "C" fn inflateCopy(
         let state_copy = inflate_state {
             stream_identity: dest_identity,
             head: state.head,
-            window: state.window,
+            back_window: state.back_window.clone(),
             decoder: InflateOwnedDecoder {
                 normal: InflateNormalState {
                 mode: state.decoder.normal.mode,

@@ -167,7 +167,7 @@ pub unsafe extern "C" fn inflateBackInit_(
         crate::src::inflate::inflate_state {
             stream_identity,
             head: None,
-            window: Some(::core::ptr::NonNull::new(window).expect("validated caller window")),
+            back_window: Some(crate::src::inflate::InflateBackWindow::new()),
             decoder: crate::src::inflate::InflateOwnedDecoder::from_normal(crate::src::inflate::InflateNormalState {
                 mode: crate::src::inflate::TYPE,
                 last: 0,
@@ -1251,8 +1251,8 @@ pub unsafe extern "C" fn inflateBack(
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
     // Keep this state borrow tied to the stream for the entire invocation.
-    // In particular, the borrowed tables and caller window cannot outlive
-    // either the stream association check or the callback-backed state.
+    // The decoder tables and owned back-mode workspace cannot outlive either
+    // the stream association check or the callback-backed state.
     let Some((strm, raw_state)) = crate::src::inflate::inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -1266,10 +1266,11 @@ pub unsafe extern "C" fn inflateBack(
     } else {
         strm.avail_in as ::core::ffi::c_uint
     };
-    let window = ::core::slice::from_raw_parts_mut(
-        raw_state.window.expect("inflateBack window").as_ptr(),
-        raw_state.decoder.normal.wsize as usize,
-    );
+    let back_window = raw_state
+        .back_window
+        .as_mut()
+        .expect("inflateBack window");
+    let window = &mut back_window.bytes.as_mut()[..raw_state.decoder.normal.wsize as usize];
     let mut state = InflateBackDecoderState {
         mode: raw_state.decoder.normal.mode,
         last: raw_state.decoder.normal.last,
