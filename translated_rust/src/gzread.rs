@@ -1406,6 +1406,17 @@ fn gz_skip_consume_progress(
     }
 }
 
+fn gz_skip_apply_progress(
+    have: &mut ::core::ffi::c_uint,
+    pos: &mut crate::stdlib::off64_t,
+    skip: &mut crate::stdlib::off64_t,
+    progress: &GzSkipProgress,
+) {
+    *have = progress.remaining_have;
+    *pos = progress.pos;
+    *skip = progress.remaining_skip;
+}
+
 fn gz_skip_is_limited_by_remaining(
     have: ::core::ffi::c_uint,
     skip: crate::stdlib::off64_t,
@@ -1553,9 +1564,12 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 state.skip,
                 crate::src::gzlib::gz_intmax(),
             );
-            state.x.have = progress.remaining_have;
-            state.x.pos = progress.pos;
-            state.skip = progress.remaining_skip;
+            gz_skip_apply_progress(
+                &mut state.x.have,
+                &mut state.x.pos,
+                &mut state.skip,
+                &progress,
+            );
             state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
         }
         let fetch_failed =
@@ -2928,6 +2942,44 @@ mod tests {
                 consumed: 1,
             }
         );
+    }
+
+    #[test]
+    fn gz_skip_apply_progress_commits_buffered_skip_scalars() {
+        let progress = GzSkipProgress {
+            remaining_have: 7,
+            pos: 45,
+            remaining_skip: 0,
+            consumed: 3,
+        };
+        let mut have = 10;
+        let mut pos = 42;
+        let mut skip = 3;
+
+        gz_skip_apply_progress(&mut have, &mut pos, &mut skip, &progress);
+
+        assert_eq!(have, 7);
+        assert_eq!(pos, 45);
+        assert_eq!(skip, 0);
+    }
+
+    #[test]
+    fn gz_skip_apply_progress_preserves_wrapping_progress_values() {
+        let progress = GzSkipProgress {
+            remaining_have: ::core::ffi::c_uint::MAX,
+            pos: crate::stdlib::off64_t::MIN,
+            remaining_skip: crate::stdlib::off64_t::MAX,
+            consumed: 1,
+        };
+        let mut have = 0;
+        let mut pos = crate::stdlib::off64_t::MAX;
+        let mut skip = crate::stdlib::off64_t::MIN;
+
+        gz_skip_apply_progress(&mut have, &mut pos, &mut skip, &progress);
+
+        assert_eq!(have, ::core::ffi::c_uint::MAX);
+        assert_eq!(pos, crate::stdlib::off64_t::MIN);
+        assert_eq!(skip, crate::stdlib::off64_t::MAX);
     }
 
     #[test]

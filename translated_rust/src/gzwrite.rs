@@ -125,6 +125,14 @@ fn gz_zero_initialize_buffer(buffer: &mut [crate::stdlib::Byte]) {
     buffer.fill(0);
 }
 
+fn gz_zero_initialize_chunk_buffer(
+    first: &mut ::core::ffi::c_int,
+    buffer: &mut [crate::stdlib::Byte],
+) {
+    gz_zero_initialize_buffer(buffer);
+    *first = 0;
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct GzZeroChunkLimits {
     int_and_off64_are_same_size: bool,
@@ -1159,8 +1167,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         let chunk = gz_zero_prepare_chunk(state, first);
         if chunk.initialize_buffer {
             let buffer = ::core::slice::from_raw_parts_mut(state.in_0, chunk.len as usize);
-            gz_zero_initialize_buffer(buffer);
-            first = 0 as ::core::ffi::c_int;
+            gz_zero_initialize_chunk_buffer(&mut first, buffer);
         }
         let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         match gz_zero_apply_comp_progress(
@@ -1663,12 +1670,12 @@ mod tests {
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_comp_progress,
         gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_limits, gz_zero_chunk_plan,
         gz_zero_chunk_step, gz_zero_initial_step, gz_zero_initialize_buffer,
-        gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
-        gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error, gzclose_w_result,
-        gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_action, gzsetparams_buffer_action,
-        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
-        GzCloseBufferAction, GzCompDeflateAction, GzCompDirectWriteProgress,
+        gz_zero_initialize_chunk_buffer, gz_zero_needs_initialization, gz_zero_pending_step,
+        gz_zero_progress, gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error,
+        gzclose_w_result, gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result,
+        gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_action,
+        gzsetparams_buffer_action, gzsetparams_settings_match, gzsetparams_state_is_usable,
+        gzwrite_request, GzCloseBufferAction, GzCompDeflateAction, GzCompDirectWriteProgress,
         GzCompDirectWriteResult, GzCompOutputBufferAction, GzCompOutputBufferProgress,
         GzCompOutputWriteProgress, GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure,
         GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
@@ -1815,6 +1822,27 @@ mod tests {
         gz_zero_initialize_buffer(&mut buffer);
 
         assert_eq!(buffer, [0; 4]);
+    }
+
+    #[test]
+    fn gz_zero_initialize_chunk_buffer_clears_buffer_and_marks_follow_up_chunks() {
+        let mut first = 1;
+        let mut buffer = [0xff; 4];
+
+        gz_zero_initialize_chunk_buffer(&mut first, &mut buffer);
+
+        assert_eq!(first, 0);
+        assert_eq!(buffer, [0; 4]);
+    }
+
+    #[test]
+    fn gz_zero_initialize_chunk_buffer_marks_follow_up_chunks_for_empty_buffers() {
+        let mut first = ::core::ffi::c_int::MAX;
+        let mut buffer = [];
+
+        gz_zero_initialize_chunk_buffer(&mut first, &mut buffer);
+
+        assert_eq!(first, 0);
     }
 
     #[test]

@@ -289,6 +289,12 @@ enum FastWindowContinuationSource {
     Output,
 }
 
+fn fast_window_copy_continues_from_output(
+    continuation_source: FastWindowContinuationSource,
+) -> bool {
+    continuation_source == FastWindowContinuationSource::Output
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct FastWindowCopyPlan {
     first_window_start: ::core::ffi::c_uint,
@@ -689,7 +695,7 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                         }
                         len = copy_plan.remaining_length;
-                        if copy_plan.continuation_source == FastWindowContinuationSource::Output {
+                        if fast_window_copy_continues_from_output(copy_plan.continuation_source) {
                             from = out.wrapping_sub(dist as usize);
                         }
                         for _ in 0..copy_layout.final_copy_triplets {
@@ -864,6 +870,16 @@ mod tests {
         assert!(!fast_match_uses_window(4, 4));
         assert!(!fast_match_uses_window(3, 4));
         assert!(fast_match_uses_window(5, 4));
+    }
+
+    #[test]
+    fn fast_window_copy_continues_from_output_only_for_output_source() {
+        assert!(!super::fast_window_copy_continues_from_output(
+            FastWindowContinuationSource::Window
+        ));
+        assert!(super::fast_window_copy_continues_from_output(
+            FastWindowContinuationSource::Output
+        ));
     }
 
     #[test]
