@@ -119,6 +119,29 @@ fn gz_avail_can_load(err: ::core::ffi::c_int) -> bool {
     err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum GzAvailAction {
+    Error,
+    Refill { compact_input: bool },
+    Done,
+}
+
+fn gz_avail_action(
+    err: ::core::ffi::c_int,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+) -> GzAvailAction {
+    if !gz_avail_can_load(err) {
+        GzAvailAction::Error
+    } else if eof != 0 {
+        GzAvailAction::Done
+    } else {
+        GzAvailAction::Refill {
+            compact_input: avail_in != 0,
+        }
+    }
+}
+
 fn gz_fread_request_len(
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
@@ -434,30 +457,31 @@ unsafe extern "C" fn gz_load(
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut got: ::core::ffi::c_uint = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if !gz_avail_can_load((*state).err) {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).eof == 0 as ::core::ffi::c_int {
-        if (*strm).avail_in != 0 {
-            let mut p: *mut ::core::ffi::c_uchar = (*state).in_0;
-            let mut q: *const ::core::ffi::c_uchar = (*strm).next_in;
-            if q != p as *const ::core::ffi::c_uchar {
-                core::ptr::copy_nonoverlapping(q, p, (*strm).avail_in as usize);
+    match gz_avail_action((*state).err, (*state).eof, (*strm).avail_in) {
+        GzAvailAction::Error => return -1 as ::core::ffi::c_int,
+        GzAvailAction::Done => return 0 as ::core::ffi::c_int,
+        GzAvailAction::Refill { compact_input } => {
+            if compact_input {
+                let mut p: *mut ::core::ffi::c_uchar = (*state).in_0;
+                let mut q: *const ::core::ffi::c_uchar = (*strm).next_in;
+                if q != p as *const ::core::ffi::c_uchar {
+                    core::ptr::copy_nonoverlapping(q, p, (*strm).avail_in as usize);
+                }
             }
+            if gz_load(
+                state,
+                (*state).in_0.wrapping_add((*strm).avail_in as usize),
+                (*state)
+                    .size
+                    .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
+                &raw mut got,
+            ) == -1 as ::core::ffi::c_int
+            {
+                return -1 as ::core::ffi::c_int;
+            }
+            (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
+            (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
         }
-        if gz_load(
-            state,
-            (*state).in_0.wrapping_add((*strm).avail_in as usize),
-            (*state)
-                .size
-                .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
-            &raw mut got,
-        ) == -1 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
-        (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
-        (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -997,6 +1021,38 @@ mod tests {
         assert!(gz_avail_can_load(crate::zlib_h::Z_OK));
         assert!(gz_avail_can_load(crate::zlib_h::Z_BUF_ERROR));
         assert!(!gz_avail_can_load(crate::zlib_h::Z_DATA_ERROR));
+    }
+
+    #[test]
+    fn gz_avail_action_rejects_non_refillable_errors_before_eof() {
+        assert_eq!(
+            gz_avail_action(crate::zlib_h::Z_DATA_ERROR, 1, 4),
+            GzAvailAction::Error
+        );
+    }
+
+    #[test]
+    fn gz_avail_action_leaves_eof_input_untouched() {
+        assert_eq!(
+            gz_avail_action(crate::zlib_h::Z_OK, 1, 4),
+            GzAvailAction::Done
+        );
+    }
+
+    #[test]
+    fn gz_avail_action_refills_with_or_without_input_compaction() {
+        assert_eq!(
+            gz_avail_action(crate::zlib_h::Z_BUF_ERROR, 0, 0),
+            GzAvailAction::Refill {
+                compact_input: false
+            }
+        );
+        assert_eq!(
+            gz_avail_action(crate::zlib_h::Z_OK, 0, 1),
+            GzAvailAction::Refill {
+                compact_input: true
+            }
+        );
     }
 
     #[test]
