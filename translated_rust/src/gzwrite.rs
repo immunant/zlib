@@ -439,13 +439,14 @@ fn gzwrite_preflight(
     Ok(slice_len)
 }
 
-// The raw FFI wrapper only binds a range selected by `gzwrite_preflight()`.
-// This adapter owns the result and buffer-shape handling after that binding.
+// The reference-bound dispatcher owns write-state preflight and result
+// handling after the ABI adapter has bound the caller buffer.
 fn gzwrite_ffi_dispatch(
     state: &mut crate::gzguts_h::gz_state,
-    prepared: Result<usize, ()>,
+    len: ::core::ffi::c_uint,
     source: Option<&[::core::ffi::c_uchar]>,
 ) -> ::core::ffi::c_int {
+    let prepared = gzwrite_preflight(state, len);
     match (prepared, source) {
         (Ok(len), Some(source)) if source.len() == len => {
             gz_write(state, source) as ::core::ffi::c_int
@@ -461,6 +462,20 @@ fn gzwrite_ffi_dispatch(
         (Err(()), _) => 0,
     }
 }
+
+// Writing neither closes the handle nor invokes a user callback. Resolve its
+// opaque address through the owned-state registry, leaving the exported
+// adapter responsible only for binding the caller's readable range.
+fn gzwrite_handle(
+    file_key: usize,
+    len: ::core::ffi::c_uint,
+    source: Option<&[::core::ffi::c_uchar]>,
+) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        gzwrite_ffi_dispatch(state, len, source)
+    })
+    .unwrap_or(0)
+}
 #[export_name = "gzwrite"]
 
 pub unsafe extern "C" fn gzwrite_ffi(
@@ -471,20 +486,21 @@ pub unsafe extern "C" fn gzwrite_ffi(
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let prepared = gzwrite_preflight(state, len);
     // SAFETY: C's `gzwrite` contract supplies `len` readable bytes when
-    // `len` is nonzero. The preflight has already preserved the invalid-state
-    // and rejected-request exits before this caller range is bound.
-    let source = match prepared {
-        Ok(0) => Some(&[] as &[::core::ffi::c_uchar]),
-        Ok(len) if !buf.is_null() => Some(::core::slice::from_raw_parts(
+    // `len` is nonzero. Stateful request validation remains in
+    // `gzwrite_handle()` after registry lookup.
+    let source = match crate::src::gzlib::gz_uint_request_fits_int(len)
+        .then(|| crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t))
+        .flatten()
+    {
+        Some(0) => Some(&[] as &[::core::ffi::c_uchar]),
+        Some(slice_len) if !buf.is_null() => Some(::core::slice::from_raw_parts(
             buf as *const ::core::ffi::c_uchar,
-            len,
+            slice_len,
         )),
         _ => None,
     };
-    gzwrite_ffi_dispatch(state, prepared, source)
+    gzwrite_handle(file.addr(), len, source)
 }
 pub fn gzfwrite(
     source: &[::core::ffi::c_uchar],
@@ -546,9 +562,10 @@ fn gzfwrite_preflight(
 fn gzfwrite_ffi_dispatch(
     state: &mut crate::gzguts_h::gz_state,
     size: crate::stdlib::z_size_t,
-    prepared: Result<usize, ()>,
+    nitems: crate::stdlib::z_size_t,
     source: Option<&[::core::ffi::c_uchar]>,
 ) -> crate::stdlib::z_size_t {
+    let prepared = gzfwrite_preflight(state, size, nitems);
     match (prepared, source) {
         (Ok(0), _) => 0,
         (Ok(len), Some(source)) if source.len() == len => {
@@ -565,6 +582,20 @@ fn gzfwrite_ffi_dispatch(
         (Err(()), _) => 0,
     }
 }
+
+// As with `gzwrite_handle`, this is a non-closing, non-reentrant operation
+// and can retain the registry borrow while it validates and consumes input.
+fn gzfwrite_handle(
+    file_key: usize,
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+    source: Option<&[::core::ffi::c_uchar]>,
+) -> crate::stdlib::z_size_t {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        gzfwrite_ffi_dispatch(state, size, nitems, source)
+    })
+    .unwrap_or(0)
+}
 #[export_name = "gzfwrite"]
 
 pub unsafe extern "C" fn gzfwrite_ffi(
@@ -576,20 +607,17 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     if file.is_null() {
         return 0 as crate::stdlib::z_size_t;
     }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let prepared = gzfwrite_preflight(state, size, nitems);
     // SAFETY: a nonempty, representable item request requires C to provide
-    // that many readable bytes. The preflight has already preserved the
-    // invalid-state and rejected-request exits before binding `buf`.
-    let source = match prepared {
-        Ok(0) => Some(&[] as &[::core::ffi::c_uchar]),
-        Ok(len) if !buf.is_null() => Some(::core::slice::from_raw_parts(
+    // that many readable bytes. Stateful request validation remains in
+    // `gzfwrite_handle()` after registry lookup.
+    let source = match crate::src::gzlib::gz_item_slice_len(size, nitems) {
+        Some(slice_len) if slice_len != 0 && !buf.is_null() => Some(::core::slice::from_raw_parts(
             buf as *const ::core::ffi::c_uchar,
-            len,
+            slice_len,
         )),
         _ => None,
     };
-    gzfwrite_ffi_dispatch(state, size, prepared, source)
+    gzfwrite_handle(file.addr(), size, nitems, source)
 }
 // The one-byte request can use the same buffered/streaming adapter as larger
 // writes. Keeping the byte in a local array lets this coordinator remain
@@ -684,19 +712,21 @@ fn gzputs_ffi_dispatch(
     };
     gzputs_write(state, source)
 }
+
+// String output is non-closing and cannot re-enter through a user callback,
+// so the registry can retain the state borrow for the complete operation.
+fn gzputs_handle(file_key: usize, source: Option<&::core::ffi::CStr>) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        gzputs_ffi_dispatch(Some(state), source)
+    })
+    .unwrap_or(-1)
+}
 #[export_name = "gzputs"]
 
 pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    let state = if file.is_null() {
-        None
-    } else {
-        // SAFETY: a non-null gzip handle identifies the state bound by this
-        // ABI entry. Its mode is checked by the implementation dispatcher.
-        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
-    };
     let source = if s.is_null() {
         None
     } else {
@@ -706,7 +736,7 @@ pub unsafe extern "C" fn gzputs_ffi(
         // work.
         Some(unsafe { ::core::ffi::CStr::from_ptr(s) })
     };
-    gzputs_ffi_dispatch(state, source)
+    gzputs_handle(file.addr(), source)
 }
 fn gzflush(
     state: &mut crate::gzguts_h::gz_state,
@@ -742,20 +772,22 @@ fn gzflush_ffi_dispatch(
         None => crate::zlib_h::Z_STREAM_ERROR,
     }
 }
+
+// Flushing does not close the handle or invoke user callbacks, so it can use
+// the same address-keyed state lookup as the other simple write operations.
+fn gzflush_handle(file_key: usize, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        gzflush_ffi_dispatch(Some(state), flush)
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
 #[export_name = "gzflush"]
 
 pub unsafe extern "C" fn gzflush_ffi(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let state = if file.is_null() {
-        None
-    } else {
-        // SAFETY: a non-null gzip handle identifies the state bound by this
-        // ABI entry. `gzflush` retains write-state validation.
-        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
-    };
-    gzflush_ffi_dispatch(state, flush)
+    gzflush_handle(file.addr(), flush)
 }
 // Parameter selection only needs the already-bound write state. Keep the
 // deflater call scoped to its one C boundary so the surrounding validation,
@@ -803,6 +835,19 @@ fn gzsetparams_ffi_dispatch(
         None => crate::zlib_h::Z_STREAM_ERROR,
     }
 }
+
+// Parameter selection is likewise a non-closing write operation with no
+// user callback, so keep its state validation behind the registry lookup.
+fn gzsetparams_handle(
+    file_key: usize,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        gzsetparams_ffi_dispatch(Some(state), level, strategy)
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
 #[export_name = "gzsetparams"]
 
 pub unsafe extern "C" fn gzsetparams_ffi(
@@ -810,14 +855,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let state = if file.is_null() {
-        None
-    } else {
-        // SAFETY: a non-null gzip handle identifies the state bound by this
-        // ABI entry. The safe operation retains parameter validation.
-        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
-    };
-    gzsetparams_ffi_dispatch(state, level, strategy)
+    gzsetparams_handle(file.addr(), level, strategy)
 }
 
 // Once a write handle is known to be valid, finishing sparse output and the
