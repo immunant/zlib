@@ -860,6 +860,16 @@ fn deflate_state_status_valid(status: ::core::ffi::c_int) -> bool {
     )
 }
 
+fn deflate_reset_status_and_adler(
+    wrap: ::core::ffi::c_int,
+) -> (::core::ffi::c_int, crate::stdlib::uLong) {
+    if wrap == 2 as ::core::ffi::c_int {
+        (crate::src::deflate::GZIP_STATE, 0 as crate::stdlib::uLong)
+    } else {
+        (crate::src::deflate::INIT_STATE, 1 as crate::stdlib::uLong)
+    }
+}
+
 fn dictionary_tail_offset(
     dict_length: crate::stdlib::uInt,
     window_size: crate::stdlib::uInt,
@@ -1044,16 +1054,7 @@ pub unsafe extern "C" fn deflateResetKeep(
     if (*s).wrap < 0 as ::core::ffi::c_int {
         (*s).wrap = -(*s).wrap;
     }
-    (*s).status = if (*s).wrap == 2 as ::core::ffi::c_int {
-        crate::src::deflate::GZIP_STATE
-    } else {
-        crate::src::deflate::INIT_STATE
-    };
-    (*strm).adler = if (*s).wrap == 2 as ::core::ffi::c_int {
-        0 as crate::stdlib::uLong
-    } else {
-        1 as crate::stdlib::uLong
-    };
+    ((*s).status, (*strm).adler) = deflate_reset_status_and_adler((*s).wrap);
     (*s).last_flush = -2 as ::core::ffi::c_int;
     crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
     return crate::zlib_h::Z_OK;
@@ -3775,13 +3776,14 @@ mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_flush_rank, deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_request_is_invalid, deflate_should_return_buf_error, deflate_state_status_valid,
-        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
-        fill_window_cursor, fill_window_insert_after_slide, fill_window_zero_range,
-        flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_min_size,
+        deflate_request_is_invalid, deflate_reset_status_and_adler,
+        deflate_should_return_buf_error, deflate_state_status_valid, deflate_version_matches,
+        dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
+        fill_window_insert_after_slide, fill_window_zero_range, flush_pending_accounting,
+        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
+        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
+        slide_hash_entry, stored_block_available_output, stored_block_min_size,
         stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
         DeflatePreflight,
     };
@@ -4322,5 +4324,20 @@ mod tests {
         assert!(!deflate_state_status_valid(
             crate::src::deflate::FINISH_STATE - 1
         ));
+    }
+    #[test]
+    fn deflate_reset_status_and_adler_selects_wrapper_initial_state() {
+        assert_eq!(
+            deflate_reset_status_and_adler(2),
+            (crate::src::deflate::GZIP_STATE, 0),
+        );
+        assert_eq!(
+            deflate_reset_status_and_adler(1),
+            (crate::src::deflate::INIT_STATE, 1),
+        );
+        assert_eq!(
+            deflate_reset_status_and_adler(0),
+            (crate::src::deflate::INIT_STATE, 1),
+        );
     }
 }

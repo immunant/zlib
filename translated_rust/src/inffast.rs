@@ -125,7 +125,7 @@ fn input_bytes_needed(
     required_bits: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
     let missing_bits = required_bits.saturating_sub(bits);
-    missing_bits / 8 + if missing_bits % 8 == 0 { 0 } else { 1 }
+    missing_bits / 8 + (missing_bits % 8 != 0) as ::core::ffi::c_uint
 }
 
 fn output_cursor_after_write(
@@ -742,6 +742,13 @@ mod tests {
         assert_eq!(input_bytes_needed(0, 13), 2);
         assert_eq!(input_bytes_needed(0, 0), 0);
         assert_eq!(input_bytes_needed(0, ::core::ffi::c_uint::MAX), 536_870_912);
+    }
+
+    #[test]
+    fn input_bytes_needed_rounds_partial_missing_bytes_up() {
+        assert_eq!(input_bytes_needed(0, 8), 1);
+        assert_eq!(input_bytes_needed(0, 9), 2);
+        assert_eq!(input_bytes_needed(1, 9), 1);
     }
 
     #[test]

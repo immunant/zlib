@@ -242,20 +242,20 @@ fn gz_write_remaining_after_consumption(
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct GzWriteDirectProgress {
+struct GzWriteProgress {
     pos: crate::stdlib::off64_t,
     remaining: crate::stdlib::z_size_t,
 }
 
-fn gz_write_direct_progress(
+fn gz_write_progress(
     pos: crate::stdlib::off64_t,
     remaining: crate::stdlib::z_size_t,
     chunk_len: ::core::ffi::c_uint,
     remaining_avail_in: crate::stdlib::uInt,
-) -> GzWriteDirectProgress {
+) -> GzWriteProgress {
     let consumed = gz_write_consumed(chunk_len, remaining_avail_in);
 
-    GzWriteDirectProgress {
+    GzWriteProgress {
         pos: gz_write_advanced_pos(pos, consumed),
         remaining: gz_write_remaining_after_consumption(remaining, consumed),
     }
@@ -505,13 +505,14 @@ fn gz_write_buffered_progress(
     remaining: crate::stdlib::z_size_t,
 ) -> GzWriteBufferedProgress {
     let copy = gz_write_buffered_copy_len(size, have, remaining);
+    let write_progress = gz_write_progress(pos, remaining, copy, 0);
 
     GzWriteBufferedProgress {
         copy,
         avail_in: avail_in.wrapping_add(copy),
         have: have.wrapping_add(copy),
-        pos: gz_write_advanced_pos(pos, copy),
-        remaining: gz_write_remaining_after_consumption(remaining, copy),
+        pos: write_progress.pos,
+        remaining: write_progress.remaining,
     }
 }
 
@@ -775,7 +776,7 @@ unsafe fn gz_write(
             let n = gz_write_chunk_len(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
             let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            let progress = gz_write_direct_progress(state.x.pos, len, n, state.strm.avail_in);
+            let progress = gz_write_progress(state.x.pos, len, n, state.strm.avail_in);
             state.x.pos = progress.pos;
             len = progress.remaining;
             match gz_write_direct_action(ret, len) {
@@ -1119,8 +1120,8 @@ mod tests {
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_has_pending_input,
         gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
         gz_write_apply_chunk_progress, gz_write_buffered_copy_len, gz_write_buffered_progress,
-        gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_direct_progress,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
+        gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
+        gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
@@ -1815,25 +1816,25 @@ mod tests {
     }
 
     #[test]
-    fn gz_write_direct_progress_accounts_for_partial_consumption() {
-        let progress = gz_write_direct_progress(10, 100, 80, 20);
+    fn gz_write_progress_accounts_for_partial_consumption() {
+        let progress = gz_write_progress(10, 100, 80, 20);
 
         assert_eq!(progress.pos, 70);
         assert_eq!(progress.remaining, 40);
     }
 
     #[test]
-    fn gz_write_direct_progress_reports_input_exhaustion() {
-        let progress = gz_write_direct_progress(10, 80, 80, 0);
+    fn gz_write_progress_reports_input_exhaustion() {
+        let progress = gz_write_progress(10, 80, 80, 0);
 
         assert_eq!(progress.pos, 90);
         assert_eq!(progress.remaining, 0);
     }
 
     #[test]
-    fn gz_write_direct_progress_preserves_wrapping_accounting() {
+    fn gz_write_progress_preserves_wrapping_accounting() {
         let progress =
-            gz_write_direct_progress(0, ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t, 0, 1);
+            gz_write_progress(0, ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t, 0, 1);
 
         assert_eq!(
             progress.pos,
