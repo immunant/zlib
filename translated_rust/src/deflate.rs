@@ -2955,6 +2955,38 @@ fn update_callback_deflate_workspace(
     deflate_update(state, strm, workspace, flush)
 }
 
+/// Emit and drain the initial zlib wrapper through already-borrowed buffers.
+///
+/// The legacy stream engine still supplies the pending/output views, but the
+/// wrapper transition itself is ordinary slice-based state-machine work.  An
+/// owned pending-buffer call path can reuse this without recreating a raw
+/// view of `state.pending_buf`.
+fn initialize_deflate_wrapper(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output_buffer: &mut [crate::stdlib::Bytef],
+) -> Result<Option<::core::ffi::c_int>, ()> {
+    if state.status == crate::src::deflate::INIT_STATE
+        && state.wrap == 0 as ::core::ffi::c_int
+    {
+        state.status = crate::src::deflate::BUSY_STATE;
+    }
+    if state.status != crate::src::deflate::INIT_STATE {
+        return Ok(None);
+    }
+    if !write_zlib_header(state, strm, pending_buf) {
+        return Err(());
+    }
+    let output = output_tail(strm, output_buffer).ok_or(())?;
+    flush_pending(strm, state, pending_buf, output);
+    if state.pending != 0 as crate::zutil_h::ulg {
+        state.last_flush = -1 as ::core::ffi::c_int;
+        return Ok(Some(crate::zlib_h::Z_OK));
+    }
+    Ok(None)
+}
+
 pub fn deflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
@@ -3048,21 +3080,10 @@ pub fn deflate(
             .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
-    if state.status == crate::src::deflate::INIT_STATE && state.wrap == 0 as ::core::ffi::c_int {
-        state.status = crate::src::deflate::BUSY_STATE;
-    }
-    if state.status == crate::src::deflate::INIT_STATE {
-        if !write_zlib_header(state, strm, &mut pending_buffer) {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        let Some(output) = output_tail(strm, &mut output_buffer) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        flush_pending(strm, state, &mut pending_buffer, output);
-        if state.pending != 0 as crate::zutil_h::ulg {
-            state.last_flush = -1 as ::core::ffi::c_int;
-            return crate::zlib_h::Z_OK;
-        }
+    match initialize_deflate_wrapper(state, strm, &mut pending_buffer, &mut output_buffer) {
+        Ok(Some(result)) => return result,
+        Ok(None) => {}
+        Err(()) => return crate::zlib_h::Z_STREAM_ERROR,
     }
     // A custom header is copied at `deflateSetHeader`'s ABI boundary.  Header
     // emission below consequently uses only owned Rust data and never needs
