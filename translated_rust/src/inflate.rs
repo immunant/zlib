@@ -2860,7 +2860,13 @@ pub unsafe fn inflate(
                 (*state).mode = crate::src::inflate::MATCH;
                 break 'c_2425;
             }
-            if (*state).flags & 0x200 as ::core::ffi::c_int != 0 {
+            // Header-CRC completion only consumes the existing decoder
+            // cursor and updates stream/header scalars.  Keep those commits
+            // on one short-lived boundary borrow instead of repeatedly
+            // traversing the compatibility records.
+            let strm_ref = &mut *strm;
+            let state_ref = &mut *state;
+            if state_ref.flags & 0x200 as ::core::ffi::c_int != 0 {
                 while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint {
                     if have == 0 as ::core::ffi::c_uint {
                         break '_inf_leave;
@@ -2871,26 +2877,26 @@ pub unsafe fn inflate(
                     hold = hold.wrapping_add((*c2rust_fresh9 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    && hold != (*state).check & 0xffff as ::core::ffi::c_ulong
+                if state_ref.wrap & 4 as ::core::ffi::c_int != 0
+                    && hold != state_ref.check & 0xffff as ::core::ffi::c_ulong
                 {
-                    (*strm).msg = INFLATE_ERROR_MESSAGES[16].as_ptr() as *const ::core::ffi::c_char
+                    strm_ref.msg = INFLATE_ERROR_MESSAGES[16].as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
+                    state_ref.mode = crate::src::inflate::BAD;
                     continue '_inf_leave;
                 } else {
                     hold = 0 as ::core::ffi::c_ulong;
                     bits = 0 as ::core::ffi::c_uint;
                 }
             }
-            if !(*state).head.is_null() {
-                (*(*state).head).hcrc =
-                    (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
-                (*(*state).head).done = 1 as ::core::ffi::c_int;
+            if !state_ref.head.is_null() {
+                (*state_ref.head).hcrc =
+                    state_ref.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                (*state_ref.head).done = 1 as ::core::ffi::c_int;
             }
-            (*state).check = inflate_header_crc_update(0, &[]);
-            (*strm).adler = (*state).check as crate::stdlib::uLong;
-            (*state).mode = crate::src::inflate::TYPE;
+            state_ref.check = inflate_header_crc_update(0, &[]);
+            strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+            state_ref.mode = crate::src::inflate::TYPE;
             continue '_inf_leave;
         }
         if left == 0 as ::core::ffi::c_uint {
