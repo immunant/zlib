@@ -2831,22 +2831,39 @@ enum CodeType {
     Dists,
 }
 
-fn code_type(type_0: crate::src::inftrees::codetype) -> Option<CodeType> {
-    match type_0 {
-        crate::src::inftrees::CODES => Some(CodeType::Codes),
-        crate::src::inftrees::LENS => Some(CodeType::Lens),
-        crate::src::inftrees::DISTS => Some(CodeType::Dists),
-        _ => None,
+impl CodeType {
+    fn from_raw(type_0: crate::src::inftrees::codetype) -> Option<Self> {
+        match type_0 {
+            crate::src::inftrees::CODES => Some(Self::Codes),
+            crate::src::inftrees::LENS => Some(Self::Lens),
+            crate::src::inftrees::DISTS => Some(Self::Dists),
+            _ => None,
+        }
+    }
+
+    fn table_capacity(self) -> usize {
+        match self {
+            Self::Codes => 128,
+            Self::Lens => ENOUGH_LENS as usize,
+            Self::Dists => ENOUGH_DISTS as usize,
+        }
+    }
+
+    fn maximum_used_entries(self) -> Option<u32> {
+        match self {
+            Self::Codes => None,
+            Self::Lens => Some(ENOUGH_LENS as u32),
+            Self::Dists => Some(ENOUGH_DISTS as u32),
+        }
     }
 }
 
+fn code_type(type_0: crate::src::inftrees::codetype) -> Option<CodeType> {
+    CodeType::from_raw(type_0)
+}
+
 fn table_capacity_for_type(type_0: crate::src::inftrees::codetype) -> Option<usize> {
-    match type_0 {
-        CODES => Some(128),
-        LENS => Some(ENOUGH_LENS as usize),
-        DISTS => Some(ENOUGH_DISTS as usize),
-        _ => None,
-    }
+    code_type(type_0).map(CodeType::table_capacity)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2877,6 +2894,19 @@ impl TableCursor {
         table.get_mut(self.index(table_offset, entry_offset)?)
     }
 
+    fn write_entries(
+        self,
+        table: &mut [crate::src::inftrees::code],
+        table_offset: usize,
+        entries: &[crate::src::inftrees::code],
+    ) -> Option<usize> {
+        let end_offset = table_offset.checked_add(entries.len())?;
+        let end = self.end(end_offset)?;
+        let start = self.start.checked_add(table_offset)?;
+        table.get_mut(start..end)?.copy_from_slice(entries);
+        Some(end)
+    }
+
     fn end(self, table_offset: usize) -> Option<usize> {
         let end = self.start.checked_add(table_offset)?;
         (end <= self.table_len).then_some(end)
@@ -2893,11 +2923,9 @@ fn table_inputs_fit(codes: usize, work_len: usize) -> bool {
 }
 
 fn table_usage_fits(type_0: CodeType, used: u32, table_cursor: TableCursor) -> bool {
-    let within_type_capacity = match type_0 {
-        CodeType::Codes => true,
-        CodeType::Lens => used <= ENOUGH_LENS as u32,
-        CodeType::Dists => used <= ENOUGH_DISTS as u32,
-    };
+    let within_type_capacity = type_0
+        .maximum_used_entries()
+        .map_or(true, |maximum| used <= maximum);
     within_type_capacity && table_cursor.end(used as usize).is_some()
 }
 
@@ -2990,18 +3018,14 @@ pub fn inflate_table_safe(
         root = max;
     }
     if max == 0 {
-        let Some(end) = table_cursor.end(2) else {
-            return 1;
-        };
         let here = crate::src::inftrees::code {
             op: 64,
             bits: 1,
             val: 0,
         };
-        let Some(entries) = table.get_mut(table_cursor.start..end) else {
+        let Some(end) = table_cursor.write_entries(table, 0, &[here; 2]) else {
             return 1;
         };
-        entries.copy_from_slice(&[here; 2]);
         *table_cursor_out = end;
         *bits = 1;
         return 0;
@@ -3238,6 +3262,22 @@ mod tests {
         assert_eq!(cursor.index(4, 0), None);
         assert_eq!(cursor.end(5), None);
         assert_eq!(cursor.advance(4, 1), None);
+        let entries = [
+            code {
+                op: 1,
+                bits: 2,
+                val: 3,
+            },
+            code {
+                op: 4,
+                bits: 5,
+                val: 6,
+            },
+        ];
+        assert_eq!(cursor.write_entries(&mut table, 0, &entries), Some(4));
+        assert_eq!(table[2].val, 3);
+        assert_eq!(table[3].val, 6);
+        assert_eq!(cursor.write_entries(&mut table, 4, &entries), None);
         cursor
             .entry_mut(&mut table, 1, 2)
             .expect("entry lies within cursor bounds")

@@ -293,6 +293,13 @@ fn gzseek_effective_skip(
     }
 }
 
+fn gz_position_after_skip(
+    position: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    position + skip
+}
+
 fn gzseek_can_fast_forward(
     mode: ::core::ffi::c_int,
     how: ::core::ffi::c_int,
@@ -652,6 +659,15 @@ fn gzdopen_has_valid_descriptor(fd: ::core::ffi::c_int) -> bool {
     fd != -1 as ::core::ffi::c_int
 }
 
+fn gzdopen_path_buffer_len() -> crate::__stddef_size_t_h::size_t {
+    (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
+        (3 as crate::__stddef_size_t_h::size_t)
+            .wrapping_mul(
+                ::core::mem::size_of::<::core::ffi::c_int>() as crate::__stddef_size_t_h::size_t
+            ),
+    )
+}
+
 pub unsafe extern "C" fn gzdopen(
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
@@ -661,23 +677,13 @@ pub unsafe extern "C" fn gzdopen(
     if !gzdopen_has_valid_descriptor(fd) {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    path = crate::stdlib::malloc(
-        (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-            (3 as crate::__stddef_size_t_h::size_t)
-                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()
-                    as crate::__stddef_size_t_h::size_t),
-        ),
-    ) as *mut ::core::ffi::c_char;
+    path = crate::stdlib::malloc(gzdopen_path_buffer_len()) as *mut ::core::ffi::c_char;
     if path.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     crate::stdlib::snprintf(
         path,
-        (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-            (3 as crate::__stddef_size_t_h::size_t)
-                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()
-                    as crate::__stddef_size_t_h::size_t),
-        ),
+        gzdopen_path_buffer_len(),
         b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
         fd,
     );
@@ -813,7 +819,7 @@ pub unsafe extern "C" fn gzseek64(
         offset = read_buffer_plan.remaining_offset;
     }
     (*state).skip = offset;
-    return (*state).x.pos + offset;
+    return gz_position_after_skip((*state).x.pos, offset);
 }
 #[export_name = "gzseek64"]
 
@@ -847,7 +853,7 @@ fn gztell64_core(
     past: ::core::ffi::c_int,
     skip: crate::stdlib::off64_t,
 ) -> crate::stdlib::off64_t {
-    pos + gzseek_effective_skip(past, skip)
+    gz_position_after_skip(pos, gzseek_effective_skip(past, skip))
 }
 
 fn gztell64_result(
@@ -1103,9 +1109,10 @@ mod tests {
         gz_error_needs_message_allocation, gz_error_plan, gz_is_read_or_write_mode,
         gz_legacy_offset_result, gz_lseek_succeeded, gz_open_needs_open, gz_open_offset_plan,
         gz_open_path_buffer_len, gz_open_recorded_offset, gz_open_should_set_close_on_exec,
-        gz_open_should_set_nonblocking, gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open,
-        gz_reset_core, gzbuffer_normalized_want, gzclearerr_core, gzdopen_has_valid_descriptor,
-        gzeof_result, gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
+        gz_open_should_set_nonblocking, gz_parse_open_mode, gz_position_after_skip,
+        gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
+        gzclearerr_core, gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result,
+        gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
         gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
         gzseek_clears_pending_skip, gzseek_effective_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
@@ -1406,6 +1413,12 @@ mod tests {
     #[test]
     fn gztell64_core_ignores_skip_after_eof() {
         assert_eq!(gztell64_core(42, 1, 7), 42);
+    }
+
+    #[test]
+    fn position_after_skip_preserves_signed_cursor_arithmetic() {
+        assert_eq!(gz_position_after_skip(42, 7), 49);
+        assert_eq!(gz_position_after_skip(42, -7), 35);
     }
 
     #[test]
@@ -1890,6 +1903,14 @@ mod tests {
         assert!(gzdopen_has_valid_descriptor(-2));
         assert!(gzdopen_has_valid_descriptor(0));
         assert!(gzdopen_has_valid_descriptor(17));
+    }
+
+    #[test]
+    fn gzdopen_path_buffer_len_matches_fd_identifier_bound() {
+        assert_eq!(
+            gzdopen_path_buffer_len(),
+            7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()
+        );
     }
 
     #[test]
