@@ -681,6 +681,17 @@ enum GzSkipMaterialization {
     Only,
 }
 
+// One staged compressor pass carries only caller input and scalar transition
+// choices.  The ABI stream and its callback-backed state stay at `gz_comp()`;
+// this request can therefore drive admission, buffering, and result policy
+// without itself owning an unsafe deflate boundary.
+struct GzCompRequest<'a> {
+    flush: ::core::ffi::c_int,
+    external_input: Option<&'a [u8]>,
+    retune: Option<GzDeflateRetune>,
+    close: Option<GzWriteCloseCodec<'a>>,
+}
+
 // Keep deferred-zero materialization in the compressor boundary, but schedule
 // its individual no-flush requests iteratively.  This avoids recursively
 // re-entering the ABI-shaped adapter while preserving the old ordering: drain
@@ -746,10 +757,42 @@ unsafe fn gz_comp(
             };
         let status = gz_comp_request(
             state,
-            request_flush,
-            request_input,
-            request_retune,
-            request_close,
+            GzCompRequest {
+                flush: request_flush,
+                external_input: request_input,
+                retune: request_retune,
+                close: request_close,
+            },
+            |state| unsafe { gz_init(state) },
+            |strm| unsafe {
+                crate::src::deflate::deflateEnd(::core::ptr::NonNull::from(strm));
+            },
+            |strm| unsafe {
+                deflateTune(strm, DeflateScalarAction::Reset(DeflateResetKind::Full));
+            },
+            |strm, flush, dispatch| unsafe {
+                dispatch.dispatch(|input, input_available, output, output_available| {
+                    strm.next_in = input.as_ptr().cast_mut();
+                    strm.avail_in = input_available;
+                    strm.next_out = output.as_mut_ptr();
+                    strm.avail_out = output_available;
+                    let result = crate::src::deflate::deflate_dispatch_from_abi_stream(strm, flush);
+                    crate::src::gzlib::GzEmbeddedDeflateResult {
+                        result,
+                        remaining_input: strm.avail_in,
+                        output_available: strm.avail_out,
+                        total_in: strm.total_in,
+                        total_out: strm.total_out,
+                    }
+                })
+            },
+            |strm, retune| unsafe {
+                crate::src::deflate::deflate_params_from_stream(
+                    strm,
+                    retune.level,
+                    retune.strategy,
+                );
+            },
         );
 
         if !materialization_request {
@@ -783,13 +826,35 @@ unsafe fn gz_comp(
 // This request executes one already-staged compressor pass.  Its caller owns
 // the deferred-zero state machine above, so this body never needs to recurse
 // through the ABI-shaped gzip state.
-unsafe fn gz_comp_request(
+fn gz_comp_request<'request, Initialize, EndDeflater, ResetDeflater, DispatchDeflater, RetuneDeflater>(
     state: &mut crate::gzguts_h::gz_state,
-    mut flush: ::core::ffi::c_int,
-    external_input: Option<&[u8]>,
-    retune: Option<GzDeflateRetune>,
-    mut close: Option<GzWriteCloseCodec<'_>>,
-) -> ::core::ffi::c_int {
+    request: GzCompRequest<'request>,
+    mut initialize: Initialize,
+    mut end_deflater: EndDeflater,
+    mut reset_deflater: ResetDeflater,
+    mut dispatch_deflater: DispatchDeflater,
+    mut retune_deflater: RetuneDeflater,
+) -> ::core::ffi::c_int
+where
+    Initialize: FnMut(&mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int,
+    EndDeflater: FnMut(&mut crate::zlib_h::z_stream),
+    ResetDeflater: FnMut(&mut crate::zlib_h::z_stream),
+    DispatchDeflater: for<'input, 'output> FnMut(
+        &mut crate::zlib_h::z_stream,
+        ::core::ffi::c_int,
+        crate::src::gzlib::GzEmbeddedDeflateDispatch<'input, 'output>,
+    ) -> Option<(
+        crate::src::gzlib::GzEmbeddedDeflateState,
+        crate::src::gzlib::GzEmbeddedDeflateProgress,
+    )>,
+    RetuneDeflater: FnMut(&mut crate::zlib_h::z_stream, GzDeflateRetune),
+{
+    let GzCompRequest {
+        mut flush,
+        external_input,
+        retune,
+        mut close,
+    } = request;
     // A close lends this existing codec boundary a pointer-free slot for the
     // single-use lifecycle proof.  Every exit below reaches this completion,
     // so a failed final write still tears the embedded deflater down before
@@ -799,9 +864,7 @@ unsafe fn gz_comp_request(
             close.result.record_codec_result(status, state.err);
             let deflater = GzEmbeddedDeflaterClose::take(&mut state.buffers);
             if deflater.needs_teardown() {
-                unsafe {
-                    crate::src::deflate::deflateEnd(::core::ptr::NonNull::from(&mut state.strm));
-                }
+                end_deflater(&mut state.strm);
                 *close.deflater_closed = true;
             }
         }
@@ -814,7 +877,8 @@ unsafe fn gz_comp_request(
     let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
         >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint);
-    if state.buffers.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
+    if state.buffers.size == 0 as ::core::ffi::c_uint
+        && initialize(state) == -1 as ::core::ffi::c_int
     {
         return finish_close(state, -1 as ::core::ffi::c_int);
     }
@@ -883,10 +947,7 @@ unsafe fn gz_comp_request(
             {
                 return finish_close(state, 0 as ::core::ffi::c_int);
             }
-            deflateTune(
-                &mut state.strm,
-                DeflateScalarAction::Reset(DeflateResetKind::Full),
-            );
+            reset_deflater(&mut state.strm);
             state.reset = 0 as ::core::ffi::c_int;
         }
         ret = crate::zlib_h::Z_OK;
@@ -1029,22 +1090,11 @@ unsafe fn gz_comp_request(
                 return finish_close(state, -1);
             };
             let dispatch = crate::src::gzlib::GzEmbeddedDeflateDispatch::new(codec_state, call);
-            let Some((codec_state, snapshot)) =
-                dispatch.dispatch(|input, input_available, output, output_available| {
-                    let strm = &mut state.strm;
-                    strm.next_in = input.as_ptr().cast_mut();
-                    strm.avail_in = input_available;
-                    strm.next_out = output.as_mut_ptr();
-                    strm.avail_out = output_available;
-                    let result = crate::src::deflate::deflate_dispatch_from_abi_stream(strm, flush);
-                    crate::src::gzlib::GzEmbeddedDeflateResult {
-                        result,
-                        remaining_input: strm.avail_in,
-                        output_available: strm.avail_out,
-                        total_in: strm.total_in,
-                        total_out: strm.total_out,
-                    }
-                })
+            let Some((codec_state, snapshot)) = dispatch_deflater(
+                &mut state.strm,
+                flush,
+                dispatch,
+            )
             else {
                 return finish_close(state, -1);
             };
@@ -1102,11 +1152,7 @@ unsafe fn gz_comp_request(
         }
     }
     if let Some(retune) = retune {
-        crate::src::deflate::deflate_params_from_stream(
-            &mut state.strm,
-            retune.level,
-            retune.strategy,
-        );
+        retune_deflater(&mut state.strm, retune);
     }
     finish_close(state, 0 as ::core::ffi::c_int)
 }
