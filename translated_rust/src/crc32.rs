@@ -4807,18 +4807,6 @@ pub fn crc32_z(crc: crate::stdlib::uLong, buf: Option<&[::core::ffi::c_uchar]>) 
     crc ^ 0xffffffff as crate::stdlib::uLong
 }
 
-pub unsafe fn crc32_z_raw(
-    crc: crate::stdlib::uLong,
-    buf: *const ::core::ffi::c_uchar,
-    len: crate::stdlib::z_size_t,
-) -> crate::stdlib::uLong {
-    let buf = if buf.is_null() {
-        None
-    } else {
-        Some(unsafe { ::core::slice::from_raw_parts(buf, len) })
-    };
-    crc32_z(crc, buf)
-}
 #[export_name = "crc32_z"]
 
 pub unsafe extern "C" fn crc32_z_ffi(
