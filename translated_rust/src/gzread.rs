@@ -368,21 +368,21 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
 }
 
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+    let state = &mut *state;
     loop {
-        if (*state).x.have != 0 {
-            let state = &mut *state;
+        if state.x.have != 0 {
             let skip = state.skip;
             let n = gz_consume(state, skip);
             state.skip -= n as crate::stdlib::off64_t;
         } else {
-            if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
+            if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
             if gz_fetch(state) == -1 as ::core::ffi::c_int {
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if (*state).skip == 0 {
+        if state.skip == 0 {
             break;
         }
     }
@@ -661,7 +661,8 @@ pub unsafe extern "C" fn gzungetc(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    let state_ref = &mut *state;
+    if state_ref.skip != 0 && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if c < 0 as ::core::ffi::c_int {
@@ -742,7 +743,8 @@ pub unsafe extern "C" fn gzgets(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    let state_ref = &mut *state;
+    if state_ref.skip != 0 && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
