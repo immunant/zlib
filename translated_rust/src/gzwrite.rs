@@ -14,7 +14,7 @@ pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
-pub use crate::src::deflate::deflate;
+pub use crate::src::deflate::deflate_ffi as deflate;
 pub use crate::src::deflate::deflateEnd_ffi as deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflateReset_ffi as deflateReset;
@@ -1273,7 +1273,7 @@ fn gz_comp(
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
         ret = unsafe {
-            crate::src::deflate::deflate(
+            crate::src::deflate::deflate_ffi(
                 &mut state.strm as *mut crate::zlib_h::z_stream_s,
                 flush,
             )

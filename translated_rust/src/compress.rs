@@ -1,7 +1,7 @@
 pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::deflate::deflate;
+pub use crate::src::deflate::deflate_ffi as deflate;
 pub use crate::src::deflate::deflateEnd_ffi as deflateEnd;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
@@ -255,7 +255,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
         };
         stream.avail_out = chunk.output_len as crate::stdlib::uInt;
 
-        let status = crate::src::deflate::deflate(&mut stream, chunk.flush);
+        let status = crate::src::deflate::deflate_ffi(&mut stream, chunk.flush);
         chunk.record_progress(
             &mut source_progress,
             &mut dest_progress,

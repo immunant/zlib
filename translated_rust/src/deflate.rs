@@ -2295,7 +2295,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
     };
 
     if plan.flush_before_apply {
-        let err = deflate(strm, crate::zlib_h::Z_BLOCK);
+        let err = deflate_ffi(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
@@ -2933,7 +2933,8 @@ fn deflate_preflight(
     }
 }
 
-pub unsafe extern "C" fn deflate(
+#[export_name = "deflate"]
+pub unsafe extern "C" fn deflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -3374,14 +3375,6 @@ pub unsafe extern "C" fn deflate(
     } else {
         crate::zlib_h::Z_STREAM_END
     };
-}
-#[export_name = "deflate"]
-
-pub unsafe extern "C" fn deflate_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    deflate(strm, flush)
 }
 #[export_name = "deflateEnd"]
 
