@@ -1416,6 +1416,73 @@ fn fill_window_zero(
     true
 }
 
+/// Rebuild the hash entries for bytes retained after a window refill.
+///
+/// The state values use zlib's wrapping integer arithmetic, but every buffer
+/// access is checked.  A malformed state therefore stops the refill instead
+/// of deriving an out-of-bounds pointer from its scalar fields.
+fn fill_window_reinsert(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+) -> bool {
+    if !fill_window_has_insertable_match(state.lookahead, state.insert) {
+        return true;
+    }
+
+    let mut str = state.strstart.wrapping_sub(state.insert);
+    let Some(&first) = window.get(str as usize) else {
+        return false;
+    };
+    let Some(&second) = window.get(str.wrapping_add(1) as usize) else {
+        return false;
+    };
+    state.ins_h = first as crate::stdlib::uInt;
+    state.ins_h = fill_window_hash_update(
+        state.ins_h,
+        second as crate::stdlib::uInt,
+        state.hash_shift,
+        state.hash_mask,
+    );
+
+    while state.insert != 0 {
+        let Some(&next) = window.get(
+            str.wrapping_add(3 as crate::stdlib::uInt)
+                .wrapping_sub(1 as crate::stdlib::uInt) as usize,
+        ) else {
+            return false;
+        };
+        state.ins_h = fill_window_hash_update(
+            state.ins_h,
+            next as crate::stdlib::uInt,
+            state.hash_shift,
+            state.hash_mask,
+        );
+
+        let hash_index = state.ins_h as usize;
+        let previous = match head.get(hash_index) {
+            Some(entry) => *entry,
+            None => return false,
+        };
+        let prev_index = (str & state.w_mask) as usize;
+        let Some(prev_entry) = prev.get_mut(prev_index) else {
+            return false;
+        };
+        *prev_entry = previous;
+        let Some(head_entry) = head.get_mut(hash_index) else {
+            return false;
+        };
+        *head_entry = str as crate::src::deflate::Pos as crate::src::deflate::Posf;
+        str = str.wrapping_add(1);
+        state.insert = state.insert.wrapping_sub(1);
+        if !fill_window_has_insertable_match(state.lookahead, state.insert) {
+            break;
+        }
+    }
+    true
+}
+
 unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
     // The callback allocation has exactly `window_size` bytes.  All window
@@ -1425,9 +1492,13 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         state.window,
         state.window_size as usize,
     );
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut more: ::core::ffi::c_uint = 0;
-    let mut wsize: crate::stdlib::uInt = state.w_size;
+    // The raw hash-table storage belongs to the callback-allocated deflate
+    // state.  This boundary creates short-lived bounded views, then delegates
+    // the retained-byte hash rebuild to `fill_window_reinsert()`.
+    let head = &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
+    let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
+    let mut more: ::core::ffi::c_uint;
+    let wsize = state.w_size;
     loop {
         more = fill_window_available_space(
             state.window_size,
@@ -1452,66 +1523,27 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
                 state.insert,
                 wsize,
             );
-            // The raw hash-table storage belongs to the callback-allocated
-            // deflate state.  Establish its short-lived views at this
-            // existing state boundary; the rebasing algorithm itself is
-            // slice-based and safe.
-            let head = &mut *::core::ptr::slice_from_raw_parts_mut(
-                state.head,
-                state.hash_size as usize,
-            );
-            let prev = &mut *::core::ptr::slice_from_raw_parts_mut(
-                state.prev,
-                state.w_size as usize,
-            );
             slide_hash_core(head, prev, wsize);
             state.slid = 1;
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
-        if (*state.strm).avail_in == 0 as crate::stdlib::uInt {
+        if (*state.strm).avail_in == 0 {
             break;
         }
-        let cursor = fill_window_cursor(state.strstart, state.lookahead);
-        let Ok(cursor) = usize::try_from(cursor) else {
+        let Ok(cursor) = usize::try_from(fill_window_cursor(state.strstart, state.lookahead))
+        else {
             return;
         };
-        let output_ptr = match window.get_mut(cursor..) {
-            Some(output) if output.len() >= more as usize => output.as_mut_ptr(),
-            _ => return,
+        let Some(output) = window.get_mut(cursor..) else {
+            return;
         };
-        n = read_buf(state.strm, output_ptr, more);
-        state.lookahead = fill_window_lookahead_after_read(state.lookahead, n);
-        if fill_window_has_insertable_match(state.lookahead, state.insert) {
-            let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
-            state.ins_h = window[str as usize] as crate::stdlib::uInt;
-            state.ins_h = fill_window_hash_update(
-                state.ins_h,
-                window[str.wrapping_add(1 as crate::stdlib::uInt) as usize]
-                    as crate::stdlib::uInt,
-                state.hash_shift,
-                state.hash_mask,
-            );
-            while state.insert != 0 {
-                state.ins_h = fill_window_hash_update(
-                    state.ins_h,
-                    window[
-                        str.wrapping_add(3 as crate::stdlib::uInt)
-                            .wrapping_sub(1 as crate::stdlib::uInt)
-                            as usize
-                    ] as crate::stdlib::uInt,
-                    state.hash_shift,
-                    state.hash_mask,
-                );
-                *state.prev.wrapping_add((str & state.w_mask) as usize) =
-                    *state.head.wrapping_add(state.ins_h as usize);
-                *state.head.wrapping_add(state.ins_h as usize) =
-                    str as crate::src::deflate::Pos as crate::src::deflate::Posf;
-                str = str.wrapping_add(1);
-                state.insert = state.insert.wrapping_sub(1);
-                if !fill_window_has_insertable_match(state.lookahead, state.insert) {
-                    break;
-                }
-            }
+        if output.len() < more as usize {
+            return;
+        }
+        let copied = read_buf(state.strm, output.as_mut_ptr(), more);
+        state.lookahead = fill_window_lookahead_after_read(state.lookahead, copied);
+        if !fill_window_reinsert(state, window, head, prev) {
+            return;
         }
         if !fill_window_should_refill(state.lookahead, (*state.strm).avail_in) {
             break;
@@ -3830,26 +3862,58 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         deflateEnd_ffi(dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memcpy(
-        (*ds).window as *mut ::core::ffi::c_void,
-        (*ss).window as *const ::core::ffi::c_void,
-        (*ss).high_water as crate::__stddef_size_t_h::size_t,
-    );
-    crate::stdlib::memcpy(
-        (*ds).prev as *mut ::core::ffi::c_void,
-        (*ss).prev as *const ::core::ffi::c_void,
-        (deflate_copy_prev_len((*ss).slid, (*ss).strstart, (*ss).insert, (*ds).w_size)
-            as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()
-                as crate::__stddef_size_t_h::size_t),
-    );
-    crate::stdlib::memcpy(
-        (*ds).head as *mut ::core::ffi::c_void,
-        (*ss).head as *const ::core::ffi::c_void,
-        ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()
-                as crate::__stddef_size_t_h::size_t),
-    );
+    let Ok(window_len) = usize::try_from((*ss).high_water) else {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Ok(prev_len) = usize::try_from(deflate_copy_prev_len(
+        (*ss).slid,
+        (*ss).strstart,
+        (*ss).insert,
+        (*ds).w_size,
+    )) else {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Ok(head_len) = usize::try_from((*ds).hash_size) else {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Ok(window_capacity) = usize::try_from((*ss).window_size) else {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if window_len > window_capacity || prev_len > (*ds).w_size as usize {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // These separately callback-allocated buffers have no temporal overlap.
+    // Establish bounded views only at this exported ownership boundary, then
+    // use ordinary slice copies rather than foreign whole-buffer memcpy calls.
+    if window_len != 0 {
+        if (*ss).window.is_null() {
+            deflateEnd_ffi(dest);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        core::slice::from_raw_parts_mut((*ds).window, window_len)
+            .copy_from_slice(core::slice::from_raw_parts((*ss).window, window_len));
+    }
+    if prev_len != 0 {
+        if (*ss).prev.is_null() {
+            deflateEnd_ffi(dest);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        core::slice::from_raw_parts_mut((*ds).prev, prev_len)
+            .copy_from_slice(core::slice::from_raw_parts((*ss).prev, prev_len));
+    }
+    if head_len != 0 {
+        if (*ss).head.is_null() {
+            deflateEnd_ffi(dest);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        core::slice::from_raw_parts_mut((*ds).head, head_len)
+            .copy_from_slice(core::slice::from_raw_parts((*ss).head, head_len));
+    }
     let pending_layout = pending_plan.layout();
     debug_assert_eq!(source_pending_layout, pending_layout);
     let Some(pending_copy) = pending_storage_copy_plan(
@@ -5185,10 +5249,12 @@ mod tests {
         deflate_rle_tally_plan, deflate_set_dictionary_allowed, deflate_should_return_buf_error,
         deflate_slow_can_search_match, deflate_state_is_usable, deflate_state_status_valid,
         deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
-        fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
+        fill_window_cursor, fill_window_has_insertable_match,
+        fill_window_hash_update,
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
-        fill_window_slide, fill_window_state_after_slide, fill_window_zero, fill_window_zero_range,
+        fill_window_reinsert, fill_window_slide, fill_window_state_after_slide, fill_window_zero,
+        fill_window_zero_range,
         drain_pending, flush_pending_core,
         gzip_default_header_bytes, gzip_default_xfl, gzip_extra_copy_chunk, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_bytes, gzip_header_crc_pending_range, gzip_custom_header_bytes,
@@ -7001,6 +7067,31 @@ mod tests {
         assert_eq!(fill_window_hash_update(0x12, 0xab, 5, 0xff), 0xeb);
         assert_eq!(fill_window_hash_update(0xff, 0x34, 8, 0x7fff), 0x7f34);
         assert_eq!(fill_window_hash_update(0x1234, 0xffff, 4, 0), 0);
+    }
+
+    #[test]
+    fn fill_window_reinsert_uses_checked_window_and_hash_indices() {
+        let mut state = super::internal_state::newly_allocated();
+        state.strstart = 2;
+        state.lookahead = 3;
+        state.insert = 2;
+        state.w_mask = 3;
+        state.hash_shift = 1;
+        state.hash_mask = 7;
+        let window = [1, 2, 3, 4, 5];
+        let mut head = [0; 8];
+        let mut prev = [0; 4];
+
+        assert!(fill_window_reinsert(&mut state, &window, &mut head, &mut prev));
+        assert_eq!(state.insert, 0);
+        assert_eq!(head[3], 0);
+        assert_eq!(head[2], 1);
+        assert_eq!(prev[0], 0);
+        assert_eq!(prev[1], 0);
+
+        state.insert = 1;
+        state.strstart = 0;
+        assert!(!fill_window_reinsert(&mut state, &window, &mut head, &mut prev));
     }
 
     #[test]

@@ -1350,11 +1350,16 @@ pub unsafe extern "C" fn gzerror_ffi(
     file: crate::zlib_h::gzFile,
     errnum: *mut ::core::ffi::c_int,
 ) -> *const ::core::ffi::c_char {
-    if file.is_null() {
+    let state = file as *const crate::gzguts_h::gz_state;
+    if state.is_null()
+        || state.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+        || (!errnum.is_null()
+            && errnum.align_offset(::core::mem::align_of::<::core::ffi::c_int>()) != 0)
+    {
         return ::core::ptr::null::<::core::ffi::c_char>();
     }
 
-    let state = &*(file as crate::gzguts_h::gz_statep);
+    let state = &*state;
     let Some(message) = gzerror_core(state.mode, state.err, !state.msg.is_null()) else {
         return ::core::ptr::null::<::core::ffi::c_char>();
     };
@@ -1437,7 +1442,7 @@ mod tests {
         gz_position_after_skip, gz_post_open_metadata, gz_prepare_open, gz_request_len,
         gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
         gzclearerr_state_core, gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result,
-        gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
+        gzerror_core, gzerror_ffi, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
         gzrewind_request_is_valid, gzrewind_start_offset, gzseek_adjust_offset,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
         gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
@@ -2005,6 +2010,38 @@ mod tests {
             gz_legacy_offset_result(-1 as ::core::ffi::c_int as crate::stdlib::off64_t)
         );
         assert_eq!(unsafe { gzeof_ffi(file) }, 0);
+    }
+
+    #[test]
+    fn gzerror_rejects_misaligned_handle_and_error_output_before_dereferencing() {
+        assert!(::core::mem::align_of::<crate::gzguts_h::gz_state>() > 1);
+        let mut bytes = [0_u8; ::core::mem::size_of::<crate::gzguts_h::gz_state>() + 1];
+        let state_alignment = ::core::mem::align_of::<crate::gzguts_h::gz_state>();
+        let state_offset = if bytes.as_ptr().align_offset(state_alignment) == 0 {
+            1
+        } else {
+            0
+        };
+        let misaligned_file = bytes.as_mut_ptr().wrapping_add(state_offset) as crate::zlib_h::gzFile;
+
+        assert!(unsafe { gzerror_ffi(misaligned_file, core::ptr::null_mut()) }.is_null());
+
+        let mut state: crate::gzguts_h::gz_state = unsafe { core::mem::zeroed() };
+        state.mode = crate::gzguts_h::GZ_READ;
+        let mut errnum_bytes = [0_u8; core::mem::size_of::<::core::ffi::c_int>() + 1];
+        let errnum_alignment = core::mem::align_of::<::core::ffi::c_int>();
+        let errnum_offset = if errnum_bytes.as_ptr().align_offset(errnum_alignment) == 0 {
+            1
+        } else {
+            0
+        };
+        let misaligned_errnum = errnum_bytes.as_mut_ptr().wrapping_add(errnum_offset)
+            as *mut ::core::ffi::c_int;
+
+        assert!(unsafe {
+            gzerror_ffi(&mut state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile, misaligned_errnum)
+        }
+        .is_null());
     }
 
     #[test]
