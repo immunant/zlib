@@ -2412,128 +2412,103 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     deflateCopy(dest, source)
 }
-unsafe extern "C" fn longest_match(
-    mut s: *mut crate::src::deflate::deflate_state,
+fn longest_match_state(
+    s: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Byte],
+    prev: &[crate::src::deflate::Posf],
     mut cur_match: crate::src::deflate::IPos,
-) -> crate::stdlib::uInt {
-    let mut chain_length: ::core::ffi::c_uint = (*s).max_chain_length as ::core::ffi::c_uint;
-    let mut scan: *mut crate::stdlib::Bytef = (*s).window.offset((*s).strstart as isize);
-    let mut match_0: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    let mut len: ::core::ffi::c_int = 0;
-    let mut best_len: ::core::ffi::c_int = (*s).prev_length as ::core::ffi::c_int;
-    let mut nice_match: ::core::ffi::c_int = (*s).nice_match;
-    let mut limit: crate::src::deflate::IPos = if (*s).strstart
-        > (*s)
-            .w_size
+) -> Option<crate::stdlib::uInt> {
+    let max_match = usize::try_from(crate::zutil_h::MAX_MATCH).ok()?;
+    let strstart = usize::try_from(s.strstart).ok()?;
+    let strend = strstart.checked_add(max_match)?;
+    if strend > window.len() {
+        return None;
+    }
+
+    let mut chain_length = s.max_chain_length as ::core::ffi::c_uint;
+    let mut best_len = usize::try_from(s.prev_length).ok()?;
+    if best_len < 2 || best_len >= max_match {
+        return None;
+    }
+    let mut nice_match = s.nice_match;
+    let limit = if s.strstart
+        > s.w_size
             .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
     {
-        ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(
-            (*s).w_size
+        (s.strstart as crate::src::deflate::IPos).wrapping_sub(
+            s.w_size
                 .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
         )
     } else {
         NIL as crate::src::deflate::IPos
     };
-    let mut prev: *mut crate::src::deflate::Posf = (*s).prev;
-    let mut wmask: crate::stdlib::uInt = (*s).w_mask;
-    let mut strend: *mut crate::stdlib::Bytef = (*s)
-        .window
-        .offset((*s).strstart as isize)
-        .offset(crate::zutil_h::MAX_MATCH as isize);
-    let mut scan_end1: crate::stdlib::Byte =
-        *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize) as crate::stdlib::Byte;
-    let mut scan_end: crate::stdlib::Byte = *scan.offset(best_len as isize) as crate::stdlib::Byte;
-    if (*s).prev_length >= (*s).good_match {
-        chain_length >>= 2 as ::core::ffi::c_int;
+    if s.prev_length >= s.good_match {
+        chain_length >>= 2;
     }
-    if nice_match as crate::stdlib::uInt > (*s).lookahead {
-        nice_match = (*s).lookahead as ::core::ffi::c_int;
+    if nice_match as crate::stdlib::uInt > s.lookahead {
+        nice_match = s.lookahead as ::core::ffi::c_int;
     }
+
     loop {
-        match_0 = (*s).window.offset(cur_match as isize);
-        if !(*match_0.offset(best_len as isize) as ::core::ffi::c_int
-            != scan_end as ::core::ffi::c_int
-            || *match_0.offset((best_len - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_int
-                != scan_end1 as ::core::ffi::c_int
-            || *match_0 as ::core::ffi::c_int != *scan as ::core::ffi::c_int
-            || {
-                match_0 = match_0.offset(1);
-                *match_0 as ::core::ffi::c_int
-                    != *scan.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            })
+        let candidate = usize::try_from(cur_match).ok()?;
+        let candidate_end = candidate.checked_add(max_match)?;
+        if candidate_end > window.len() {
+            return None;
+        }
+        if window[candidate + best_len] == window[strstart + best_len]
+            && window[candidate + best_len - 1] == window[strstart + best_len - 1]
+            && window[candidate] == window[strstart]
+            && window[candidate + 1] == window[strstart + 1]
         {
-            scan = scan.offset(2 as ::core::ffi::c_int as isize);
-            match_0 = match_0.offset(1);
-            loop {
-                scan = scan.offset(1);
-                match_0 = match_0.offset(1);
-                if !(*scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && scan < strend)
-                {
-                    break;
-                }
+            let mut len = 2usize;
+            while len < max_match && window[strstart + len] == window[candidate + len] {
+                len += 1;
             }
-            len = crate::zutil_h::MAX_MATCH - strend.offset_from(scan) as ::core::ffi::c_int;
-            scan = strend.offset(-(crate::zutil_h::MAX_MATCH as isize));
             if len > best_len {
-                (*s).match_start = cur_match as crate::stdlib::uInt;
+                s.match_start = cur_match as crate::stdlib::uInt;
                 best_len = len;
-                if len >= nice_match {
+                if len as ::core::ffi::c_int >= nice_match {
                     break;
                 }
-                scan_end1 = *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize)
-                    as crate::stdlib::Byte;
-                scan_end = *scan.offset(best_len as isize) as crate::stdlib::Byte;
             }
         }
-        cur_match = *prev.offset((cur_match as crate::stdlib::uInt & wmask) as isize)
-            as crate::src::deflate::IPos;
-        if !(cur_match > limit && {
-            chain_length = chain_length.wrapping_sub(1);
-            chain_length != 0 as ::core::ffi::c_uint
-        }) {
+        let prev_index = usize::try_from((cur_match as crate::stdlib::uInt) & s.w_mask).ok()?;
+        cur_match = *prev.get(prev_index)? as crate::src::deflate::IPos;
+        chain_length = chain_length.wrapping_sub(1);
+        if cur_match <= limit || chain_length == 0 {
             break;
         }
     }
-    if best_len as crate::stdlib::uInt <= (*s).lookahead {
-        return best_len as crate::stdlib::uInt;
+    Some((best_len as crate::stdlib::uInt).min(s.lookahead))
+}
+
+unsafe extern "C" fn longest_match(
+    s: *mut crate::src::deflate::deflate_state,
+    cur_match: crate::src::deflate::IPos,
+) -> crate::stdlib::uInt {
+    if s.is_null() {
+        return 0;
     }
-    return (*s).lookahead;
+    let Ok(window_len) = usize::try_from((*s).window_size) else {
+        return 0;
+    };
+    let Ok(prev_len) = usize::try_from((*s).w_size) else {
+        return 0;
+    };
+    if (window_len != 0 && (*s).window.is_null()) || (prev_len != 0 && (*s).prev.is_null()) {
+        return 0;
+    }
+    let window = if window_len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts((*s).window, window_len)
+    };
+    let prev = if prev_len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts((*s).prev, prev_len)
+    };
+    longest_match_state(&mut *s, window, prev, cur_match).unwrap_or(0)
 }
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
