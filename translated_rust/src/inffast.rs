@@ -138,6 +138,22 @@ fn output_cursor_after_write(
     )
 }
 
+fn window_match_start(
+    window_size: ::core::ffi::c_uint,
+    window_next: ::core::ffi::c_uint,
+    distance_back: ::core::ffi::c_uint,
+) -> usize {
+    if window_next == 0 {
+        window_size.wrapping_sub(distance_back) as usize
+    } else if window_next < distance_back {
+        window_size
+            .wrapping_add(window_next)
+            .wrapping_sub(distance_back) as usize
+    } else {
+        window_next.wrapping_sub(distance_back) as usize
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum FastLitLenAction {
     Literal,
@@ -396,9 +412,8 @@ pub unsafe extern "C" fn inflate_fast(
                                 break;
                             }
                         }
-                        from = window;
+                        from = window.wrapping_add(window_match_start(wsize, wnext, op));
                         if wnext == 0 as ::core::ffi::c_uint {
-                            from = from.offset(wsize.wrapping_sub(op) as isize);
                             if op < len {
                                 len = len.wrapping_sub(op);
                                 loop {
@@ -419,7 +434,6 @@ pub unsafe extern "C" fn inflate_fast(
                                 from = out.wrapping_sub(dist as usize);
                             }
                         } else if wnext < op {
-                            from = from.offset(wsize.wrapping_add(wnext).wrapping_sub(op) as isize);
                             op = op.wrapping_sub(wnext);
                             if op < len {
                                 len = len.wrapping_sub(op);
@@ -462,7 +476,6 @@ pub unsafe extern "C" fn inflate_fast(
                                 }
                             }
                         } else {
-                            from = from.offset(wnext.wrapping_sub(op) as isize);
                             if op < len {
                                 len = len.wrapping_sub(op);
                                 loop {
@@ -569,7 +582,7 @@ mod tests {
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_dist_action, fast_input_available, fast_litlen_action, fast_output_available,
         input_remaining_after_read, low_bits, output_cursor_after_write, subtable_offset,
-        unread_input_state, FastDistAction, FastLitLenAction,
+        unread_input_state, window_match_start, FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -716,5 +729,17 @@ mod tests {
             output_cursor_after_write(::core::ffi::c_uint::MAX, 0),
             (0, ::core::ffi::c_uint::MAX),
         );
+    }
+
+    #[test]
+    fn window_match_start_preserves_window_rewind_branches_and_wrapping() {
+        assert_eq!(window_match_start(32, 0, 5), 27);
+        assert_eq!(window_match_start(32, 7, 12), 27);
+        assert_eq!(window_match_start(32, 12, 5), 7);
+        assert_eq!(
+            window_match_start(::core::ffi::c_uint::MAX, 0, 1),
+            (::core::ffi::c_uint::MAX - 1) as usize,
+        );
+        assert_eq!(window_match_start(0, 1, 2), ::core::ffi::c_uint::MAX as usize);
     }
 }

@@ -523,7 +523,7 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
             let p = state_ref.in_0;
             let q = state_ref.strm.next_in;
             if gz_avail_should_compact(compact_input, q == p) {
-                core::ptr::copy_nonoverlapping(q, p, state_ref.strm.avail_in as usize);
+                core::ptr::copy(q, p, state_ref.strm.avail_in as usize);
             }
             let (buf, len) = {
                 let state_ref = &*state;
@@ -1101,6 +1101,13 @@ mod tests {
         assert!(!gz_avail_should_compact(false, true));
         assert!(gz_avail_should_compact(true, false));
         assert!(!gz_avail_should_compact(true, true));
+    }
+
+    #[test]
+    fn gz_avail_input_compaction_preserves_overlapping_tail() {
+        let mut input = *b"abcdefgh";
+        input.copy_within(2..8, 0);
+        assert_eq!(&input[..6], b"cdefgh");
     }
 
     #[test]

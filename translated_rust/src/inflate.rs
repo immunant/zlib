@@ -1824,23 +1824,20 @@ pub unsafe extern "C" fn inflate(
                         copy = have;
                     }
                     if copy != 0 {
-                        if !(*state).head.is_null() && !(*(*state).head).extra.is_null() && {
-                            len = ((*(*state).head).extra_len as ::core::ffi::c_uint)
-                                .wrapping_sub((*state).length);
-                            len < (*(*state).head).extra_max
-                        } {
-                            crate::stdlib::memcpy(
-                                (*(*state).head).extra.offset(len as isize)
-                                    as *mut ::core::ffi::c_void,
-                                next as *const ::core::ffi::c_void,
-                                (if len.wrapping_add(copy) > (*(*state).head).extra_max {
-                                    ((*(*state).head).extra_max as ::core::ffi::c_uint)
-                                        .wrapping_sub(len)
-                                } else {
-                                    copy
-                                })
-                                    as crate::__stddef_size_t_h::size_t,
-                            );
+                        if !(*state).head.is_null() && !(*(*state).head).extra.is_null() {
+                            if let Some((offset, copy_len)) = gzip_extra_copy_bounds(
+                                (*(*state).head).extra_len as ::core::ffi::c_uint,
+                                (*state).length,
+                                (*(*state).head).extra_max,
+                                copy,
+                            ) {
+                                crate::stdlib::memcpy(
+                                    (*(*state).head).extra.offset(offset as isize)
+                                        as *mut ::core::ffi::c_void,
+                                    next as *const ::core::ffi::c_void,
+                                    copy_len as crate::__stddef_size_t_h::size_t,
+                                );
+                            }
                         }
                         if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
                             (*state).check = crate::src::crc32::crc32_ffi(
@@ -2382,6 +2379,24 @@ fn inflate_header_crc_enabled(flags: ::core::ffi::c_int, wrap: ::core::ffi::c_in
     flags & 0x200 != 0 && wrap & 4 != 0
 }
 
+fn gzip_extra_copy_bounds(
+    extra_len: ::core::ffi::c_uint,
+    remaining: ::core::ffi::c_uint,
+    extra_max: ::core::ffi::c_uint,
+    input_copy: ::core::ffi::c_uint,
+) -> Option<(::core::ffi::c_uint, ::core::ffi::c_uint)> {
+    let offset = extra_len.wrapping_sub(remaining);
+    if offset >= extra_max {
+        return None;
+    }
+    let copy = if offset.wrapping_add(input_copy) > extra_max {
+        extra_max.wrapping_sub(offset)
+    } else {
+        input_copy
+    };
+    Some((offset, copy))
+}
+
 fn inflate_should_update_window(
     wsize: ::core::ffi::c_uint,
     initial_out: ::core::ffi::c_uint,
@@ -2749,6 +2764,7 @@ mod tests {
         dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header,
         inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_progress,
         inflate_data_type_value, inflate_dictionary_is_allowed, inflate_get_dictionary_result,
+        gzip_extra_copy_bounds,
         inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_mark_progress,
         inflate_mark_value, inflate_mode_data_type_flags, inflate_mode_is_valid,
         inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
@@ -2761,6 +2777,14 @@ mod tests {
         InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT,
         HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
+
+    #[test]
+    fn gzip_extra_copy_bounds_preserves_destination_limits() {
+        assert_eq!(gzip_extra_copy_bounds(10, 8, 5, 2), Some((2, 2)));
+        assert_eq!(gzip_extra_copy_bounds(10, 7, 5, 8), Some((3, 2)));
+        assert_eq!(gzip_extra_copy_bounds(10, 5, 5, 1), None);
+        assert_eq!(gzip_extra_copy_bounds(0, 1, 5, 1), None);
+    }
 
     #[test]
     fn inflate_fast_path_requires_input_and_output_boundaries() {
