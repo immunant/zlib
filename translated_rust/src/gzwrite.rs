@@ -12,9 +12,12 @@ pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_io_chunk_limit;
 pub(crate) use crate::src::gzlib::gz_remove_owned_buffers;
+pub(crate) use crate::src::gzlib::gz_remove_owned_file_fd;
 pub(crate) use crate::src::gzlib::gz_store_owned_buffers;
 pub use crate::src::gzlib::gz_uInt_fits_int;
+pub(crate) use crate::src::gzlib::gz_with_file_mut;
 pub(crate) use crate::src::gzlib::gz_with_input_buffer_mut;
+pub(crate) use crate::src::gzlib::gz_with_output_buffer_mut;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
 pub use crate::stdlib::EAGAIN;
@@ -188,18 +191,11 @@ fn gz_comp(
             while let Some(chunk) = gz_pending_output_chunk(state, max) {
                 state.again = 0 as ::core::ffi::c_int;
                 put = chunk;
-                writ = unsafe {
-                    crate::stdlib::write(
-                        state.fd,
-                        state.x.next as *const ::core::ffi::c_void,
-                        put as crate::__stddef_size_t_h::size_t,
-                    ) as ::core::ffi::c_int
-                };
-                let write_result = if writ < 0 as ::core::ffi::c_int {
-                    gz_write_syscall_result(writ, gz_last_os_errno())
-                } else {
-                    gz_write_syscall_result(writ, 0 as ::core::ffi::c_int)
-                };
+                let write_result = gz_with_output_buffer_mut(state, |state, output_buf| {
+                    let next_offset =
+                        (state.x.next as usize).wrapping_sub(output_buf.as_ptr() as usize);
+                    gz_write_file(state, &output_buf[next_offset..next_offset + put as usize])
+                });
                 match write_result {
                     GzWriteSyscallResult::Wrote(written) => {
                         state.x.next = state.x.next.wrapping_add(written as usize);
@@ -388,6 +384,23 @@ fn gz_write_syscall_result(
         }
     } else {
         GzWriteSyscallResult::Wrote(writ)
+    }
+}
+
+fn gz_write_file(
+    state: &crate::gzguts_h::gz_state,
+    buf: &[crate::stdlib::Bytef],
+) -> GzWriteSyscallResult {
+    let write_result = gz_with_file_mut(state, |file| ::std::io::Write::write(file, buf));
+    match write_result {
+        Ok(written) => GzWriteSyscallResult::Wrote(written as ::core::ffi::c_int),
+        Err(err) => {
+            let errno = err.raw_os_error().unwrap_or(0 as ::core::ffi::c_int);
+            GzWriteSyscallResult::Error {
+                errno,
+                again: gz_write_errno_again(errno),
+            }
+        }
     }
 }
 
@@ -871,9 +884,10 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     }
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     crate::src::gzlib::gz_remove_error_info(state);
+    let close_fd = gz_remove_owned_file_fd(state).unwrap_or(state.fd);
     ret = gzclose_w_final_status(
         ret,
-        crate::stdlib::close(state.fd) == -1 as ::core::ffi::c_int,
+        crate::stdlib::close(close_fd) == -1 as ::core::ffi::c_int,
     );
     crate::stdlib::free(file as *mut ::core::ffi::c_void);
     return ret;

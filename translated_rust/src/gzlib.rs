@@ -188,6 +188,7 @@ struct GzOwnedBuffers {
 }
 
 static GZ_OWNED_BUFFERS: Mutex<Vec<(usize, GzOwnedBuffers)>> = Mutex::new(Vec::new());
+static GZ_OWNED_FILES: Mutex<Vec<(usize, ::std::fs::File)>> = Mutex::new(Vec::new());
 static GZ_ERROR_PATHS: Mutex<Vec<(usize, ::std::ffi::CString)>> = Mutex::new(Vec::new());
 static GZ_ERROR_MESSAGES: Mutex<Vec<(usize, ::std::ffi::CString)>> = Mutex::new(Vec::new());
 
@@ -225,6 +226,40 @@ pub(crate) fn gz_remove_owned_buffers(state: &crate::gzguts_h::gz_state) {
     {
         buffers.swap_remove(pos);
     }
+}
+
+pub(crate) fn gz_store_owned_file(state: &crate::gzguts_h::gz_state, file: ::std::fs::File) {
+    let mut files = GZ_OWNED_FILES.lock().expect("gz file registry poisoned");
+    let key = gz_state_key(state);
+    if let Some((_, old_file)) = files.iter_mut().find(|(stored_key, _)| *stored_key == key) {
+        *old_file = file;
+    } else {
+        files.push((key, file));
+    }
+}
+
+pub(crate) fn gz_with_file_mut<R>(
+    state: &crate::gzguts_h::gz_state,
+    f: impl FnOnce(&mut ::std::fs::File) -> R,
+) -> R {
+    let mut files = GZ_OWNED_FILES.lock().expect("gz file registry poisoned");
+    let (_, file) = files
+        .iter_mut()
+        .find(|(stored_key, _)| *stored_key == gz_state_key(state))
+        .expect("gz file missing");
+    f(file)
+}
+
+pub(crate) fn gz_remove_owned_file_fd(
+    state: &crate::gzguts_h::gz_state,
+) -> Option<::core::ffi::c_int> {
+    let mut files = GZ_OWNED_FILES.lock().expect("gz file registry poisoned");
+    let key = gz_state_key(state);
+    let pos = files
+        .iter()
+        .position(|(stored_key, _)| *stored_key == key)?;
+    let (_, file) = files.swap_remove(pos);
+    Some(::std::os::fd::IntoRawFd::into_raw_fd(file))
 }
 
 fn gz_store_error_path(state: &mut crate::gzguts_h::gz_state, path: &::core::ffi::CStr) {
@@ -421,6 +456,9 @@ macro_rules! gz_open_file {
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
+        let owned_file =
+            unsafe { <::std::fs::File as ::std::os::fd::FromRawFd>::from_raw_fd(state_ref.fd) };
+        gz_store_owned_file(state_ref, owned_file);
         if state_ref.mode == crate::gzguts_h::GZ_APPEND {
             crate::stdlib::lseek64(
                 state_ref.fd,

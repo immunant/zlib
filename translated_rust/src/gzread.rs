@@ -14,9 +14,11 @@ pub(crate) use crate::src::gzlib::gz_file_completed_items;
 pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
 pub(crate) use crate::src::gzlib::gz_remove_owned_buffers;
+pub(crate) use crate::src::gzlib::gz_remove_owned_file_fd;
 pub(crate) use crate::src::gzlib::gz_store_owned_buffers;
 pub use crate::src::gzlib::gz_uInt_fits_int;
 pub(crate) use crate::src::gzlib::gz_with_buffers_mut;
+pub(crate) use crate::src::gzlib::gz_with_file_mut;
 pub(crate) use crate::src::gzlib::gz_with_input_buffer_mut;
 pub(crate) use crate::src::gzlib::gz_with_output_buffer_mut;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
@@ -106,20 +108,24 @@ fn gz_load_read_result(
     }
 }
 
-fn gz_load(fd: ::core::ffi::c_int, buf: &mut [crate::stdlib::Bytef]) -> GzLoadOutcome {
+fn gz_load(state: &crate::gzguts_h::gz_state, buf: &mut [crate::stdlib::Bytef]) -> GzLoadOutcome {
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
     let len = buf.len() as ::core::ffi::c_uint;
     let mut have = 0 as ::core::ffi::c_uint;
+    let mut errno = 0 as ::core::ffi::c_int;
     loop {
         get = gz_io_chunk_len(len.wrapping_sub(have));
-        ret = unsafe {
-            crate::stdlib::read(
-                fd,
-                buf[have as usize..].as_mut_ptr() as *mut ::core::ffi::c_void,
-                get as crate::__stddef_size_t_h::size_t,
-            )
-        } as ::core::ffi::c_int;
+        let read_result = gz_with_file_mut(state, |file| {
+            ::std::io::Read::read(file, &mut buf[have as usize..have as usize + get as usize])
+        });
+        ret = match read_result {
+            Ok(read) => read as ::core::ffi::c_int,
+            Err(err) => {
+                errno = err.raw_os_error().unwrap_or(0 as ::core::ffi::c_int);
+                -1 as ::core::ffi::c_int
+            }
+        };
         if ret <= 0 as ::core::ffi::c_int {
             break;
         }
@@ -128,11 +134,6 @@ fn gz_load(fd: ::core::ffi::c_int, buf: &mut [crate::stdlib::Bytef]) -> GzLoadOu
             break;
         }
     }
-    let errno = if ret < 0 as ::core::ffi::c_int {
-        gz_last_os_errno()
-    } else {
-        0 as ::core::ffi::c_int
-    };
     GzLoadOutcome { ret, have, errno }
 }
 
@@ -201,7 +202,7 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 gz_compact_input_buffer(input, next_offset, state.strm.avail_in as usize);
             }
             let load_start = state.strm.avail_in as usize;
-            gz_load(state.fd, &mut input[load_start..])
+            gz_load(state, &mut input[load_start..])
         });
         if gz_apply_load_outcome(state, outcome, &mut got) == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
@@ -433,7 +434,7 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 let mut loaded = 0 as ::core::ffi::c_uint;
                 let len = state.size << 1 as ::core::ffi::c_int;
                 let outcome = gz_with_output_buffer_mut(state, |state, output| {
-                    gz_load(state.fd, &mut output[..len as usize])
+                    gz_load(state, &mut output[..len as usize])
                 });
                 let ret = gz_apply_load_outcome(state, outcome, &mut loaded);
                 state.x.have = loaded;
@@ -535,8 +536,7 @@ fn gz_read(
                 step = GzReadStep::NeedMoreInput;
             } else {
                 if state.how == crate::gzguts_h::COPY {
-                    let outcome =
-                        gz_load(state.fd, &mut output[output_pos..output_pos + n as usize]);
+                    let outcome = gz_load(state, &mut output[output_pos..output_pos + n as usize]);
                     err = gz_apply_load_outcome(state, outcome, &mut n);
                 } else {
                     state.strm.avail_out = n as crate::stdlib::uInt;
@@ -1043,7 +1043,8 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     err = gzclose_read_status(state.err);
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     crate::src::gzlib::gz_remove_error_info(state);
-    ret = crate::stdlib::close(state.fd);
+    let close_fd = gz_remove_owned_file_fd(state).unwrap_or(state.fd);
+    ret = crate::stdlib::close(close_fd);
     crate::stdlib::free(file as *mut ::core::ffi::c_void);
     return gzclose_r_final_status(ret, err);
 }
