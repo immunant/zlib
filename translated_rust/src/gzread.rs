@@ -179,6 +179,64 @@ struct GzAvailState<'a> {
     cursor_address: usize,
 }
 
+// Skipping buffered gzip output needs only a checked buffer offset and scalar
+// progress.  Keep that transition independent of the ABI cursor so the
+// eventual gzip owner can reuse it after the cursor becomes an offset rather
+// than a raw pointer.
+struct GzSkipState<'a> {
+    buffer: Option<&'a [u8]>,
+    cursor: usize,
+    have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+}
+
+enum GzSkipStep {
+    Advanced,
+    Fetch,
+    Done,
+}
+
+fn gz_skip_step(state: &mut GzSkipState<'_>) -> Result<GzSkipStep, ()> {
+    if state.have == 0 {
+        return Ok(if state.eof != 0 && state.avail_in == 0 {
+            GzSkipStep::Done
+        } else {
+            GzSkipStep::Fetch
+        });
+    }
+    let n = if ::core::mem::size_of::<::core::ffi::c_int>()
+        == ::core::mem::size_of::<crate::stdlib::off64_t>()
+        && state.have > crate::src::gzlib::gz_intmax()
+        || state.have as crate::stdlib::off64_t > state.skip
+    {
+        state.skip as ::core::ffi::c_uint
+    } else {
+        state.have
+    };
+    if n > state.have {
+        return Err(());
+    }
+    let end = state.cursor.checked_add(state.have as usize).ok_or(())?;
+    let Some(buffer) = state.buffer else {
+        return Err(());
+    };
+    if buffer.get(state.cursor..end).is_none() {
+        return Err(());
+    }
+    state.cursor = state.cursor.checked_add(n as usize).ok_or(())?;
+    state.have = state.have.wrapping_sub(n);
+    state.pos += n as crate::stdlib::off64_t;
+    state.skip -= n as crate::stdlib::off64_t;
+    Ok(if state.skip == 0 {
+        GzSkipStep::Done
+    } else {
+        GzSkipStep::Advanced
+    })
+}
+
 // Reading an owned gzip buffer does not require the ABI-shaped state.  Keep
 // the I/O loop pointer-free and return every state transition for the caller
 // to apply at its existing boundary.
@@ -666,45 +724,53 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
 }
 
 unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut n: ::core::ffi::c_uint = 0;
     loop {
-        if state.x.have != 0 {
-            n = if ::core::mem::size_of::<::core::ffi::c_int>()
-                == ::core::mem::size_of::<crate::stdlib::off64_t>()
-                && state.x.have > crate::src::gzlib::gz_intmax()
-                || state.x.have as crate::stdlib::off64_t > state.skip
-            {
-                state.skip as ::core::ffi::c_uint
-            } else {
-                state.x.have
-            };
-            let Some((next, have)) = state.out.as_deref().and_then(|buffer| {
+        let cursor = if state.x.have == 0 {
+            0
+        } else {
+            let Some(cursor) = state.out.as_deref().and_then(|buffer| {
                 crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
                     buffer,
                     state.x.next.addr(),
                     state.x.have,
                 )
-                .and_then(|cursor| cursor.advance(n as usize))
+                .and_then(|cursor| cursor.advance(0))
+                .map(|(next, _)| next)
             }) else {
                 return -1 as ::core::ffi::c_int;
             };
-            let Some(buffer) = state.out.as_deref() else {
-                return -1 as ::core::ffi::c_int;
-            };
-            state.x.have = have;
-            state.x.next = buffer.as_ptr().wrapping_add(next).cast_mut();
-            state.x.pos += n as crate::stdlib::off64_t;
-            state.skip -= n as crate::stdlib::off64_t;
-        } else {
-            if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
-                break;
+            cursor
+        };
+        let mut skip = GzSkipState {
+            buffer: state.out.as_deref(),
+            cursor,
+            have: state.x.have,
+            pos: state.x.pos,
+            skip: state.skip,
+            eof: state.eof,
+            avail_in: state.strm.avail_in,
+        };
+        match gz_skip_step(&mut skip) {
+            Ok(GzSkipStep::Fetch) => {
+                if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                    return -1 as ::core::ffi::c_int;
+                }
             }
-            if gz_fetch(state) == -1 as ::core::ffi::c_int {
-                return -1 as ::core::ffi::c_int;
+            Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
+                if skip.have != 0 {
+                    let Some(buffer) = state.out.as_deref() else {
+                        return -1 as ::core::ffi::c_int;
+                    };
+                    state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
+                }
+                state.x.have = skip.have;
+                state.x.pos = skip.pos;
+                state.skip = skip.skip;
+                if matches!(step, GzSkipStep::Done) {
+                    break;
+                }
             }
-        }
-        if state.skip == 0 {
-            break;
+            Err(()) => return -1 as ::core::ffi::c_int,
         }
     }
     return 0 as ::core::ffi::c_int;
