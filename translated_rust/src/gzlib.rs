@@ -525,6 +525,15 @@ pub unsafe extern "C" fn gzseek_ffi(
 ) -> crate::stdlib::off_t {
     gzseek(file, offset, whence)
 }
+
+fn gztell64_core(
+    pos: crate::stdlib::off64_t,
+    past: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    pos + if past != 0 { 0 } else { skip }
+}
+
 pub unsafe extern "C" fn gztell64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
@@ -535,12 +544,7 @@ pub unsafe extern "C" fn gztell64(mut file: crate::zlib_h::gzFile) -> crate::std
     if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
-    return (*state).x.pos
-        + (if (*state).past != 0 {
-            0 as crate::stdlib::off64_t
-        } else {
-            (*state).skip
-        });
+    gztell64_core((*state).x.pos, (*state).past, (*state).skip)
 }
 #[export_name = "gztell64"]
 
@@ -739,4 +743,19 @@ pub fn gz_intmax() -> ::core::ffi::c_uint {
 
 pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
     gz_intmax()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gztell64_core;
+
+    #[test]
+    fn gztell64_core_includes_pending_skip_before_eof() {
+        assert_eq!(gztell64_core(42, 0, 7), 49);
+    }
+
+    #[test]
+    fn gztell64_core_ignores_skip_after_eof() {
+        assert_eq!(gztell64_core(42, 1, 7), 42);
+    }
 }
