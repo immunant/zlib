@@ -84,7 +84,8 @@ impl InflateBackInitPlan {
         stream_size: ::core::ffi::c_int,
     ) -> Result<Self, ::core::ffi::c_int> {
         if !version_matches
-            || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+            || stream_size
+                != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
         {
             return Err(crate::zlib_h::Z_VERSION_ERROR);
         }
@@ -201,7 +202,10 @@ pub unsafe extern "C" fn inflateBackInit_(
     // Back-mode state uses the same allocation/release contract as normal
     // inflate.  Publish one fully initialized value into the callback-owned
     // allocation, whose returned bytes need not have been initialized.
-    ::core::ptr::write(state, inflate_back_initial_state(&plan, strm.addr(), window));
+    ::core::ptr::write(
+        state,
+        inflate_back_initial_state(&plan, strm.addr(), window),
+    );
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackInit_"]
@@ -1148,7 +1152,10 @@ pub unsafe extern "C" fn inflateBack(
                             let put_index = window.len().wrapping_sub(left as usize);
                             let back = (*state).wsize.wrapping_sub((*state).offset) as usize;
                             let (from_index, available) = if back < left as usize {
-                                (put_index.wrapping_add(back), (left as usize).wrapping_sub(back))
+                                (
+                                    put_index.wrapping_add(back),
+                                    (left as usize).wrapping_sub(back),
+                                )
                             } else {
                                 (
                                     put_index.wrapping_sub((*state).offset as usize),

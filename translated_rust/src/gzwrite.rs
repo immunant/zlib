@@ -170,6 +170,10 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     };
     state.buffers = buffers;
+    // The write-side input allocation is owned storage.  Retain its empty
+    // cursor as an index/count now, so later buffered writes need not recover
+    // it from the embedded stream's temporary `next_in` projection.
+    state.buffers.input_cursor = Some(crate::src::gzlib::GzCodecInput::empty());
     if state.direct == 0 {
         state.strm.zalloc = None;
         state.strm.zfree = None;
@@ -393,7 +397,6 @@ unsafe fn gz_comp(
         // explicitly, so this layer never reconstructs that range from an
         // unchecked state cursor.
         let input_available = state.strm.avail_in;
-        let input_cursor = state.strm.next_in.addr();
         let output_available = state.strm.avail_out;
         let output_cursor = state.strm.next_out.addr();
         let codec_state = crate::src::gzlib::GzEmbeddedDeflateState::new(
@@ -402,30 +405,30 @@ unsafe fn gz_comp(
             state.strm.total_in,
             state.strm.total_out,
         );
-        let input = match external_input {
-            Some(input) => input,
-            None => match state.buffers.input.as_deref() {
-                Some(input) => input,
-                None => return -1,
-            },
-        };
         let input = if input_available == 0 {
             // zlib permits a flush/finalization pass with no current input;
             // `next_in` may then still be null, so no cursor validation is
             // meaningful or required for the empty request.
             &[]
         } else {
-            let Some(buffered_input) = crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                input,
-                input_cursor,
-                input_available,
-            ) else {
-                return -1;
-            };
-            let Some((input, _)) = buffered_input.consume(input_available as usize) else {
-                return -1;
-            };
-            input
+            match external_input {
+                Some(input) => match input.get(..input_available as usize) {
+                    Some(input) => input,
+                    None => return -1,
+                },
+                None => {
+                    let Some(cursor) = state.buffers.input_cursor.as_ref() else {
+                        return -1;
+                    };
+                    let Some(buffer) = state.buffers.input.as_deref() else {
+                        return -1;
+                    };
+                    let Some(input) = cursor.bytes(buffer) else {
+                        return -1;
+                    };
+                    input
+                }
+            }
         };
         let output_size = state.buffers.size;
         let Some(output) = state.buffers.output.as_deref_mut() else {
@@ -465,6 +468,15 @@ unsafe fn gz_comp(
         state.strm.avail_out = codec_state.output_available();
         state.strm.total_in = codec_state.total_in();
         state.strm.total_out = codec_state.total_out();
+        if external_input.is_none() {
+            let Some(cursor) = state.buffers.input_cursor.as_ref() else {
+                return -1;
+            };
+            let Some(cursor) = cursor.after_codec(snapshot.remaining_input) else {
+                return -1;
+            };
+            state.buffers.input_cursor = Some(cursor);
+        }
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
@@ -514,7 +526,14 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             first = 0 as ::core::ffi::c_int;
         }
         state.strm.avail_in = step.input_len;
-        state.strm.next_in = state.buffers.input.as_deref_mut().unwrap().as_mut_ptr();
+        let Some(input) = state.buffers.input.as_deref() else {
+            return -1;
+        };
+        let Some(cursor) = crate::src::gzlib::GzCodecInput::from_index(input, 0, step.input_len)
+        else {
+            return -1;
+        };
+        state.buffers.input_cursor = Some(cursor);
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None);
         let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
         state.x.pos = progress.position;
@@ -548,27 +567,33 @@ unsafe fn gz_write(
     }
     if len < state.buffers.size as crate::stdlib::z_size_t {
         loop {
-            let (copy, have) = {
-                let strm = &mut state.strm;
+            let (copy, cursor) = {
                 let buffer =
                     &mut state.buffers.input.as_deref_mut().unwrap()[..state.buffers.size as usize];
-                if strm.avail_in == 0 as crate::stdlib::uInt {
-                    strm.next_in = buffer.as_mut_ptr();
-                }
-                let Some(mut buffered) = crate::src::gzlib::GzBufferedInput::from_owned_buffer(
+                let cursor = state
+                    .buffers
+                    .input_cursor
+                    .take()
+                    .unwrap_or_else(crate::src::gzlib::GzCodecInput::empty);
+                let Some(mut buffered) = crate::src::gzlib::GzBufferedInput::from_index(
                     buffer,
-                    strm.next_in.addr(),
-                    strm.avail_in,
+                    cursor.cursor(),
+                    cursor.available(),
                 ) else {
                     return 0 as crate::stdlib::z_size_t;
                 };
                 let copy = buffered.append(input);
-                let Some(have) = buffered.have() else {
+                let Some((start, have)) = buffered.cursor() else {
                     return 0 as crate::stdlib::z_size_t;
                 };
-                (copy, have)
+                let Some(cursor) = crate::src::gzlib::GzCodecInput::from_index(buffer, start, have)
+                else {
+                    return 0 as crate::stdlib::z_size_t;
+                };
+                (copy, cursor)
             };
-            state.strm.avail_in = have;
+            state.strm.avail_in = cursor.available();
+            state.buffers.input_cursor = Some(cursor);
             state.x.pos += copy as crate::stdlib::off64_t;
             input = &input[copy..];
             len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
@@ -584,7 +609,11 @@ unsafe fn gz_write(
             }
         }
     } else {
-        if state.strm.avail_in != 0
+        if state
+            .buffers
+            .input_cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.available() != 0)
             && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
@@ -793,32 +822,46 @@ unsafe fn gzputc(
     }
     if state.buffers.size != 0 {
         let size = state.buffers.size as usize;
-        let (copy, available) = {
-            let strm = &mut state.strm;
+        let (copy, cursor) = {
             let Some(buffer) = state.buffers.input.as_deref_mut() else {
                 return -1 as ::core::ffi::c_int;
             };
             let Some(buffer) = buffer.get_mut(..size) else {
                 return -1 as ::core::ffi::c_int;
             };
-            if strm.avail_in == 0 as crate::stdlib::uInt {
-                strm.next_in = buffer.as_mut_ptr();
-            }
-            let Some(mut buffered) = crate::src::gzlib::GzBufferedInput::from_owned_buffer(
+            let cursor = state
+                .buffers
+                .input_cursor
+                .take()
+                .unwrap_or_else(crate::src::gzlib::GzCodecInput::empty);
+            let Some(mut buffered) = crate::src::gzlib::GzBufferedInput::from_index(
                 buffer,
-                strm.next_in.addr(),
-                strm.avail_in,
+                cursor.cursor(),
+                cursor.available(),
             ) else {
                 return -1 as ::core::ffi::c_int;
             };
             let copy = buffered.append(&[c as ::core::ffi::c_uchar]);
-            let Some(available) = buffered.have() else {
+            let Some((start, available)) = buffered.cursor() else {
                 return -1 as ::core::ffi::c_int;
             };
-            (copy, available)
+            let Some(cursor) =
+                crate::src::gzlib::GzCodecInput::from_index(buffer, start, available)
+            else {
+                return -1 as ::core::ffi::c_int;
+            };
+            (copy, cursor)
         };
+        // Keep a full owned buffer's cursor as well: the fallback through
+        // `gz_write()` must flush those bytes before it appends this byte.
+        state.buffers.input_cursor = Some(cursor);
         if copy != 0 {
-            state.strm.avail_in = available;
+            state.strm.avail_in = state
+                .buffers
+                .input_cursor
+                .as_ref()
+                .expect("owned write cursor")
+                .available();
             state.x.pos += 1;
             return c & 0xff as ::core::ffi::c_int;
         }
@@ -965,7 +1008,11 @@ unsafe fn gzsetparams(
         return state.err;
     }
     if state.buffers.size != 0 {
-        if state.strm.avail_in != 0
+        if state
+            .buffers
+            .input_cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.available() != 0)
             && gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int
         {
             return state.err;

@@ -512,6 +512,15 @@ impl GzCodecInput {
         })
     }
 
+    // Buffered writers already know their owned-buffer offset.  Preserve
+    // that pointer-free proof instead of publishing a temporary ABI cursor
+    // solely to recover it before the next embedded-deflate request.
+    pub(crate) fn from_index(buffer: &[u8], cursor: usize, available: u32) -> Option<Self> {
+        let end = cursor.checked_add(available as usize)?;
+        buffer.get(cursor..end)?;
+        Some(Self { cursor, available })
+    }
+
     pub(crate) fn available(&self) -> u32 {
         self.available
     }
@@ -1576,8 +1585,12 @@ fn store_gz_reset_target(target: GzResetTarget<'_>, reset: GzResetState) {
     *target.codec_available_output = reset.codec.available_output;
     *target.codec_total_in = reset.codec.total_in;
     *target.codec_total_out = reset.codec.total_out;
-    *target.input_cursor =
-        (reset.mode == crate::gzguts_h::GZ_READ).then_some(GzCodecInput::empty());
+    // Seek-state snapshots use this owner cursor for reads, but buffered
+    // writers now retain pending input here as well.  A write-side seek only
+    // records `skip`; it must not discard bytes that still need deflating.
+    if reset.mode == crate::gzguts_h::GZ_READ {
+        *target.input_cursor = Some(GzCodecInput::empty());
+    }
 }
 
 fn gz_reset_fields(mode: ::core::ffi::c_int) -> GzResetFields {

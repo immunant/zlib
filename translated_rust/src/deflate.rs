@@ -825,7 +825,8 @@ pub unsafe extern "C" fn deflateInit2_(
     };
     let allocation_plan = layout.allocation_plan();
     let storage = allocation_plan.storage;
-    let s = Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
+    let s = Some(stream.zalloc.expect("non-null function pointer"))
+        .expect("non-null function pointer")(
         stream.opaque,
         allocation_plan.state.items,
         allocation_plan.state.size,
@@ -1153,7 +1154,9 @@ fn advance_slow_match(
         state.lookahead = state
             .lookahead
             .wrapping_sub(state.prev_length.wrapping_sub(1));
-        state.strstart = state.strstart.wrapping_add(state.prev_length.wrapping_sub(1));
+        state.strstart = state
+            .strstart
+            .wrapping_add(state.prev_length.wrapping_sub(1));
         state.prev_length = 0;
         state.match_available = 0;
         state.match_length = crate::zutil_h::MIN_MATCH as crate::stdlib::uInt - 1;
@@ -1277,12 +1280,8 @@ fn set_dictionary_core(
     state.prev_length = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
     state.match_length = state.prev_length;
     state.match_available = 0;
-    state.high_water = initialize_window_high_water(
-        window,
-        state.high_water,
-        state.strstart,
-        state.lookahead,
-    );
+    state.high_water =
+        initialize_window_high_water(window, state.high_water, state.strstart, state.lookahead);
     state.wrap = wrap;
     Ok(checksum)
 }
@@ -2452,9 +2451,7 @@ pub unsafe extern "C" fn deflate(
             .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
-    if s.status == crate::src::deflate::FINISH_STATE
-        && strm.avail_in != 0 as crate::stdlib::uInt
-    {
+    if s.status == crate::src::deflate::FINISH_STATE && strm.avail_in != 0 as crate::stdlib::uInt {
         strm.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
             || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -2547,28 +2544,27 @@ pub unsafe extern "C" fn deflate(
             state.gzhead.as_ref(),
         ) {
             None => {
-            state.status = crate::src::deflate::BUSY_STATE;
-            flush_pending(strm, s);
-            if s.pending != 0 as crate::zutil_h::ulg {
-                s.last_flush = -1 as ::core::ffi::c_int;
-                return crate::zlib_h::Z_OK;
-            }
+                state.status = crate::src::deflate::BUSY_STATE;
+                flush_pending(strm, s);
+                if s.pending != 0 as crate::zutil_h::ulg {
+                    s.last_flush = -1 as ::core::ffi::c_int;
+                    return crate::zlib_h::Z_OK;
+                }
             }
             Some(hcrc) => {
-            if hcrc {
-                strm.adler = crate::src::crc32::crc32_z(
-                    strm.adler,
-                    Some(&pending_buf[..state.pending as usize]),
-                );
-            }
-            state.gzindex = 0;
-            state.status = crate::src::deflate::EXTRA_STATE;
+                if hcrc {
+                    strm.adler = crate::src::crc32::crc32_z(
+                        strm.adler,
+                        Some(&pending_buf[..state.pending as usize]),
+                    );
+                }
+                state.gzindex = 0;
+                state.status = crate::src::deflate::EXTRA_STATE;
             }
         }
     }
     if s.status == crate::src::deflate::EXTRA_STATE {
-        if s
-            .gzhead
+        if s.gzhead
             .as_ref()
             .is_some_and(|header| header.extra.is_some())
         {
@@ -2577,9 +2573,7 @@ pub unsafe extern "C" fn deflate(
                     let header = s.gzhead.as_ref().expect("gzip header was checked");
                     let extra = header.extra.as_deref().expect("gzip extra was checked");
                     let pending_buf = ::core::slice::from_raw_parts_mut(
-                        s.pending_buf
-                            .expect("initialized pending buffer")
-                            .as_ptr(),
+                        s.pending_buf.expect("initialized pending buffer").as_ptr(),
                         s.pending_buf_size as usize,
                     );
                     append_gzip_extra_chunk(
@@ -2605,8 +2599,7 @@ pub unsafe extern "C" fn deflate(
         s.status = crate::src::deflate::NAME_STATE;
     }
     if s.status == crate::src::deflate::NAME_STATE {
-        if s
-            .gzhead
+        if s.gzhead
             .as_ref()
             .is_some_and(|header| header.name.is_some())
         {
@@ -2616,7 +2609,11 @@ pub unsafe extern "C" fn deflate(
             let (name, hcrc) = {
                 let gzhead = s.gzhead.as_ref().expect("gzip header was checked");
                 (
-                    gzhead.name.as_deref().expect("gzip name was checked").to_vec(),
+                    gzhead
+                        .name
+                        .as_deref()
+                        .expect("gzip name was checked")
+                        .to_vec(),
                     gzhead.hcrc,
                 )
             };
@@ -2686,8 +2683,7 @@ pub unsafe extern "C" fn deflate(
         s.status = crate::src::deflate::COMMENT_STATE;
     }
     if s.status == crate::src::deflate::COMMENT_STATE {
-        if s
-            .gzhead
+        if s.gzhead
             .as_ref()
             .is_some_and(|header| header.comment.is_some())
         {
@@ -2845,9 +2841,7 @@ pub unsafe extern "C" fn deflate(
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
                 let pending_buf = ::core::slice::from_raw_parts_mut(
-                    s.pending_buf
-                        .expect("initialized pending buffer")
-                        .as_ptr(),
+                    s.pending_buf.expect("initialized pending buffer").as_ptr(),
                     s.pending_buf_size as usize,
                 );
                 crate::src::trees::bit_output(
@@ -2869,9 +2863,7 @@ pub unsafe extern "C" fn deflate(
                 // than reconstructing the C null cursor accepted by the ABI
                 // adapter.
                 let pending_buf = ::core::slice::from_raw_parts_mut(
-                    s.pending_buf
-                        .expect("initialized pending buffer")
-                        .as_ptr(),
+                    s.pending_buf.expect("initialized pending buffer").as_ptr(),
                     s.pending_buf_size as usize,
                 );
                 crate::src::trees::stored_block_bytes(
@@ -2918,9 +2910,7 @@ pub unsafe extern "C" fn deflate(
         // pending allocation has exactly `pending_buf_size` bytes, established
         // by `deflateInit2_()` or `deflateCopy()`.
         let pending_buf = ::core::slice::from_raw_parts_mut(
-            s.pending_buf
-                .expect("initialized pending buffer")
-                .as_ptr(),
+            s.pending_buf.expect("initialized pending buffer").as_ptr(),
             s.pending_buf_size as usize,
         );
         append_pending_bytes(
@@ -3072,11 +3062,7 @@ pub unsafe extern "C" fn deflateCopy(
     // The allocation is immediately overwritten with the source state before
     // any field is observed.  Do not clear it first: that C-style write is
     // dead and the copied state supplies every byte.
-    ::core::ptr::copy_nonoverlapping(
-        ss,
-        ds,
-        1,
-    );
+    ::core::ptr::copy_nonoverlapping(ss, ds, 1);
     // The bytewise state copy above is needed for the C allocator-backed
     // storage.  Replace the copied owner before it can be observed or
     // released, making the header registration an independent deep copy.
@@ -3084,27 +3070,18 @@ pub unsafe extern "C" fn deflateCopy(
     ::core::ptr::addr_of_mut!(ds.gzhead).write(ss.gzhead.as_ref().map(copy_gzip_header));
     ds.strm = ::core::ptr::NonNull::from(&mut *dest);
     let storage = DeflateStorageLayout::new(ds.w_size, ds.hash_size, ds.lit_bufsize);
-    ds.window =
-        ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            dest.opaque,
-            storage.window.items,
-            storage.window.size,
-        ) as *mut crate::stdlib::Bytef);
-    ds.prev =
-        ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            dest.opaque,
-            storage.prev.items,
-            storage.prev.size,
-        ) as *mut crate::src::deflate::Posf);
-    ds.head =
-        ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            dest.opaque,
-            storage.head.items,
-            storage.head.size,
-        ) as *mut crate::src::deflate::Posf);
+    ds.window = ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
+        .expect("non-null function pointer")(
+        dest.opaque, storage.window.items, storage.window.size
+    ) as *mut crate::stdlib::Bytef);
+    ds.prev = ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
+        .expect("non-null function pointer")(
+        dest.opaque, storage.prev.items, storage.prev.size
+    ) as *mut crate::src::deflate::Posf);
+    ds.head = ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
+        .expect("non-null function pointer")(
+        dest.opaque, storage.head.items, storage.head.size
+    ) as *mut crate::src::deflate::Posf);
     ds.pending_buf =
         ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
@@ -3113,11 +3090,7 @@ pub unsafe extern "C" fn deflateCopy(
             storage.pending.size,
         ) as *mut crate::zutil_h::uchf
             as *mut crate::stdlib::Bytef);
-    if ds.window.is_none()
-        || ds.prev.is_none()
-        || ds.head.is_none()
-        || ds.pending_buf.is_none()
-    {
+    if ds.window.is_none() || ds.prev.is_none() || ds.head.is_none() || ds.pending_buf.is_none() {
         deflateEnd(dest as *mut crate::zlib_h::z_stream_s);
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -3152,15 +3125,11 @@ pub unsafe extern "C" fn deflateCopy(
     // each bounded view once and keep the two logical-region copies in the
     // pointer-free kernel.
     let source_pending = ::core::slice::from_raw_parts(
-        ss.pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
+        ss.pending_buf.expect("initialized pending buffer").as_ptr(),
         ss.pending_buf_size as usize,
     );
     let destination_pending = ::core::slice::from_raw_parts_mut(
-        ds.pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
+        ds.pending_buf.expect("initialized pending buffer").as_ptr(),
         ds.pending_buf_size as usize,
     );
     copy_pending_regions(source_pending, destination_pending, copy_layout.pending);
@@ -3324,11 +3293,10 @@ unsafe extern "C" fn deflate_stored(
         have = (stream.avail_out as ::core::ffi::c_uint).wrapping_sub(have);
         left = (state.strstart as ::core::ffi::c_long - state.block_start) as ::core::ffi::c_uint;
         if len as crate::zutil_h::ulg
-            > (left as crate::zutil_h::ulg)
-                .wrapping_add(stream.avail_in as crate::zutil_h::ulg)
+            > (left as crate::zutil_h::ulg).wrapping_add(stream.avail_in as crate::zutil_h::ulg)
         {
-            len = (left as crate::stdlib::uInt).wrapping_add(stream.avail_in)
-                as ::core::ffi::c_uint;
+            len =
+                (left as crate::stdlib::uInt).wrapping_add(stream.avail_in) as ::core::ffi::c_uint;
         }
         if len > have {
             len = have;
@@ -3336,8 +3304,7 @@ unsafe extern "C" fn deflate_stored(
         if len < min_block
             && (len == 0 as ::core::ffi::c_uint && flush != crate::zlib_h::Z_FINISH
                 || flush == crate::zlib_h::Z_NO_FLUSH
-                || len
-                    != (left as crate::stdlib::uInt).wrapping_add(stream.avail_in))
+                || len != (left as crate::stdlib::uInt).wrapping_add(stream.avail_in))
         {
             break;
         }
@@ -3455,9 +3422,7 @@ unsafe extern "C" fn deflate_stored(
     have = state
         .window_size
         .wrapping_sub(state.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
-    if stream.avail_in > have
-        && state.block_start >= state.w_size as ::core::ffi::c_long
-    {
+    if stream.avail_in > have && state.block_start >= state.w_size as ::core::ffi::c_long {
         state.block_start -= state.w_size as ::core::ffi::c_long;
         state.strstart = state.strstart.wrapping_sub(state.w_size);
         window.copy_within(
@@ -3570,7 +3535,8 @@ unsafe extern "C" fn deflate_fast(
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
     let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf
+        state
+            .pending_buf
             .expect("initialized pending buffer")
             .as_ptr(),
         state.pending_buf_size as usize,
@@ -3696,7 +3662,8 @@ unsafe extern "C" fn deflate_fast(
             } else {
                 state.strstart = state.strstart.wrapping_add(state.match_length);
                 state.match_length = 0 as crate::stdlib::uInt;
-                state.ins_h = initial_hash(window, state.strstart, state.hash_shift, state.hash_mask);
+                state.ins_h =
+                    initial_hash(window, state.strstart, state.hash_shift, state.hash_mask);
             }
         } else {
             let cc: crate::zutil_h::uch = window[state.strstart as usize] as crate::zutil_h::uch;
@@ -3910,7 +3877,8 @@ unsafe extern "C" fn deflate_slow(
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
     let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf
+        state
+            .pending_buf
             .expect("initialized pending buffer")
             .as_ptr(),
         state.pending_buf_size as usize,
@@ -3991,7 +3959,8 @@ unsafe extern "C" fn deflate_slow(
         if state.match_length <= 5 as crate::stdlib::uInt
             && (state.strategy == crate::zlib_h::Z_FILTERED
                 || state.match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                    && state.strstart.wrapping_sub(state.match_start) > TOO_FAR as crate::stdlib::uInt)
+                    && state.strstart.wrapping_sub(state.match_start)
+                        > TOO_FAR as crate::stdlib::uInt)
         {
             state.match_length =
                 (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
@@ -4059,8 +4028,8 @@ unsafe extern "C" fn deflate_slow(
                     );
                 }
                 if bflush != 0 {
-                    let stored_len = (state.strstart as ::core::ffi::c_long
-                        - state.block_start) as crate::zutil_h::ulg;
+                    let stored_len = (state.strstart as ::core::ffi::c_long - state.block_start)
+                        as crate::zutil_h::ulg;
                     let input = if state.block_start >= 0 {
                         let start = state.block_start as usize;
                         Some(&window[start..start + stored_len as usize])
@@ -4068,12 +4037,12 @@ unsafe extern "C" fn deflate_slow(
                         None
                     };
                     crate::src::trees::flush_block_from_views(
-                            if state.level > 0 {
-                                Some(&mut stream.data_type)
-                            } else {
-                                None
-                            },
-                            crate::src::trees::BlockFlushState {
+                        if state.level > 0 {
+                            Some(&mut stream.data_type)
+                        } else {
+                            None
+                        },
+                        crate::src::trees::BlockFlushState {
                             level: state.level,
                             strategy: state.strategy,
                             pending_buf,
@@ -4096,11 +4065,11 @@ unsafe extern "C" fn deflate_slow(
                             static_len: &mut state.static_len,
                             matches: &mut state.matches,
                             sym_buf_start: state.sym_buf_start,
-                                sym_next: &mut state.sym_next,
-                            },
-                            input,
-                            stored_len,
-                            0,
+                            sym_next: &mut state.sym_next,
+                        },
+                        input,
+                        stored_len,
+                        0,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
                     flush_pending(stream, state);
@@ -4112,8 +4081,8 @@ unsafe extern "C" fn deflate_slow(
             SlowMatchAction::Literal(next_bflush) => {
                 bflush = next_bflush;
                 if bflush != 0 {
-                    let stored_len = (state.strstart as ::core::ffi::c_long
-                        - state.block_start) as crate::zutil_h::ulg;
+                    let stored_len = (state.strstart as ::core::ffi::c_long - state.block_start)
+                        as crate::zutil_h::ulg;
                     let input = if state.block_start >= 0 {
                         let start = state.block_start as usize;
                         Some(&window[start..start + stored_len as usize])
@@ -4121,12 +4090,12 @@ unsafe extern "C" fn deflate_slow(
                         None
                     };
                     crate::src::trees::flush_block_from_views(
-                            if state.level > 0 {
-                                Some(&mut stream.data_type)
-                            } else {
-                                None
-                            },
-                            crate::src::trees::BlockFlushState {
+                        if state.level > 0 {
+                            Some(&mut stream.data_type)
+                        } else {
+                            None
+                        },
+                        crate::src::trees::BlockFlushState {
                             level: state.level,
                             strategy: state.strategy,
                             pending_buf,
@@ -4149,11 +4118,11 @@ unsafe extern "C" fn deflate_slow(
                             static_len: &mut state.static_len,
                             matches: &mut state.matches,
                             sym_buf_start: state.sym_buf_start,
-                                sym_next: &mut state.sym_next,
-                            },
-                            input,
-                            stored_len,
-                            0,
+                            sym_next: &mut state.sym_next,
+                        },
+                        input,
+                        stored_len,
+                        0,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
                     flush_pending(stream, state);
@@ -4209,12 +4178,12 @@ unsafe extern "C" fn deflate_slow(
             None
         };
         crate::src::trees::flush_block_from_views(
-                if state.level > 0 {
-                    Some(&mut stream.data_type)
-                } else {
-                    None
-                },
-                crate::src::trees::BlockFlushState {
+            if state.level > 0 {
+                Some(&mut stream.data_type)
+            } else {
+                None
+            },
+            crate::src::trees::BlockFlushState {
                 level: state.level,
                 strategy: state.strategy,
                 pending_buf,
@@ -4237,11 +4206,11 @@ unsafe extern "C" fn deflate_slow(
                 static_len: &mut state.static_len,
                 matches: &mut state.matches,
                 sym_buf_start: state.sym_buf_start,
-                    sym_next: &mut state.sym_next,
-                },
-                input,
-                stored_len,
-                1,
+                sym_next: &mut state.sym_next,
+            },
+            input,
+            stored_len,
+            1,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
         flush_pending(stream, state);
@@ -4268,12 +4237,12 @@ unsafe extern "C" fn deflate_slow(
             None
         };
         crate::src::trees::flush_block_from_views(
-                if state.level > 0 {
-                    Some(&mut stream.data_type)
-                } else {
-                    None
-                },
-                crate::src::trees::BlockFlushState {
+            if state.level > 0 {
+                Some(&mut stream.data_type)
+            } else {
+                None
+            },
+            crate::src::trees::BlockFlushState {
                 level: state.level,
                 strategy: state.strategy,
                 pending_buf,
@@ -4296,11 +4265,11 @@ unsafe extern "C" fn deflate_slow(
                 static_len: &mut state.static_len,
                 matches: &mut state.matches,
                 sym_buf_start: state.sym_buf_start,
-                    sym_next: &mut state.sym_next,
-                },
-                input,
-                stored_len,
-                0,
+                sym_next: &mut state.sym_next,
+            },
+            input,
+            stored_len,
+            0,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
         flush_pending(stream, state);
@@ -4453,7 +4422,8 @@ unsafe extern "C" fn deflate_rle(
         crate::src::trees::_tr_flush_block(
             state as *mut crate::src::deflate::internal_state,
             if state.block_start >= 0 as ::core::ffi::c_long {
-                state.window
+                state
+                    .window
                     .expect("initialized window")
                     .as_ptr()
                     .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
@@ -4478,7 +4448,8 @@ unsafe extern "C" fn deflate_rle(
         crate::src::trees::_tr_flush_block(
             state as *mut crate::src::deflate::internal_state,
             if state.block_start >= 0 as ::core::ffi::c_long {
-                state.window
+                state
+                    .window
                     .expect("initialized window")
                     .as_ptr()
                     .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)

@@ -1277,7 +1277,10 @@ pub unsafe extern "C" fn inflate(
                                                                                     break '_inf_leave;
                                                                                 }
                                                                                 inflate_pull_byte(
-                                                                                    input, in_0, &mut have, &mut hold, &mut bits,
+                                                                                    input, in_0,
+                                                                                    &mut have,
+                                                                                    &mut hold,
+                                                                                    &mut bits,
                                                                                 );
                                                                                 next = input[in_0.wrapping_sub(have) as usize..]
                                                                                     .as_ptr() as *mut ::core::ffi::c_uchar;
@@ -1527,8 +1530,12 @@ pub unsafe extern "C" fn inflate(
                                                                             as usize;
                                                                         let copy_len =
                                                                             copy as usize;
-                                                                        let output_start = output.len() - left as usize;
-                                                                        output[output_start..output_start + copy_len]
+                                                                        let output_start = output
+                                                                            .len()
+                                                                            - left as usize;
+                                                                        output[output_start
+                                                                            ..output_start
+                                                                                + copy_len]
                                                                             .copy_from_slice(
                                                                                 &input[input_start
                                                                                     ..input_start
@@ -1541,9 +1548,12 @@ pub unsafe extern "C" fn inflate(
                                                                             as *mut ::core::ffi::c_uchar;
                                                                         left =
                                                                             left.wrapping_sub(copy);
-                                                                        put = output.as_mut_ptr().wrapping_add(
-                                                                            output_start + copy_len,
-                                                                        );
+                                                                        put = output
+                                                                            .as_mut_ptr()
+                                                                            .wrapping_add(
+                                                                                output_start
+                                                                                    + copy_len,
+                                                                            );
                                                                         state.length = (*state)
                                                                             .length
                                                                             .wrapping_sub(copy);
@@ -1569,9 +1579,7 @@ pub unsafe extern "C" fn inflate(
                                                                         .as_ptr()
                                                                         as *mut ::core::ffi::c_uchar;
                                                                 }
-                                                                if let Some(mut head) =
-                                                                    state.head
-                                                                {
+                                                                if let Some(mut head) = state.head {
                                                                     let head = &mut *head.as_ptr();
                                                                     head.xflags = (hold
                                                                         & 0xff
@@ -1638,8 +1646,7 @@ pub unsafe extern "C" fn inflate(
                                                                 .as_ptr()
                                                                 as *mut ::core::ffi::c_uchar;
                                                         }
-                                                        state.last = (hold
-                                                            as ::core::ffi::c_uint
+                                                        state.last = (hold as ::core::ffi::c_uint
                                                             & ((1 as ::core::ffi::c_uint)
                                                                 << 1 as ::core::ffi::c_int)
                                                                 .wrapping_sub(
@@ -1703,8 +1710,7 @@ pub unsafe extern "C" fn inflate(
                                                         continue '_inf_leave;
                                                     }
                                                 }
-                                                if state.flags & 0x400 as ::core::ffi::c_int != 0
-                                                {
+                                                if state.flags & 0x400 as ::core::ffi::c_int != 0 {
                                                     while bits
                                                         < 16 as ::core::ffi::c_int
                                                             as ::core::ffi::c_uint
@@ -1728,8 +1734,7 @@ pub unsafe extern "C" fn inflate(
                                                     }
                                                     if state.flags & 0x200 as ::core::ffi::c_int
                                                         != 0
-                                                        && state.wrap & 4 as ::core::ffi::c_int
-                                                            != 0
+                                                        && state.wrap & 4 as ::core::ffi::c_int != 0
                                                     {
                                                         hbuf[0 as usize] =
                                                             hold as ::core::ffi::c_uchar;
@@ -2044,8 +2049,8 @@ pub unsafe extern "C" fn inflate(
                                 loop {
                                     let c2rust_fresh5 = copy;
                                     copy = copy.wrapping_add(1);
-                                    len = input[in_0.wrapping_sub(have) as usize
-                                        + c2rust_fresh5 as usize]
+                                    len = input
+                                        [in_0.wrapping_sub(have) as usize + c2rust_fresh5 as usize]
                                         as ::core::ffi::c_uint;
                                     if let Some(head) = state.head {
                                         if !(*head.as_ptr()).name.is_null()
@@ -2066,8 +2071,11 @@ pub unsafe extern "C" fn inflate(
                                 {
                                     state.check = crate::src::crc32::crc32_z(
                                         state.check as crate::stdlib::uLong,
-                                        Some(&input[in_0.wrapping_sub(have) as usize
-                                            ..in_0.wrapping_sub(have).wrapping_add(copy) as usize]),
+                                        Some(
+                                            &input[in_0.wrapping_sub(have) as usize
+                                                ..in_0.wrapping_sub(have).wrapping_add(copy)
+                                                    as usize],
+                                        ),
                                     )
                                         as ::core::ffi::c_ulong;
                                 }
@@ -2165,8 +2173,7 @@ pub unsafe extern "C" fn inflate(
                         loop {
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
-                            len = input[in_0.wrapping_sub(have) as usize
-                                + c2rust_fresh7 as usize]
+                            len = input[in_0.wrapping_sub(have) as usize + c2rust_fresh7 as usize]
                                 as ::core::ffi::c_uint;
                             if let Some(head) = state.head {
                                 if !(*head.as_ptr()).comment.is_null()
@@ -2187,8 +2194,10 @@ pub unsafe extern "C" fn inflate(
                         {
                             state.check = crate::src::crc32::crc32_z(
                                 state.check as crate::stdlib::uLong,
-                                Some(&input[in_0.wrapping_sub(have) as usize
-                                    ..in_0.wrapping_sub(have).wrapping_add(copy) as usize]),
+                                Some(
+                                    &input[in_0.wrapping_sub(have) as usize
+                                        ..in_0.wrapping_sub(have).wrapping_add(copy) as usize],
+                                ),
                             ) as ::core::ffi::c_ulong;
                         }
                         have = have.wrapping_sub(copy);
@@ -2218,8 +2227,7 @@ pub unsafe extern "C" fn inflate(
                     );
                     hold >>= state.extra;
                     bits = bits.wrapping_sub(state.extra);
-                    state.back = (state.back as ::core::ffi::c_uint)
-                        .wrapping_add(state.extra)
+                    state.back = (state.back as ::core::ffi::c_uint).wrapping_add(state.extra)
                         as ::core::ffi::c_int;
                 }
                 state.mode = crate::src::inflate::MATCH;
@@ -2620,9 +2628,13 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
         state.have = sync_state.have;
         state.flags = sync_state.flags;
         state.wrap = sync_state.wrap;
-        strm_ref.avail_in = strm_ref.avail_in.wrapping_sub(consumed as crate::stdlib::uInt);
+        strm_ref.avail_in = strm_ref
+            .avail_in
+            .wrapping_sub(consumed as crate::stdlib::uInt);
         strm_ref.next_in = strm_ref.next_in.wrapping_add(consumed);
-        strm_ref.total_in = strm_ref.total_in.wrapping_add(consumed as crate::stdlib::uLong);
+        strm_ref.total_in = strm_ref
+            .total_in
+            .wrapping_add(consumed as crate::stdlib::uLong);
         if status != crate::zlib_h::Z_OK {
             return status;
         }
