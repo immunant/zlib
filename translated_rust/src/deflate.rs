@@ -496,6 +496,41 @@ impl<'a> DeflateWorkingSet<'a> {
         self.pending.as_mut()
     }
 
+    /// Flush complete pending bits and drain the resulting bytes through the
+    /// call-scoped output view.  This is the safe half of `flush_pending()`:
+    /// the exported boundary remains responsible for establishing the output
+    /// slice and committing its raw cursor afterward.
+    ///
+    /// Keeping both operations on the same working set is important because
+    /// pending bytes and symbol triplets share one callback allocation.  A
+    /// strategy must not reconstruct a second view of that allocation between
+    /// bit flushing and draining it.
+    pub(crate) fn flush_pending_into(
+        &mut self,
+        state: &mut internal_state,
+        output: &mut [crate::stdlib::Bytef],
+        avail_out: crate::stdlib::uInt,
+        total_out: crate::stdlib::uLong,
+    ) -> Option<FlushPendingResult> {
+        let storage = self.pending.as_mut()?;
+        if !crate::src::trees::tr_flush_bits_core(
+            storage,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+        ) {
+            return None;
+        }
+        let drain = PendingDrainState {
+            pending: state.pending,
+            pending_out_offset: state.pending_out_offset,
+        };
+        let result = storage.drain_into(drain, output, avail_out, total_out)?;
+        state.pending = result.next.pending;
+        state.pending_out_offset = result.next.pending_out_offset;
+        Some(result)
+    }
+
     pub(crate) fn window(&self) -> &[crate::stdlib::Bytef] {
         self.window
     }
@@ -3316,7 +3351,7 @@ struct PendingDrainState {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-struct FlushPendingResult {
+pub(crate) struct FlushPendingResult {
     copied: ::core::ffi::c_uint,
     next: PendingDrainState,
     avail_out: crate::stdlib::uInt,
@@ -7511,6 +7546,39 @@ mod tests {
         assert_eq!(head[2], 0);
         assert_eq!(prev[0], 11);
         assert_eq!(window[0], 9);
+    }
+
+    #[test]
+    fn deflate_working_set_flushes_and_drains_pending_storage() {
+        let mut state = super::internal_state::newly_allocated();
+        let layout = pending_storage_layout(4);
+        state.lit_bufsize = 4;
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        state.sym_buf_offset = layout.symbol_offset;
+        state.sym_end = layout.symbol_flush_threshold;
+        state.window_size = 8;
+        state.w_size = 4;
+        state.hash_size = 8;
+        state.pending = 3;
+
+        let mut pending = [0; 16];
+        pending[..3].copy_from_slice(&[0xa1, 0xb2, 0xc3]);
+        let mut window = [0; 8];
+        let mut head = [0; 8];
+        let mut prev = [0; 4];
+        let mut output = [0; 2];
+        let result =
+            DeflateWorkingSet::new(&state, &mut pending, &mut window, &mut head, &mut prev)
+                .unwrap()
+                .flush_pending_into(&mut state, &mut output, 2, 11)
+                .unwrap();
+
+        assert_eq!(output, [0xa1, 0xb2]);
+        assert_eq!(result.copied, 2);
+        assert_eq!(result.avail_out, 0);
+        assert_eq!(result.total_out, 13);
+        assert_eq!(state.pending, 1);
+        assert_eq!(state.pending_out_offset, 2);
     }
 
     #[test]
