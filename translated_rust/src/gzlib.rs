@@ -642,7 +642,7 @@ pub unsafe extern "C" fn gzseek64(
             state.x.have
         };
         state.x.have = state.x.have.wrapping_sub(n);
-        state.x.next = state.x.next.offset(n as isize);
+        state.x.next = state.x.next.wrapping_add(n as usize);
         state.x.pos += n as crate::stdlib::off64_t;
         offset -= n as crate::stdlib::off64_t;
     }

@@ -353,8 +353,9 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
     }
     (*state).x.have =
         (had as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as ::core::ffi::c_uint;
-    (*state).x.next =
-        (*strm).next_out.offset(-((*state).x.have as isize)) as *mut ::core::ffi::c_uchar;
+    (*state).x.next = (*strm)
+        .next_out
+        .wrapping_sub((*state).x.have as usize) as *mut ::core::ffi::c_uchar;
     if ret == crate::zlib_h::Z_STREAM_END {
         (*state).junk = 0 as ::core::ffi::c_int;
         (*state).how = crate::gzguts_h::LOOK;
@@ -432,7 +433,7 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
                 (*state).x.have
             };
             (*state).x.have = (*state).x.have.wrapping_sub(n);
-            (*state).x.next = (*state).x.next.offset(n as isize);
+            (*state).x.next = (*state).x.next.wrapping_add(n as usize);
             (*state).x.pos += n as crate::stdlib::off64_t;
             (*state).skip -= n as crate::stdlib::off64_t;
         } else {
@@ -812,7 +813,7 @@ unsafe fn gzgets(
                     copy_through_newline(input, &mut output[written..written + n]);
                 n = copied;
                 state.x.have = state.x.have.wrapping_sub(n as ::core::ffi::c_uint);
-                state.x.next = state.x.next.offset(n as isize);
+                state.x.next = state.x.next.wrapping_add(n);
                 state.x.pos += n as crate::stdlib::off64_t;
                 left -= n;
                 written += n;

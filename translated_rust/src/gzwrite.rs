@@ -159,7 +159,7 @@ unsafe extern "C" fn gz_comp(
                 return -1 as ::core::ffi::c_int;
             }
             (*strm).avail_in = (*strm).avail_in.wrapping_sub(writ as ::core::ffi::c_uint);
-            (*strm).next_in = (*strm).next_in.offset(writ as isize);
+            (*strm).next_in = (*strm).next_in.wrapping_add(writ as usize);
         }
         return 0 as ::core::ffi::c_int;
     }
@@ -179,12 +179,11 @@ unsafe extern "C" fn gz_comp(
             while (*strm).next_out > (*state).x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 (*state).again = 0 as ::core::ffi::c_int;
-                put = if (*strm).next_out.offset_from((*state).x.next)
-                    > max as ::core::ffi::c_int as isize
-                {
+                let buffered = (*strm).next_out.addr().wrapping_sub((*state).x.next.addr());
+                put = if buffered > max as usize {
                     max
                 } else {
-                    (*strm).next_out.offset_from((*state).x.next) as ::core::ffi::c_uint
+                    buffered as ::core::ffi::c_uint
                 };
                 writ = crate::stdlib::write(
                     (*state).fd,
@@ -204,7 +203,7 @@ unsafe extern "C" fn gz_comp(
                     );
                     return -1 as ::core::ffi::c_int;
                 }
-                (*state).x.next = (*state).x.next.offset(writ as isize);
+                (*state).x.next = (*state).x.next.wrapping_add(writ as usize);
             }
             if (*strm).avail_out == 0 as crate::stdlib::uInt {
                 (*strm).avail_out = (*state).size as crate::stdlib::uInt;
@@ -301,8 +300,9 @@ unsafe extern "C" fn gz_write(
             have = (*state)
                 .strm
                 .next_in
-                .offset((*state).strm.avail_in as isize)
-                .offset_from((*state).in_0) as ::core::ffi::c_uint;
+                .wrapping_add((*state).strm.avail_in as usize)
+                .addr()
+                .wrapping_sub((*state).in_0.addr()) as ::core::ffi::c_uint;
             copy = (*state).size.wrapping_sub(have);
             if copy as crate::stdlib::z_size_t > len {
                 copy = len as ::core::ffi::c_uint;
