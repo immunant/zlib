@@ -308,10 +308,7 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
             }
         }
     }
-    (*state).x.have =
-        (had as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as ::core::ffi::c_uint;
-    (*state).x.next =
-        (*strm).next_out.offset(-((*state).x.have as isize)) as *mut ::core::ffi::c_uchar;
+    gz_record_decompressed_output(&mut *state, had);
     if ret == crate::zlib_h::Z_STREAM_END {
         (*state).junk = 0 as ::core::ffi::c_int;
         (*state).how = crate::gzguts_h::LOOK;
@@ -376,15 +373,9 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
 }
 
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let mut n: ::core::ffi::c_uint = 0;
     loop {
         if (*state).x.have != 0 {
-            n = gz_consume_buffered_read(
-                &mut (*state).x.have,
-                &mut (*state).x.pos,
-                &mut (*state).skip,
-            );
-            (*state).x.next = (*state).x.next.offset(n as isize);
+            gz_consume_skip_buffer(&mut *state);
         } else {
             if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
@@ -488,6 +479,19 @@ fn gz_read_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
         && (state.err == crate::zlib_h::Z_OK
             || state.err == crate::zlib_h::Z_BUF_ERROR
             || state.again != 0)
+}
+
+fn gz_record_decompressed_output(
+    state: &mut crate::gzguts_h::gz_state,
+    had: ::core::ffi::c_uint,
+) {
+    state.x.have = had.wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
+    state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize);
+}
+
+fn gz_consume_skip_buffer(state: &mut crate::gzguts_h::gz_state) {
+    let n = gz_consume_buffered_read(&mut state.x.have, &mut state.x.pos, &mut state.skip);
+    state.x.next = state.x.next.wrapping_add(n as usize);
 }
 
 fn gz_shift_pushback_buffer(buf: &mut [crate::stdlib::Bytef], have: usize) -> usize {

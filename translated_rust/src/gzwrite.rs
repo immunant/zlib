@@ -149,8 +149,7 @@ unsafe extern "C" fn gz_comp(
                 );
                 return -1 as ::core::ffi::c_int;
             }
-            (*strm).avail_in = (*strm).avail_in.wrapping_sub(writ as ::core::ffi::c_uint);
-            (*strm).next_in = (*strm).next_in.offset(writ as isize);
+            gz_note_direct_input_written(&mut *strm, writ);
         }
         return 0 as ::core::ffi::c_int;
     }
@@ -189,7 +188,7 @@ unsafe extern "C" fn gz_comp(
                     );
                     return -1 as ::core::ffi::c_int;
                 }
-                (*state).x.next = (*state).x.next.offset(writ as isize);
+                gz_note_pending_output_written(&mut *state, writ);
             }
             if (*strm).avail_out == 0 as crate::stdlib::uInt {
                 (*strm).avail_out = (*state).size as crate::stdlib::uInt;
@@ -343,6 +342,21 @@ fn gz_note_buffered_input(
 ) {
     state.strm.avail_in = state.strm.avail_in.wrapping_add(count);
     state.x.pos += count as crate::stdlib::off64_t;
+}
+
+fn gz_note_direct_input_written(
+    strm: &mut crate::zlib_h::z_stream,
+    written: ::core::ffi::c_int,
+) {
+    strm.avail_in = strm.avail_in.wrapping_sub(written as ::core::ffi::c_uint);
+    strm.next_in = strm.next_in.wrapping_add(written as usize);
+}
+
+fn gz_note_pending_output_written(
+    state: &mut crate::gzguts_h::gz_state,
+    written: ::core::ffi::c_int,
+) {
+    state.x.next = state.x.next.wrapping_add(written as usize);
 }
 
 fn gz_buffered_input_used(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_uint {
