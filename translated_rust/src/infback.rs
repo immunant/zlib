@@ -74,11 +74,56 @@ struct InflateBackStateConfig {
     wsize: ::core::ffi::c_uint,
 }
 
+#[derive(Copy, Clone)]
+enum InflateBackBlockType {
+    Stored,
+    Fixed,
+    Dynamic,
+    Invalid,
+}
+
+#[derive(Copy, Clone)]
+struct InflateBackDynamicHeader {
+    nlen: ::core::ffi::c_uint,
+    ndist: ::core::ffi::c_uint,
+    ncode: ::core::ffi::c_uint,
+}
+
 fn inflate_back_state_config(window_bits: ::core::ffi::c_int) -> InflateBackStateConfig {
     InflateBackStateConfig {
         dmax: 32768 as ::core::ffi::c_uint,
         wbits: window_bits as crate::stdlib::uInt as ::core::ffi::c_uint,
         wsize: (1 as ::core::ffi::c_uint) << window_bits,
+    }
+}
+
+fn inflate_back_block_header(
+    hold: ::core::ffi::c_ulong,
+) -> (::core::ffi::c_int, InflateBackBlockType) {
+    let last = (hold & 1) as ::core::ffi::c_int;
+    let block_type = match (hold >> 1) & 3 {
+        0 => InflateBackBlockType::Stored,
+        1 => InflateBackBlockType::Fixed,
+        2 => InflateBackBlockType::Dynamic,
+        _ => InflateBackBlockType::Invalid,
+    };
+    (last, block_type)
+}
+
+fn inflate_back_stored_length(hold: ::core::ffi::c_ulong) -> Option<::core::ffi::c_uint> {
+    let length = hold as ::core::ffi::c_uint & 0xffff;
+    if hold & 0xffff == hold >> 16 ^ 0xffff {
+        Some(length)
+    } else {
+        None
+    }
+}
+
+fn inflate_back_dynamic_header(hold: ::core::ffi::c_ulong) -> InflateBackDynamicHeader {
+    InflateBackDynamicHeader {
+        nlen: (hold as ::core::ffi::c_uint & 31).wrapping_add(257),
+        ndist: ((hold >> 5) as ::core::ffi::c_uint & 31).wrapping_add(1),
+        ncode: ((hold >> 10) as ::core::ffi::c_uint & 15).wrapping_add(4),
     }
 }
 
@@ -245,36 +290,29 @@ pub unsafe extern "C" fn inflateBack(
                         hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).last = (hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 1 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                        as ::core::ffi::c_int;
-                    hold >>= 1 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(1 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                    match hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 2 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                    {
-                        0 => {
+                    let (last, block_type) = inflate_back_block_header(hold);
+                    (*state).last = last;
+                    hold >>= 3;
+                    bits = bits.wrapping_sub(3);
+                    match block_type {
+                        InflateBackBlockType::Stored => {
                             (*state).mode = crate::src::inflate::STORED;
                         }
-                        1 => {
+                        InflateBackBlockType::Fixed => {
                             let state_ref = &mut *state;
                             crate::src::inftrees::inflate_fixed(state_ref);
                             state_ref.mode = crate::src::inflate::LEN;
                         }
-                        2 => {
+                        InflateBackBlockType::Dynamic => {
                             (*state).mode = crate::src::inflate::TABLE;
                         }
-                        _ => {
+                        InflateBackBlockType::Invalid => {
                             (*strm).msg = b"invalid block type\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
                             (*state).mode = crate::src::inflate::BAD;
                         }
                     }
-                    hold >>= 2 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
                     continue;
                 }
             }
@@ -296,16 +334,8 @@ pub unsafe extern "C" fn inflateBack(
                     hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if hold & 0xffff as ::core::ffi::c_ulong
-                    != hold >> 16 as ::core::ffi::c_int ^ 0xffff as ::core::ffi::c_ulong
-                {
-                    (*strm).msg = b"invalid stored block lengths\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
-                    continue;
-                } else {
-                    (*state).length = hold as ::core::ffi::c_uint & 0xffff as ::core::ffi::c_uint;
+                if let Some(length) = inflate_back_stored_length(hold) {
+                    (*state).length = length;
                     hold = 0 as ::core::ffi::c_ulong;
                     bits = 0 as ::core::ffi::c_uint;
                     while (*state).length != 0 as ::core::ffi::c_uint {
@@ -346,6 +376,12 @@ pub unsafe extern "C" fn inflateBack(
                     }
                     (*state).mode = crate::src::inflate::TYPE;
                     continue;
+                } else {
+                    (*strm).msg = b"invalid stored block lengths\0".as_ptr()
+                        as *const ::core::ffi::c_char
+                        as *mut ::core::ffi::c_char;
+                    (*state).mode = crate::src::inflate::BAD;
+                    continue;
                 }
             }
             16196 => {
@@ -364,24 +400,12 @@ pub unsafe extern "C" fn inflateBack(
                     hold = hold.wrapping_add((*c2rust_fresh2 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                (*state).nlen = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(257 as ::core::ffi::c_uint);
-                hold >>= 5 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                (*state).ndist = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(1 as ::core::ffi::c_uint);
-                hold >>= 5 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                (*state).ncode = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(4 as ::core::ffi::c_uint);
-                hold >>= 4 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
+                let header = inflate_back_dynamic_header(hold);
+                (*state).nlen = header.nlen;
+                (*state).ndist = header.ndist;
+                (*state).ncode = header.ncode;
+                hold >>= 14;
+                bits = bits.wrapping_sub(14);
                 if (*state).nlen > 286 as ::core::ffi::c_uint
                     || (*state).ndist > 30 as ::core::ffi::c_uint
                 {
