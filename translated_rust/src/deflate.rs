@@ -385,42 +385,26 @@ static configuration_table: [config; 10] = [
 ];
 
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut m: ::core::ffi::c_uint = 0;
-    let mut p: *mut crate::src::deflate::Posf =
-        ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
-    n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
+    let state = &mut *s;
+    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+    slide_hash_tables(head, prev, state.w_size);
+    state.slid = 1 as ::core::ffi::c_int;
+}
+
+fn slide_hash_tables(
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    wsize: crate::stdlib::uInt,
+) {
+    for entry in head.iter_mut().chain(prev.iter_mut()) {
+        let value = *entry as ::core::ffi::c_uint;
+        *entry = (if value >= wsize {
+            value.wrapping_sub(wsize as ::core::ffi::c_uint)
         } else {
             NIL as ::core::ffi::c_uint
         }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
     }
-    n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
-    }
-    (*s).slid = 1 as ::core::ffi::c_int;
 }
 
 unsafe extern "C" fn read_buf(
