@@ -610,7 +610,7 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     static my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
-        || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
+        || *version as ::core::ffi::c_int
             != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
         || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>() as usize
     {
@@ -960,21 +960,13 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     crate::src::trees::_tr_init_ffi(s as *mut crate::src::deflate::internal_state);
     return crate::zlib_h::Z_OK;
 }
-unsafe fn lm_init(state: &mut crate::src::deflate::deflate_state) {
+fn lm_init(state: &mut crate::src::deflate::deflate_state, head: &mut [crate::src::deflate::Posf]) {
     state.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul(state.w_size as crate::zutil_h::ulg);
-    *state
-        .head
-        .offset(state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-        NIL as crate::src::deflate::Posf;
-    crate::stdlib::memset(
-        state.head as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        (state.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-            as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
-                as crate::__stddef_size_t_h::size_t),
-    );
+    if let Some((last, prefix)) = head.split_last_mut() {
+        *last = NIL as crate::src::deflate::Posf;
+        prefix.fill(0 as crate::src::deflate::Posf);
+    }
     deflate_lm_init_reset_fields(state);
 }
 
@@ -1000,7 +992,11 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let mut ret: ::core::ffi::c_int = 0;
     ret = deflateResetKeep_ffi(strm);
     if ret == crate::zlib_h::Z_OK {
-        lm_init(&mut *((*strm).state as *mut crate::src::deflate::deflate_state));
+        let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+        let head_ptr = state.head;
+        let hash_size = state.hash_size as usize;
+        let head = ::core::slice::from_raw_parts_mut(head_ptr, hash_size);
+        lm_init(state, head);
     }
     return ret;
 }

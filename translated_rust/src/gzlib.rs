@@ -404,11 +404,11 @@ pub fn gz_clamped_uint(
     value: crate::stdlib::uInt,
     limit: crate::stdlib::off64_t,
 ) -> crate::stdlib::uInt {
-    if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-        && value > gz_intmax()
-        || value as crate::stdlib::off64_t > limit
-    {
+    let int_and_off64_same_width = ::core::mem::size_of::<::core::ffi::c_int>() as usize
+        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize;
+    let exceeds_intmax_on_same_width = int_and_off64_same_width && value > gz_intmax();
+    let exceeds_limit = value as crate::stdlib::off64_t > limit;
+    if exceeds_intmax_on_same_width || exceeds_limit {
         limit as crate::stdlib::uInt
     } else {
         value

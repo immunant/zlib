@@ -269,10 +269,10 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     if state.strm.avail_in > 3 as crate::stdlib::uInt {
         let header = [
-            *state.strm.next_in.offset(0 as ::core::ffi::c_int as isize),
-            *state.strm.next_in.offset(1 as ::core::ffi::c_int as isize),
-            *state.strm.next_in.offset(2 as ::core::ffi::c_int as isize),
-            *state.strm.next_in.offset(3 as ::core::ffi::c_int as isize),
+            *state.strm.next_in,
+            *state.strm.next_in.wrapping_add(1),
+            *state.strm.next_in.wrapping_add(2),
+            *state.strm.next_in.wrapping_add(3),
         ];
         if gz_is_gzip_header(header) {
             crate::src::inflate::inflateReset_ffi(
@@ -955,7 +955,7 @@ pub unsafe extern "C" fn gzgets_ffi(
                 (n, found_eol) = gzgets_copy_buffered(output, buffered, left);
                 gz_note_buffered_read(&mut *state, n);
                 left = left.wrapping_sub(n);
-                buf = buf.offset(n as isize);
+                buf = buf.wrapping_add(n as usize);
                 if !(left != 0 && !found_eol) {
                     break;
                 }
@@ -965,7 +965,7 @@ pub unsafe extern "C" fn gzgets_ffi(
     if buf == str {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    *buf.offset(0 as ::core::ffi::c_int as isize) = 0 as ::core::ffi::c_char;
+    *buf = 0 as ::core::ffi::c_char;
     return str;
 }
 pub fn gzdirect(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
