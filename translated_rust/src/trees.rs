@@ -3408,58 +3408,44 @@ pub unsafe extern "C" fn _tr_flush_block(
             );
         }
     } else {
-        let (l_max_code, d_max_code) = {
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
-            write_block_header(
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                2,
-                last,
-            );
-            (state.l_desc.max_code, state.d_desc.max_code)
-        };
-        {
-            // The pending allocation is exactly `pending_buf_size` bytes.
-            // Keep this ABI projection local; the dynamic-header writer only
-            // receives bounded storage and pointer-free tree views.
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
-            send_all_trees(
-                &state.dyn_ltree,
-                &state.dyn_dtree,
-                &state.bl_tree,
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                l_max_code + 1 as ::core::ffi::c_int,
-                d_max_code + 1 as ::core::ffi::c_int,
-                max_blindex + 1 as ::core::ffi::c_int,
-            );
-        }
-        {
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
-            compress_block(
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                state.sym_buf_start,
-                state.sym_next,
-                &state.dyn_ltree,
-                &state.dyn_dtree,
-            );
-        }
+        // The pending allocation is exactly `pending_buf_size` bytes.  Keep
+        // one bounded view for the complete dynamic-block sequence: the
+        // header, tree descriptions, and payload all advance `pending` in
+        // order through this same allocation.
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        write_block_header(
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            2,
+            last,
+        );
+        send_all_trees(
+            &state.dyn_ltree,
+            &state.dyn_dtree,
+            &state.bl_tree,
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            state.l_desc.max_code + 1 as ::core::ffi::c_int,
+            state.d_desc.max_code + 1 as ::core::ffi::c_int,
+            max_blindex + 1 as ::core::ffi::c_int,
+        );
+        compress_block(
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            state.sym_buf_start,
+            state.sym_next,
+            &state.dyn_ltree,
+            &state.dyn_dtree,
+        );
     }
     init_block_fields(
         &mut state.dyn_ltree,
