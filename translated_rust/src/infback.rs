@@ -408,17 +408,21 @@ pub unsafe extern "C" fn inflateBack(
                         (*state).lens[order[c2rust_fresh5 as usize] as usize] =
                             0 as ::core::ffi::c_ushort;
                     }
-                    (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
+                    (*state).next = 0;
                     (*state).lencode = crate::src::inflate::CodeTable::Dynamic(0);
                     (*state).lenbits = 7 as ::core::ffi::c_uint;
+                    let next_index = (*state).next;
+                    let mut table = (*state).codes[next_index..].as_mut_ptr();
                     ret = crate::src::inftrees::inflate_table(
                         crate::src::inftrees::CODES,
                         &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                         19 as ::core::ffi::c_uint,
-                        &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
+                        &mut table,
                         &raw mut (*state).lenbits,
                         &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                     );
+                    (*state).next = (table.addr() - (*state).codes.as_ptr().addr())
+                        / ::core::mem::size_of::<crate::src::inftrees::code>();
                     if ret != 0 {
                         crate::zlib_h::set_stream_message(&mut *strm, c"invalid code lengths set");
                         (*state).mode = crate::src::inflate::BAD;
@@ -632,19 +636,21 @@ pub unsafe extern "C" fn inflateBack(
                             (*state).mode = crate::src::inflate::BAD;
                             continue;
                         } else {
-                            (*state).next =
-                                &raw mut (*state).codes as *mut crate::src::inftrees::code;
+                            (*state).next = 0;
                             (*state).lencode = crate::src::inflate::CodeTable::Dynamic(0);
                             (*state).lenbits = 9 as ::core::ffi::c_uint;
+                            let next_index = (*state).next;
+                            let mut table = (*state).codes[next_index..].as_mut_ptr();
                             ret = crate::src::inftrees::inflate_table(
                                 crate::src::inftrees::LENS,
                                 &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                                 (*state).nlen,
-                                &raw mut (*state).next as *mut _
-                                    as *mut *mut crate::src::inftrees::code,
+                                &mut table,
                                 &raw mut (*state).lenbits,
                                 &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                             );
+                            (*state).next = (table.addr() - (*state).codes.as_ptr().addr())
+                                / ::core::mem::size_of::<crate::src::inftrees::code>();
                             if ret != 0 {
                                 crate::zlib_h::set_stream_message(
                                     &mut *strm,
@@ -653,22 +659,21 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
-                                (*state).distcode = crate::src::inflate::CodeTable::Dynamic(
-                                    (*state).next.offset_from(
-                                        &raw mut (*state).codes as *mut crate::src::inftrees::code,
-                                    ) as usize,
-                                );
+                                (*state).distcode = crate::src::inflate::CodeTable::Dynamic((*state).next);
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
+                                let next_index = (*state).next;
+                                let mut table = (*state).codes[next_index..].as_mut_ptr();
                                 ret = crate::src::inftrees::inflate_table(
                                     crate::src::inftrees::DISTS,
                                     (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
                                         .offset((*state).nlen as isize),
                                     (*state).ndist,
-                                    &raw mut (*state).next as *mut _
-                                        as *mut *mut crate::src::inftrees::code,
+                                    &mut table,
                                     &raw mut (*state).distbits,
                                     &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                                 );
+                                (*state).next = (table.addr() - (*state).codes.as_ptr().addr())
+                                    / ::core::mem::size_of::<crate::src::inftrees::code>();
                                 if ret != 0 {
                                     crate::zlib_h::set_stream_message(
                                         &mut *strm,
