@@ -2919,11 +2919,6 @@ pub unsafe extern "C" fn inflateCopy(
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        copy as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if let Some(window_len) = plan.window_len {
         window = Some((*source).zalloc.expect("non-null function pointer"))
