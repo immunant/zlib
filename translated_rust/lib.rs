@@ -41,7 +41,7 @@ pub mod gzguts_h {
         pub x: crate::zlib_h::gzFile_s,
         pub mode: ::core::ffi::c_int,
         pub fd: ::core::ffi::c_int,
-        pub path: *mut ::core::ffi::c_char,
+        pub path: ::core::mem::ManuallyDrop<Option<::std::ffi::CString>>,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
         pub in_0: *mut ::core::ffi::c_uchar,
