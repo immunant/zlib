@@ -368,6 +368,24 @@ fn gz_skip_buffered(state: &mut crate::gzguts_h::gz_state) -> bool {
     true
 }
 
+// Complete a deferred forward seek before a read-facing operation.  This is
+// only a state-machine coordinator: `gz_fetch` retains the raw I/O and buffer
+// work needed when the seek outgrows the bytes already buffered.
+fn gz_finish_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    while state.skip != 0 {
+        if gz_skip_buffered(state) {
+            continue;
+        }
+        if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
+            break;
+        }
+        if gz_fetch(state) == -1 as ::core::ffi::c_int {
+            return -1 as ::core::ffi::c_int;
+        }
+    }
+    0
+}
+
 pub(crate) fn gz_consume(
     state: &mut crate::gzguts_h::gz_state,
     limit: crate::stdlib::off64_t,
@@ -393,16 +411,8 @@ unsafe fn gz_read(
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    while state.skip != 0 {
-        if gz_skip_buffered(state) {
-            continue;
-        }
-        if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
-            break;
-        }
-        if gz_fetch(state) == -1 as ::core::ffi::c_int {
-            return 0 as crate::stdlib::z_size_t;
-        }
+    if gz_finish_skip(state) == -1 as ::core::ffi::c_int {
+        return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
@@ -628,16 +638,8 @@ pub unsafe extern "C" fn gzungetc(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    while state.skip != 0 {
-        if gz_skip_buffered(state) {
-            continue;
-        }
-        if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
-            break;
-        }
-        if gz_fetch(state) == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
+    if gz_finish_skip(state) == -1 as ::core::ffi::c_int {
+        return -1 as ::core::ffi::c_int;
     }
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
@@ -709,16 +711,8 @@ pub unsafe extern "C" fn gzgets(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    while state.skip != 0 {
-        if gz_skip_buffered(state) {
-            continue;
-        }
-        if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
-            break;
-        }
-        if gz_fetch(state) == -1 as ::core::ffi::c_int {
-            return ::core::ptr::null_mut::<::core::ffi::c_char>();
-        }
+    if gz_finish_skip(state) == -1 as ::core::ffi::c_int {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
     left = (len as ::core::ffi::c_uint).wrapping_sub(1 as ::core::ffi::c_uint);
