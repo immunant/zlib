@@ -991,6 +991,17 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         stream_size,
     )
 }
+fn deflate_state_status_is_valid(status: ::core::ffi::c_int) -> bool {
+    status == crate::src::deflate::INIT_STATE
+        || status == crate::src::deflate::GZIP_STATE
+        || status == crate::src::deflate::EXTRA_STATE
+        || status == crate::src::deflate::NAME_STATE
+        || status == crate::src::deflate::COMMENT_STATE
+        || status == crate::src::deflate::HCRC_STATE
+        || status == crate::src::deflate::BUSY_STATE
+        || status == crate::src::deflate::FINISH_STATE
+}
+
 unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
@@ -1004,16 +1015,7 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     let state = &*s;
-    if state.strm.as_ptr() != strm
-        || state.status != crate::src::deflate::INIT_STATE
-            && state.status != crate::src::deflate::GZIP_STATE
-            && state.status != crate::src::deflate::EXTRA_STATE
-            && state.status != crate::src::deflate::NAME_STATE
-            && state.status != crate::src::deflate::COMMENT_STATE
-            && state.status != crate::src::deflate::HCRC_STATE
-            && state.status != crate::src::deflate::BUSY_STATE
-            && state.status != crate::src::deflate::FINISH_STATE
-    {
+    if state.strm.as_ptr() != strm || !deflate_state_status_is_valid(state.status) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -3357,12 +3359,24 @@ pub unsafe extern "C" fn deflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(source) != 0 || dest.is_null() {
+    if source.is_null() || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let source = &*source;
+    if source.zalloc.is_none() || source.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source_state = source.state as *const crate::src::deflate::deflate_state;
+    if source_state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let ss = &*source_state;
+    if ss.strm.as_ptr() != source as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp
+        || !deflate_state_status_is_valid(ss.status)
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let dest = &mut *dest;
-    let ss = &*(source.state as *const crate::src::deflate::deflate_state);
     let tree_copy = copy_deflate_tree_state(
         &ss.dyn_ltree,
         &ss.dyn_dtree,
