@@ -618,148 +618,180 @@ fn read_buf_bytes(
     read_buf_checksum(checksum, wrap, output)
 }
 
-unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+// The fill operation has no need to retain the ABI stream or state.  Keep
+// their raw storage projection in `fill_window()` and let this core operate
+// solely on bounded allocations and scalar cursors.
+struct DeflateInputCursor<'a> {
+    input: &'a [crate::stdlib::Bytef],
+    consumed: usize,
+    checksum: crate::stdlib::uLong,
+    total_in: crate::stdlib::uLong,
+}
+
+struct FillWindowState<'a> {
+    window: &'a mut [crate::stdlib::Bytef],
+    prev: &'a mut [crate::src::deflate::Posf],
+    head: &'a mut [crate::src::deflate::Posf],
+    w_size: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    wrap: ::core::ffi::c_int,
+    lookahead: &'a mut crate::stdlib::uInt,
+    strstart: &'a mut crate::stdlib::uInt,
+    match_start: &'a mut crate::stdlib::uInt,
+    block_start: &'a mut ::core::ffi::c_long,
+    insert: &'a mut crate::stdlib::uInt,
+    slid: &'a mut ::core::ffi::c_int,
+    ins_h: &'a mut crate::stdlib::uInt,
+    high_water: &'a mut crate::zutil_h::ulg,
+}
+
+fn fill_window_from_views(state: &mut FillWindowState<'_>, input: &mut DeflateInputCursor<'_>) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
-    // Keep the ABI-state projection at this boundary.  The work below uses
-    // the checked slice helpers and this single scoped state view instead of
-    // repeatedly dereferencing the raw state cursor.
-    let state = &mut *s;
-    let mut wsize: crate::stdlib::uInt = state.w_size;
+    let wsize = state.w_size;
     loop {
-        more = state
-            .window_size
-            .wrapping_sub(state.lookahead as crate::zutil_h::ulg)
-            .wrapping_sub(state.strstart as crate::zutil_h::ulg)
+        more = (state.window.len() as crate::zutil_h::ulg)
+            .wrapping_sub(*state.lookahead as crate::zutil_h::ulg)
+            .wrapping_sub(*state.strstart as crate::zutil_h::ulg)
             as ::core::ffi::c_uint;
         if ::core::mem::size_of::<::core::ffi::c_int>() <= 2 as usize {
             if more == 0 as ::core::ffi::c_uint
-                && state.strstart == 0 as crate::stdlib::uInt
-                && state.lookahead == 0 as crate::stdlib::uInt
+                && *state.strstart == 0 as crate::stdlib::uInt
+                && *state.lookahead == 0 as crate::stdlib::uInt
             {
                 more = wsize as ::core::ffi::c_uint;
             } else if more == -1 as ::core::ffi::c_int as ::core::ffi::c_uint {
                 more = more.wrapping_sub(1);
             }
         }
-        if state.strstart
+        if *state.strstart
             >= wsize.wrapping_add(
-                state
-                    .w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
+                wsize.wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
             )
         {
-            // `window` is allocated with exactly `window_size` bytes in
-            // `deflateInit2_()` and `deflateCopy()`.
-            let window = ::core::slice::from_raw_parts_mut(
-                state.window.expect("initialized window").as_ptr(),
-                state.window_size as usize,
-            );
-            slide_window_bytes(window, wsize, more);
-            state.match_start = state.match_start.wrapping_sub(wsize);
-            state.strstart = state.strstart.wrapping_sub(wsize);
-            state.block_start -= wsize as ::core::ffi::c_long;
-            if state.insert > state.strstart {
-                state.insert = state.strstart;
+            slide_window_bytes(state.window, wsize, more);
+            *state.match_start = state.match_start.wrapping_sub(wsize);
+            *state.strstart = state.strstart.wrapping_sub(wsize);
+            *state.block_start -= wsize as ::core::ffi::c_long;
+            if *state.insert > *state.strstart {
+                *state.insert = *state.strstart;
             }
-            // `head` and `prev` are allocated at these exact element counts
-            // in `deflateInit2_()` and `deflateCopy()`.
-            let head = ::core::slice::from_raw_parts_mut(
-                state.head.expect("initialized head table").as_ptr(),
-                state.hash_size as usize,
-            );
-            let prev = ::core::slice::from_raw_parts_mut(
-                state.prev.expect("initialized prev table").as_ptr(),
-                wsize as usize,
-            );
-            slide_hash_table(head, wsize);
-            slide_hash_table(prev, wsize);
-            state.slid = 1 as ::core::ffi::c_int;
+            slide_hash_table(state.head, wsize);
+            slide_hash_table(state.prev, wsize);
+            *state.slid = 1 as ::core::ffi::c_int;
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
-        if (&*state.strm.as_ptr()).avail_in == 0 as crate::stdlib::uInt {
+        let available = input.input.len().saturating_sub(input.consumed);
+        if available == 0 {
             break;
         }
-        let stream = &mut *state.strm.as_ptr();
-        n = stream.avail_in.min(more);
+        n = (available as crate::stdlib::uInt).min(more);
         if n != 0 {
-            stream.avail_in = stream.avail_in.wrapping_sub(n);
-            let input = ::core::slice::from_raw_parts(stream.next_in, n as usize);
-            let next_in = input.as_ptr_range().end.cast_mut();
-            // `window` is allocated with exactly `window_size` bytes in
-            // `deflateInit2_()` and `deflateCopy()`, and this write is bounded
-            // by the `more` capacity calculated above.
-            let window = ::core::slice::from_raw_parts_mut(
-                state.window.expect("initialized window").as_ptr(),
-                state.window_size as usize,
-            );
-            let start = state.strstart.wrapping_add(state.lookahead) as usize;
-            let output = &mut window[start..start + n as usize];
-            stream.adler = read_buf_bytes(input, output, stream.adler, state.wrap);
-            stream.next_in = next_in;
-            stream.total_in = stream.total_in.wrapping_add(n as crate::stdlib::uLong);
+            let source = &input.input[input.consumed..input.consumed + n as usize];
+            let start = state.strstart.wrapping_add(*state.lookahead) as usize;
+            let output = &mut state.window[start..start + n as usize];
+            input.checksum = read_buf_bytes(source, output, input.checksum, state.wrap);
+            input.consumed += n as usize;
+            input.total_in = input.total_in.wrapping_add(n as crate::stdlib::uLong);
         }
-        state.lookahead = state.lookahead.wrapping_add(n);
-        if state.lookahead.wrapping_add(state.insert)
+        *state.lookahead = state.lookahead.wrapping_add(n);
+        if state.lookahead.wrapping_add(*state.insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
-            let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
-            // These are the exact capacities allocated by `deflateInit2_()`
-            // and `deflateCopy()`. Keep the raw views local to this update,
-            // rather than repeatedly indexing through the raw cursors.
-            let window = ::core::slice::from_raw_parts(
-                state.window.expect("initialized window").as_ptr(),
-                state.window_size as usize,
-            );
-            let prev = ::core::slice::from_raw_parts_mut(
-                state.prev.expect("initialized prev table").as_ptr(),
-                wsize as usize,
-            );
-            let head = ::core::slice::from_raw_parts_mut(
-                state.head.expect("initialized head table").as_ptr(),
-                state.hash_size as usize,
-            );
-            state.ins_h = window[str as usize] as crate::stdlib::uInt;
-            state.ins_h = (state.ins_h << state.hash_shift
-                ^ window[str.wrapping_add(1 as crate::stdlib::uInt) as usize]
+            let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(*state.insert);
+            *state.ins_h = state.window[str as usize] as crate::stdlib::uInt;
+            *state.ins_h = (*state.ins_h << state.hash_shift
+                ^ state.window[str.wrapping_add(1 as crate::stdlib::uInt) as usize]
                     as crate::stdlib::uInt)
                 & state.hash_mask;
-            while state.insert != 0 {
-                state.ins_h = (state.ins_h << state.hash_shift
-                    ^ window[str
+            while *state.insert != 0 {
+                *state.ins_h = (*state.ins_h << state.hash_shift
+                    ^ state.window[str
                         .wrapping_add(3 as crate::stdlib::uInt)
                         .wrapping_sub(1 as crate::stdlib::uInt)
                         as usize] as crate::stdlib::uInt)
                     & state.hash_mask;
-                prev[(str & state.w_mask) as usize] = head[state.ins_h as usize];
-                head[state.ins_h as usize] =
+                state.prev[(str & state.w_mask) as usize] = state.head[*state.ins_h as usize];
+                state.head[*state.ins_h as usize] =
                     str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 str = str.wrapping_add(1);
-                state.insert = state.insert.wrapping_sub(1);
-                if state.lookahead.wrapping_add(state.insert)
+                *state.insert = state.insert.wrapping_sub(1);
+                if state.lookahead.wrapping_add(*state.insert)
                     < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
                 {
                     break;
                 }
             }
         }
-        if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && (&*state.strm.as_ptr()).avail_in != 0 as crate::stdlib::uInt)
+        if !(*state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            && input.consumed < input.input.len())
         {
             break;
         }
     }
-    if state.high_water < state.window_size {
-        // `window` has exactly `window_size` bytes by construction.  Form
-        // that bounded view once; the initialization policy itself is fully
-        // pointer-free.
-        let window = ::core::slice::from_raw_parts_mut(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
+    if *state.high_water < state.window.len() as crate::zutil_h::ulg {
+        *state.high_water = initialize_window_high_water(
+            state.window,
+            *state.high_water,
+            *state.strstart,
+            *state.lookahead,
         );
-        state.high_water =
-            initialize_window_high_water(window, state.high_water, state.strstart, state.lookahead);
     }
+}
+
+unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+    // All allocation and ABI-stream projections are concentrated here.  The
+    // safe core below only observes bounded slices and scalar cursors.
+    let state = &mut *s;
+    let stream = &mut *state.strm.as_ptr();
+    let input = ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize);
+    let window = ::core::slice::from_raw_parts_mut(
+        state.window.expect("initialized window").as_ptr(),
+        state.window_size as usize,
+    );
+    let prev = ::core::slice::from_raw_parts_mut(
+        state.prev.expect("initialized prev table").as_ptr(),
+        state.w_size as usize,
+    );
+    let head = ::core::slice::from_raw_parts_mut(
+        state.head.expect("initialized head table").as_ptr(),
+        state.hash_size as usize,
+    );
+    let mut input = DeflateInputCursor {
+        input,
+        consumed: 0,
+        checksum: stream.adler,
+        total_in: stream.total_in,
+    };
+    fill_window_from_views(
+        &mut FillWindowState {
+            window,
+            prev,
+            head,
+            w_size: state.w_size,
+            hash_shift: state.hash_shift,
+            hash_mask: state.hash_mask,
+            w_mask: state.w_mask,
+            wrap: state.wrap,
+            lookahead: &mut state.lookahead,
+            strstart: &mut state.strstart,
+            match_start: &mut state.match_start,
+            block_start: &mut state.block_start,
+            insert: &mut state.insert,
+            slid: &mut state.slid,
+            ins_h: &mut state.ins_h,
+            high_water: &mut state.high_water,
+        },
+        &mut input,
+    );
+    stream.next_in = input.input[input.consumed..].as_ptr().cast_mut();
+    stream.avail_in = stream
+        .avail_in
+        .wrapping_sub(input.consumed as crate::stdlib::uInt);
+    stream.adler = input.checksum;
+    stream.total_in = input.total_in;
 }
 #[export_name = "deflateInit_"]
 
