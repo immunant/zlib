@@ -196,23 +196,6 @@ fn prepare_inflate_back_init<'a>(
     }
     window_storage.resize(window_len, 0);
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
-        strm.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if strm.zfree.is_none() {
-        strm.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
     let mut state = crate::src::inflate::new_inflate_state();
     state.dmax = 32768;
     state.wbits = window_bits as crate::stdlib::uInt;
@@ -238,7 +221,19 @@ unsafe fn inflate_back_init_boundary(
             Ok(preparation) => preparation,
             Err(error) => return error,
         };
-    let state_allocation = strm.zalloc.expect("prepared stream has an allocator")(
+    if strm.zalloc.is_none() && strm.zfree.is_none() {
+        let state = Box::new(state);
+        let state_allocation = core::ptr::from_ref(state.as_ref());
+        if !crate::src::inflate::retain_default_inflate_state(state) {
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+        strm.state = state_allocation.cast_mut().cast();
+        return crate::zlib_h::Z_OK;
+    }
+    let (Some(zalloc), Some(_)) = (strm.zalloc, strm.zfree) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let state_allocation = zalloc(
         strm.opaque,
         1,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
@@ -1025,14 +1020,20 @@ unsafe fn inflate_back_end_boundary(
     strm: &mut crate::zlib_h::z_stream_s,
     state: &mut crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
-    let Some(zfree) = strm.zfree else {
+    if (strm.zalloc.is_some() && strm.zfree.is_none())
+        || (strm.zalloc.is_none() && strm.zfree.is_some())
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    }
     let end = inflate_back_end_impl(state);
     if end != crate::zlib_h::Z_STREAM_ERROR {
         // Safe cleanup released the state's only owned member.  This callback
         // owns and frees the allocation itself.
-        zfree(strm.opaque, core::ptr::from_mut(state).cast());
+        if let Some(zfree) = strm.zfree {
+            zfree(strm.opaque, core::ptr::from_mut(state).cast());
+        } else {
+            crate::src::inflate::release_default_inflate_state(core::ptr::from_mut(state).addr());
+        }
         strm.state = core::ptr::null_mut();
     }
     end

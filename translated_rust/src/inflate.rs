@@ -1,4 +1,7 @@
 // =============== BEGIN inflate_h ================
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 pub type inflate_mode = ::core::ffi::c_uint;
 
 pub const HEAD: crate::src::inflate::inflate_mode = 16180;
@@ -181,6 +184,32 @@ pub struct inflate_state {
     pub was: ::core::ffi::c_uint,
 }
 
+static DEFAULT_INFLATE_STATES: OnceLock<Mutex<HashMap<usize, Box<inflate_state>>>> =
+    OnceLock::new();
+
+fn default_inflate_states() -> &'static Mutex<HashMap<usize, Box<inflate_state>>> {
+    DEFAULT_INFLATE_STATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn retain_default_inflate_state(state: Box<inflate_state>) -> bool {
+    let address = core::ptr::from_ref(state.as_ref()).addr();
+    let mut states = default_inflate_states()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if states.try_reserve(1).is_err() {
+        return false;
+    }
+    states.insert(address, state);
+    true
+}
+
+pub(crate) fn release_default_inflate_state(address: usize) {
+    default_inflate_states()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&address);
+}
+
 pub(crate) fn new_inflate_state() -> inflate_state {
     inflate_state {
         mode: crate::src::inflate::HEAD,
@@ -237,8 +266,6 @@ pub use crate::src::inftrees::ENOUGH;
 pub use crate::src::inftrees::ENOUGH_DISTS;
 pub use crate::src::inftrees::ENOUGH_LENS;
 pub use crate::src::inftrees::LENS;
-pub use crate::src::zutil::zcalloc;
-pub use crate::src::zutil::zcfree;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
@@ -274,7 +301,12 @@ fn inflate_state_valid(
     state: &crate::src::inflate::inflate_state,
 ) -> bool {
     inflate_state_mode_valid(state)
-        && (strm.state.is_null() || (strm.zalloc.is_some() && strm.zfree.is_some()))
+        && (strm.state.is_null() || inflate_stream_has_state_allocation(strm))
+}
+
+fn inflate_stream_has_state_allocation(strm: &crate::zlib_h::z_stream_s) -> bool {
+    (strm.zalloc.is_some() && strm.zfree.is_some())
+        || (strm.zalloc.is_none() && strm.zfree.is_none())
 }
 
 fn inflate_state_mode_valid(state: &crate::src::inflate::inflate_state) -> bool {
@@ -285,8 +317,8 @@ fn inflate_reset_keep_state(
     state: &mut crate::src::inflate::inflate_state,
 ) -> Option<crate::stdlib::uLong> {
     state.total = 0 as ::core::ffi::c_ulong;
-    let adler = (state.wrap != 0)
-        .then_some((state.wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong);
+    let adler =
+        (state.wrap != 0).then_some((state.wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong);
     state.mode = crate::src::inflate::HEAD;
     state.last = 0 as ::core::ffi::c_int;
     state.havedict = 0 as ::core::ffi::c_int;
@@ -498,20 +530,36 @@ pub unsafe extern "C" fn inflateReset2_ffi(
 /// Allocate, initialize, and install an inflater state through the stream's
 /// ABI allocator.
 ///
-/// The callback owns the returned storage, so this constructor keeps the
-/// complete transaction together: storage is initialized before it is exposed
-/// as a typed reference, and a failed reset releases the same allocation
-/// through its paired callback.
+/// Construct state with either the caller's paired callbacks or Rust's
+/// default owner.  Both paths initialize state before exposing it through the
+/// ABI stream link.
 unsafe fn inflate_allocate_state(
     strm: &mut crate::zlib_h::z_stream_s,
     window_bits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(zalloc) = strm.zalloc else {
+    let mut initialized = new_inflate_state();
+    initialized.mode = crate::src::inflate::HEAD;
+    if strm.zalloc.is_none() && strm.zfree.is_none() {
+        let mut state = Box::new(initialized);
+        strm.state = core::ptr::from_mut(state.as_mut()).cast();
+        let ret = inflate_reset2_impl(strm, &mut InflateState(state.as_mut()), window_bits);
+        if ret != crate::zlib_h::Z_OK {
+            inflate_release_owned_state(state.as_mut());
+            strm.state = core::ptr::null_mut();
+            return ret;
+        }
+        if retain_default_inflate_state(state) {
+            return ret;
+        }
+        strm.state = core::ptr::null_mut();
+        return crate::zlib_h::Z_MEM_ERROR;
+    }
+    let (Some(zalloc), Some(_)) = (strm.zalloc, strm.zfree) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let allocation = zalloc(
         strm.opaque,
-        1 as crate::stdlib::uInt,
+        1,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     )
     .cast::<crate::src::inflate::inflate_state>();
@@ -519,11 +567,6 @@ unsafe fn inflate_allocate_state(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     strm.state = allocation.cast::<crate::src::deflate::internal_state>();
-
-    // Construct and reset on the stack first.  This keeps the callback-owned
-    // storage untyped until it contains a complete `inflate_state`.
-    let mut initialized = new_inflate_state();
-    initialized.mode = crate::src::inflate::HEAD;
     let mut state = InflateState(&mut initialized);
     let ret = inflate_reset2_impl(strm, &mut state, window_bits);
     drop(state);
@@ -532,11 +575,7 @@ unsafe fn inflate_allocate_state(
     }
     allocation.write(initialized);
     if ret != crate::zlib_h::Z_OK {
-        strm.zfree
-            .expect("initialized inflate stream has a free callback")(
-            strm.opaque,
-            allocation.cast(),
-        );
+        strm.zfree.expect("callback pair is validated")(strm.opaque, allocation.cast());
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     ret
@@ -570,23 +609,6 @@ pub unsafe fn inflateInit2_(
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
-        strm.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if strm.zfree.is_none() {
-        strm.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
     inflate_allocate_state(strm, windowBits)
 }
 #[export_name = "inflateInit2_"]
@@ -672,7 +694,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let allocators_present = strm.zalloc.is_some() && strm.zfree.is_some();
+    let allocators_present = inflate_stream_has_state_allocation(strm);
     let state = strm.state.cast::<crate::src::inflate::inflate_state>();
     let Some(state) = state.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -868,9 +890,7 @@ fn register_inflate_header(
     true
 }
 
-fn registered_inflate_header(
-    state: &crate::src::inflate::inflate_state,
-) -> Option<usize> {
+fn registered_inflate_header(state: &crate::src::inflate::inflate_state) -> Option<usize> {
     let registrations = inflate_header_registrations()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1652,8 +1672,8 @@ pub fn inflate_impl(
                                                                                 }
                                                                                 if let Some(
                                                                                     header,
-                                                                                ) = header
-                                                                                    .as_mut()
+                                                                                ) =
+                                                                                    header.as_mut()
                                                                                 {
                                                                                     header.header.time = hold
                                                                                         as crate::stdlib::uLong;
@@ -2273,15 +2293,19 @@ pub fn inflate_impl(
                                         if copy != 0 {
                                             if let Some(header) = header.as_mut() {
                                                 if let Some(extra) = header.extra.as_deref_mut() {
-                                                    len = (header.header.extra_len as ::core::ffi::c_uint)
+                                                    len = (header.header.extra_len
+                                                        as ::core::ffi::c_uint)
                                                         .wrapping_sub((*state).length);
                                                     if len < extra.len() as ::core::ffi::c_uint {
                                                         let extra_copy = (copy as usize)
                                                             .min(extra.len() - len as usize);
-                                                        let input_start = input.len() - have as usize;
-                                                        extra[len as usize..len as usize + extra_copy]
+                                                        let input_start =
+                                                            input.len() - have as usize;
+                                                        extra[len as usize
+                                                            ..len as usize + extra_copy]
                                                             .copy_from_slice(
-                                                                &input[input_start..input_start + extra_copy],
+                                                                &input[input_start
+                                                                    ..input_start + extra_copy],
                                                             );
                                                     }
                                                 }
@@ -2352,7 +2376,8 @@ pub fn inflate_impl(
                                             if (*state).length < name.len() as ::core::ffi::c_uint {
                                                 let c2rust_fresh6 = (*state).length;
                                                 (*state).length = (*state).length.wrapping_add(1);
-                                                name[c2rust_fresh6 as usize] = len as crate::stdlib::Bytef;
+                                                name[c2rust_fresh6 as usize] =
+                                                    len as crate::stdlib::Bytef;
                                             }
                                         }
                                     }
@@ -2375,7 +2400,8 @@ pub fn inflate_impl(
                                     break '_inf_leave;
                                 }
                             } else if let Some(header) = header.as_mut() {
-                                header.header.name = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                                header.header.name =
+                                    ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                             }
                             (*state).length = 0 as ::core::ffi::c_uint;
                             (*state).mode = crate::src::inflate::COMMENT;
@@ -2474,7 +2500,8 @@ pub fn inflate_impl(
                                     if (*state).length < comment.len() as ::core::ffi::c_uint {
                                         let c2rust_fresh8 = (*state).length;
                                         (*state).length = (*state).length.wrapping_add(1);
-                                        comment[c2rust_fresh8 as usize] = len as crate::stdlib::Bytef;
+                                        comment[c2rust_fresh8 as usize] =
+                                            len as crate::stdlib::Bytef;
                                     }
                                 }
                             }
@@ -2549,7 +2576,8 @@ pub fn inflate_impl(
                 }
             }
             if let Some(header) = header.as_mut() {
-                header.header.hcrc = (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                header.header.hcrc =
+                    (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
                 header.header.done = 1 as ::core::ffi::c_int;
             }
             (*state).check =
@@ -2635,7 +2663,15 @@ pub fn inflate_impl(
             &mut state.wnext,
             &mut state.whave,
         );
-        if updatewindow(window, wbits, wsize, wnext, whave, &output[put - copied..put]) != 0 {
+        if updatewindow(
+            window,
+            wbits,
+            wsize,
+            wnext,
+            whave,
+            &output[put - copied..put],
+        ) != 0
+        {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2717,25 +2753,29 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(state) = (unsafe { state.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let header = state.head.then(|| registered_inflate_header(state)).flatten().map(|address| unsafe {
-        let header = core::ptr::with_exposed_provenance_mut::<crate::zlib_h::gz_header_s>(address);
-        let header = &mut *header;
-                let extra = (!header.extra.is_null()).then(|| {
-                    ::core::slice::from_raw_parts_mut(header.extra, header.extra_max as usize)
-                });
-                let name = (!header.name.is_null()).then(|| {
-                    ::core::slice::from_raw_parts_mut(header.name, header.name_max as usize)
-                });
-                let comment = (!header.comment.is_null()).then(|| {
-                    ::core::slice::from_raw_parts_mut(header.comment, header.comm_max as usize)
-                });
-                InflateHeader {
-                    header,
-                    extra,
-                    name,
-                    comment,
-                }
-    });
+    let header = state
+        .head
+        .then(|| registered_inflate_header(state))
+        .flatten()
+        .map(|address| unsafe {
+            let header =
+                core::ptr::with_exposed_provenance_mut::<crate::zlib_h::gz_header_s>(address);
+            let header = &mut *header;
+            let extra = (!header.extra.is_null()).then(|| {
+                ::core::slice::from_raw_parts_mut(header.extra, header.extra_max as usize)
+            });
+            let name = (!header.name.is_null())
+                .then(|| ::core::slice::from_raw_parts_mut(header.name, header.name_max as usize));
+            let comment = (!header.comment.is_null()).then(|| {
+                ::core::slice::from_raw_parts_mut(header.comment, header.comm_max as usize)
+            });
+            InflateHeader {
+                header,
+                extra,
+                name,
+                comment,
+            }
+        });
     let mut message = None;
     inflate_impl(strm, state, flush, input, output, header, &mut message)
 }
@@ -2751,9 +2791,7 @@ pub struct InflateEndState<'a> {
     state_address: usize,
 }
 
-fn inflate_end_state(
-    state: &mut crate::src::inflate::inflate_state,
-) -> InflateEndState<'_> {
+fn inflate_end_state(state: &mut crate::src::inflate::inflate_state) -> InflateEndState<'_> {
     let state_address = inflate_state_address(state);
     InflateEndState {
         mode: state.mode,
@@ -2776,10 +2814,7 @@ pub fn inflateEnd(mut state: InflateEndState<'_>) -> ::core::ffi::c_int {
 }
 
 /// Validate the allocator pairing before safely releasing state-owned data.
-fn inflate_end_impl(
-    state: InflateEndState<'_>,
-    allocators_present: bool,
-) -> ::core::ffi::c_int {
+fn inflate_end_impl(state: InflateEndState<'_>, allocators_present: bool) -> ::core::ffi::c_int {
     if !allocators_present {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2805,16 +2840,17 @@ pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     };
     let end = inflate_end_impl(
         inflate_end_state(state),
-        strm.zalloc.is_some() && strm.zfree.is_some(),
+        inflate_stream_has_state_allocation(strm),
     );
     if end != crate::zlib_h::Z_STREAM_ERROR {
         // The safe implementation released the Rust owners and validated the
         // allocator pair.  Return precisely the allocation from which the
         // checked state reference was made to its ABI allocator.
-        strm.zfree.expect("inflate_end_impl validates zfree")(
-            strm.opaque,
-            core::ptr::from_mut(state).cast(),
-        );
+        if let Some(zfree) = strm.zfree {
+            zfree(strm.opaque, core::ptr::from_mut(state).cast());
+        } else {
+            release_default_inflate_state(core::ptr::from_mut(state).addr());
+        }
         clear_inflate_state(strm);
     }
     end
@@ -2940,7 +2976,8 @@ fn inflate_set_dictionary(
         &mut state.wnext,
         &mut state.whave,
         dictionary,
-    ) != 0 {
+    ) != 0
+    {
         state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -2969,7 +3006,7 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let target = InflateDictionaryTarget {
-        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        allocators_present: inflate_stream_has_state_allocation(strm),
         state: strm
             .state
             .cast::<crate::src::inflate::inflate_state>()
@@ -3150,7 +3187,11 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     let Some(strm) = (unsafe { strm.as_ref() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(state) = (unsafe { strm.state.cast::<crate::src::inflate::inflate_state>().as_ref() }) else {
+    let Some(state) = (unsafe {
+        strm.state
+            .cast::<crate::src::inflate::inflate_state>()
+            .as_ref()
+    }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_sync_point_from_stream(strm, state)
@@ -3160,12 +3201,27 @@ unsafe fn inflate_copy_impl(
     source: &crate::zlib_h::z_stream_s,
     state: &crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
-    let copy = Some(source.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
+    if source.zalloc.is_none() && source.zfree.is_none() {
+        let copy = Box::new(state.clone());
+        let copy_pointer = core::ptr::from_ref(copy.as_ref());
+        let address = copy_pointer.addr();
+        if !retain_default_inflate_state(copy) {
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+        *dest = *source;
+        copy_inflate_header_registration(state, address);
+        dest.state = copy_pointer.cast_mut().cast();
+        return crate::zlib_h::Z_OK;
+    }
+    let (Some(zalloc), Some(_)) = (source.zalloc, source.zfree) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let copy = zalloc(
         source.opaque,
-        1 as crate::stdlib::uInt,
+        1,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
+    )
+    .cast::<crate::src::inflate::inflate_state>();
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -3227,7 +3283,7 @@ fn inflate_validate_state<'a>(
     strm: &mut crate::zlib_h::z_stream_s,
     state: &'a mut crate::src::inflate::inflate_state,
 ) -> Option<&'a mut crate::src::inflate::inflate_state> {
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
+    if !inflate_stream_has_state_allocation(strm) {
         return None;
     }
     inflate_state_mode_valid(state).then_some(state)
@@ -3292,7 +3348,7 @@ fn inflate_mark_state<'a>(
     strm: &crate::zlib_h::z_stream_s,
     state: &'a crate::src::inflate::inflate_state,
 ) -> Option<&'a crate::src::inflate::inflate_state> {
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
+    if !inflate_stream_has_state_allocation(strm) {
         return None;
     }
     inflate_state_mode_valid(state).then_some(state)
@@ -3307,7 +3363,11 @@ pub unsafe extern "C" fn inflateMark_ffi(
     let Some(strm) = (unsafe { strm.as_ref() }) else {
         return invalid_mark;
     };
-    let Some(state) = (unsafe { strm.state.cast::<crate::src::inflate::inflate_state>().as_ref() }) else {
+    let Some(state) = (unsafe {
+        strm.state
+            .cast::<crate::src::inflate::inflate_state>()
+            .as_ref()
+    }) else {
         return invalid_mark;
     };
     let Some(state) = inflate_mark_state(strm, state) else {
@@ -3336,7 +3396,11 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     let Some(strm) = (unsafe { strm.as_ref() }) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
-    let Some(state) = (unsafe { strm.state.cast::<crate::src::inflate::inflate_state>().as_ref() }) else {
+    let Some(state) = (unsafe {
+        strm.state
+            .cast::<crate::src::inflate::inflate_state>()
+            .as_ref()
+    }) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
     inflate_codes_used_from_stream(strm, state)

@@ -207,41 +207,38 @@ pub fn zError(err: ::core::ffi::c_int) -> &'static [u8] {
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     zError(err).as_ptr().cast()
 }
-pub unsafe extern "C" fn zcalloc(
-    _opaque: crate::stdlib::voidpf,
-    items: ::core::ffi::c_uint,
-    size: ::core::ffi::c_uint,
-) -> crate::stdlib::voidpf {
+/// Allocate default-allocator storage and return its exposed address.
+///
+/// The registry retains the owner until the matching ABI free callback.  The
+/// raw-address conversion itself is deliberately left to that callback's FFI
+/// boundary.
+fn zcalloc_impl(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> Option<usize> {
     let Some(mut allocation) = prepare_zcalloc_allocation(items, size) else {
-        return ::core::ptr::null_mut();
+        return None;
     };
     let pointer = std::ptr::NonNull::from(&mut allocation.units[0])
         .cast::<::core::ffi::c_void>()
         .as_ptr();
     allocation.address = pointer.addr();
     if retain_zcalloc_allocation(allocation) {
-        pointer
+        Some(pointer.addr())
     } else {
-        ::core::ptr::null_mut()
+        None
     }
 }
 #[export_name = "zcalloc"]
 
 pub unsafe extern "C" fn zcalloc_ffi(
-    mut opaque: crate::stdlib::voidpf,
-    mut items: ::core::ffi::c_uint,
-    mut size: ::core::ffi::c_uint,
+    _opaque: crate::stdlib::voidpf,
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    zcalloc(opaque, items, size)
-}
-pub unsafe extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
-    release_zcalloc_allocation(ptr.addr());
+    zcalloc_impl(items, size)
+        .map(std::ptr::with_exposed_provenance_mut)
+        .unwrap_or_else(::core::ptr::null_mut)
 }
 #[export_name = "zcfree"]
 
-pub unsafe extern "C" fn zcfree_ffi(
-    mut opaque: crate::stdlib::voidpf,
-    mut ptr: crate::stdlib::voidpf,
-) {
-    zcfree(opaque, ptr)
+pub unsafe extern "C" fn zcfree_ffi(_opaque: crate::stdlib::voidpf, ptr: crate::stdlib::voidpf) {
+    release_zcalloc_allocation(ptr.addr())
 }

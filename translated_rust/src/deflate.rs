@@ -518,6 +518,31 @@ pub struct GzipHeader {
 
 static GZIP_HEADERS: OnceLock<Mutex<HashMap<u64, GzipHeader>>> = OnceLock::new();
 static NEXT_GZIP_HEADER_ID: AtomicU64 = AtomicU64::new(1);
+static DEFAULT_DEFLATE_STATES: OnceLock<Mutex<HashMap<usize, Box<internal_state>>>> =
+    OnceLock::new();
+
+fn default_deflate_states() -> &'static Mutex<HashMap<usize, Box<internal_state>>> {
+    DEFAULT_DEFLATE_STATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn retain_default_deflate_state(state: Box<internal_state>) -> bool {
+    let address = core::ptr::from_ref(state.as_ref()).addr();
+    let mut states = default_deflate_states()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if states.try_reserve(1).is_err() {
+        return false;
+    }
+    states.insert(address, state);
+    true
+}
+
+fn release_default_deflate_state(address: usize) {
+    default_deflate_states()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&address);
+}
 
 fn gzip_headers() -> &'static Mutex<HashMap<u64, GzipHeader>> {
     GZIP_HEADERS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -597,8 +622,6 @@ pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::_tr_stored_block_ffi as _tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
-pub use crate::src::zutil::zcalloc;
-pub use crate::src::zutil::zcfree;
 
 pub use crate::stdlib::charf;
 pub use crate::stdlib::uInt;
@@ -1176,23 +1199,6 @@ pub unsafe fn deflateInit2_(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
-        strm.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if strm.zfree.is_none() {
-        strm.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
@@ -1226,29 +1232,44 @@ pub unsafe fn deflateInit2_(
     // The codec buffers use Rust owners, so this leaves no partially
     // initialized callback allocation to clean up if one of them cannot be
     // allocated.
-    let Some(mut state) = prepare_deflate_state(level, method, windowBits, memLevel, strategy, wrap)
+    let Some(state) = prepare_deflate_state(level, method, windowBits, memLevel, strategy, wrap)
     else {
         strm.msg = crate::src::zutil::z_errmsg[6].load(::core::sync::atomic::Ordering::Relaxed);
         return crate::zlib_h::Z_MEM_ERROR;
     };
+    if strm.zalloc.is_none() && strm.zfree.is_none() {
+        let mut state = Box::new(state);
+        strm.state = core::ptr::from_mut(state.as_mut());
+        let result = deflate_reset_state(strm, state.as_mut());
+        if result == crate::zlib_h::Z_OK && retain_default_deflate_state(state) {
+            return result;
+        }
+        strm.state = core::ptr::null_mut();
+        return if result == crate::zlib_h::Z_OK {
+            crate::zlib_h::Z_MEM_ERROR
+        } else {
+            result
+        };
+    }
+    let (Some(zalloc), Some(_)) = (strm.zalloc, strm.zfree) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let state_allocation = unsafe {
-        let state_allocation = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+        zalloc(
             strm.opaque,
-            1 as crate::stdlib::uInt,
+            1,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::deflate_state;
-        state_allocation
+        )
+        .cast::<crate::src::deflate::deflate_state>()
     };
     if state_allocation.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let state_storage = unsafe {
-        &mut *state_allocation.cast::<
-            ::core::mem::MaybeUninit<crate::src::deflate::deflate_state>,
-        >()
+    let state = unsafe {
+        (&mut *state_allocation
+            .cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>())
+            .write(state)
     };
-    let state = state_storage.write(state);
     strm.state = state;
     deflate_reset_state(strm, state)
 }
@@ -1315,10 +1336,6 @@ pub(crate) fn deflate_initialize_gzip(
     if !(0..=9).contains(&level) || !(0..=crate::zlib_h::Z_FIXED).contains(&strategy) {
         return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    strm.zalloc = Some(crate::src::zutil::zcalloc);
-    strm.zfree = Some(crate::src::zutil::zcfree);
-    strm.opaque = ::core::ptr::null_mut();
-
     let mut state = new_deflate_state();
     state.status = crate::src::deflate::INIT_STATE;
     state.wrap = 2;
@@ -1383,7 +1400,16 @@ pub unsafe extern "C" fn deflateInit2__ffi(
 /// following its state link.  Parameter updates use this before borrowing the
 /// state, leaving the raw link crossing confined to the caller.
 fn deflate_params_stream_is_valid(strm: &crate::zlib_h::z_stream_s) -> bool {
-    strm.zalloc.is_some() && strm.zfree.is_some() && !strm.state.is_null()
+    deflate_stream_has_state_allocation(strm)
+}
+
+/// A stream either carries a caller-supplied callback pair or a Rust-owned
+/// default state.  Treating a half-pair as invalid keeps allocation and
+/// release paired without reinstalling zlib's raw default callbacks.
+fn deflate_stream_has_state_allocation(strm: &crate::zlib_h::z_stream_s) -> bool {
+    ((strm.zalloc.is_some() && strm.zfree.is_some())
+        || (strm.zalloc.is_none() && strm.zfree.is_none()))
+        && !strm.state.is_null()
 }
 
 /// Validate a deflate state after its already-checked link has been borrowed.
@@ -1488,8 +1514,7 @@ fn deflate_set_dictionary_impl(
             }
         }
         s.strstart = str;
-        s.lookahead =
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+        s.lookahead = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
         fill_window_from_input(s, strm, Some(dictionary));
     }
     s.strstart = s.strstart.wrapping_add(s.lookahead);
@@ -1546,7 +1571,10 @@ fn deflate_dictionary_source<'a>(
     if len == 0 {
         return Ok(&[]);
     }
-    let start = state.strstart.wrapping_add(state.lookahead).wrapping_sub(len);
+    let start = state
+        .strstart
+        .wrapping_add(state.lookahead)
+        .wrapping_sub(len);
     state
         .window_bytes(start, len as usize)
         .ok_or(crate::zlib_h::Z_STREAM_ERROR)
@@ -1797,7 +1825,7 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let stream = DeflateHeaderStream {
-        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        allocators_present: deflate_stream_has_state_allocation(strm),
         state: strm.state.as_mut(),
     };
     let header = head.as_ref().map(|head| {
@@ -1868,7 +1896,7 @@ pub unsafe extern "C" fn deflatePending_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let stream = DeflatePendingStream {
-        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        allocators_present: deflate_stream_has_state_allocation(strm),
         state: strm.state.as_ref(),
     };
     deflatePending(stream, pending.as_mut(), bits.as_mut())
@@ -2120,7 +2148,7 @@ pub unsafe extern "C" fn deflatePrime_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let stream = DeflatePrimeStream {
-        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        allocators_present: deflate_stream_has_state_allocation(strm),
         state: unsafe { strm.state.as_mut() },
     };
     deflate_prime_impl(stream, bits, value)
@@ -2131,9 +2159,7 @@ fn deflate_params_impl(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if !deflate_params_stream_is_valid(stream.stream)
-        || !deflate_params_state_is_valid(state)
-    {
+    if !deflate_params_stream_is_valid(stream.stream) || !deflate_params_state_is_valid(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     deflate_params_update(stream, state, level, strategy)
@@ -2303,7 +2329,7 @@ pub unsafe extern "C" fn deflateTune_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let stream = DeflateTuneStream {
-        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        allocators_present: deflate_stream_has_state_allocation(strm),
         state: strm.state.as_mut(),
     };
     deflateTune(stream, good_length, max_lazy, nice_length, max_chain)
@@ -2936,13 +2962,7 @@ fn deflate_impl(
             );
             drop(io);
             commit_deflate_progress(
-                strm,
-                input_pos,
-                input_len,
-                output_pos,
-                output_len,
-                progress,
-                None,
+                strm, input_pos, input_len, output_pos, output_len, progress, None,
             );
             result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
@@ -3372,9 +3392,16 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     let Some(state) = strm.state.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let end = deflate_end_impl(state, zalloc.is_some() && zfree.is_some());
+    let end = deflate_end_impl(
+        state,
+        (zalloc.is_some() && zfree.is_some()) || (zalloc.is_none() && zfree.is_none()),
+    );
     if end != crate::zlib_h::Z_STREAM_ERROR {
-        zfree.expect("deflate_end_impl validates zfree")(opaque, state_allocation);
+        if let Some(zfree) = zfree {
+            zfree(opaque, state_allocation);
+        } else {
+            release_default_deflate_state(state_allocation.addr());
+        }
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     end
@@ -3578,14 +3605,26 @@ unsafe fn deflate_copy_install(
         Err(error) => return error,
     };
     *dest = *source;
+    if dest.zalloc.is_none() && dest.zfree.is_none() {
+        let state = Box::new(copied_state);
+        let state_memory = core::ptr::from_ref(state.as_ref());
+        if !retain_default_deflate_state(state) {
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+        dest.state = state_memory.cast_mut();
+        return crate::zlib_h::Z_OK;
+    }
+    let (Some(zalloc), Some(_)) = (dest.zalloc, dest.zfree) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let state_memory = unsafe {
-        dest.zalloc.expect("validated source allocator")(
+        zalloc(
             dest.opaque,
             1,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
         )
-    }
-    .cast::<crate::src::deflate::deflate_state>();
+        .cast::<crate::src::deflate::deflate_state>()
+    };
     if state_memory.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -3609,7 +3648,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     };
     let copy_source = DeflateCopySource {
         state: source_state,
-        allocators_present: source.zalloc.is_some() && source.zfree.is_some(),
+        allocators_present: deflate_stream_has_state_allocation(source),
     };
     deflate_copy_install(dest, source, copy_source)
 }
