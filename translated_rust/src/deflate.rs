@@ -3328,14 +3328,14 @@ unsafe extern "C" fn deflate_rle(
                 .offset((*s).strstart as isize)
                 .offset(-(1 as ::core::ffi::c_int as isize));
             prev = *scan as crate::stdlib::uInt;
-            scan = scan.offset(1);
+            scan = scan.wrapping_add(1);
             if prev == *scan as crate::stdlib::uInt
                 && {
-                    scan = scan.offset(1);
+                    scan = scan.wrapping_add(1);
                     prev == *scan as crate::stdlib::uInt
                 }
                 && {
-                    scan = scan.offset(1);
+                    scan = scan.wrapping_add(1);
                     prev == *scan as crate::stdlib::uInt
                 }
             {
@@ -3344,34 +3344,34 @@ unsafe extern "C" fn deflate_rle(
                     .offset((*s).strstart as isize)
                     .offset(crate::zutil_h::MAX_MATCH as isize);
                 loop {
-                    scan = scan.offset(1);
+                    scan = scan.wrapping_add(1);
                     if !(prev == *scan as crate::stdlib::uInt
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_add(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_add(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_add(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_add(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_add(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_add(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_add(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                         && scan < strend)
