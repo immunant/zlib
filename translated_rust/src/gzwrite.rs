@@ -44,6 +44,22 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+// Keep the errno-dependent write failure policy separate from the ABI-shaped
+// gzip state.  A later FD/write facade can return this pointer-free result
+// directly instead of making the state machine inspect errno itself.
+struct GzWriteFailure {
+    errno_value: ::core::ffi::c_int,
+    would_block: bool,
+}
+
+fn gz_write_failure(errno_value: ::core::ffi::c_int) -> GzWriteFailure {
+    GzWriteFailure {
+        errno_value,
+        would_block: errno_value == crate::stdlib::EAGAIN
+            || errno_value == crate::stdlib::EWOULDBLOCK,
+    }
+}
+
 fn write_buffered_byte(buffer: &mut [u8], index: usize, byte: u8) -> bool {
     let Some(slot) = buffer.get_mut(index) else {
         return false;
@@ -146,15 +162,14 @@ unsafe extern "C" fn gz_comp(
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             if writ < 0 as ::core::ffi::c_int {
-                if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                    || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                {
+                let failure = gz_write_failure(*crate::stdlib::__errno_location());
+                if failure.would_block {
                     (*state).again = 1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                    crate::stdlib::strerror(failure.errno_value),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -193,15 +208,14 @@ unsafe extern "C" fn gz_comp(
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 if writ < 0 as ::core::ffi::c_int {
-                    if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                        || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                    {
+                    let failure = gz_write_failure(*crate::stdlib::__errno_location());
+                    if failure.would_block {
                         (*state).again = 1 as ::core::ffi::c_int;
                     }
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                        crate::stdlib::strerror(failure.errno_value),
                     );
                     return -1 as ::core::ffi::c_int;
                 }
