@@ -3129,6 +3129,27 @@ fn stored_tail_block_plan(
     })
 }
 
+/// Record the history-window cursors after stored mode has copied `have`
+/// caller bytes into the window.  The legacy adapter retains the raw input and
+/// window lends; this transition is only scalar state and deliberately keeps
+/// zlib's wrapping arithmetic.
+fn record_stored_input_state(
+    s: &mut crate::src::deflate::deflate_state,
+    have: crate::stdlib::uInt,
+) {
+    s.strstart = s.strstart.wrapping_add(have);
+    s.insert = s
+        .insert
+        .wrapping_add(if have > s.w_size.wrapping_sub(s.insert) {
+            (s.w_size as ::core::ffi::c_uint).wrapping_sub(s.insert as ::core::ffi::c_uint)
+        } else {
+            have
+        });
+    if s.high_water < s.strstart as crate::zutil_h::ulg {
+        s.high_water = s.strstart as crate::zutil_h::ulg;
+    }
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3281,18 +3302,7 @@ unsafe extern "C" fn deflate_stored(
     }
     if have != 0 {
         read_buf((*s).strm, (*s).window.offset((*s).strstart as isize), have);
-        (*s).strstart = (*s).strstart.wrapping_add(have);
-        (*s).insert = (*s)
-            .insert
-            .wrapping_add(if have > (*s).w_size.wrapping_sub((*s).insert) {
-                ((*s).w_size as ::core::ffi::c_uint)
-                    .wrapping_sub((*s).insert as ::core::ffi::c_uint)
-            } else {
-                have
-            });
-    }
-    if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
-        (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
+        record_stored_input_state(&mut *s, have);
     }
     if let Some(plan) = stored_tail_block_plan(
         (*s).pending_buf_size,
