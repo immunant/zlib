@@ -152,22 +152,18 @@ pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
+    let Some(strm) = strm.as_ref() else {
+        return 1;
+    };
+    // Check the allocator pair before following `state`.  This preserves the
+    // C short-circuit for malformed streams with a stale state handle.
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return 1;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if state.is_null()
-        || (*state).strm != strm
-        || ((*state).mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || (*state).mode as ::core::ffi::c_uint
-            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        return 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
+    let Some(state) = (strm.state as *const crate::src::inflate::inflate_state).as_ref() else {
+        return 1;
+    };
+    (!inflate_state_valid(strm, state)) as ::core::ffi::c_int
 }
 fn inflate_state_valid(
     strm: &crate::zlib_h::z_stream,
@@ -215,6 +211,9 @@ pub fn inflateResetKeep(
 pub unsafe extern "C" fn inflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -240,6 +239,9 @@ pub fn inflateReset(
 pub unsafe extern "C" fn inflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -295,6 +297,9 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2367,6 +2372,9 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
+    if inflateStateCheck(strm) != 0 {
+        return inflate_get_dictionary(None, None, None, None, None);
+    }
     let Some(strm) = strm.as_ref() else {
         return inflate_get_dictionary(None, None, None, None, None);
     };
@@ -2469,6 +2477,9 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2567,6 +2578,9 @@ fn inflate_sync(
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
