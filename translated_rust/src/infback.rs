@@ -80,6 +80,41 @@ fn inflate_back_window_size(window_bits: ::core::ffi::c_int) -> Option<::core::f
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct InflateBackInitPlan {
+    window_bits: ::core::ffi::c_int,
+    window_size: ::core::ffi::c_uint,
+    install_default_zalloc: bool,
+    install_default_zfree: bool,
+}
+
+fn inflate_back_init_plan(
+    window_bits: ::core::ffi::c_int,
+    has_zalloc: bool,
+    has_zfree: bool,
+) -> Option<InflateBackInitPlan> {
+    Some(InflateBackInitPlan {
+        window_bits,
+        window_size: inflate_back_window_size(window_bits)?,
+        install_default_zalloc: !has_zalloc,
+        install_default_zfree: !has_zfree,
+    })
+}
+
+fn inflate_back_apply_allocator_defaults(
+    stream: &mut crate::zlib_h::z_stream_s,
+    plan: &InflateBackInitPlan,
+) {
+    stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if plan.install_default_zalloc {
+        stream.zalloc = Some(crate::src::zutil::zcalloc_ffi);
+        stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if plan.install_default_zfree {
+        stream.zfree = Some(crate::src::zutil::zcfree_ffi);
+    }
+}
+
 fn inflate_back_init_metadata_is_valid(
     version_first_byte: Option<::core::ffi::c_int>,
     stream_size: ::core::ffi::c_int,
@@ -427,20 +462,17 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     if strm.is_null() || window.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let window_size = match inflate_back_window_size(windowBits) {
-        Some(window_size) => window_size,
+    let plan = match inflate_back_init_plan(
+        windowBits,
+        (*strm).zalloc.is_some(),
+        (*strm).zfree.is_some(),
+    ) {
+        Some(plan) => plan,
         None => return crate::zlib_h::Z_STREAM_ERROR,
     };
 
     let stream = &mut *strm;
-    stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if stream.zalloc.is_none() {
-        stream.zalloc = Some(crate::src::zutil::zcalloc_ffi);
-        stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if stream.zfree.is_none() {
-        stream.zfree = Some(crate::src::zutil::zcfree_ffi);
-    }
+    inflate_back_apply_allocator_defaults(stream, &plan);
     let state = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         stream.opaque,
@@ -450,8 +482,8 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     let Some(state) = state.as_mut() else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let window = core::slice::from_raw_parts_mut(window, window_size as usize);
-    inflate_back_initialize_state(stream, state, window, windowBits);
+    let window = core::slice::from_raw_parts_mut(window, plan.window_size as usize);
+    inflate_back_initialize_state(stream, state, window, plan.window_bits);
     crate::zlib_h::Z_OK
 }
 pub unsafe extern "C" fn inflateBack(
@@ -1197,12 +1229,12 @@ mod tests {
         inflate_back_copy_count, inflate_back_copy_match, inflate_back_discard_bits,
         inflate_back_distance_exceeds_window, inflate_back_fill_code_length_run,
         inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
-        inflate_back_initial_input_count, inflate_back_litlen_action, inflate_back_low_bits,
-        inflate_back_match_copy_plan, inflate_back_root_table_index,
+        inflate_back_init_plan, inflate_back_initial_input_count, inflate_back_litlen_action,
+        inflate_back_low_bits, inflate_back_match_copy_plan, inflate_back_root_table_index,
         inflate_back_stored_block_length, inflate_back_subtable_index, inflate_back_take_bits,
         inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
-        InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan, InflateBackLitLenAction,
-        InflateBackMatchSource,
+        InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan, InflateBackInitPlan,
+        InflateBackLitLenAction, InflateBackMatchSource,
     };
 
     #[test]
@@ -1307,6 +1339,29 @@ mod tests {
         for window_bits in [::core::ffi::c_int::MIN, -1, 7, 16, ::core::ffi::c_int::MAX] {
             assert_eq!(inflate_back_window_size(window_bits), None);
         }
+    }
+
+    #[test]
+    fn inflate_back_init_plan_preserves_window_and_allocator_decisions() {
+        assert_eq!(
+            inflate_back_init_plan(15, false, false),
+            Some(InflateBackInitPlan {
+                window_bits: 15,
+                window_size: 32768,
+                install_default_zalloc: true,
+                install_default_zfree: true,
+            })
+        );
+        assert_eq!(
+            inflate_back_init_plan(8, true, true),
+            Some(InflateBackInitPlan {
+                window_bits: 8,
+                window_size: 256,
+                install_default_zalloc: false,
+                install_default_zfree: false,
+            })
+        );
+        assert_eq!(inflate_back_init_plan(7, false, false), None);
     }
 
     #[test]
