@@ -1685,26 +1685,67 @@ fn gz_clear_error_state(state: &mut crate::gzguts_h::gz_state) -> bool {
     true
 }
 
+// `gz_error()` owns message allocation and release, but deciding which prior
+// message is released and which stream fields are reset needs only scalar
+// state. Keep those choices out of that raw ownership boundary.
+pub(crate) struct GzErrorPlan {
+    pub discard_message: bool,
+    pub release_message: bool,
+    pub clear_have: bool,
+}
+
+pub(crate) fn gz_error_plan(
+    previous_err: ::core::ffi::c_int,
+    has_message: bool,
+    again: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+) -> GzErrorPlan {
+    GzErrorPlan {
+        discard_message: has_message,
+        release_message: has_message && previous_err != crate::zlib_h::Z_MEM_ERROR,
+        clear_have: err != crate::zlib_h::Z_OK
+            && err != crate::zlib_h::Z_BUF_ERROR
+            && again == 0,
+    }
+}
+
+pub(crate) fn gz_error_apply(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    plan: &GzErrorPlan,
+) {
+    if plan.discard_message {
+        state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    }
+    if plan.clear_have {
+        state.x.have = 0;
+    }
+    state.err = err;
+}
+
+pub(crate) fn gz_error_allocation_failed(state: &mut crate::gzguts_h::gz_state) {
+    state.err = crate::zlib_h::Z_MEM_ERROR;
+}
+
+pub(crate) fn gz_error_needs_message_allocation(
+    msg_is_null: bool,
+    err: ::core::ffi::c_int,
+) -> bool {
+    !msg_is_null && err != crate::zlib_h::Z_MEM_ERROR
+}
+
 pub unsafe extern "C" fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
     let state_ref = &mut *state;
-    if !state_ref.msg.is_null() {
-        if state_ref.err != crate::zlib_h::Z_MEM_ERROR {
-            crate::stdlib::free(state_ref.msg as *mut ::core::ffi::c_void);
-        }
-        state_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let plan = gz_error_plan(state_ref.err, !state_ref.msg.is_null(), state_ref.again, err);
+    if plan.release_message {
+        crate::stdlib::free(state_ref.msg as *mut ::core::ffi::c_void);
     }
-    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && state_ref.again == 0 {
-        state_ref.x.have = 0 as ::core::ffi::c_uint;
-    }
-    state_ref.err = err;
-    if msg.is_null() {
-        return;
-    }
-    if err == crate::zlib_h::Z_MEM_ERROR {
+    gz_error_apply(state_ref, err, &plan);
+    if !gz_error_needs_message_allocation(msg.is_null(), err) {
         return;
     }
     state_ref.msg = crate::stdlib::malloc(
@@ -1713,7 +1754,7 @@ pub unsafe extern "C" fn gz_error(
             .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
     ) as *mut ::core::ffi::c_char;
     if state_ref.msg.is_null() {
-        state_ref.err = crate::zlib_h::Z_MEM_ERROR;
+        gz_error_allocation_failed(state_ref);
         return;
     }
     crate::stdlib::snprintf(
