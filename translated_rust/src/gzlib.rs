@@ -300,6 +300,10 @@ fn gzseek_clears_pending_skip(whence: ::core::ffi::c_int) -> bool {
     whence == crate::stdlib::SEEK_CUR
 }
 
+fn gzseek_uses_read_buffer(mode: ::core::ffi::c_int) -> bool {
+    mode == crate::gzguts_h::GZ_READ
+}
+
 fn gzseek_effective_skip(
     past: ::core::ffi::c_int,
     skip: crate::stdlib::off64_t,
@@ -825,7 +829,7 @@ pub unsafe extern "C" fn gzseek64(
     if seek_plan.rewind && gzrewind_ffi(file) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
+    if gzseek_uses_read_buffer((*state).mode) {
         let read_buffer_plan = gzseek_plan_read_buffer_consumption(
             (*state).x.have,
             offset,
@@ -1136,9 +1140,9 @@ mod tests {
         gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_read_buffer_consumed,
-        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid, gztell64_core,
-        gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan, GzResetFields,
-        GzSeekOffsetPlan, GzSeekReadBufferPlan,
+        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid, gzseek_uses_read_buffer,
+        gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan,
+        GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1555,6 +1559,14 @@ mod tests {
                 remaining_offset: 0,
             }
         );
+    }
+
+    #[test]
+    fn gzseek_uses_read_buffer_only_for_read_mode() {
+        assert!(gzseek_uses_read_buffer(crate::gzguts_h::GZ_READ));
+        assert!(!gzseek_uses_read_buffer(crate::gzguts_h::GZ_WRITE));
+        assert!(!gzseek_uses_read_buffer(crate::gzguts_h::GZ_NONE));
+        assert!(!gzseek_uses_read_buffer(crate::gzguts_h::GZ_APPEND));
     }
 
     #[test]

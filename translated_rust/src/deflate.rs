@@ -2584,6 +2584,19 @@ fn stored_block_min_size(
     }) as ::core::ffi::c_uint
 }
 
+fn stored_block_available_output(
+    bi_valid: ::core::ffi::c_int,
+    avail_out: crate::stdlib::uInt,
+) -> Option<::core::ffi::c_uint> {
+    let header_bytes = (bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
+        >> 3 as ::core::ffi::c_int;
+    if avail_out < header_bytes {
+        None
+    } else {
+        Some((avail_out as ::core::ffi::c_uint).wrapping_sub(header_bytes))
+    }
+}
+
 fn stored_insert_after_input(
     insert: crate::stdlib::uInt,
     window_size: crate::stdlib::uInt,
@@ -2609,12 +2622,12 @@ unsafe extern "C" fn deflate_stored(
     let mut used: ::core::ffi::c_uint = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     loop {
         len = MAX_STORED as ::core::ffi::c_uint;
-        have = ((*s).bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
-            >> 3 as ::core::ffi::c_int;
-        if (*(*s).strm).avail_out < have {
+        let Some(available_output) =
+            stored_block_available_output((*s).bi_valid, (*(*s).strm).avail_out)
+        else {
             break;
-        }
-        have = ((*(*s).strm).avail_out as ::core::ffi::c_uint).wrapping_sub(have);
+        };
+        have = available_output;
         left = ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as ::core::ffi::c_uint;
         if len as crate::zutil_h::ulg
             > (left as crate::zutil_h::ulg)
@@ -3706,8 +3719,8 @@ mod tests {
         fill_window_zero_range, flush_pending_accounting, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
         pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_min_size, stored_insert_after_input, symbol_triplet_cursors,
-        zlib_header,
+        slide_hash_entry, stored_block_available_output, stored_block_min_size,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header,
     };
 
     #[test]
@@ -3998,6 +4011,15 @@ mod tests {
     fn stored_block_min_size_preserves_wrapping_underflow_behavior() {
         assert_eq!(stored_block_min_size(4, 32), 32);
         assert_eq!(stored_block_min_size(0, 32), 32);
+    }
+
+    #[test]
+    fn stored_block_available_output_requires_space_for_header_bits() {
+        assert_eq!(stored_block_available_output(0, 4), None);
+        assert_eq!(stored_block_available_output(0, 5), Some(0));
+        assert_eq!(stored_block_available_output(7, 5), None);
+        assert_eq!(stored_block_available_output(7, 9), Some(3));
+        assert_eq!(stored_block_available_output(-1, 5), Some(0));
     }
 
     #[test]

@@ -199,6 +199,39 @@ fn inflate_zlib_header_error(
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct InflateZlibWindowParams {
+    wbits: ::core::ffi::c_uint,
+    dmax: ::core::ffi::c_uint,
+    next_mode: inflate_mode,
+}
+
+fn inflate_zlib_window_params(
+    hold: crate::stdlib::uLong,
+    configured_wbits: ::core::ffi::c_uint,
+) -> Option<InflateZlibWindowParams> {
+    let header_wbits = (hold as ::core::ffi::c_uint & 0x0f).wrapping_add(8);
+    let wbits = if configured_wbits == 0 {
+        header_wbits
+    } else {
+        configured_wbits
+    };
+
+    if header_wbits > 15 || header_wbits > wbits {
+        return None;
+    }
+
+    Some(InflateZlibWindowParams {
+        wbits,
+        dmax: (1 as ::core::ffi::c_uint) << header_wbits,
+        next_mode: if hold & 0x200 as crate::stdlib::uLong != 0 {
+            DICTID
+        } else {
+            TYPE
+        },
+    })
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateBlockKind {
     Stored,
     Fixed,
@@ -918,39 +951,28 @@ pub unsafe extern "C" fn inflate(
                             hold >>= 4 as ::core::ffi::c_int;
                             bits =
                                 bits.wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                            len = (hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint))
-                            .wrapping_add(8 as ::core::ffi::c_uint);
-                            if (*state).wbits == 0 as ::core::ffi::c_uint {
-                                (*state).wbits = len;
-                            }
-                            if len > 15 as ::core::ffi::c_uint || len > (*state).wbits {
+                            let Some(window_params) =
+                                inflate_zlib_window_params(hold, (*state).wbits)
+                            else {
                                 (*strm).msg = b"invalid window size\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
                                 (*state).mode = crate::src::inflate::BAD;
                                 continue;
-                            } else {
-                                (*state).dmax = (1 as ::core::ffi::c_uint) << len;
-                                (*state).flags = 0 as ::core::ffi::c_int;
-                                (*state).check = crate::src::adler32::adler32_ffi(
-                                    0 as crate::stdlib::uLong,
-                                    ::core::ptr::null::<crate::stdlib::Bytef>(),
-                                    0 as crate::stdlib::uInt,
-                                )
-                                    as ::core::ffi::c_ulong;
-                                (*strm).adler = (*state).check as crate::stdlib::uLong;
-                                (*state).mode = (if hold & 0x200 as ::core::ffi::c_ulong != 0 {
-                                    crate::src::inflate::DICTID as ::core::ffi::c_int
-                                } else {
-                                    crate::src::inflate::TYPE as ::core::ffi::c_int
-                                })
-                                    as crate::src::inflate::inflate_mode;
-                                hold = 0 as ::core::ffi::c_ulong;
-                                bits = 0 as ::core::ffi::c_uint;
-                                continue;
-                            }
+                            };
+                            (*state).wbits = window_params.wbits;
+                            (*state).dmax = window_params.dmax;
+                            (*state).flags = 0 as ::core::ffi::c_int;
+                            (*state).check = crate::src::adler32::adler32_ffi(
+                                0 as crate::stdlib::uLong,
+                                ::core::ptr::null::<crate::stdlib::Bytef>(),
+                                0 as crate::stdlib::uInt,
+                            ) as ::core::ffi::c_ulong;
+                            (*strm).adler = (*state).check as crate::stdlib::uLong;
+                            (*state).mode = window_params.next_mode;
+                            hold = 0 as ::core::ffi::c_ulong;
+                            bits = 0 as ::core::ffi::c_uint;
+                            continue;
                         }
                     }
                 }
@@ -2849,11 +2871,12 @@ mod tests {
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
-        inflate_validate_wrap, inflate_zlib_header_error, initial_window_metadata,
-        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
-        InflateBlockKind, InflateCopyProgress, InflateMatchPlan, InflateMatchSource,
-        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
+        initial_window_metadata, stored_block_length, syncsearch_safe, window_needs_allocation,
+        window_update_plan, InflateBlockKind, InflateCopyProgress, InflateMatchPlan,
+        InflateMatchSource, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
+        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2974,6 +2997,32 @@ mod tests {
             inflate_zlib_header_error(1, 0x0977),
             Some(InflateZlibHeaderError::UnknownCompressionMethod)
         );
+    }
+
+    #[test]
+    fn inflate_zlib_window_params_negotiates_window_and_dictionary_mode() {
+        assert_eq!(
+            inflate_zlib_window_params(7, 0),
+            Some(InflateZlibWindowParams {
+                wbits: 15,
+                dmax: 32_768,
+                next_mode: TYPE,
+            })
+        );
+        assert_eq!(
+            inflate_zlib_window_params(0x207, 15),
+            Some(InflateZlibWindowParams {
+                wbits: 15,
+                dmax: 32_768,
+                next_mode: DICTID,
+            })
+        );
+    }
+
+    #[test]
+    fn inflate_zlib_window_params_rejects_oversized_headers() {
+        assert_eq!(inflate_zlib_window_params(8, 0), None);
+        assert_eq!(inflate_zlib_window_params(3, 10), None);
     }
 
     #[test]
