@@ -630,15 +630,21 @@ pub unsafe extern "C" fn inflateInit2_(
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    let state = Some(strm.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        strm.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
+    // Retain the callback result with its provenance while initialization is
+    // in flight.  The raw allocation is not exposed to the pointer-free
+    // decoder plan; it is consumed only by the paired publication/release
+    // boundary below.
+    let Some(state) = ::core::ptr::NonNull::new(
+        Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        )
+        .cast::<crate::src::inflate::inflate_state>(),
+    ) else {
         return crate::zlib_h::Z_MEM_ERROR;
-    }
+    };
     // Apply the requested wrapper/window policy before publishing the state.
     // The normal decoder is still entirely pointer-free here, so initialization
     // need not re-enter the stream/state reset adapter it is about to install.
@@ -652,7 +658,7 @@ pub unsafe extern "C" fn inflateInit2_(
     // fields piecemeal here would briefly treat uninitialized callback bytes
     // as Rust fields with drop glue.
     ::core::ptr::write(
-        state,
+        state.as_ptr(),
         crate::src::inflate::inflate_state {
             stream_identity: ::core::ptr::from_mut(strm).addr(),
             head: None,
@@ -661,16 +667,14 @@ pub unsafe extern "C" fn inflateInit2_(
         },
     );
     strm.state = Some(
-        ::core::ptr::NonNull::new(state)
-            .expect("checked state allocation")
-            .cast(),
+        state.cast(),
     );
     let update = match reset {
         Ok(update) => update,
         Err(status) => {
             Some(strm.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
-                strm.opaque, state as crate::stdlib::voidpf
+                strm.opaque, state.as_ptr().cast()
             );
             strm.state = None;
             return status;
