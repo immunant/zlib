@@ -447,126 +447,134 @@ fn read_buf_bytes(
 }
 
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+    let state = &mut *s;
+    let stream = &mut *state.strm;
+    let window = if state.window_size == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize)
+    };
+    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+    let input = if stream.avail_in == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+    };
+    let consumed = fill_window_bytes(state, stream, window, head, prev, input);
+    stream.next_in = stream.next_in.offset(consumed as isize);
+}
+
+fn fill_window_bytes(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    mut input: &[crate::stdlib::Bytef],
+) -> usize {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
+    let wsize = state.w_size;
+    let initial_input_len = input.len();
     loop {
-        more = (*s)
+        more = state
             .window_size
-            .wrapping_sub((*s).lookahead as crate::zutil_h::ulg)
-            .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
+            .wrapping_sub(state.lookahead as crate::zutil_h::ulg)
+            .wrapping_sub(state.strstart as crate::zutil_h::ulg)
             as ::core::ffi::c_uint;
         if ::core::mem::size_of::<::core::ffi::c_int>() <= 2 as usize {
             if more == 0 as ::core::ffi::c_uint
-                && (*s).strstart == 0 as crate::stdlib::uInt
-                && (*s).lookahead == 0 as crate::stdlib::uInt
+                && state.strstart == 0 as crate::stdlib::uInt
+                && state.lookahead == 0 as crate::stdlib::uInt
             {
                 more = wsize as ::core::ffi::c_uint;
             } else if more == -1 as ::core::ffi::c_int as ::core::ffi::c_uint {
                 more = more.wrapping_sub(1);
             }
         }
-        if (*s).strstart
+        if state.strstart
             >= wsize.wrapping_add(
-                (*s).w_size
+                state.w_size
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
             )
         {
-            crate::stdlib::memcpy(
-                (*s).window as *mut ::core::ffi::c_void,
-                (*s).window.offset(wsize as isize) as *const ::core::ffi::c_void,
-                wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).match_start = (*s).match_start.wrapping_sub(wsize);
-            (*s).strstart = (*s).strstart.wrapping_sub(wsize);
-            (*s).block_start -= wsize as ::core::ffi::c_long;
-            if (*s).insert > (*s).strstart {
-                (*s).insert = (*s).strstart;
+            let copied = wsize.wrapping_sub(more) as usize;
+            window.copy_within(wsize as usize..wsize as usize + copied, 0);
+            state.match_start = state.match_start.wrapping_sub(wsize);
+            state.strstart = state.strstart.wrapping_sub(wsize);
+            state.block_start -= wsize as ::core::ffi::c_long;
+            if state.insert > state.strstart {
+                state.insert = state.strstart;
             }
-            slide_hash(s);
+            slide_hash_tables(head, prev, wsize);
+            state.slid = 1 as ::core::ffi::c_int;
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
-        if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
+        if stream.avail_in == 0 as crate::stdlib::uInt {
             break;
         }
-        n = read_buf(
-            (*s).strm,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize),
-            more,
-        );
-        (*s).lookahead = (*s).lookahead.wrapping_add(n);
-        if (*s).lookahead.wrapping_add((*s).insert)
+        let len = ::core::cmp::min(stream.avail_in, more) as usize;
+        let start = state.strstart.wrapping_add(state.lookahead) as usize;
+        n = read_buf_bytes(stream, &mut window[start..start + len], &input[..len], state.wrap);
+        input = &input[len..];
+        state.lookahead = state.lookahead.wrapping_add(n);
+        if state.lookahead.wrapping_add(state.insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
-            let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
-            (*s).ins_h = *(*s).window.offset(str as isize) as crate::stdlib::uInt;
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s)
-                    .window
-                    .offset(str.wrapping_add(1 as crate::stdlib::uInt) as isize)
-                    as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            while (*s).insert != 0 {
-                (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                    ^ *(*s).window.offset(
-                        str.wrapping_add(3 as crate::stdlib::uInt)
-                            .wrapping_sub(1 as crate::stdlib::uInt)
-                            as isize,
-                    ) as crate::stdlib::uInt)
-                    & (*s).hash_mask;
-                *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                    *(*s).head.offset((*s).ins_h as isize);
-                *(*s).head.offset((*s).ins_h as isize) =
-                    str as crate::src::deflate::Pos as crate::src::deflate::Posf;
+            let mut str = state.strstart.wrapping_sub(state.insert);
+            state.ins_h = window[str as usize] as crate::stdlib::uInt;
+            state.ins_h = (state.ins_h << state.hash_shift
+                ^ window[str.wrapping_add(1) as usize] as crate::stdlib::uInt)
+                & state.hash_mask;
+            while state.insert != 0 {
+                state.ins_h = (state.ins_h << state.hash_shift
+                    ^ window[str.wrapping_add(3).wrapping_sub(1) as usize]
+                        as crate::stdlib::uInt)
+                    & state.hash_mask;
+                prev[(str & state.w_mask) as usize] = head[state.ins_h as usize];
+                head[state.ins_h as usize] = str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 str = str.wrapping_add(1);
-                (*s).insert = (*s).insert.wrapping_sub(1);
-                if (*s).lookahead.wrapping_add((*s).insert)
+                state.insert = state.insert.wrapping_sub(1);
+                if state.lookahead.wrapping_add(state.insert)
                     < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
                 {
                     break;
                 }
             }
         }
-        if !((*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && (*(*s).strm).avail_in != 0 as crate::stdlib::uInt)
+        if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            && stream.avail_in != 0 as crate::stdlib::uInt)
         {
             break;
         }
     }
-    if (*s).high_water < (*s).window_size {
-        let mut curr: crate::zutil_h::ulg = ((*s).strstart as crate::zutil_h::ulg)
-            .wrapping_add((*s).lookahead as crate::zutil_h::ulg);
+    if state.high_water < state.window_size {
+        let curr: crate::zutil_h::ulg = (state.strstart as crate::zutil_h::ulg)
+            .wrapping_add(state.lookahead as crate::zutil_h::ulg);
         let mut init: crate::zutil_h::ulg = 0;
-        if (*s).high_water < curr {
-            init = (*s).window_size.wrapping_sub(curr);
+        if state.high_water < curr {
+            init = state.window_size.wrapping_sub(curr);
             if init > crate::src::deflate::WIN_INIT as crate::zutil_h::ulg {
                 init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
             }
-            crate::stdlib::memset(
-                (*s).window.offset(curr as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).high_water = curr.wrapping_add(init);
-        } else if (*s).high_water
+            window[curr as usize..curr.wrapping_add(init) as usize].fill(0);
+            state.high_water = curr.wrapping_add(init);
+        } else if state.high_water
             < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
         {
             init = curr
                 .wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-                .wrapping_sub((*s).high_water);
-            if init > (*s).window_size.wrapping_sub((*s).high_water) {
-                init = (*s).window_size.wrapping_sub((*s).high_water);
+                .wrapping_sub(state.high_water);
+            if init > state.window_size.wrapping_sub(state.high_water) {
+                init = state.window_size.wrapping_sub(state.high_water);
             }
-            crate::stdlib::memset(
-                (*s).window.offset((*s).high_water as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).high_water = (*s).high_water.wrapping_add(init);
+            window[state.high_water as usize..state.high_water.wrapping_add(init) as usize]
+                .fill(0);
+            state.high_water = state.high_water.wrapping_add(init);
         }
     }
+    initial_input_len - input.len()
 }
 pub unsafe extern "C" fn deflateInit_(
     mut strm: crate::zlib_h::z_streamp,
