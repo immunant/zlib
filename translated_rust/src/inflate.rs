@@ -340,7 +340,7 @@ fn inflate_state_references_are_valid(
         stream.zfree.is_some(),
         state_matches_stream,
         state.mode,
-    )
+    ) && state_window_ownership(state).is_some()
 }
 
 fn inflate_stream_buffers_are_valid(
@@ -3917,6 +3917,7 @@ mod tests {
         inflate_reset2_discards_window, inflate_reset2_params, inflate_reset_keep_adler,
         inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
         inflate_state_is_usable, inflate_state_metadata_check_result,
+        inflate_state_references_are_valid,
         inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_core, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point, inflate_sync_point_value,
@@ -5426,6 +5427,35 @@ mod tests {
 
         assert_eq!(inflate_state_check_impl(None, None, false), 1);
         assert_eq!(inflate_state_check_impl(Some(&stream), None, false), 1);
+    }
+
+    #[test]
+    fn inflate_state_validation_requires_a_consistent_window_owner() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: Some(crate::src::zutil::zcalloc_ffi),
+            zfree: Some(crate::src::zutil::zcfree_ffi),
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+        let mut state = super::inflate_state::newly_allocated();
+        state.strm = &mut stream;
+        stream.state = &mut state as *mut super::inflate_state
+            as *mut crate::src::deflate::internal_state;
+
+        assert!(inflate_state_references_are_valid(&stream, &state, true));
+
+        state.window_ownership = WindowOwnership::CallerBorrowed.raw();
+        assert!(!inflate_state_references_are_valid(&stream, &state, true));
     }
 
     #[test]
