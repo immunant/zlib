@@ -326,6 +326,85 @@ static configuration_table: [config; 10] = [
     },
 ];
 
+// The allocation geometry is pure policy: it depends only on the public
+// initialization arguments and does not need access to the ABI stream or the
+// raw state allocation.  Keep it separate so the eventual owner-backed state
+// can retain the exact zlib validation and capacities without reproducing the
+// boundary projection.
+struct DeflateLayout {
+    level: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+    w_bits: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    hash_bits: crate::stdlib::uInt,
+    hash_size: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    lit_bufsize: crate::stdlib::uInt,
+    pending_buf_size: crate::zutil_h::ulg,
+}
+
+fn deflate_layout(
+    level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    mut window_bits: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> Option<DeflateLayout> {
+    let level = if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
+        6
+    } else {
+        level
+    };
+    let wrap = if window_bits < 0 {
+        if window_bits < -15 {
+            return None;
+        }
+        window_bits = -window_bits;
+        0
+    } else if window_bits > 15 {
+        window_bits -= 16;
+        2
+    } else {
+        1
+    };
+    if mem_level < 1
+        || mem_level > crate::stdlib::MAX_MEM_LEVEL
+        || method != crate::zlib_h::Z_DEFLATED
+        || !(8..=15).contains(&window_bits)
+        || !(0..=9).contains(&level)
+        || !(0..=crate::zlib_h::Z_FIXED).contains(&strategy)
+        || window_bits == 8 && wrap != 1
+    {
+        return None;
+    }
+    if window_bits == 8 {
+        window_bits = 9;
+    }
+    let w_bits = window_bits as crate::stdlib::uInt;
+    let w_size = (1 << w_bits) as crate::stdlib::uInt;
+    let hash_bits = (mem_level as crate::stdlib::uInt).wrapping_add(7);
+    let hash_size = (1 << hash_bits) as crate::stdlib::uInt;
+    let lit_bufsize = (1 << (mem_level + 6)) as crate::stdlib::uInt;
+    Some(DeflateLayout {
+        level,
+        wrap,
+        w_bits,
+        w_size,
+        w_mask: w_size.wrapping_sub(1),
+        hash_bits,
+        hash_size,
+        hash_mask: hash_size.wrapping_sub(1),
+        hash_shift: hash_bits
+            .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
+            .wrapping_sub(1)
+            .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt),
+        lit_bufsize,
+        pending_buf_size: (lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4),
+    })
+}
+
 fn slide_hash_table(table: &mut [crate::src::deflate::Posf], wsize: crate::stdlib::uInt) {
     for entry in table.iter_mut().rev() {
         let position = *entry as ::core::ffi::c_uint;
@@ -574,7 +653,6 @@ pub unsafe extern "C" fn deflateInit2_(
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
     static my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
         || *version.offset(0 as isize) as ::core::ffi::c_int
@@ -604,35 +682,9 @@ pub unsafe extern "C" fn deflateInit2_(
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
-        level = 6 as ::core::ffi::c_int;
-    }
-    if windowBits < 0 as ::core::ffi::c_int {
-        wrap = 0 as ::core::ffi::c_int;
-        if windowBits < -15 as ::core::ffi::c_int {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        windowBits = -windowBits;
-    } else if windowBits > 15 as ::core::ffi::c_int {
-        wrap = 2 as ::core::ffi::c_int;
-        windowBits -= 16 as ::core::ffi::c_int;
-    }
-    if memLevel < 1 as ::core::ffi::c_int
-        || memLevel > crate::stdlib::MAX_MEM_LEVEL
-        || method != crate::zlib_h::Z_DEFLATED
-        || windowBits < 8 as ::core::ffi::c_int
-        || windowBits > 15 as ::core::ffi::c_int
-        || level < 0 as ::core::ffi::c_int
-        || level > 9 as ::core::ffi::c_int
-        || strategy < 0 as ::core::ffi::c_int
-        || strategy > crate::zlib_h::Z_FIXED
-        || windowBits == 8 as ::core::ffi::c_int && wrap != 1 as ::core::ffi::c_int
-    {
+    let Some(layout) = deflate_layout(level, method, windowBits, memLevel, strategy) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if windowBits == 8 as ::core::ffi::c_int {
-        windowBits = 9 as ::core::ffi::c_int;
-    }
+    };
     s = Some((*strm).zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
         (*strm).opaque,
         1 as crate::stdlib::uInt,
@@ -649,19 +701,15 @@ pub unsafe extern "C" fn deflateInit2_(
     (*strm).state = s as *mut crate::src::deflate::internal_state;
     (*s).strm = strm;
     (*s).status = crate::src::deflate::INIT_STATE;
-    (*s).wrap = wrap;
+    (*s).wrap = layout.wrap;
     (*s).gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
-    (*s).w_bits = windowBits as crate::stdlib::uInt;
-    (*s).w_size = ((1 as ::core::ffi::c_int) << (*s).w_bits) as crate::stdlib::uInt;
-    (*s).w_mask = (*s).w_size.wrapping_sub(1 as crate::stdlib::uInt);
-    (*s).hash_bits = (memLevel as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
-    (*s).hash_size = ((1 as ::core::ffi::c_int) << (*s).hash_bits) as crate::stdlib::uInt;
-    (*s).hash_mask = (*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt);
-    (*s).hash_shift = (*s)
-        .hash_bits
-        .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
-        .wrapping_sub(1 as crate::stdlib::uInt)
-        .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+    (*s).w_bits = layout.w_bits;
+    (*s).w_size = layout.w_size;
+    (*s).w_mask = layout.w_mask;
+    (*s).hash_bits = layout.hash_bits;
+    (*s).hash_size = layout.hash_size;
+    (*s).hash_mask = layout.hash_mask;
+    (*s).hash_shift = layout.hash_shift;
     (*s).window = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
@@ -682,16 +730,14 @@ pub unsafe extern "C" fn deflateInit2_(
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
     (*s).high_water = 0 as crate::zutil_h::ulg;
-    (*s).lit_bufsize =
-        ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    (*s).lit_bufsize = layout.lit_bufsize;
     (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
         (*s).lit_bufsize,
         4 as crate::stdlib::uInt,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    (*s).pending_buf_size =
-        ((*s).lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
+    (*s).pending_buf_size = layout.pending_buf_size;
     if (*s).window.is_null()
         || (*s).prev.is_null()
         || (*s).head.is_null()
@@ -715,7 +761,7 @@ pub unsafe extern "C" fn deflateInit2_(
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_mul(3 as crate::stdlib::uInt);
-    (*s).level = level;
+    (*s).level = layout.level;
     (*s).strategy = strategy;
     (*s).method = method as crate::stdlib::Byte;
     return deflateReset(strm);
