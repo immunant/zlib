@@ -61,12 +61,7 @@ pub unsafe extern "C" fn compress2_z(
     stream.zalloc = None;
     stream.zfree = None;
     stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    err = crate::src::deflate::deflateInit_(
-        &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        level,
-        crate::zlib_h::ZLIB_VERSION.as_ptr(),
-        ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-    );
+    err = crate::src::deflate::deflateInit_(&mut stream, level);
     if err != crate::zlib_h::Z_OK {
         return err;
     }
@@ -92,7 +87,7 @@ pub unsafe extern "C" fn compress2_z(
             sourceLen = sourceLen.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
         }
         err = crate::src::deflate::deflate(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+            &mut stream,
             if sourceLen != 0 {
                 crate::zlib_h::Z_NO_FLUSH
             } else {
@@ -104,7 +99,7 @@ pub unsafe extern "C" fn compress2_z(
         }
     }
     *destLen = stream.next_out.offset_from(dest) as crate::stdlib::z_size_t;
-    crate::src::deflate::deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+    crate::src::deflate::deflateEnd(&mut stream);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
     } else {

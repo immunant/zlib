@@ -114,18 +114,14 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     state.strm.zalloc = None;
     state.strm.zfree = None;
     state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    ret = unsafe {
-        crate::src::deflate::deflateInit2_(
-            &mut state.strm,
-            state.level,
-            8,
-            15 + 16,
-            8,
-            state.strategy,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        )
-    };
+    ret = crate::src::deflate::deflateInit2_(
+        &mut state.strm,
+        state.level,
+        8,
+        15 + 16,
+        8,
+        state.strategy,
+    );
     if ret != crate::zlib_h::Z_OK {
         state.in_buf.clear();
         state.out_buf.clear();
@@ -162,7 +158,7 @@ fn gz_comp(
         if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        unsafe { crate::src::deflate::deflateReset(&mut state.strm) };
+        crate::src::deflate::deflateReset(&mut state.strm);
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
@@ -195,7 +191,7 @@ fn gz_comp(
             }
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
-        ret = unsafe { crate::src::deflate::deflate(&mut state.strm, flush) };
+        ret = crate::src::deflate::deflate(&mut state.strm, flush);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error_safe(
                 state,
