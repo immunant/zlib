@@ -1455,7 +1455,7 @@ pub(crate) fn deflateParams(
     if (strategy != state.strategy || current_kind != next_kind)
         && state.last_flush != -2 as ::core::ffi::c_int
     {
-        let err = unsafe { deflate(strm, crate::zlib_h::Z_BLOCK) };
+        let err = deflate(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
@@ -2240,7 +2240,7 @@ fn deflate_update(
     }
 }
 
-pub unsafe fn deflate(
+pub fn deflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -2248,8 +2248,6 @@ pub unsafe fn deflate(
     // reference. Keep the translated raw-state implementation below local
     // until stream ownership is converted.
     let mut old_flush: ::core::ffi::c_int = 0;
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if strm.zalloc.is_none()
         || strm.zfree.is_none()
         || strm.state.is_null()
@@ -2258,13 +2256,15 @@ pub unsafe fn deflate(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = strm.state as *mut crate::src::deflate::deflate_state;
-    if !deflate_stream_state_valid(Some(strm), Some(&*s)) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     // The stream/state handle has now passed the ABI validation above. Keep
-    // every subsequent state access behind this one legacy boundary borrow.
-    let state = &mut *s;
+    // the raw handle conversion inside its own legacy boundary.
+    let state = unsafe {
+        let state = strm.state as *mut crate::src::deflate::deflate_state;
+        if !deflate_stream_state_valid(Some(strm), Some(&*state)) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        &mut *state
+    };
     if strm.next_out.is_null()
         || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.is_null()
         || state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
@@ -2285,10 +2285,12 @@ pub unsafe fn deflate(
     if state.pending_buf.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let mut pending_buffer =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let mut output_buffer =
-        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+    let (mut pending_buffer, mut output_buffer) = unsafe {
+        (
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize),
+            ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize),
+        )
+    };
     old_flush = state.last_flush;
     state.last_flush = flush;
     if state.pending != 0 as crate::zutil_h::ulg {
@@ -2345,37 +2347,39 @@ pub unsafe fn deflate(
     // A custom header is retained by the stream for the duration of a deflate
     // call. Convert it once at this legacy boundary so all header phases below
     // operate on ordinary borrowed Rust values.
-    let gzip_header = if state.gzhead.is_null() {
-        None
-    } else {
-        let header = &*state.gzhead;
-        let extra = if header.extra.is_null() {
+    let gzip_header = unsafe {
+        if state.gzhead.is_null() {
             None
         } else {
-            Some(::core::slice::from_raw_parts(
-                header.extra,
-                (header.extra_len & 0xffff as crate::stdlib::uInt) as usize,
-            ))
-        };
-        let name = if header.name.is_null() {
-            None
-        } else {
-            Some(::std::ffi::CStr::from_ptr(header.name.cast()))
-        };
-        let comment = if header.comment.is_null() {
-            None
-        } else {
-            Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
-        };
-        Some(DeflateGzipHeader {
-            text: header.text,
-            time: header.time,
-            os: header.os,
-            extra,
-            name,
-            comment,
-            hcrc: header.hcrc,
-        })
+            let header = &*state.gzhead;
+            let extra = if header.extra.is_null() {
+                None
+            } else {
+                Some(::core::slice::from_raw_parts(
+                    header.extra,
+                    (header.extra_len & 0xffff as crate::stdlib::uInt) as usize,
+                ))
+            };
+            let name = if header.name.is_null() {
+                None
+            } else {
+                Some(::std::ffi::CStr::from_ptr(header.name.cast()))
+            };
+            let comment = if header.comment.is_null() {
+                None
+            } else {
+                Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
+            };
+            Some(DeflateGzipHeader {
+                text: header.text,
+                time: header.time,
+                os: header.os,
+                extra,
+                name,
+                comment,
+                hcrc: header.hcrc,
+            })
+        }
     };
     // Gzip header emission may resume in any of these phases.  Keep its
     // pending-buffer conversion at this one legacy boundary, then reborrow
@@ -2615,47 +2619,51 @@ pub unsafe fn deflate(
     {
         // This is the last raw stream/storage bridge. The named safe update
         // below owns level and strategy selection.
-        let stream = &mut *strm;
-        if state.window.is_null() || state.pending_buf.is_null() {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-        let head = if state.head.is_null() {
-            None
-        } else {
-            Some(::core::slice::from_raw_parts_mut(
-                state.head,
-                state.hash_size as usize,
-            ))
-        };
-        let prev = if state.prev.is_null() {
-            None
-        } else {
-            Some(::core::slice::from_raw_parts_mut(
-                state.prev,
-                state.w_size as usize,
-            ))
-        };
-        let input = if stream.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-        };
-        let Some(output) = output_tail(stream, &mut output_buffer) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        let Some(bstate) = deflate_update(
-            state,
-            stream,
-            window,
-            head,
-            prev,
-            input,
-            &mut pending_buffer,
-            output,
-            flush,
-        ) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
+        let bstate = unsafe {
+            let stream = &mut *strm;
+            if state.window.is_null() || state.pending_buf.is_null() {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let window =
+                ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+            let head = if state.head.is_null() {
+                None
+            } else {
+                Some(::core::slice::from_raw_parts_mut(
+                    state.head,
+                    state.hash_size as usize,
+                ))
+            };
+            let prev = if state.prev.is_null() {
+                None
+            } else {
+                Some(::core::slice::from_raw_parts_mut(
+                    state.prev,
+                    state.w_size as usize,
+                ))
+            };
+            let input = if stream.avail_in == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+            };
+            let Some(output) = output_tail(stream, &mut output_buffer) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let Some(bstate) = deflate_update(
+                state,
+                stream,
+                window,
+                head,
+                prev,
+                input,
+                &mut pending_buffer,
+                output,
+                flush,
+            ) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            bstate
         };
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -2689,8 +2697,9 @@ pub unsafe fn deflate(
                     if state.head.is_null() {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     }
-                    let head =
-                        ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+                    let head = unsafe {
+                        ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
+                    };
                     if !clear_full_flush_hash(state, head) {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     }

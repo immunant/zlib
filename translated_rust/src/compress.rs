@@ -89,16 +89,14 @@ pub fn compress2_z(
         let avail_out = stream.avail_out;
         // `stream` is initialized above and its input/output cursors are
         // derived only from the borrowed slices retained for this call.
-        err = unsafe {
-            crate::src::deflate::deflate(
-                &mut stream,
-                if source_len != 0 {
-                    crate::zlib_h::Z_NO_FLUSH
-                } else {
-                    crate::zlib_h::Z_FINISH
-                },
-            )
-        };
+        err = crate::src::deflate::deflate(
+            &mut stream,
+            if source_len != 0 {
+                crate::zlib_h::Z_NO_FLUSH
+            } else {
+                crate::zlib_h::Z_FINISH
+            },
+        );
         written = written
             .wrapping_add(avail_out.wrapping_sub(stream.avail_out) as crate::stdlib::z_size_t);
         if err != crate::zlib_h::Z_OK {

@@ -319,7 +319,7 @@ fn gz_comp(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) -> 
         }
         have = strm.avail_out as ::core::ffi::c_uint;
         // `strm` is the initialized stream held by this gzip state.
-        ret = unsafe { crate::src::deflate::deflate(strm, flush) };
+        ret = crate::src::deflate::deflate(strm, flush);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_static_error(
                 state,
