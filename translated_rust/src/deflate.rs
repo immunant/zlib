@@ -88,7 +88,10 @@ pub struct internal_state {
     pub data_type: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
-    pub pending_out: *mut crate::stdlib::Bytef,
+    /// Offset of the next pending byte within `pending_buf`.  The deflate
+    /// state is opaque across the ABI, so an offset preserves its observable
+    /// behavior without retaining an interior raw pointer.
+    pub pending_out: usize,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
     pub gzhead: crate::zlib_h::gz_headerp,
@@ -166,7 +169,7 @@ fn deflate_initial_state() -> deflate_state {
         data_type: crate::zlib_h::Z_UNKNOWN,
         pending_buf: ::core::ptr::null_mut(),
         pending_buf_size: 0,
-        pending_out: ::core::ptr::null_mut(),
+        pending_out: 0,
         pending: 0,
         wrap: 0,
         gzhead: ::core::ptr::null_mut(),
@@ -1528,7 +1531,7 @@ pub(crate) fn deflate_reset_keep_state(
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
     state.data_type = crate::zlib_h::Z_UNKNOWN;
     state.pending = 0 as crate::zutil_h::ulg;
-    state.pending_out = state.pending_buf;
+    state.pending_out = 0;
     if state.wrap < 0 as ::core::ffi::c_int {
         state.wrap = -state.wrap;
     }
@@ -1761,11 +1764,11 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     let s = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || s.sym_buf
-            < s.pending_out.wrapping_add(
-                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as usize,
-            )
+        || s.pending_out.checked_add(
+            (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
+                as usize,
+        )
+        .map_or(true, |pending_end| pending_end > s.lit_bufsize as usize)
     {
         return crate::zlib_h::Z_BUF_ERROR;
     }
@@ -2511,31 +2514,25 @@ fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate::stdlib::uInt {
         let Ok(len) = usize::try_from(len) else {
             return strm.avail_out;
         };
-        if (len != 0 && (strm.next_out.is_null() || s.pending_out.is_null()))
-            || len > strm.avail_out as usize
-        {
+        if strm.next_out.is_null() || len > strm.avail_out as usize {
             return strm.avail_out;
         }
         // `memcpy` required raw cursors even after their bounds had been
         // validated.  Keep the ABI lends here, reject aliasing just as C
         // `memcpy` requires, then perform the actual copy in the slice core.
-        let Some(output_end) = (strm.next_out as usize).checked_add(len) else {
+        let Some(pending_end) = s.pending_out.checked_add(len) else {
             return strm.avail_out;
         };
-        let Some(pending_end) = (s.pending_out as usize).checked_add(len) else {
-            return strm.avail_out;
-        };
-        if (strm.next_out as usize) < pending_end && (s.pending_out as usize) < output_end {
+        if pending_end > pending_buf.len() {
             return strm.avail_out;
         }
-        let Some(pending_start) = (s.pending_out as usize).checked_sub(s.pending_buf as usize)
-        else {
+        let Some(pending_address) = (s.pending_buf as usize).checked_add(s.pending_out) else {
             return strm.avail_out;
         };
-        let Some(pending_end) = pending_start.checked_add(len) else {
+        if !deflate_spans_are_disjoint(strm.next_out as usize, len, pending_address, len) {
             return strm.avail_out;
-        };
-        let Some(pending) = pending_buf.get(pending_start..pending_end) else {
+        }
+        let Some(pending) = pending_buf.get(s.pending_out..pending_end) else {
             return strm.avail_out;
         };
         let output = ::core::slice::from_raw_parts_mut(strm.next_out, len);
@@ -2546,11 +2543,11 @@ fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate::stdlib::uInt {
         // spans above. Preserve zlib's cursor advance without an unsafe pointer
         // offset operation in this transitional ABI adapter.
         strm.next_out = strm.next_out.wrapping_add(len);
-        s.pending_out = s.pending_out.wrapping_add(len);
+        s.pending_out = pending_end;
         strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
         strm.avail_out = strm.avail_out.wrapping_sub(len as crate::stdlib::uInt);
         if reset_pending_out {
-            s.pending_out = s.pending_buf;
+            s.pending_out = 0;
         }
         strm.avail_out
     }
@@ -3507,12 +3504,11 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let pending_len = usize::try_from(source_state.pending).ok();
     let sym_len = usize::try_from(source_state.sym_next).ok();
     let pending_range = pending_len.and_then(|len| {
-        deflate_copy_range(
-            pending_capacity,
-            source_state.pending_buf as usize,
-            source_state.pending_out as usize,
-            len,
-        )
+        source_state
+            .pending_out
+            .checked_add(len)
+            .filter(|end| *end <= pending_capacity)
+            .map(|end| source_state.pending_out..end)
     });
     let src_sym = sym_len.and_then(|len| {
         deflate_copy_range(
@@ -3609,7 +3605,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    dest_state.pending_out = dest_state.pending_buf.wrapping_add(pending_range.start);
+    dest_state.pending_out = pending_range.start;
     dest_state.sym_buf =
         dest_state.pending_buf.wrapping_add(dest_sym_start) as *mut crate::zutil_h::uchf;
     return crate::zlib_h::Z_OK;
