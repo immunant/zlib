@@ -2379,35 +2379,35 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflateEnd(strm)
 }
-pub unsafe extern "C" fn inflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
+pub fn inflateGetDictionary(
+    whave: crate::stdlib::uInt,
+    wnext: crate::stdlib::uInt,
+    window: Option<&[crate::stdlib::Bytef]>,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dictLength: Option<&mut crate::stdlib::uInt>,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let whave = whave as usize;
+    let wnext = wnext as usize;
+
+    if wnext > whave {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).whave != 0 && !dictionary.is_null() {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*state).window.offset((*state).wnext as isize) as *const ::core::ffi::c_void,
-            (*state).whave.wrapping_sub((*state).wnext) as crate::__stddef_size_t_h::size_t,
-        );
-        crate::stdlib::memcpy(
-            dictionary
-                .offset((*state).whave as isize)
-                .offset(-((*state).wnext as isize)) as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).wnext as crate::__stddef_size_t_h::size_t,
-        );
+
+    if let Some(dictionary) = dictionary {
+        let Some(window) = window else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let split = whave - wnext;
+        if dictionary.len() < whave || window.len() < whave {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        dictionary[..split].copy_from_slice(&window[wnext..whave]);
+        dictionary[split..whave].copy_from_slice(&window[..wnext]);
     }
-    if !dictLength.is_null() {
-        *dictLength = (*state).whave as crate::stdlib::uInt;
+    if let Some(dictLength) = dictLength {
+        *dictLength = whave as crate::stdlib::uInt;
     }
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateGetDictionary"]
 
@@ -2416,7 +2416,44 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    inflateGetDictionary(strm, dictionary, dictLength)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let strm = &*strm;
+    let state = strm.state as *const crate::src::inflate::inflate_state;
+    if state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &*state;
+    if !inflate_state_valid(strm, state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+
+    let whave = state.whave as usize;
+    let wnext = state.wnext as usize;
+    if wnext > whave || whave > state.wsize as usize {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let window = if whave == 0 {
+        None
+    } else {
+        if state.window.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        Some(::core::slice::from_raw_parts(state.window, state.wsize as usize))
+    };
+    let dictionary = if whave == 0 || dictionary.is_null() {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts_mut(dictionary, whave))
+    };
+    let dictLength = if dictLength.is_null() {
+        None
+    } else {
+        Some(&mut *dictLength)
+    };
+
+    inflateGetDictionary(state.whave, state.wnext, window, dictionary, dictLength)
 }
 pub unsafe extern "C" fn inflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
