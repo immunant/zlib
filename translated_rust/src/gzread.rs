@@ -682,67 +682,65 @@ pub unsafe extern "C" fn gzungetc(
     mut c: ::core::ffi::c_int,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).how == crate::gzguts_h::LOOK && (*state).x.have == 0 as ::core::ffi::c_uint {
+    if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
         gz_look(state);
     }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
+        state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).x.have == 0 as ::core::ffi::c_uint {
-        let size = (*state).size as usize;
+    if state.x.have == 0 as ::core::ffi::c_uint {
+        let size = state.size as usize;
         let Some(capacity) = size.checked_mul(2) else {
             return -1 as ::core::ffi::c_int;
         };
-        if (*state).out.is_null() {
+        if state.out.is_null() {
             return -1 as ::core::ffi::c_int;
         }
-        let buffer = ::core::slice::from_raw_parts_mut((*state).out, capacity);
+        let buffer = ::core::slice::from_raw_parts_mut(state.out, capacity);
         let Some(next) = pushback_empty(buffer, c as ::core::ffi::c_uchar) else {
             return -1 as ::core::ffi::c_int;
         };
-        (*state).x.have = 1 as ::core::ffi::c_uint;
-        (*state).x.next = (*state).out.add(next);
-        (*state).x.pos -= 1;
-        (*state).past = 0 as ::core::ffi::c_int;
+        state.x.have = 1 as ::core::ffi::c_uint;
+        state.x.next = state.out.add(next);
+        state.x.pos -= 1;
+        state.past = 0 as ::core::ffi::c_int;
         return c;
     }
-    if (*state).x.have == (*state).size << 1 as ::core::ffi::c_int {
+    if state.x.have == state.size << 1 as ::core::ffi::c_int {
         crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+            state,
             crate::zlib_h::Z_DATA_ERROR,
             b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
         );
         return -1 as ::core::ffi::c_int;
     }
-    let size = (*state).size as usize;
+    let size = state.size as usize;
     let Some(capacity) = size.checked_mul(2) else {
         return -1 as ::core::ffi::c_int;
     };
-    let out = (*state).out;
-    let cursor = (*state).x.next;
+    let out = state.out;
+    let cursor = state.x.next;
     if out.is_null() || cursor.is_null() {
         return -1 as ::core::ffi::c_int;
     }
@@ -750,13 +748,13 @@ pub unsafe extern "C" fn gzungetc(
         return -1 as ::core::ffi::c_int;
     };
     let buffer = ::core::slice::from_raw_parts_mut(out, capacity);
-    let Some(next) = pushback_buffer(buffer, next, (*state).x.have as usize, c as ::core::ffi::c_uchar) else {
+    let Some(next) = pushback_buffer(buffer, next, state.x.have as usize, c as ::core::ffi::c_uchar) else {
         return -1 as ::core::ffi::c_int;
     };
-    (*state).x.have = (*state).x.have.wrapping_add(1);
-    (*state).x.next = out.add(next);
-    (*state).x.pos -= 1;
-    (*state).past = 0 as ::core::ffi::c_int;
+    state.x.have = state.x.have.wrapping_add(1);
+    state.x.next = out.add(next);
+    state.x.pos -= 1;
+    state.past = 0 as ::core::ffi::c_int;
     return c;
 }
 #[export_name = "gzungetc"]
