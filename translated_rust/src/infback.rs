@@ -264,6 +264,101 @@ where
     }
 }
 
+// The caller window is valid only for this `inflateBack()` invocation.  Keep
+// its cursor as an index into a scoped slice, and let the boundary closure be
+// the sole place that presents a raw window pointer to the output callback.
+// In particular, no callback allocation or borrowed window escapes this
+// facade as a `'static` slice.
+struct InflateBackOutput<'a, F> {
+    window: &'a mut [::core::ffi::c_uchar],
+    written: usize,
+    visit: F,
+}
+
+impl<'a, F> InflateBackOutput<'a, F>
+where
+    F: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
+{
+    fn new(window: &'a mut [::core::ffi::c_uchar], visit: F) -> Self {
+        Self {
+            window,
+            written: 0,
+            visit,
+        }
+    }
+
+    fn remaining(&self) -> usize {
+        self.window.len() - self.written
+    }
+
+    fn written(&self) -> usize {
+        self.written
+    }
+
+    fn flush(&mut self) -> bool {
+        if (self.visit)(&self.window[..self.written]) != 0 {
+            return false;
+        }
+        self.written = 0;
+        true
+    }
+
+    fn write_with(
+        &mut self,
+        operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> usize,
+    ) -> usize {
+        let available = self.remaining();
+        let written = operation(&mut self.window[self.written..]);
+        let written = written.min(available);
+        self.written += written;
+        written
+    }
+
+    fn write_byte(&mut self, byte: ::core::ffi::c_uchar) -> bool {
+        let Some(slot) = self.window.get_mut(self.written) else {
+            return false;
+        };
+        *slot = byte;
+        self.written += 1;
+        true
+    }
+
+    fn with_window<R>(
+        &mut self,
+        operation: impl FnOnce(&mut [::core::ffi::c_uchar], usize) -> R,
+    ) -> R {
+        operation(self.window, self.written)
+    }
+
+    fn set_written(&mut self, written: usize) -> bool {
+        if written > self.window.len() {
+            return false;
+        }
+        self.written = written;
+        true
+    }
+
+    fn copy_match(&mut self, offset: usize, length: usize) -> Option<usize> {
+        let left = self.remaining();
+        let put_index = self.written;
+        let back = self.window.len().checked_sub(offset)?;
+        let (from_index, available) = if back < left {
+            (put_index.checked_add(back)?, left.checked_sub(back)?)
+        } else {
+            (put_index.checked_sub(offset)?, left)
+        };
+        let count = available.min(length);
+        let from_end = from_index.checked_add(count)?;
+        let put_end = put_index.checked_add(count)?;
+        if from_end > self.window.len() || put_end > self.window.len() {
+            return None;
+        }
+        self.window.copy_within(from_index..from_end, put_index);
+        self.written = put_end;
+        Some(count)
+    }
+}
+
 pub unsafe extern "C" fn inflateBack(
     mut strm: crate::zlib_h::z_streamp,
     mut in_0: crate::zlib_h::in_func,
@@ -274,9 +369,7 @@ pub unsafe extern "C" fn inflateBack(
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
-    let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
@@ -336,8 +429,17 @@ pub unsafe extern "C" fn inflateBack(
     }) as ::core::ffi::c_uint;
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
-    put = (*state).window.expect("inflateBack window").as_ptr();
-    left = (*state).wsize;
+    let window = ::core::slice::from_raw_parts_mut(
+        state.window.expect("inflateBack window").as_ptr(),
+        state.wsize as usize,
+    );
+    let mut output = InflateBackOutput::new(window, |bytes| {
+        out.expect("non-null function pointer")(
+            out_desc,
+            bytes.as_ptr().cast_mut(),
+            bytes.len() as u32,
+        )
+    });
     let mut input = InflateBackInput::new(|consume| {
         if have == 0 {
             have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
@@ -437,11 +539,9 @@ pub unsafe extern "C" fn inflateBack(
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         }
-                        if left == 0 as ::core::ffi::c_uint {
-                            put = (*state).window.expect("inflateBack window").as_ptr();
-                            left = (*state).wsize;
-                            (*state).whave = left;
-                            if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
+                        if output.remaining() == 0 {
+                            (*state).whave = state.wsize;
+                            if !output.flush() {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             }
@@ -449,13 +549,12 @@ pub unsafe extern "C" fn inflateBack(
                         if copy > input.available() as ::core::ffi::c_uint {
                             copy = input.available() as ::core::ffi::c_uint;
                         }
-                        if copy > left {
-                            copy = left;
+                        if copy > output.remaining() as ::core::ffi::c_uint {
+                            copy = output.remaining() as ::core::ffi::c_uint;
                         }
-                        let output = ::core::slice::from_raw_parts_mut(put, copy as usize);
-                        let copied = input.copy_to(output) as ::core::ffi::c_uint;
-                        left = left.wrapping_sub(copy);
-                        put = put.wrapping_add(copy as usize);
+                        let copied = output
+                            .write_with(|bytes| input.copy_to(&mut bytes[..copy as usize]))
+                            as ::core::ffi::c_uint;
                         (*state).length = (*state).length.wrapping_sub(copied);
                     }
                     (*state).mode = crate::src::inflate::TYPE;
@@ -811,16 +910,14 @@ pub unsafe extern "C" fn inflateBack(
                 break;
             }
         }
-        if input.available() >= 6 && left >= 258 as ::core::ffi::c_uint {
+        if input.available() >= 6 && output.remaining() >= 258 {
             // Both callback cursors are bounded for this dispatch: `have`
-            // describes the input callback's current chunk, and `put` lies
-            // in the caller window with `left` bytes remaining.  Decode
+            // describes the input callback's current chunk, and the output
+            // facade retains the checked caller-window cursor. Decode
             // directly through those views instead of republishing them via
             // the legacy raw-stream fast adapter.
-            let window = state.window.expect("inflateBack window");
-            let window_size = state.wsize as usize;
-            let output = ::core::slice::from_raw_parts_mut(window.as_ptr(), window_size);
-            let written = window_size.wrapping_sub(left as usize);
+            let window_size = output.written().wrapping_add(output.remaining());
+            let written = output.written();
             let mut fast_state = crate::src::inffast::InflateFastState {
                 history: crate::src::inffast::FastHistory::Output,
                 wsize: window_size,
@@ -836,20 +933,24 @@ pub unsafe extern "C" fn inflateBack(
                 sane: state.sane != 0,
             };
             let mut fast_result = None;
-            input.with_remaining(|input| {
-                let result = crate::src::inffast::inflate_fast_from_views(
-                    input,
-                    output,
-                    written,
-                    &mut fast_state,
-                );
-                let used = result.input_used;
-                fast_result = Some(result);
-                used
+            output.with_window(|window, _| {
+                input.with_remaining(|input| {
+                    let result = crate::src::inffast::inflate_fast_from_views(
+                        input,
+                        window,
+                        written,
+                        &mut fast_state,
+                    );
+                    let used = result.input_used;
+                    fast_result = Some(result);
+                    used
+                });
             });
             let result = fast_result.expect("fast input visit");
-            put = output.as_mut_ptr().wrapping_add(result.output_used);
-            left = output.len().wrapping_sub(result.output_used) as ::core::ffi::c_uint;
+            if !output.set_written(result.output_used) {
+                ret = crate::zlib_h::Z_DATA_ERROR;
+                break;
+            }
             hold = fast_state.hold;
             bits = fast_state.bits;
             match result.exit {
@@ -928,19 +1029,17 @@ pub unsafe extern "C" fn inflateBack(
             bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
             (*state).length = here.val as ::core::ffi::c_uint;
             if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-                if left == 0 as ::core::ffi::c_uint {
-                    put = (*state).window.expect("inflateBack window").as_ptr();
-                    left = (*state).wsize;
-                    (*state).whave = left;
-                    if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
+                if output.remaining() == 0 {
+                    (*state).whave = state.wsize;
+                    if !output.flush() {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break;
                     }
                 }
-                let c2rust_fresh15 = put;
-                put = put.offset(1);
-                *c2rust_fresh15 = (*state).length as ::core::ffi::c_uchar;
-                left = left.wrapping_sub(1);
+                if !output.write_byte((*state).length as ::core::ffi::c_uchar) {
+                    ret = crate::zlib_h::Z_DATA_ERROR;
+                    break;
+                }
                 (*state).mode = crate::src::inflate::LEN;
             } else if here.op as ::core::ffi::c_int & 32 as ::core::ffi::c_int != 0 {
                 (*state).mode = crate::src::inflate::TYPE;
@@ -1052,7 +1151,7 @@ pub unsafe extern "C" fn inflateBack(
                         > (*state)
                             .wsize
                             .wrapping_sub(if (*state).whave < (*state).wsize {
-                                left
+                                output.remaining() as ::core::ffi::c_uint
                             } else {
                                 0 as ::core::ffi::c_uint
                             })
@@ -1063,55 +1162,24 @@ pub unsafe extern "C" fn inflateBack(
                         (*state).mode = crate::src::inflate::BAD;
                     } else {
                         loop {
-                            if left == 0 as ::core::ffi::c_uint {
-                                put = (*state).window.expect("inflateBack window").as_ptr();
-                                left = (*state).wsize;
-                                (*state).whave = left;
-                                if out.expect("non-null function pointer")(out_desc, put, left) != 0
-                                {
+                            if output.remaining() == 0 {
+                                (*state).whave = state.wsize;
+                                if !output.flush() {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break '_inf_leave;
                                 }
                             }
                             // `offset` was checked against the amount of
                             // history represented by this caller window.
-                            // Rebuild that bounded window only for this
-                            // copy, so the overlapping match uses Rust's
-                            // memmove-equivalent slice operation.
-                            let window = ::core::slice::from_raw_parts_mut(
-                                (*state).window.expect("inflateBack window").as_ptr(),
-                                (*state).wsize as usize,
-                            );
-                            let put_index = window.len().wrapping_sub(left as usize);
-                            let back = (*state).wsize.wrapping_sub((*state).offset) as usize;
-                            let (from_index, available) = if back < left as usize {
-                                (
-                                    put_index.wrapping_add(back),
-                                    (left as usize).wrapping_sub(back),
-                                )
-                            } else {
-                                (
-                                    put_index.wrapping_sub((*state).offset as usize),
-                                    left as usize,
-                                )
-                            };
-                            let count = available.min((*state).length as usize);
-                            let Some(from_end) = from_index.checked_add(count) else {
+                            // The call-scoped output facade performs the
+                            // overlapping copy with a checked slice range.
+                            let Some(count) = output
+                                .copy_match((*state).offset as usize, (*state).length as usize)
+                            else {
                                 ret = crate::zlib_h::Z_DATA_ERROR;
                                 break '_inf_leave;
                             };
-                            let Some(put_end) = put_index.checked_add(count) else {
-                                ret = crate::zlib_h::Z_DATA_ERROR;
-                                break '_inf_leave;
-                            };
-                            if from_end > window.len() || put_end > window.len() {
-                                ret = crate::zlib_h::Z_DATA_ERROR;
-                                break '_inf_leave;
-                            }
-                            window.copy_within(from_index..from_end, put_index);
                             (*state).length = (*state).length.wrapping_sub(count as u32);
-                            left = left.wrapping_sub(count as u32);
-                            put = window.as_mut_ptr().wrapping_add(put_end);
                             if (*state).length == 0 as ::core::ffi::c_uint {
                                 break;
                             }
@@ -1121,16 +1189,8 @@ pub unsafe extern "C" fn inflateBack(
             }
         }
     }
-    if left < (*state).wsize {
-        if out.expect("non-null function pointer")(
-            out_desc,
-            (*state).window.expect("inflateBack window").as_ptr(),
-            (*state).wsize.wrapping_sub(left),
-        ) != 0
-            && ret == crate::zlib_h::Z_STREAM_END
-        {
-            ret = crate::zlib_h::Z_BUF_ERROR;
-        }
+    if output.written() != 0 && !output.flush() && ret == crate::zlib_h::Z_STREAM_END {
+        ret = crate::zlib_h::Z_BUF_ERROR;
     }
     // End the call-scoped input facade before publishing its raw cursor back
     // to the ABI stream.
