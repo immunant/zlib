@@ -21,11 +21,13 @@ pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub unsafe fn gzclose(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state.mode == crate::gzguts_h::GZ_READ {
-        crate::src::gzread::gzclose_r(state as *mut _ as *mut crate::zlib_h::gzFile_s)
-    } else {
-        crate::src::gzwrite::gzclose_w(state as *mut _ as *mut crate::zlib_h::gzFile_s)
-    }
+    let close: unsafe extern "C" fn(crate::zlib_h::gzFile) -> ::core::ffi::c_int =
+        if state.mode == crate::gzguts_h::GZ_READ {
+            crate::src::gzread::gzclose_r
+        } else {
+            crate::src::gzwrite::gzclose_w
+        };
+    close(state as *mut _ as *mut crate::zlib_h::gzFile_s)
 }
 #[export_name = "gzclose"]
 
