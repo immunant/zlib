@@ -1875,12 +1875,13 @@ fn putShortMSB(s: &mut crate::src::deflate::deflate_state, b: crate::stdlib::uIn
 /// means the compression implementation cannot read or write through an ABI
 /// pointer.  The small adapter in `deflate` updates the ABI cursors after this
 /// function reports how many bytes were copied.
-fn flush_pending_bytes(
+fn flush_pending_to(
     s: &mut crate::src::deflate::deflate_state,
-    output: &mut [crate::stdlib::Bytef],
+    output_capacity: usize,
+    mut write: impl FnMut(&[crate::stdlib::Bytef]),
 ) -> usize {
     s.with_pending(|state, pending_buf| crate::src::trees::bi_flush(state, pending_buf));
-    let len = (s.pending as usize).min(output.len());
+    let len = (s.pending as usize).min(output_capacity);
     if len == 0 {
         return 0;
     }
@@ -1888,13 +1889,22 @@ fn flush_pending_bytes(
         .pending_out
         .checked_add(len)
         .expect("pending output overflow");
-    output[..len].copy_from_slice(&s.buffers().pending[s.pending_out..output_end]);
+    write(&s.buffers().pending[s.pending_out..output_end]);
     s.pending_out = output_end;
     s.pending = s.pending.wrapping_sub(len as crate::zutil_h::ulg);
     if s.pending == 0 {
         s.pending_out = 0;
     }
     len
+}
+
+fn flush_pending_bytes(
+    s: &mut crate::src::deflate::deflate_state,
+    output: &mut [crate::stdlib::Bytef],
+) -> usize {
+    flush_pending_to(s, output.len(), |pending| {
+        output[..pending.len()].copy_from_slice(pending)
+    })
 }
 
 // This is the sole legacy `z_stream` adapter.  It remains unsafe until the
@@ -1911,22 +1921,8 @@ unsafe extern "C" fn flush_pending(strm: &mut crate::zlib_h::z_stream) {
 }
 
 fn flush_pending_io(s: &mut crate::src::deflate::deflate_state, io: &mut deflate_io) {
-    s.with_pending(|state, pending_buf| crate::src::trees::bi_flush(state, pending_buf));
     io.data_type = s.data_type;
-    let len = (s.pending as usize).min(io.avail_out() as usize);
-    if len == 0 {
-        return;
-    }
-    let output_end = s
-        .pending_out
-        .checked_add(len)
-        .expect("pending output overflow");
-    io.write(&s.buffers().pending[s.pending_out..output_end]);
-    s.pending_out = output_end;
-    s.pending = s.pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if s.pending == 0 {
-        s.pending_out = 0;
-    }
+    flush_pending_to(s, io.avail_out() as usize, |pending| io.write(pending));
 }
 
 pub fn deflate(
