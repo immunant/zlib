@@ -1174,18 +1174,22 @@ fn read_buf_core(
     }
 }
 
-unsafe fn read_buf(
-    mut strm: crate::zlib_h::z_streamp,
-    mut buf: *mut crate::stdlib::Bytef,
-    mut size: ::core::ffi::c_uint,
+// The raw stream and callback-backed output storage are still established by
+// the deflate boundary. Keep each crossing explicit while the copy and
+// checksum work stays in the safe slice core above.
+fn read_buf(
+    strm: crate::zlib_h::z_streamp,
+    buf: *mut crate::stdlib::Bytef,
+    size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let stream = &mut *strm;
+    let stream = unsafe { &mut *strm };
     let len = read_buf_len(stream.avail_in, size);
     if len == 0 {
-        return 0 as ::core::ffi::c_uint;
+        return 0;
     }
-    let input = core::slice::from_raw_parts(stream.next_in, len as usize);
-    let output = core::slice::from_raw_parts_mut(buf, len as usize);
+    let input = unsafe { core::slice::from_raw_parts(stream.next_in, len as usize) };
+    let output = unsafe { core::slice::from_raw_parts_mut(buf, len as usize) };
+    let state = unsafe { &*(stream.state as *mut crate::src::deflate::deflate_state) };
     let result = read_buf_core(
         input,
         output,
@@ -1193,7 +1197,7 @@ unsafe fn read_buf(
         size,
         stream.total_in,
         stream.adler,
-        (*(stream.state as *mut crate::src::deflate::deflate_state)).wrap,
+        state.wrap,
     );
     stream.avail_in = result.avail_in;
     stream.adler = result.adler;
