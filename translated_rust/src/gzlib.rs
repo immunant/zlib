@@ -473,24 +473,22 @@ unsafe extern "C" fn gz_open(
             reserved: 0,
         },
     });
-    let state = state_owner.as_mut_ptr();
     let mode_input = ::core::ffi::CStr::from_ptr(mode).to_bytes();
     let Some(parsed_mode) = parse_gz_open_mode(mode_input) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
     let mut oflag = parsed_mode.oflag;
     let exclusive = parsed_mode.exclusive;
-    {
-        let state_ref = &mut *state;
-        state_ref.size = 0 as ::core::ffi::c_uint;
-        state_ref.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
-        state_ref.err = crate::zlib_h::Z_OK;
-        state_ref.mode = parsed_mode.mode;
-        state_ref.level = parsed_mode.level;
-        state_ref.strategy = parsed_mode.strategy;
-        state_ref.direct = parsed_mode.direct;
-    }
-    let state_ref = &mut *state;
+    let state_ref = state_owner
+        .first_mut()
+        .expect("gzip state owner contains its reserved state");
+    state_ref.size = 0 as ::core::ffi::c_uint;
+    state_ref.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
+    state_ref.err = crate::zlib_h::Z_OK;
+    state_ref.mode = parsed_mode.mode;
+    state_ref.level = parsed_mode.level;
+    state_ref.strategy = parsed_mode.strategy;
+    state_ref.direct = parsed_mode.direct;
     if state_ref.mode == crate::gzguts_h::GZ_NONE {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -574,6 +572,7 @@ unsafe extern "C" fn gz_open(
             .map(|position| position as crate::stdlib::off64_t)
             .unwrap_or(0 as crate::stdlib::off64_t);
     }
+    let state = state_owner.as_mut_ptr();
     gz_reset(state);
     ::core::mem::forget(state_owner);
     return state as crate::zlib_h::gzFile;
