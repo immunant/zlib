@@ -814,8 +814,36 @@ fn reset_window_history(
     *wnext = 0;
 }
 
-fn window_needs_allocation(has_window: bool) -> bool {
-    !has_window
+/// Who supplies the storage used for an inflate history window.
+///
+/// Ordinary inflate streams allocate their window through `zalloc`, whereas
+/// `inflateBack` receives one from its caller.  The current ABI state still
+/// stores the backing address separately, but using this distinction in the
+/// safe allocation plan keeps the eventual owner conversion from conflating a
+/// borrowed window with a callback-owned one.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum WindowOwnership {
+    Missing,
+    CallbackOwned,
+    CallerBorrowed,
+}
+
+impl WindowOwnership {
+    fn normal_inflate(has_window: bool) -> Self {
+        if has_window {
+            Self::CallbackOwned
+        } else {
+            Self::Missing
+        }
+    }
+
+    fn needs_callback_allocation(self) -> bool {
+        matches!(self, Self::Missing)
+    }
+}
+
+fn window_needs_allocation(ownership: WindowOwnership) -> bool {
+    ownership.needs_callback_allocation()
 }
 
 fn window_allocation_request(
@@ -833,8 +861,11 @@ enum WindowAllocationPlan {
     },
 }
 
-fn window_allocation_plan(has_window: bool, wbits: crate::stdlib::uInt) -> WindowAllocationPlan {
-    if window_needs_allocation(has_window) {
+fn window_allocation_plan(
+    ownership: WindowOwnership,
+    wbits: crate::stdlib::uInt,
+) -> WindowAllocationPlan {
+    if window_needs_allocation(ownership) {
         let (items, size) = window_allocation_request(wbits);
         WindowAllocationPlan::Allocate { items, size }
     } else {
@@ -851,8 +882,9 @@ fn window_allocation_request_for_plan(
     }
 }
 
-fn window_allocation_failed(plan: WindowAllocationPlan, has_window: bool) -> bool {
-    matches!(plan, WindowAllocationPlan::Allocate { .. }) && !has_window
+fn window_allocation_failed(plan: WindowAllocationPlan, ownership: WindowOwnership) -> bool {
+    matches!(plan, WindowAllocationPlan::Allocate { .. })
+        && ownership.needs_callback_allocation()
 }
 
 fn window_update_plan(
@@ -1369,30 +1401,34 @@ fn update_window_slice_plan(
 }
 
 fn update_window_plan(
-    has_window: bool,
+    ownership: WindowOwnership,
     wsize: ::core::ffi::c_uint,
     wbits: ::core::ffi::c_uint,
     copy: ::core::ffi::c_uint,
 ) -> UpdateWindowPlan {
     UpdateWindowPlan {
-        allocation: window_allocation_plan(has_window, wbits),
+        allocation: window_allocation_plan(ownership, wbits),
         slices: update_window_slice_plan(wsize, wbits, copy),
     }
 }
 
 fn update_window_state_plan(
     state: &crate::src::inflate::inflate_state,
-    has_window: bool,
     copy: ::core::ffi::c_uint,
 ) -> UpdateWindowPlan {
-    update_window_plan(has_window, state.wsize, state.wbits, copy)
+    update_window_plan(
+        WindowOwnership::normal_inflate(!state.window.is_null()),
+        state.wsize,
+        state.wbits,
+        copy,
+    )
 }
 
 fn update_window_slices_after_allocation(
     plan: UpdateWindowPlan,
-    has_window: bool,
+    ownership: WindowOwnership,
 ) -> Result<UpdateWindowSlicePlan, ::core::ffi::c_int> {
-    if window_allocation_failed(plan.allocation, has_window) {
+    if window_allocation_failed(plan.allocation, ownership) {
         Err(1)
     } else {
         Ok(plan.slices)
@@ -1427,14 +1463,17 @@ fn updatewindow(
 ) -> ::core::ffi::c_int {
     unsafe {
         let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-        let plan = update_window_state_plan(state, !state.window.is_null(), copy);
+        let plan = update_window_state_plan(state, copy);
         if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
             state.window = Some((*strm).zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 (*strm).opaque, items, size
             ) as *mut crate::stdlib::Byte;
         }
-        let slices = match update_window_slices_after_allocation(plan, !state.window.is_null()) {
+        let slices = match update_window_slices_after_allocation(
+            plan,
+            WindowOwnership::normal_inflate(!state.window.is_null()),
+        ) {
             Ok(slices) => slices,
             Err(status) => return status,
         };
@@ -3604,7 +3643,7 @@ mod tests {
         InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
         InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
         InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO, WindowOwnership,
     };
 
     #[test]
@@ -5124,19 +5163,23 @@ mod tests {
     }
 
     #[test]
-    fn window_allocation_is_needed_only_without_a_window() {
-        assert!(window_needs_allocation(false));
-        assert!(!window_needs_allocation(true));
+    fn window_allocation_is_needed_only_for_missing_storage() {
+        assert!(window_needs_allocation(WindowOwnership::Missing));
+        assert!(!window_needs_allocation(WindowOwnership::CallbackOwned));
+        assert!(!window_needs_allocation(WindowOwnership::CallerBorrowed));
     }
 
     #[test]
     fn window_allocation_failure_requires_a_missing_allocated_window() {
-        let allocation = window_allocation_plan(false, 15);
-        assert!(window_allocation_failed(allocation, false));
-        assert!(!window_allocation_failed(allocation, true));
+        let allocation = window_allocation_plan(WindowOwnership::Missing, 15);
+        assert!(window_allocation_failed(allocation, WindowOwnership::Missing));
         assert!(!window_allocation_failed(
-            window_allocation_plan(true, 15),
-            false
+            allocation,
+            WindowOwnership::CallbackOwned
+        ));
+        assert!(!window_allocation_failed(
+            window_allocation_plan(WindowOwnership::CallerBorrowed, 15),
+            WindowOwnership::CallerBorrowed
         ));
     }
 
@@ -5149,11 +5192,11 @@ mod tests {
     #[test]
     fn window_allocation_plan_distinguishes_existing_and_required_windows() {
         assert_eq!(
-            window_allocation_plan(true, 15),
+            window_allocation_plan(WindowOwnership::CallbackOwned, 15),
             WindowAllocationPlan::Existing
         );
         assert_eq!(
-            window_allocation_plan(false, 8),
+            window_allocation_plan(WindowOwnership::Missing, 8),
             WindowAllocationPlan::Allocate {
                 items: 256,
                 size: 1,
@@ -5164,11 +5207,11 @@ mod tests {
     #[test]
     fn window_allocation_request_for_plan_preserves_allocation_branch() {
         assert_eq!(
-            window_allocation_request_for_plan(window_allocation_plan(false, 8)),
+            window_allocation_request_for_plan(window_allocation_plan(WindowOwnership::Missing, 8)),
             Some((256, 1))
         );
         assert_eq!(
-            window_allocation_request_for_plan(window_allocation_plan(true, 15)),
+            window_allocation_request_for_plan(window_allocation_plan(WindowOwnership::CallbackOwned, 15)),
             None
         );
     }
@@ -5498,7 +5541,7 @@ mod tests {
     #[test]
     fn update_window_plan_combines_allocation_and_slice_decisions() {
         assert_eq!(
-            super::update_window_plan(false, 0, 3, 5),
+            super::update_window_plan(WindowOwnership::Missing, 0, 3, 5),
             super::UpdateWindowPlan {
                 allocation: WindowAllocationPlan::Allocate { items: 8, size: 1 },
                 slices: super::UpdateWindowSlicePlan {
@@ -5508,7 +5551,7 @@ mod tests {
             }
         );
         assert_eq!(
-            super::update_window_plan(true, 8, 3, 0),
+            super::update_window_plan(WindowOwnership::CallbackOwned, 8, 3, 0),
             super::UpdateWindowPlan {
                 allocation: WindowAllocationPlan::Existing,
                 slices: super::UpdateWindowSlicePlan {
@@ -5521,25 +5564,31 @@ mod tests {
 
     #[test]
     fn update_window_slices_after_allocation_rejects_missing_new_window() {
-        let plan = super::update_window_plan(false, 0, 3, 5);
+        let plan = super::update_window_plan(WindowOwnership::Missing, 0, 3, 5);
 
-        assert_eq!(update_window_slices_after_allocation(plan, false), Err(1));
+        assert_eq!(
+            update_window_slices_after_allocation(plan, WindowOwnership::Missing),
+            Err(1)
+        );
     }
 
     #[test]
     fn update_window_slices_after_allocation_preserves_ready_slice_lengths() {
-        let allocation_plan = super::update_window_plan(false, 0, 3, 5);
+        let allocation_plan = super::update_window_plan(WindowOwnership::Missing, 0, 3, 5);
         assert_eq!(
-            update_window_slices_after_allocation(allocation_plan, true),
+            update_window_slices_after_allocation(
+                allocation_plan,
+                WindowOwnership::CallbackOwned,
+            ),
             Ok(super::UpdateWindowSlicePlan {
                 window_len: 8,
                 produced_len: Some(5),
             })
         );
 
-        let existing_plan = super::update_window_plan(true, 8, 3, 0);
+        let existing_plan = super::update_window_plan(WindowOwnership::CallerBorrowed, 8, 3, 0);
         assert_eq!(
-            update_window_slices_after_allocation(existing_plan, true),
+            update_window_slices_after_allocation(existing_plan, WindowOwnership::CallerBorrowed),
             Ok(super::UpdateWindowSlicePlan {
                 window_len: 8,
                 produced_len: None,
