@@ -447,6 +447,103 @@ struct InflateResetUpdate {
     adler: Option<crate::stdlib::uLong>,
 }
 
+// The requested wrapper policy and the normal decoder's initial value are
+// entirely pointer-free.  Keep them together while the callback transaction
+// below decides whether that value is published or released.  In particular,
+// an invalid window request still reaches the callback allocation boundary,
+// matching zlib's allocation-then-reset lifecycle.
+struct InflateInitOwner {
+    normal: InflateNormalState,
+    reset: Result<InflateResetUpdate, ::core::ffi::c_int>,
+}
+
+impl InflateInitOwner {
+    fn new(window_bits: ::core::ffi::c_int) -> Self {
+        let mut normal = initial_inflate_normal_state();
+        let reset = inflate_reset2_normal(&mut normal, window_bits);
+        Self { normal, reset }
+    }
+}
+
+// This is the one callback-paired initialization transaction.  It keeps the
+// allocator result's provenance at the boundary until exactly one complete
+// state publication or matching zfree.  The owner it receives contains no
+// callback handle, stream pointer, or foreign registration.
+unsafe fn inflate_publish_callback_owner(
+    strm: &mut crate::zlib_h::z_stream_s,
+    window_bits: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    // Keep the caller's stream projection at the allocator boundary. The
+    // callback-owned state is published only after it has been fully
+    // initialized below, since zalloc() need not return initialized bytes.
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
+            crate::src::zutil::zcalloc
+                as unsafe extern "C" fn(
+                    crate::stdlib::voidpf,
+                    ::core::ffi::c_uint,
+                    ::core::ffi::c_uint,
+                ) -> crate::stdlib::voidpf,
+        ) as crate::zlib_h::alloc_func;
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
+            crate::src::zutil::zcfree
+                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+        ) as crate::zlib_h::free_func;
+    }
+    // Retain the callback result with its provenance while initialization is
+    // in flight.  The raw allocation is not exposed to the pointer-free
+    // decoder plan; it is consumed only by the paired publication/release
+    // boundary below.
+    let Some(state) = ::core::ptr::NonNull::new(
+        Some(strm.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        )
+        .cast::<crate::src::inflate::inflate_state>(),
+    ) else {
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    // Preserve the callback ordering: allocation comes first, then the
+    // pointer-free initialization plan is built and published as one value.
+    // A failing plan therefore still has a matching callback release below.
+    let owner = InflateInitOwner::new(window_bits);
+    // Publish one complete value into the callback-owned allocation.  Writing
+    // fields piecemeal here would briefly treat uninitialized callback bytes
+    // as Rust fields with drop glue.
+    ::core::ptr::write(
+        state.as_ptr(),
+        crate::src::inflate::inflate_state {
+            stream_identity: ::core::ptr::from_mut(strm).addr(),
+            head: None,
+            window: None,
+            normal: owner.normal,
+        },
+    );
+    strm.state = Some(state.cast());
+    let update = match owner.reset {
+        Ok(update) => update,
+        Err(status) => {
+            Some(strm.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(strm.opaque, state.as_ptr().cast());
+            strm.state = None;
+            return status;
+        }
+    };
+    strm.total_out = 0;
+    strm.total_in = strm.total_out;
+    strm.msg = ::core::ptr::null_mut();
+    strm.data_type = 0;
+    if let Some(adler) = update.adler {
+        strm.adler = adler;
+    }
+    crate::zlib_h::Z_OK
+}
+
 // Resetting the resumable decoder state is independent of the ABI stream.
 // Keep the stream publication at the state projection boundary, while the
 // scalar reset itself remains usable by all reset variants.
@@ -609,85 +706,7 @@ pub unsafe extern "C" fn inflateInit2_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // Keep the caller's stream projection at the allocator boundary. The
-    // callback-owned state is published only after it has been fully
-    // initialized below, since zalloc() need not return initialized bytes.
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
-        strm.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if strm.zfree.is_none() {
-        strm.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
-    // Retain the callback result with its provenance while initialization is
-    // in flight.  The raw allocation is not exposed to the pointer-free
-    // decoder plan; it is consumed only by the paired publication/release
-    // boundary below.
-    let Some(state) = ::core::ptr::NonNull::new(
-        Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        )
-        .cast::<crate::src::inflate::inflate_state>(),
-    ) else {
-        return crate::zlib_h::Z_MEM_ERROR;
-    };
-    // Apply the requested wrapper/window policy before publishing the state.
-    // The normal decoder is still entirely pointer-free here, so initialization
-    // need not re-enter the stream/state reset adapter it is about to install.
-    // Keep the allocation and publication order unchanged: even an invalid
-    // window request receives a complete initial value before the matching
-    // callback release below.
-    let mut normal = initial_inflate_normal_state();
-    let reset = inflate_reset2_normal(&mut normal, windowBits);
-
-    // Publish one complete value into the callback-owned allocation.  Writing
-    // fields piecemeal here would briefly treat uninitialized callback bytes
-    // as Rust fields with drop glue.
-    ::core::ptr::write(
-        state.as_ptr(),
-        crate::src::inflate::inflate_state {
-            stream_identity: ::core::ptr::from_mut(strm).addr(),
-            head: None,
-            window: None,
-            normal,
-        },
-    );
-    strm.state = Some(
-        state.cast(),
-    );
-    let update = match reset {
-        Ok(update) => update,
-        Err(status) => {
-            Some(strm.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque, state.as_ptr().cast()
-            );
-            strm.state = None;
-            return status;
-        }
-    };
-    strm.total_out = 0;
-    strm.total_in = strm.total_out;
-    strm.msg = ::core::ptr::null_mut();
-    strm.data_type = 0;
-    if let Some(adler) = update.adler {
-        strm.adler = adler;
-    }
-    crate::zlib_h::Z_OK
+    inflate_publish_callback_owner(strm, windowBits)
 }
 #[export_name = "inflateInit2_"]
 
