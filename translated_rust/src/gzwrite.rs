@@ -365,6 +365,45 @@ pub(crate) fn gz_zero_direct(
     }
 }
 
+/// Scalar state commit required by a transparent sparse zero-fill. The
+/// exported gzip boundary owns the opaque-state writes and diagnostic; this
+/// plan preserves wrapping position/seek accounting without making a safe
+/// helper traverse `gz_state`.
+pub(crate) enum GzZeroDirectCommit {
+    Complete {
+        pos: crate::stdlib::off64_t,
+        skip: crate::stdlib::off64_t,
+    },
+    IoError {
+        pos: crate::stdlib::off64_t,
+        skip: crate::stdlib::off64_t,
+        again: ::core::ffi::c_int,
+        code: ::core::ffi::c_int,
+    },
+    Invalid,
+}
+
+pub(crate) fn gz_zero_direct_commit(
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+    result: GzZeroDirect,
+) -> GzZeroDirectCommit {
+    match result {
+        GzZeroDirect::Complete(consumed) => GzZeroDirectCommit::Complete {
+            pos: pos.wrapping_add(consumed as crate::stdlib::off64_t),
+            skip: skip.wrapping_sub(consumed as crate::stdlib::off64_t),
+        },
+        GzZeroDirect::IoError { consumed, code } => GzZeroDirectCommit::IoError {
+            pos: pos.wrapping_add(consumed as crate::stdlib::off64_t),
+            skip: skip.wrapping_sub(consumed as crate::stdlib::off64_t),
+            again: (code == crate::stdlib::EAGAIN || code == crate::stdlib::EWOULDBLOCK)
+                as ::core::ffi::c_int,
+            code,
+        },
+        GzZeroDirect::Invalid => GzZeroDirectCommit::Invalid,
+    }
+}
+
 /// Determine how much input fits after the existing buffered compressor
 /// input.  The wrapping subtraction deliberately preserves zlib's behavior
 /// for a malformed internal cursor while keeping the size conversion local.
@@ -700,23 +739,30 @@ macro_rules! gz_zero_at_boundary {
                         state.skip,
                     )
                 };
-                break 'gz_zero_result match result {
-                    crate::src::gzwrite::GzZeroDirect::Complete(consumed) => {
+                break 'gz_zero_result match crate::src::gzwrite::gz_zero_direct_commit(
+                    state.x.pos,
+                    state.skip,
+                    result,
+                ) {
+                    crate::src::gzwrite::GzZeroDirectCommit::Complete { pos, skip } => {
                         state.again = 0;
-                        state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
-                        state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
+                        state.x.pos = pos;
+                        state.skip = skip;
                         0
                     }
-                    crate::src::gzwrite::GzZeroDirect::IoError { consumed, code } => {
-                        state.again = (code == crate::stdlib::EAGAIN
-                            || code == crate::stdlib::EWOULDBLOCK)
-                            as ::core::ffi::c_int;
-                        state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
-                        state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
+                    crate::src::gzwrite::GzZeroDirectCommit::IoError {
+                        pos,
+                        skip,
+                        again,
+                        code,
+                    } => {
+                        state.again = again;
+                        state.x.pos = pos;
+                        state.skip = skip;
                         crate::src::gzlib::gz_error_io(state, code);
                         -1
                     }
-                    crate::src::gzwrite::GzZeroDirect::Invalid => -1,
+                    crate::src::gzwrite::GzZeroDirectCommit::Invalid => -1,
                 };
             }
             let mut first = true;
