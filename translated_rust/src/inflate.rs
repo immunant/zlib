@@ -817,43 +817,6 @@ fn inflate_reset_from_stream(
     })
 }
 
-// The sole reset projection ties the opaque state to the borrowed ABI stream.
-// It snapshots and republishes only scalar stream values around the
-// pointer-free reset transaction; persistent header provenance stays here.
-pub(crate) unsafe fn inflate_reset_from_abi_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    kind: InflateResetKind,
-) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // Refresh the owner from the ABI scalar snapshot at the one cursor
-    // projection boundary.  The bounded decoder then updates that owner
-    // directly, so no second stream-scalar lifecycle can drift from it.
-    state.decoder.stream = InflateDecoderStream {
-        total_in: strm.total_in,
-        total_out: strm.total_out,
-        adler: strm.adler,
-        data_type: strm.data_type,
-        message: None,
-    };
-    let completion = match inflate_reset_from_stream(
-        InflateResetOwner::new(&mut state.decoder.normal, &mut state.decoder.stream),
-        kind,
-    ) {
-        Ok(completion) => completion,
-        Err(status) => return status,
-    };
-    strm.total_out = state.decoder.stream.total_out;
-    strm.total_in = state.decoder.stream.total_in;
-    strm.msg = ::core::ptr::null_mut();
-    strm.data_type = state.decoder.stream.data_type;
-    strm.adler = state.decoder.stream.adler;
-    if completion.clear_header_registration {
-        state.head = None;
-    }
-    crate::zlib_h::Z_OK
-}
 #[export_name = "inflateResetKeep"]
 
 pub unsafe extern "C" fn inflateResetKeep_ffi(
@@ -862,7 +825,7 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_reset_from_abi_stream(strm, InflateResetKind::Keep)
+    inflate_from_stream(strm, InflateStreamRequest::Reset(InflateResetKind::Keep)).status()
 }
 #[export_name = "inflateReset"]
 
@@ -872,7 +835,7 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_reset_from_abi_stream(strm, InflateResetKind::Full)
+    inflate_from_stream(strm, InflateStreamRequest::Reset(InflateResetKind::Full)).status()
 }
 #[export_name = "inflateReset2"]
 
@@ -883,7 +846,11 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_reset_from_abi_stream(strm, InflateResetKind::WindowBits(windowBits))
+    inflate_from_stream(
+        strm,
+        InflateStreamRequest::Reset(InflateResetKind::WindowBits(windowBits)),
+    )
+    .status()
 }
 pub unsafe extern "C" fn inflateInit2_(
     strm: Option<&mut crate::zlib_h::z_stream_s>,
@@ -1333,6 +1300,7 @@ pub(crate) enum InflateStreamRequest<'request> {
     Decode(::core::ffi::c_int),
     Fast(::core::ffi::c_uint),
     Sync,
+    Reset(InflateResetKind),
     Scalar(InflateNormalScalarAction),
     Dictionary {
         dictionary: Option<&'request mut [crate::stdlib::Bytef]>,
@@ -3085,6 +3053,7 @@ pub(crate) unsafe fn inflate_from_stream(
             InflateStreamRequest::Decode(_)
             | InflateStreamRequest::Fast(_)
             | InflateStreamRequest::Sync
+            | InflateStreamRequest::Reset(_)
             | InflateStreamRequest::Dictionary { .. } => {
                 InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR)
             }
@@ -3104,6 +3073,35 @@ pub(crate) unsafe fn inflate_from_stream(
             dictionary,
             dict_length,
         ));
+    }
+    if let InflateStreamRequest::Reset(kind) = request {
+        // Reset shares this established stream/state projection with normal
+        // inflate requests. Refresh and publish the scalar snapshot here,
+        // keeping header-registration release at the sole association
+        // boundary rather than recreating a reset-specific unsafe adapter.
+        state.decoder.stream = InflateDecoderStream {
+            total_in: strm.total_in,
+            total_out: strm.total_out,
+            adler: strm.adler,
+            data_type: strm.data_type,
+            message: None,
+        };
+        let completion = match inflate_reset_from_stream(
+            InflateResetOwner::new(&mut state.decoder.normal, &mut state.decoder.stream),
+            kind,
+        ) {
+            Ok(completion) => completion,
+            Err(status) => return InflateStreamResult::Status(status),
+        };
+        strm.total_out = state.decoder.stream.total_out;
+        strm.total_in = state.decoder.stream.total_in;
+        strm.msg = ::core::ptr::null_mut();
+        strm.data_type = state.decoder.stream.data_type;
+        strm.adler = state.decoder.stream.adler;
+        if completion.clear_header_registration {
+            state.head = None;
+        }
+        return InflateStreamResult::Status(crate::zlib_h::Z_OK);
     }
     if strm.avail_in != 0 && strm.next_in.is_null() {
         return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
