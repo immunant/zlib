@@ -3856,12 +3856,12 @@ fn inflate_codes_used(next: usize) -> ::core::ffi::c_ulong {
     next as ::core::ffi::c_ulong
 }
 
-pub unsafe extern "C" fn inflateCodesUsed(
-    mut strm: crate::zlib_h::z_streamp,
+// Keep the opaque-state association out of the export wrapper.  This named
+// adapter owns that projection; its caller has already validated and borrowed
+// the ABI stream handle.
+pub unsafe fn inflateCodesUsed(
+    strm: &mut crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_ulong {
-    let Some(strm) = strm.as_mut() else {
-        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
-    };
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
@@ -3872,5 +3872,8 @@ pub unsafe extern "C" fn inflateCodesUsed(
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
+    let Some(strm) = strm.as_mut() else {
+        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
+    };
     inflateCodesUsed(strm)
 }
