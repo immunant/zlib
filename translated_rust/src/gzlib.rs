@@ -59,7 +59,7 @@ pub use crate::zlib_h::Z_HUFFMAN_ONLY;
 pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
-use std::os::fd::BorrowedFd;
+use std::os::fd::{BorrowedFd, IntoRawFd};
 
 fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
     state.x.have = 0 as ::core::ffi::c_uint;
@@ -227,11 +227,17 @@ unsafe fn gz_open(
                 })
         });
     if fd == -1 as ::core::ffi::c_int {
-        state.fd = crate::stdlib::open(
-            path.as_ptr(),
-            oflag,
-            0o666 as ::core::ffi::c_int,
-        );
+        state.fd = match rustix::fs::open(
+            path,
+            rustix::fs::OFlags::from_bits_retain(oflag as u32),
+            rustix::fs::Mode::from_bits_retain(0o666),
+        ) {
+            Ok(fd) => fd.into_raw_fd(),
+            Err(error) => {
+                errno::set_errno(errno::Errno(error.raw_os_error()));
+                -1
+            }
+        };
     } else {
         if oflag & crate::stdlib::O_NONBLOCK != 0 {
             crate::stdlib::fcntl(
