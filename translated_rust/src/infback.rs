@@ -1176,7 +1176,11 @@ pub(crate) fn inflateBack(
         strm.next_out = callback_window.wrapping_add(written);
         strm.avail_out = (window_size - written) as crate::stdlib::uInt;
         let status = crate::src::inflate::inflate(strm, crate::zlib_h::Z_NO_FLUSH);
-        written = window_size - strm.avail_out as usize;
+        // Keep the callback boundary on the same `left < wsize` rule as
+        // zlib's final-output path. In particular, a failed full-window
+        // callback remains pending and is presented again before returning.
+        written = inflate_back_pending_output(window_size as ::core::ffi::c_uint, strm.avail_out)
+            .unwrap_or(0) as usize;
 
         if written == window_size {
             published_full_window = true;
