@@ -463,6 +463,24 @@ impl GzCompressor<'_> {
     }
 }
 
+/// Drain pending input before a compression-parameter transition.
+///
+/// This is the `ParameterUpdate` branch of `gzflush`, kept separate so the
+/// parameter setter does not need to cross its unsafe, state-carrying helper.
+/// In particular, an empty stream must not create a `Z_BLOCK` deflate call.
+fn gz_flush_parameter_update(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero_impl(&mut GzCompressor { state }) == -1 {
+        return state.err;
+    }
+    if state.size != 0
+        && state.strm.avail_in != 0
+        && (GzCompressor { state }).buffered(crate::zlib_h::Z_BLOCK) == -1
+    {
+        return state.err;
+    }
+    state.err
+}
+
 /// Fill a pending gzip seek gap through the buffered compressor.
 fn gz_zero_impl(compressor: &mut GzCompressor<'_>) -> ::core::ffi::c_int {
     if compressor.state.strm.avail_in != 0
@@ -776,10 +794,6 @@ struct GzFlushFailures {
 
 enum GzFlushBehavior<'a> {
     Public,
-    /// Drain only pending input before changing compression parameters.  This
-    /// deliberately differs from a public flush: when there is no input it
-    /// must not manufacture a `Z_BLOCK` call to deflate.
-    ParameterUpdate,
     Closing(&'a mut GzFlushFailures),
 }
 
@@ -792,12 +806,10 @@ unsafe fn gzflush(
         validate_state,
         clear_error,
         stop_after_zero_failure,
-        drain_pending_input_only,
         mut failures,
     ) = match behavior {
-        GzFlushBehavior::Public => (true, true, true, false, None),
-        GzFlushBehavior::ParameterUpdate => (false, false, true, true, None),
-        GzFlushBehavior::Closing(failures) => (false, false, false, false, Some(failures)),
+        GzFlushBehavior::Public => (true, true, true, None),
+        GzFlushBehavior::Closing(failures) => (false, false, false, Some(failures)),
     };
     if validate_state
         && (state.mode != crate::gzguts_h::GZ_WRITE
@@ -819,9 +831,7 @@ unsafe fn gzflush(
             return state.err;
         }
     }
-    let compression_failed = (!drain_pending_input_only
-        || (state.size != 0 && state.strm.avail_in != 0))
-        && (GzCompressor { state }).buffered(flush) == -1 as ::core::ffi::c_int;
+    let compression_failed = (GzCompressor { state }).buffered(flush) == -1 as ::core::ffi::c_int;
     if compression_failed {
         if let Some(failures) = failures.as_deref_mut() {
             failures.compression = Some(state.err);
@@ -855,12 +865,7 @@ unsafe fn gzsetparams(
     if level == state.level && strategy == state.strategy {
         return crate::zlib_h::Z_OK;
     }
-    if gzflush(
-        state,
-        crate::zlib_h::Z_BLOCK,
-        GzFlushBehavior::ParameterUpdate,
-    ) != crate::zlib_h::Z_OK
-    {
+    if gz_flush_parameter_update(state) != crate::zlib_h::Z_OK {
         return state.err;
     }
     if state.size != 0 {
