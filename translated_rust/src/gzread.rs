@@ -426,8 +426,9 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     }
     state.x.have =
         (had as crate::stdlib::uInt).wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
-    state.x.next =
-        state.strm.next_out.wrapping_sub(state.x.have as usize) as *mut ::core::ffi::c_uchar;
+    // Callers establish `x.next` as the start of this output span before
+    // entering the codec.  Keeping that origin avoids reconstructing it by
+    // subtracting from the raw post-inflate cursor.
     if ret == crate::zlib_h::Z_STREAM_END {
         state.junk = 0 as ::core::ffi::c_int;
         state.how = crate::gzguts_h::LOOK;
@@ -491,6 +492,7 @@ unsafe fn gz_fetch(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_
                 state_ref.strm.avail_out =
                     (state_ref.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
                 state_ref.strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
+                state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
                 if gz_decomp(state_ref) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
@@ -834,6 +836,7 @@ unsafe fn gz_read(
                     };
                     state_ref.strm.avail_out = n as crate::stdlib::uInt;
                     state_ref.strm.next_out = destination.as_mut_ptr() as *mut crate::stdlib::Bytef;
+                    state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
                     err = gz_decomp(state_ref);
                     n = state_ref.x.have;
                     state_ref.x.have = 0 as ::core::ffi::c_uint;
