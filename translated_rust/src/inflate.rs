@@ -426,6 +426,69 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     (*state).bits = held_bits;
     crate::zlib_h::Z_OK
 }
+/// The two copy operations needed to append decoded bytes to inflate's
+/// circular history window.  This is deliberately pointer-free: the caller
+/// owns the ABI allocation and performs the copies only after this plan has
+/// proved the window cursor and lengths are coherent.
+#[derive(Copy, Clone)]
+struct InflateWindowCopyPlan {
+    first_dest: ::core::ffi::c_uint,
+    first_from_end: ::core::ffi::c_uint,
+    first_len: ::core::ffi::c_uint,
+    second_from_end: ::core::ffi::c_uint,
+    second_len: ::core::ffi::c_uint,
+    next: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+}
+
+/// Compute the circular-window update without touching the ABI window
+/// pointer.  `copy` is the number of bytes immediately preceding `end`.
+/// Invalid internal cursor state is rejected before the boundary performs a
+/// pointer offset or memory copy.
+fn inflate_window_copy_plan(
+    wsize: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    copy: ::core::ffi::c_uint,
+) -> Option<InflateWindowCopyPlan> {
+    if wsize == 0 || wnext > wsize || whave > wsize {
+        return None;
+    }
+
+    if copy >= wsize {
+        return Some(InflateWindowCopyPlan {
+            first_dest: 0,
+            first_from_end: wsize,
+            first_len: wsize,
+            second_from_end: 0,
+            second_len: 0,
+            next: 0,
+            have: wsize,
+        });
+    }
+
+    let first_len = wsize.checked_sub(wnext)?.min(copy);
+    let remaining = copy.checked_sub(first_len)?;
+    let (next, have) = if remaining != 0 {
+        (remaining, wsize)
+    } else {
+        let next = wnext.checked_add(first_len)?;
+        let next = if next == wsize { 0 } else { next };
+        let have = whave.checked_add(first_len)?.min(wsize);
+        (next, have)
+    };
+
+    Some(InflateWindowCopyPlan {
+        first_dest: wnext,
+        first_from_end: copy,
+        first_len,
+        second_from_end: remaining,
+        second_len: remaining,
+        next,
+        have,
+    })
+}
+
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
@@ -433,7 +496,6 @@ unsafe extern "C" fn updatewindow(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut dist: ::core::ffi::c_uint = 0;
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).window.is_null() {
         (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
@@ -451,43 +513,26 @@ unsafe extern "C" fn updatewindow(
         (*state).wnext = 0 as ::core::ffi::c_uint;
         (*state).whave = 0 as ::core::ffi::c_uint;
     }
-    if copy >= (*state).wsize {
+    let Some(plan) = inflate_window_copy_plan((*state).wsize, (*state).wnext, (*state).whave, copy)
+    else {
+        return 1 as ::core::ffi::c_int;
+    };
+    if plan.first_len != 0 {
+        crate::stdlib::memcpy(
+            (*state).window.offset(plan.first_dest as isize) as *mut ::core::ffi::c_void,
+            end.offset(-(plan.first_from_end as isize)) as *const ::core::ffi::c_void,
+            plan.first_len as crate::__stddef_size_t_h::size_t,
+        );
+    }
+    if plan.second_len != 0 {
         crate::stdlib::memcpy(
             (*state).window as *mut ::core::ffi::c_void,
-            end.offset(-((*state).wsize as isize)) as *const ::core::ffi::c_void,
-            (*state).wsize as crate::__stddef_size_t_h::size_t,
+            end.offset(-(plan.second_from_end as isize)) as *const ::core::ffi::c_void,
+            plan.second_len as crate::__stddef_size_t_h::size_t,
         );
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = (*state).wsize;
-    } else {
-        dist = (*state).wsize.wrapping_sub((*state).wnext);
-        if dist > copy {
-            dist = copy;
-        }
-        crate::stdlib::memcpy(
-            (*state).window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
-            end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-            dist as crate::__stddef_size_t_h::size_t,
-        );
-        copy = copy.wrapping_sub(dist);
-        if copy != 0 {
-            crate::stdlib::memcpy(
-                (*state).window as *mut ::core::ffi::c_void,
-                end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
-            );
-            (*state).wnext = copy;
-            (*state).whave = (*state).wsize;
-        } else {
-            (*state).wnext = (*state).wnext.wrapping_add(dist);
-            if (*state).wnext == (*state).wsize {
-                (*state).wnext = 0 as ::core::ffi::c_uint;
-            }
-            if (*state).whave < (*state).wsize {
-                (*state).whave = (*state).whave.wrapping_add(dist);
-            }
-        }
     }
+    (*state).wnext = plan.next;
+    (*state).whave = plan.have;
     return 0 as ::core::ffi::c_int;
 }
 pub unsafe extern "C" fn inflate(
