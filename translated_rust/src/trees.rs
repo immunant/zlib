@@ -5263,42 +5263,47 @@ fn detect_data_type_from_ltree(dyn_ltree: &[crate::src::deflate::ct_data]) -> ::
     }
     return crate::zlib_h::Z_BINARY;
 }
-pub unsafe extern "C" fn _tr_flush_block(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
+fn tr_flush_block_core(
+    storage: &mut crate::src::deflate::PendingStorageView<'_>,
+    state: &mut crate::src::deflate::deflate_state,
+    strm: Option<&mut crate::zlib_h::z_stream>,
+    stored_data: Option<&[crate::stdlib::Bytef]>,
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
     let mut opt_lenb: crate::zutil_h::ulg = 0;
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let state = &mut *s;
     let level = state.level;
-    let strm = state.strm;
     if level > 0 as ::core::ffi::c_int {
-        if (*strm).data_type == crate::zlib_h::Z_UNKNOWN {
-            (*strm).data_type = detect_data_type_from_ltree(&state.dyn_ltree);
+        let strm = strm.expect("active deflate state has a stream");
+        if strm.data_type == crate::zlib_h::Z_UNKNOWN {
+            strm.data_type = detect_data_type_from_ltree(&state.dyn_ltree);
         }
-        build_tree(&mut *s, crate::src::deflate::DynamicTree::Literal);
-        build_tree(&mut *s, crate::src::deflate::DynamicTree::Distance);
+        build_tree(state, crate::src::deflate::DynamicTree::Literal);
+        build_tree(state, crate::src::deflate::DynamicTree::Distance);
         max_blindex = build_bl_tree(state);
-        opt_lenb = block_bit_length_bytes((*s).opt_len);
-        static_lenb = block_bit_length_bytes((*s).static_len);
-        if static_lenb <= opt_lenb || (*s).strategy == crate::zlib_h::Z_FIXED {
+        opt_lenb = block_bit_length_bytes(state.opt_len);
+        static_lenb = block_bit_length_bytes(state.static_len);
+        if static_lenb <= opt_lenb || state.strategy == crate::zlib_h::Z_FIXED {
             opt_lenb = static_lenb;
         }
     } else {
         static_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
         opt_lenb = static_lenb;
     }
-    let encoding = select_block_encoding(stored_len, opt_lenb, static_lenb, !buf.is_null());
+    let encoding = select_block_encoding(stored_len, opt_lenb, static_lenb, stored_data.is_some());
     if encoding == BlockEncoding::Stored {
-        _tr_stored_block(s, buf, stored_len, last);
+        tr_stored_block_core(
+            storage,
+            state,
+            stored_data.expect("stored blocks require an input buffer"),
+            stored_len,
+            last,
+        );
     } else {
-        let pending_buffer =
-            core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
         let mut writer = PendingBitWriter {
-            pending_buffer: &mut *pending_buffer,
+            pending_buffer: storage.pending_bytes(),
             pending: &mut state.pending,
             bi_buf: &mut state.bi_buf,
             bi_valid: &mut state.bi_valid,
@@ -5320,7 +5325,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         drop(writer);
         let symbol_start = state.lit_bufsize as usize;
         let mut writer = PendingBitWriter {
-            pending_buffer,
+            pending_buffer: storage.pending_bytes(),
             pending: &mut state.pending,
             bi_buf: &mut state.bi_buf,
             bi_valid: &mut state.bi_valid,
@@ -5345,14 +5350,39 @@ pub unsafe extern "C" fn _tr_flush_block(
     }
     init_block(state);
     if last != 0 {
-        let pending = state.pending;
         let (count, bytes) = bi_windup(state);
-        for (index, byte) in bytes.into_iter().take(count).enumerate() {
-            let cursor = pending.wrapping_add(index as crate::zutil_h::ulg);
-            *state.pending_buf.wrapping_add(cursor as usize) = byte;
-        }
-        state.pending = pending_cursor_after_bytes(pending, count);
+        assert!(storage.append_pending(&mut state.pending, &bytes[..count]));
     }
+}
+
+pub unsafe extern "C" fn _tr_flush_block(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut buf: *mut crate::stdlib::charf,
+    mut stored_len: crate::zutil_h::ulg,
+    mut last: ::core::ffi::c_int,
+) {
+    let state = &mut *s;
+    let strm = if state.level > 0 as ::core::ffi::c_int {
+        Some(&mut *state.strm)
+    } else {
+        None
+    };
+    let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
+    let pending_buffer =
+        core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, layout)
+        .expect("pending storage layout matches its allocation");
+    let stored_data = if buf.is_null() {
+        None
+    } else if stored_len == 0 {
+        Some(&[][..])
+    } else {
+        Some(core::slice::from_raw_parts(
+            buf as *const crate::stdlib::Bytef,
+            stored_len as usize,
+        ))
+    };
+    tr_flush_block_core(&mut storage, state, strm, stored_data, stored_len, last);
 }
 #[export_name = "_tr_flush_block"]
 
