@@ -205,10 +205,12 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     let strm_ref = &*strm;
-    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null()
-        || !inflate_state_is_valid(strm_ref, &*state, (*state).strm == strm)
-    {
+    let state_ptr = strm_ref.state as *mut crate::src::inflate::inflate_state;
+    if state_ptr.is_null() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let state = &*state_ptr;
+    if !inflate_state_is_valid(strm_ref, state, state.strm == strm) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;

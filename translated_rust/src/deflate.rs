@@ -756,10 +756,12 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     let strm_ref = &*strm;
-    let state = strm_ref.state as *mut crate::src::deflate::deflate_state;
-    if state.is_null()
-        || !deflate_state_is_valid(strm_ref, &*state, (*state).strm == strm)
-    {
+    let state_ptr = strm_ref.state as *mut crate::src::deflate::deflate_state;
+    if state_ptr.is_null() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let state = &*state_ptr;
+    if !deflate_state_is_valid(strm_ref, state, state.strm == strm) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -1461,6 +1463,29 @@ fn deflate_bound_z(
     }
 }
 
+// Header length accounting is ordinary, reference-bound state inspection.
+// The exported adapter below is solely responsible for binding optional C
+// strings before this helper sees them.
+fn deflate_bound_gzip_header(
+    header: &crate::zlib_h::gz_header,
+    name: Option<&::core::ffi::CStr>,
+    comment: Option<&::core::ffi::CStr>,
+) -> DeflateBoundGzipHeader {
+    DeflateBoundGzipHeader {
+        has_extra: !header.extra.is_null(),
+        extra_len: header.extra_len,
+        // zlib's bound includes each terminating nul when a name or comment
+        // is present. `to_bytes_with_nul()` preserves that exact count.
+        name_len: name
+            .map(|name| name.to_bytes_with_nul().len() as crate::stdlib::z_size_t)
+            .unwrap_or(0),
+        comment_len: comment
+            .map(|comment| comment.to_bytes_with_nul().len() as crate::stdlib::z_size_t)
+            .unwrap_or(0),
+        hcrc: header.hcrc,
+    }
+}
+
 pub unsafe extern "C" fn deflateBound_z(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
@@ -1473,39 +1498,21 @@ pub unsafe extern "C" fn deflateBound_z(
             None
         } else {
             let header = &*state.gzhead;
-            Some(DeflateBoundGzipHeader {
-                has_extra: !header.extra.is_null(),
-                extra_len: header.extra_len,
-                name_len: if header.name.is_null() {
-                    0
-                } else {
-                    let mut name = header.name;
-                    let mut name_len: crate::stdlib::z_size_t = 0;
-                    loop {
-                        name_len = name_len.wrapping_add(1);
-                        let byte = *name;
-                        name = name.offset(1);
-                        if byte == 0 {
-                            break name_len;
-                        }
-                    }
-                },
-                comment_len: if header.comment.is_null() {
-                    0
-                } else {
-                    let mut comment = header.comment;
-                    let mut comment_len: crate::stdlib::z_size_t = 0;
-                    loop {
-                        comment_len = comment_len.wrapping_add(1);
-                        let byte = *comment;
-                        comment = comment.offset(1);
-                        if byte == 0 {
-                            break comment_len;
-                        }
-                    }
-                },
-                hcrc: header.hcrc,
-            })
+            let name = if header.name.is_null() {
+                None
+            } else {
+                Some(::core::ffi::CStr::from_ptr(
+                    header.name as *const ::core::ffi::c_char,
+                ))
+            };
+            let comment = if header.comment.is_null() {
+                None
+            } else {
+                Some(::core::ffi::CStr::from_ptr(
+                    header.comment as *const ::core::ffi::c_char,
+                ))
+            };
+            Some(deflate_bound_gzip_header(header, name, comment))
         };
         (
             Some(DeflateBoundState {
