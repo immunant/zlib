@@ -85,9 +85,6 @@ pub mod zutil_h {
 
     pub const PRESET_DICT: ::core::ffi::c_int = 0x20 as ::core::ffi::c_int;
 }
-pub mod __stddef_null_h {
-    pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-}
 pub mod zlib_h {
     pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = [
         b'1' as ::core::ffi::c_char,

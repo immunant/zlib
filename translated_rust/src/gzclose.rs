@@ -1,4 +1,3 @@
-pub use crate::__stddef_null_h::NULL;
 pub use crate::gzguts_h::gz_state;
 pub use crate::gzguts_h::gz_statep;
 pub use crate::gzguts_h::GZ_READ;

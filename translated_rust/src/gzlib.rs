@@ -1,4 +1,3 @@
-pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 pub use crate::stdlib::__O_LARGEFILE;
 
