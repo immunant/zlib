@@ -1,6 +1,6 @@
 pub mod crc32_h {
 
-    pub static mut crc_table: [crate::stdlib::z_crc_t; 256] = [
+    pub static crc_table: [crate::stdlib::z_crc_t; 256] = [
         0 as crate::stdlib::z_crc_t,
         0x77073096 as ::core::ffi::c_int as crate::stdlib::z_crc_t,
         0xee0e612c as crate::stdlib::z_crc_t,
@@ -259,7 +259,7 @@ pub mod crc32_h {
         0x2d02ef8d as ::core::ffi::c_int as crate::stdlib::z_crc_t,
     ];
 
-    pub static mut crc_big_table: [z_word_t; 256] = [
+    pub static crc_big_table: [z_word_t; 256] = [
         0 as z_word_t,
         0x9630077700000000 as z_word_t,
         0x2c610eee00000000 as ::core::ffi::c_long as z_word_t,
@@ -518,7 +518,7 @@ pub mod crc32_h {
         0x8def022d00000000 as z_word_t,
     ];
 
-    pub static mut crc_braid_table: [[crate::stdlib::z_crc_t; 256]; 8] = [
+    pub static crc_braid_table: [[crate::stdlib::z_crc_t; 256]; 8] = [
         [
             0 as crate::stdlib::z_crc_t,
             0xaf449247 as crate::stdlib::z_crc_t,
@@ -2585,7 +2585,7 @@ pub mod crc32_h {
         ],
     ];
 
-    pub static mut crc_braid_big_table: [[z_word_t; 256]; 8] = [
+    pub static crc_braid_big_table: [[z_word_t; 256]; 8] = [
         [
             0 as z_word_t,
             0xf390f23600000000 as z_word_t,
@@ -4771,15 +4771,15 @@ fn x2nmodp(
     }
     return p;
 }
-pub unsafe extern "C" fn get_crc_table() -> *const crate::stdlib::z_crc_t {
-    return &raw const crc_table as *const crate::stdlib::z_crc_t;
+pub fn get_crc_table() -> &'static [crate::stdlib::z_crc_t; 256] {
+    &crc_table
 }
 #[export_name = "get_crc_table"]
 
 pub unsafe extern "C" fn get_crc_table_ffi() -> *const crate::stdlib::z_crc_t {
-    get_crc_table()
+    get_crc_table().as_ptr()
 }
-unsafe extern "C" fn crc_word(mut data: z_word_t) -> crate::stdlib::z_crc_t {
+fn crc_word(mut data: z_word_t) -> crate::stdlib::z_crc_t {
     let mut k: ::core::ffi::c_int = 0;
     k = 0 as ::core::ffi::c_int;
     while k < W {
@@ -4790,7 +4790,7 @@ unsafe extern "C" fn crc_word(mut data: z_word_t) -> crate::stdlib::z_crc_t {
     return data as crate::stdlib::z_crc_t;
 }
 
-unsafe extern "C" fn crc_word_big(mut data: z_word_t) -> z_word_t {
+fn crc_word_big(mut data: z_word_t) -> z_word_t {
     let mut k: ::core::ffi::c_int = 0;
     k = 0 as ::core::ffi::c_int;
     while k < W {
