@@ -63,6 +63,24 @@ fn copy_through_newline(input: &[u8], output: &mut [u8]) -> (usize, bool) {
     (copied, copied != input.len())
 }
 
+// Admission to a gzip read operation depends only on scalar state.  Keep
+// that decision pointer-free so the eventual gzip owner can reuse it without
+// exposing the ABI stream or its cursors to read APIs.
+struct GzReadPolicy {
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+}
+
+impl GzReadPolicy {
+    fn accepts_read(&self) -> bool {
+        self.mode == crate::gzguts_h::GZ_READ
+            && (self.err == crate::zlib_h::Z_OK
+                || self.err == crate::zlib_h::Z_BUF_ERROR
+                || self.again != 0)
+    }
+}
+
 // A checked view of unread compressed input in gzip's owned input buffer.
 // The ABI stream cursor is projected to an address once at the state boundary;
 // compaction then works only with a mutable slice and checked indices.  Keep
@@ -697,13 +715,12 @@ unsafe fn gz_read(
     return got;
 }
 unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::core::ffi::c_int {
-    if state.mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.err != crate::zlib_h::Z_OK
-        && state.err != crate::zlib_h::Z_BUF_ERROR
-        && state.again == 0
-    {
+    let policy = GzReadPolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+    };
+    if !policy.accepts_read() {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
@@ -765,13 +782,12 @@ unsafe fn gzfread(
     mut nitems: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let mut len: crate::stdlib::z_size_t = 0;
-    if state.mode != crate::gzguts_h::GZ_READ {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if state.err != crate::zlib_h::Z_OK
-        && state.err != crate::zlib_h::Z_BUF_ERROR
-        && state.again == 0
-    {
+    let policy = GzReadPolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+    };
+    if !policy.accepts_read() {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
@@ -813,13 +829,12 @@ pub unsafe extern "C" fn gzfread_ffi(
 }
 unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    if state.mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.err != crate::zlib_h::Z_OK
-        && state.err != crate::zlib_h::Z_BUF_ERROR
-        && state.again == 0
-    {
+    let policy = GzReadPolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+    };
+    if !policy.accepts_read() {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
@@ -877,10 +892,12 @@ unsafe fn gzungetc(
     if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
         gz_look(state);
     }
-    if state.err != crate::zlib_h::Z_OK
-        && state.err != crate::zlib_h::Z_BUF_ERROR
-        && state.again == 0
-    {
+    let policy = GzReadPolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+    };
+    if !policy.accepts_read() {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
@@ -943,13 +960,12 @@ unsafe fn gzgets(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     };
     let state = state.as_mut();
-    if state.mode != crate::gzguts_h::GZ_READ {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    if state.err != crate::zlib_h::Z_OK
-        && state.err != crate::zlib_h::Z_BUF_ERROR
-        && state.again == 0
-    {
+    let policy = GzReadPolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+    };
+    if !policy.accepts_read() {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
