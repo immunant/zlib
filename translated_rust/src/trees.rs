@@ -2424,10 +2424,10 @@ unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
     );
 }
 
-unsafe extern "C" fn gen_codes(
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
-    mut bl_count: *mut crate::zutil_h::ushf,
+fn gen_codes(
+    tree: &mut [crate::src::deflate::ct_data_s],
+    max_code: usize,
+    bl_count: &[crate::zutil_h::ush; 16],
 ) {
     let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
     let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
@@ -2436,18 +2436,18 @@ unsafe extern "C" fn gen_codes(
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
         code = code.wrapping_add(
-            *bl_count.offset((bits - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_uint
+            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint
         ) << 1 as ::core::ffi::c_int;
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;
     }
-    n = 0 as ::core::ffi::c_int;
-    while n <= max_code {
-        let mut len: ::core::ffi::c_int = (*tree.offset(n as isize)).dl as ::core::ffi::c_int;
+    n = 0;
+    while n as usize <= max_code {
+        let mut len: ::core::ffi::c_int = tree[n as usize].dl as ::core::ffi::c_int;
         if len != 0 as ::core::ffi::c_int {
             let c2rust_fresh57 = next_code[len as usize];
             next_code[len as usize] = next_code[len as usize].wrapping_add(1);
-            (*tree.offset(n as isize)).fc =
+            tree[n as usize].fc =
                 bi_reverse(c2rust_fresh57 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
         n += 1;
@@ -2744,11 +2744,10 @@ unsafe extern "C" fn build_tree(
     (*s).heap_max -= 1;
     (*s).heap[(*s).heap_max as usize] = (*s).heap[SMALLEST as usize];
     gen_bitlen(s, desc);
-    gen_codes(
-        tree,
-        max_code,
-        &raw mut (*s).bl_count as *mut crate::zutil_h::ushf,
-    );
+    // `tree` starts at the selected state array. `elems` is that tree's
+    // logical capacity; it safely covers every code up through `max_code`.
+    let tree = ::core::slice::from_raw_parts_mut(tree, stat_desc.elems as usize);
+    gen_codes(tree, max_code as usize, &(*s).bl_count);
 }
 
 unsafe extern "C" fn scan_tree(
