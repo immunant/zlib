@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -169,6 +169,29 @@ fn gz_error_plan(
         err,
         allocate_message: gz_error_needs_message_allocation(err, has_message),
     }
+}
+
+fn gz_error_state_core(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    has_previous_message: bool,
+    has_message: bool,
+) -> GzErrorPlan {
+    let plan = gz_error_plan(
+        has_previous_message,
+        state.err,
+        err,
+        state.again,
+        has_message,
+    );
+    state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+
+    if plan.clear_buffer {
+        state.x.have = 0;
+    }
+    state.err = plan.err;
+
+    plan
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1244,30 +1267,18 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
         }
     }
 }
-pub unsafe extern "C" fn gz_error(
+#[export_name = "gz_error"]
+pub unsafe extern "C" fn gz_error_ffi(
     mut state: crate::gzguts_h::gz_statep,
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
     let state = &mut *state;
     let previous_message = state.msg;
-    let plan = gz_error_plan(
-        !previous_message.is_null(),
-        state.err,
-        err,
-        state.again,
-        !msg.is_null(),
-    );
-    if !previous_message.is_null() {
-        if plan.free_previous_message {
-            crate::stdlib::free(previous_message as *mut ::core::ffi::c_void);
-        }
-        state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let plan = gz_error_state_core(state, err, !previous_message.is_null(), !msg.is_null());
+    if plan.free_previous_message {
+        crate::stdlib::free(previous_message as *mut ::core::ffi::c_void);
     }
-    if plan.clear_buffer {
-        state.x.have = 0 as ::core::ffi::c_uint;
-    }
-    state.err = plan.err;
     if !plan.allocate_message {
         return;
     }
@@ -1275,13 +1286,14 @@ pub unsafe extern "C" fn gz_error(
         crate::stdlib::strlen(state.path),
         crate::stdlib::strlen(msg),
     );
-    state.msg = crate::stdlib::malloc(message_allocation_len) as *mut ::core::ffi::c_char;
-    if state.msg.is_null() {
+    let message = crate::stdlib::malloc(message_allocation_len) as *mut ::core::ffi::c_char;
+    if message.is_null() {
         state.err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
+    state.msg = message;
     crate::stdlib::snprintf(
-        state.msg,
+        message,
         message_allocation_len,
         b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
         state.path,
@@ -1289,15 +1301,7 @@ pub unsafe extern "C" fn gz_error(
         msg,
     );
 }
-#[export_name = "gz_error"]
-
-pub unsafe extern "C" fn gz_error_ffi(
-    mut state: crate::gzguts_h::gz_statep,
-    mut err: ::core::ffi::c_int,
-    mut msg: *const ::core::ffi::c_char,
-) {
-    gz_error(state, err, msg)
-}
+pub use gz_error_ffi as gz_error;
 pub fn gz_intmax() -> ::core::ffi::c_uint {
     crate::limits_h::INT_MAX as ::core::ffi::c_uint
 }
