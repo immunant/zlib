@@ -1786,11 +1786,9 @@ pub unsafe extern "C" fn inflate_ffi(
                         break;
                     };
                     copy = copy_len;
-                    crate::stdlib::memcpy(
-                        put as *mut ::core::ffi::c_void,
-                        next as *const ::core::ffi::c_void,
-                        copy as crate::__stddef_size_t_h::size_t,
-                    );
+                    let input = ::core::slice::from_raw_parts(next, copy as usize);
+                    let output = ::core::slice::from_raw_parts_mut(put, copy as usize);
+                    output.copy_from_slice(input);
                     have = have.wrapping_sub(copy);
                     next = next.offset(copy as isize);
                     left = left.wrapping_sub(copy);
@@ -2052,18 +2050,18 @@ pub unsafe extern "C" fn inflate_ffi(
                                 .wrapping_sub((*state).length);
                             len < (*(*state).head).extra_max
                         } {
-                            crate::stdlib::memcpy(
-                                (*(*state).head).extra.offset(len as isize)
-                                    as *mut ::core::ffi::c_void,
-                                next as *const ::core::ffi::c_void,
-                                (if len.wrapping_add(copy) > (*(*state).head).extra_max {
-                                    ((*(*state).head).extra_max as ::core::ffi::c_uint)
-                                        .wrapping_sub(len)
-                                } else {
-                                    copy
-                                })
-                                    as crate::__stddef_size_t_h::size_t,
+                            let write_len = if len.wrapping_add(copy) > (*(*state).head).extra_max {
+                                ((*(*state).head).extra_max as ::core::ffi::c_uint)
+                                    .wrapping_sub(len)
+                            } else {
+                                copy
+                            };
+                            let input = ::core::slice::from_raw_parts(next, write_len as usize);
+                            let output = ::core::slice::from_raw_parts_mut(
+                                (*(*state).head).extra.offset(len as isize),
+                                write_len as usize,
                             );
+                            output.copy_from_slice(input);
                         }
                         if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
                             let input = ::core::slice::from_raw_parts(next, copy as usize);

@@ -1941,15 +1941,22 @@ pub unsafe extern "C" fn deflate_ffi(
             let mut left: crate::zutil_h::ulg =
                 (((*(*s).gzhead).extra_len & 0xffff as crate::stdlib::uInt) as crate::zutil_h::ulg)
                     .wrapping_sub((*s).gzindex);
+            let extra = ::core::slice::from_raw_parts(
+                (*(*s).gzhead).extra,
+                ((*(*s).gzhead).extra_len & 0xffff as crate::stdlib::uInt) as usize,
+            );
             while (*s).pending.wrapping_add(left) > (*s).pending_buf_size {
                 let mut copy: crate::zutil_h::ulg =
                     (*s).pending_buf_size.wrapping_sub((*s).pending);
-                crate::stdlib::memcpy(
-                    (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-                    (*(*s).gzhead).extra.offset((*s).gzindex as isize)
-                        as *const ::core::ffi::c_void,
-                    copy as crate::__stddef_size_t_h::size_t,
+                let pending = (*s).pending as usize;
+                let copy_len = copy as usize;
+                let gzindex = (*s).gzindex as usize;
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    (*s).pending_buf,
+                    (*s).pending_buf_size as usize,
                 );
+                pending_buf[pending..pending + copy_len]
+                    .copy_from_slice(&extra[gzindex..gzindex + copy_len]);
                 (*s).pending = (*s).pending_buf_size;
                 if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
                     let hcrc_bytes = ::core::slice::from_raw_parts(
@@ -1969,11 +1976,13 @@ pub unsafe extern "C" fn deflate_ffi(
                 beg = 0 as crate::zutil_h::ulg;
                 left = left.wrapping_sub(copy);
             }
-            crate::stdlib::memcpy(
-                (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-                (*(*s).gzhead).extra.offset((*s).gzindex as isize) as *const ::core::ffi::c_void,
-                left as crate::__stddef_size_t_h::size_t,
-            );
+            let pending = (*s).pending as usize;
+            let left_len = left as usize;
+            let gzindex = (*s).gzindex as usize;
+            let pending_buf =
+                ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+            pending_buf[pending..pending + left_len]
+                .copy_from_slice(&extra[gzindex..gzindex + left_len]);
             (*s).pending = (*s).pending.wrapping_add(left);
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
                 let hcrc_bytes = ::core::slice::from_raw_parts(
