@@ -350,20 +350,21 @@ unsafe extern "C" fn gz_write(
     }
     return put;
 }
+fn gzwrite_usable(state: &crate::gzguts_h::gz_state) -> bool {
+    state.mode == crate::gzguts_h::GZ_WRITE
+        && (state.err == crate::zlib_h::Z_OK || state.again != 0)
+}
+
 pub unsafe extern "C" fn gzwrite(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    let state = file as crate::gzguts_h::gz_statep;
+    if !gzwrite_usable(&*state) {
         return 0 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
