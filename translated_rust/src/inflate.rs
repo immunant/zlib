@@ -3116,53 +3116,71 @@ fn inflate_sync_search_core(
     }
 }
 
+fn inflate_sync_core(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    input: &[crate::stdlib::Bytef],
+) -> InflateSyncSearch {
+    let result = inflate_sync_search_core(
+        &mut state.mode,
+        &mut state.hold,
+        &mut state.bits,
+        &mut state.have,
+        input,
+    );
+    let consumed = match result {
+        InflateSyncSearch::BufferError => return result,
+        InflateSyncSearch::DataError { consumed } | InflateSyncSearch::MarkerFound { consumed } => {
+            consumed
+        }
+    };
+    let (remaining_input, total_input) =
+        inflate_sync_input_progress(strm.avail_in, strm.total_in, consumed);
+    strm.avail_in = remaining_input;
+    strm.total_in = total_input;
+    if let InflateSyncSearch::MarkerFound { .. } = result {
+        state.wrap = inflate_sync_normalized_wrap(state.flags, state.wrap);
+    }
+    result
+}
+
 #[export_name = "inflateSync"]
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if inflate_state_check_at_ffi_boundary!(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let avail_in = (*strm).avail_in;
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    let avail_in = strm.avail_in;
     let input = if avail_in == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts((*strm).next_in, avail_in as usize)
+        ::core::slice::from_raw_parts(strm.next_in, avail_in as usize)
     };
-    let result = inflate_sync_search_core(
-        &mut (*state).mode,
-        &mut (*state).hold,
-        &mut (*state).bits,
-        &mut (*state).have,
-        input,
-    );
+    let result = inflate_sync_core(strm, state, input);
     let consumed = match result {
         InflateSyncSearch::BufferError => return crate::zlib_h::Z_BUF_ERROR,
         InflateSyncSearch::DataError { consumed } | InflateSyncSearch::MarkerFound { consumed } => {
             consumed
         }
     };
-    let (remaining_input, total_input) =
-        inflate_sync_input_progress(avail_in, (*strm).total_in, consumed);
-    (*strm).avail_in = remaining_input;
     if consumed != 0 {
-        (*strm).next_in =
+        strm.next_in =
             inflate_sync_remaining_input(input, consumed).as_ptr() as *mut ::core::ffi::c_uchar;
     }
-    (*strm).total_in = total_input;
     if let InflateSyncSearch::DataError { .. } = result {
         return crate::zlib_h::Z_DATA_ERROR;
     }
 
-    let flags = (*state).flags;
-    (*state).wrap = inflate_sync_normalized_wrap(flags, (*state).wrap);
-    let input_total = (*strm).total_in;
-    let output_total = (*strm).total_out;
+    let flags = state.flags;
+    let input_total = strm.total_in;
+    let output_total = strm.total_out;
     inflateReset(strm);
-    (*strm).total_in = input_total;
-    (*strm).total_out = output_total;
-    (*state).flags = flags;
-    (*state).mode = crate::src::inflate::TYPE;
+    strm.total_in = input_total;
+    strm.total_out = output_total;
+    state.flags = flags;
+    state.mode = crate::src::inflate::TYPE;
     crate::zlib_h::Z_OK
 }
 fn inflate_sync_point_value(
@@ -3392,7 +3410,7 @@ mod tests {
         inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
         inflate_state_is_usable, inflate_state_metadata_check_result,
         inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
+        inflate_stream_has_allocator_callbacks, inflate_sync_core, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point, inflate_sync_point_value,
         inflate_sync_remaining_input, inflate_sync_search_core, inflate_trailer_checksum_from_hold,
         inflate_trailer_checksum_is_valid, inflate_undermine_core, inflate_validate_core,
@@ -4590,6 +4608,58 @@ mod tests {
         assert_eq!(have, 0);
     }
 
+    #[test]
+    fn inflate_sync_core_updates_stream_progress_before_reset() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 4,
+            total_in: 11,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 7,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+        let input = [0, 0, 0xff, 0xff];
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+
+        let state = unsafe { &mut *(stream.state as *mut crate::src::inflate::inflate_state) };
+        state.wrap = 5;
+        state.flags = 0;
+        stream.total_in = 11;
+        stream.total_out = 7;
+        assert_eq!(
+            inflate_sync_core(&mut stream, state, &input),
+            InflateSyncSearch::MarkerFound {
+                consumed: input.len()
+            }
+        );
+        assert_eq!(stream.avail_in, 0);
+        assert_eq!(stream.total_in, 15);
+        assert_eq!(state.wrap, 1);
+
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut stream) },
+            crate::zlib_h::Z_OK
+        );
+    }
     #[test]
     fn inflate_mode_validation_accepts_only_known_range() {
         assert!(inflate_mode_is_valid(HEAD));

@@ -214,6 +214,23 @@ fn gz_load_transition(
     }
 }
 
+macro_rules! gz_load_read_loop_body {
+    ($len:expr, $eof:expr, $again:expr, |$have:ident, $get:ident| $read:expr) => {{
+        let max = gz_load_max_read_len();
+        let mut $have = 0;
+        loop {
+            let $get = gz_load_read_len($len, $have, max);
+            match gz_load_transition($len, $have, $eof, $again, $read) {
+                GzLoadTransition::Error { have, errno } => {
+                    break Err(GzLoadError { have, errno });
+                }
+                GzLoadTransition::Continue { have: next_have } => $have = next_have,
+                GzLoadTransition::Complete { have } => break Ok(have),
+            }
+        }
+    }};
+}
+
 fn gz_load_read_loop<F>(
     len: ::core::ffi::c_uint,
     eof: &mut ::core::ffi::c_int,
@@ -226,18 +243,7 @@ where
         ::core::ffi::c_uint,
     ) -> Result<::core::ffi::c_uint, ::core::ffi::c_int>,
 {
-    let max = gz_load_max_read_len();
-    let mut have = 0;
-    loop {
-        let get = gz_load_read_len(len, have, max);
-        match gz_load_transition(len, have, eof, again, read(have, get)) {
-            GzLoadTransition::Error { have, errno } => {
-                return Err(GzLoadError { have, errno });
-            }
-            GzLoadTransition::Continue { have: next_have } => have = next_have,
-            GzLoadTransition::Complete { have } => return Ok(have),
-        }
-    }
+    gz_load_read_loop_body!(len, eof, again, |have, get| read(have, get))
 }
 
 fn gz_load_read_result(
@@ -934,36 +940,28 @@ unsafe fn gz_load(
     buf: *mut ::core::ffi::c_uchar,
     len: ::core::ffi::c_uint,
 ) -> GzLoadResult {
-    let mut have = 0;
-    loop {
-        let get = gz_load_read_len(len, have, gz_load_max_read_len());
+    match gz_load_read_loop_body!(len, &mut state.eof, &mut state.again, |have, get| {
         let ret = crate::stdlib::read(
             state.fd,
             buf.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
         let errno = gz_load_errno(ret, std::io::Error::last_os_error().raw_os_error());
-        match gz_load_transition(
-            len,
+        gz_load_read_result(ret, errno)
+    }) {
+        Ok(have) => GzLoadResult {
             have,
-            &mut state.eof,
-            &mut state.again,
-            gz_load_read_result(ret, errno),
-        ) {
-            GzLoadTransition::Error { have, errno } => {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(errno),
-                );
-                return GzLoadResult { have, failed: true };
-            }
-            GzLoadTransition::Continue { have: next_have } => have = next_have,
-            GzLoadTransition::Complete { have } => {
-                return GzLoadResult {
-                    have,
-                    failed: false,
-                };
+            failed: false,
+        },
+        Err(error) => {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_ERRNO,
+                crate::stdlib::strerror(error.errno),
+            );
+            GzLoadResult {
+                have: error.have,
+                failed: true,
             }
         }
     }

@@ -5029,39 +5029,40 @@ fn send_all_trees(
 }
 fn tr_stored_block_core(
     storage: &mut crate::src::deflate::PendingStorageView<'_>,
-    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    bi_used: &mut ::core::ffi::c_int,
     stored_data: &[crate::stdlib::Bytef],
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
     let len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-    if bit_buffer_would_overflow(state.bi_valid, len) {
+    if bit_buffer_would_overflow(*bi_valid, len) {
         let val: ::core::ffi::c_int = ((0 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
-        state.bi_buf = (state.bi_buf as ::core::ffi::c_int
-            | (val as crate::zutil_h::ush as ::core::ffi::c_int) << state.bi_valid)
+        *bi_buf = (*bi_buf as ::core::ffi::c_int
+            | (val as crate::zutil_h::ush as ::core::ffi::c_int) << *bi_valid)
             as crate::zutil_h::ush;
         assert!(storage.append_pending(
-            &mut state.pending,
+            pending,
             &[
-                (state.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                    as crate::zutil_h::uch,
-                (state.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                    as crate::zutil_h::uch,
+                (*bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch,
+                (*bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch,
             ],
         ));
-        state.bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
-            >> crate::src::deflate::Buf_size - state.bi_valid)
-            as crate::zutil_h::ush;
-        state.bi_valid += len - crate::src::deflate::Buf_size;
+        *bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
+            >> crate::src::deflate::Buf_size - *bi_valid) as crate::zutil_h::ush;
+        *bi_valid += len - crate::src::deflate::Buf_size;
     } else {
-        state.bi_buf = (state.bi_buf as ::core::ffi::c_int
+        *bi_buf = (*bi_buf as ::core::ffi::c_int
             | ((((0 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last)
                 as crate::zutil_h::ush as ::core::ffi::c_int)
-                << state.bi_valid) as crate::zutil_h::ush;
-        state.bi_valid += len;
+                << *bi_valid) as crate::zutil_h::ush;
+        *bi_valid += len;
     }
-    let (count, bytes) = bi_windup(state);
-    assert!(storage.append_pending(&mut state.pending, &bytes[..count]));
+    let (used, count, bytes) = bi_windup_core(bi_buf, bi_valid);
+    *bi_used = used;
+    assert!(storage.append_pending(pending, &bytes[..count]));
     let stored_header = [
         (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
             as crate::zutil_h::uch,
@@ -5072,8 +5073,8 @@ fn tr_stored_block_core(
         (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
             as crate::zutil_h::uch,
     ];
-    assert!(storage.append_pending(&mut state.pending, &stored_header));
-    assert!(storage.append_pending(&mut state.pending, stored_data));
+    assert!(storage.append_pending(pending, &stored_header));
+    assert!(storage.append_pending(pending, stored_data));
 }
 
 #[export_name = "_tr_stored_block"]
@@ -5094,7 +5095,16 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
         core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
     };
     crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
-        tr_stored_block_core(storage, state, stored_data, stored_len, last);
+        tr_stored_block_core(
+            storage,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+            stored_data,
+            stored_len,
+            last,
+        );
     })
     .expect("pending storage layout matches its allocation");
 }
@@ -5294,7 +5304,10 @@ fn tr_flush_block_core(
     if encoding == BlockEncoding::Stored {
         tr_stored_block_core(
             storage,
-            state,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
             stored_data.expect("stored blocks require an input buffer"),
             stored_len,
             last,
@@ -5460,14 +5473,14 @@ mod tests {
         supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
-        tr_align_core, tr_flush_bits_core, tr_tally_core, tree_bit_emissions, tree_bit_length_cost,
-        tree_bit_length_totals_after_node, tree_code_count, tree_heap_has_pair,
-        tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth, tree_run_continues,
-        tree_run_emissions, tree_run_extra_bits, tree_run_limits, tree_run_step,
-        tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode,
-        GenBitlenOverflowReassignment, HeapChild, PendingBitWriter, ScanTreeAction,
-        TallyTreeUpdate, TreeBitEmission, TreeInitialLeafPlan, TreeRunEmission, TreeRunStep,
-        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
+        tr_align_core, tr_flush_bits_core, tr_stored_block_core, tr_tally_core, tree_bit_emissions,
+        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_code_count,
+        tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth,
+        tree_run_continues, tree_run_emissions, tree_run_extra_bits, tree_run_limits,
+        tree_run_step, tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol,
+        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, PendingBitWriter,
+        ScanTreeAction, TallyTreeUpdate, TreeBitEmission, TreeInitialLeafPlan, TreeRunEmission,
+        TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6274,6 +6287,36 @@ mod tests {
         assert_eq!(pending, 1);
         assert_eq!(storage.pending_bytes()[0], 0x02);
         assert_eq!((bi_buf, bi_valid), (0, 2));
+    }
+
+    #[test]
+    fn stored_block_core_emits_header_and_data_from_safe_fields() {
+        let layout = crate::src::deflate::pending_storage_layout(4);
+        let mut pending_buffer = [0; 16];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_buffer, layout).unwrap();
+        let mut pending = 0;
+        let mut bi_buf = 0;
+        let mut bi_valid = 0;
+        let mut bi_used = 0;
+
+        tr_stored_block_core(
+            &mut storage,
+            &mut pending,
+            &mut bi_buf,
+            &mut bi_valid,
+            &mut bi_used,
+            &[0x11, 0x22, 0x33],
+            3,
+            1,
+        );
+
+        assert_eq!(pending, 8);
+        assert_eq!(
+            storage.pending_bytes()[..8],
+            [1, 3, 0, 0xfc, 0xff, 0x11, 0x22, 0x33]
+        );
+        assert_eq!((bi_buf, bi_valid, bi_used), (0, 0, 3));
     }
 
     #[test]
