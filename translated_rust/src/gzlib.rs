@@ -61,25 +61,25 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
-unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
-    (*state).x.have = 0 as ::core::ffi::c_uint;
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
-        (*state).how = crate::gzguts_h::LOOK;
-        (*state).junk = -1 as ::core::ffi::c_int;
+fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
+    state.x.have = 0 as ::core::ffi::c_uint;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0 as ::core::ffi::c_int;
+        state.past = 0 as ::core::ffi::c_int;
+        state.how = crate::gzguts_h::LOOK;
+        state.junk = -1 as ::core::ffi::c_int;
     } else {
-        (*state).reset = 0 as ::core::ffi::c_int;
+        state.reset = 0 as ::core::ffi::c_int;
     }
-    (*state).again = 0 as ::core::ffi::c_int;
-    (*state).skip = 0 as crate::stdlib::off64_t;
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    (*state).x.pos = 0 as crate::stdlib::off64_t;
-    (*state).strm.avail_in = 0 as crate::stdlib::uInt;
+    state.again = 0 as ::core::ffi::c_int;
+    state.skip = 0 as crate::stdlib::off64_t;
+    gz_error_state(state, crate::zlib_h::Z_OK, None, None);
+    state.x.pos = 0 as crate::stdlib::off64_t;
+    state.strm.avail_in = 0 as crate::stdlib::uInt;
+}
+
+unsafe extern "C" fn gz_reset(state: crate::gzguts_h::gz_statep) {
+    gz_reset_state(&mut *state);
 }
 
 unsafe extern "C" fn gz_open(
@@ -100,16 +100,49 @@ unsafe extern "C" fn gz_open(
     if state.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    (*state).size = 0 as ::core::ffi::c_uint;
-    (*state).want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
-    (*state).err = crate::zlib_h::Z_OK;
-    // `state` comes from `malloc`; `ManuallyDrop` permits initialization of
-    // this slot without attempting to drop uninitialized storage.
-    (*state).msg = ::core::mem::ManuallyDrop::new(None);
-    (*state).mode = crate::gzguts_h::GZ_NONE;
-    (*state).level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
-    (*state).strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
-    (*state).direct = 0 as ::core::ffi::c_int;
+    state.write(crate::gzguts_h::gz_state {
+        x: crate::zlib_h::gzFile_s {
+            have: 0,
+            next: ::core::ptr::null_mut(),
+            pos: 0,
+        },
+        mode: crate::gzguts_h::GZ_NONE,
+        fd: -1,
+        path: ::core::ptr::null_mut(),
+        size: 0,
+        want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
+        in_0: ::core::ptr::null_mut(),
+        out: ::core::ptr::null_mut(),
+        direct: 0,
+        junk: 0,
+        how: 0,
+        again: 0,
+        start: 0,
+        eof: 0,
+        past: 0,
+        level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
+        strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
+        reset: 0,
+        skip: 0,
+        err: crate::zlib_h::Z_OK,
+        msg: ::core::mem::ManuallyDrop::new(None),
+        strm: crate::zlib_h::z_stream_s {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        },
+    });
     while *mode != 0 {
         if *mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
             && *mode as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
