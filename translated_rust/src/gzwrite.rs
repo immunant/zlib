@@ -119,7 +119,7 @@ unsafe extern "C" fn gz_comp(
     if state.direct != 0 {
         while state.strm.avail_in != 0 {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-            state.again = 0 as ::core::ffi::c_int;
+            crate::src::gzlib::gz_begin_io(state);
             put = crate::src::gzlib::gz_syscall_chunk(state.strm.avail_in);
             writ = crate::stdlib::write(
                 state.fd,
@@ -127,10 +127,7 @@ unsafe extern "C" fn gz_comp(
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             let errno = *crate::stdlib::__errno_location();
-            if let Err(again) = crate::src::gzlib::gz_syscall_result(writ, errno) {
-                if again {
-                    state.again = 1 as ::core::ffi::c_int;
-                }
+            if let Err(errno) = crate::src::gzlib::gz_io_result(state, writ, errno) {
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_ERRNO,
@@ -158,7 +155,7 @@ unsafe extern "C" fn gz_comp(
         if crate::src::gzlib::gz_comp_needs_write(state.strm.avail_out, flush, ret) {
             while state.strm.next_out > state.x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                state.again = 0 as ::core::ffi::c_int;
+                crate::src::gzlib::gz_begin_io(state);
                 put = crate::src::gzlib::gz_syscall_chunk(
                     state.strm.next_out.offset_from(state.x.next) as ::core::ffi::c_uint,
                 );
@@ -168,10 +165,7 @@ unsafe extern "C" fn gz_comp(
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 let errno = *crate::stdlib::__errno_location();
-                if let Err(again) = crate::src::gzlib::gz_syscall_result(writ, errno) {
-                    if again {
-                        state.again = 1 as ::core::ffi::c_int;
-                    }
+                if let Err(errno) = crate::src::gzlib::gz_io_result(state, writ, errno) {
                     crate::src::gzlib::gz_error(
                         state,
                         crate::zlib_h::Z_ERRNO,
@@ -182,7 +176,7 @@ unsafe extern "C" fn gz_comp(
                 state.x.next = state.x.next.offset(writ as isize);
             }
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
-                state.strm.avail_out = state.size as crate::stdlib::uInt;
+                crate::src::gzlib::gz_reset_output_buffer(state);
                 state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
                 state.x.next = state.out;
             }

@@ -94,6 +94,69 @@ pub(crate) fn gz_add_received(
     have.wrapping_add(received)
 }
 
+// The read and write adapters own the descriptor, errno, and raw buffer
+// pointers.  Keep their common state transitions here, where they can be
+// checked without expanding either raw I/O boundary.
+pub(crate) fn gz_begin_io(state: &mut crate::gzguts_h::gz_state) {
+    state.again = 0;
+}
+
+pub(crate) fn gz_io_result(
+    state: &mut crate::gzguts_h::gz_state,
+    result: ::core::ffi::c_int,
+    errno: ::core::ffi::c_int,
+) -> Result<::core::ffi::c_uint, ::core::ffi::c_int> {
+    match gz_syscall_result(result, errno) {
+        Ok(count) => Ok(count),
+        Err(again) => {
+            if again {
+                state.again = 1;
+            }
+            Err(errno)
+        }
+    }
+}
+
+pub(crate) fn gz_load_result(
+    state: &mut crate::gzguts_h::gz_state,
+    result: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+    errno: ::core::ffi::c_int,
+) -> Result<(), ::core::ffi::c_int> {
+    if result < 0 {
+        if let Err(errno) = gz_io_result(state, result, errno) {
+            if state.again != 0 && have != 0 {
+                return Ok(());
+            }
+            return Err(errno);
+        }
+    }
+    if result == 0 {
+        state.eof = 1;
+    }
+    Ok(())
+}
+
+pub(crate) fn gz_avail_after_load(
+    state: &mut crate::gzguts_h::gz_state,
+    received: ::core::ffi::c_uint,
+) {
+    state.strm.avail_in = state.strm.avail_in.wrapping_add(received);
+}
+
+pub(crate) fn gz_set_copy_input(
+    state: &mut crate::gzguts_h::gz_state,
+    copied: ::core::ffi::c_uint,
+) {
+    state.x.have = copied;
+    state.strm.avail_in = 0;
+    state.how = crate::gzguts_h::COPY;
+}
+
+pub(crate) fn gz_reset_output_buffer(state: &mut crate::gzguts_h::gz_state) {
+    state.strm.avail_out = state.size;
+}
+
 pub(crate) fn gz_remaining_after_write(
     available: crate::stdlib::uInt,
     written: ::core::ffi::c_uint,

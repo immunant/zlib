@@ -46,27 +46,6 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-fn gz_load_result(
-    state: &mut crate::gzguts_h::gz_state,
-    ret: ::core::ffi::c_int,
-    have: ::core::ffi::c_uint,
-    errno: ::core::ffi::c_int,
-) -> Result<(), ::core::ffi::c_int> {
-    if let Err(again) = crate::src::gzlib::gz_syscall_result(ret, errno) {
-        if again {
-            state.again = 1;
-            if have != 0 {
-                return Ok(());
-            }
-        }
-        return Err(errno);
-    }
-    if ret == 0 {
-        state.eof = 1;
-    }
-    Ok(())
-}
-
 unsafe extern "C" fn gz_load(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: *mut ::core::ffi::c_uchar,
@@ -77,7 +56,7 @@ unsafe extern "C" fn gz_load(
     let have = &mut *have;
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
-    state.again = 0;
+    crate::src::gzlib::gz_begin_io(state);
     *crate::stdlib::__errno_location() = 0;
     *have = 0;
     loop {
@@ -95,7 +74,12 @@ unsafe extern "C" fn gz_load(
             break;
         }
     }
-    if let Err(errno) = gz_load_result(state, ret, *have, *crate::stdlib::__errno_location()) {
+    if let Err(errno) = crate::src::gzlib::gz_load_result(
+        state,
+        ret,
+        *have,
+        *crate::stdlib::__errno_location(),
+    ) {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_ERRNO,
@@ -142,7 +126,7 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
         {
             return -1 as ::core::ffi::c_int;
         }
-        state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
+        crate::src::gzlib::gz_avail_after_load(state, got);
         state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
     }
     return 0 as ::core::ffi::c_int;
@@ -227,9 +211,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         state.strm.next_in as *const ::core::ffi::c_void,
         state.strm.avail_in as crate::__stddef_size_t_h::size_t,
     );
-    state.x.have = state.strm.avail_in as ::core::ffi::c_uint;
-    state.strm.avail_in = 0 as crate::stdlib::uInt;
-    state.how = crate::gzguts_h::COPY;
+    crate::src::gzlib::gz_set_copy_input(state, state.strm.avail_in);
     return 0 as ::core::ffi::c_int;
 }
 
