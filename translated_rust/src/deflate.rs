@@ -365,6 +365,40 @@ struct CallbackDeflateStoragePlan {
     pending: DeflateCallbackAllocation,
 }
 
+impl CallbackDeflateStoragePlan {
+    /// Allocate one complete callback-owned workspace into its established
+    /// typed state handles.
+    ///
+    /// The plan is deliberately the sole source of these four requests: both
+    /// initialization and `deflateCopy` must make the same calls, in the same
+    /// order, before the existing storage boundary may borrow the results.
+    /// A later callback-paired owner can replace this handoff as one unit.
+    fn allocate_into(
+        &self,
+        strm: &mut crate::zlib_h::z_stream,
+        state: &mut crate::src::deflate::deflate_state,
+    ) {
+        let zalloc = strm.zalloc.expect("checked allocator");
+        state.window = ::core::ptr::NonNull::new(zalloc(
+            strm.opaque,
+            self.window.items,
+            self.window.item_size,
+        ) as *mut crate::stdlib::Bytef);
+        state.prev =
+            ::core::ptr::NonNull::new(zalloc(strm.opaque, self.prev.items, self.prev.item_size)
+                as *mut crate::src::deflate::Posf);
+        state.head =
+            ::core::ptr::NonNull::new(zalloc(strm.opaque, self.head.items, self.head.item_size)
+                as *mut crate::src::deflate::Posf);
+        state.pending_buf = ::core::ptr::NonNull::new(zalloc(
+            strm.opaque,
+            self.pending.items,
+            self.pending.item_size,
+        ) as *mut crate::zutil_h::uchf
+            as *mut crate::stdlib::Bytef);
+    }
+}
+
 /// The complete pointer-free plan for copying a callback-owned workspace.
 ///
 /// `deflateCopy` must preserve four independent callback allocations and the
@@ -1297,35 +1331,7 @@ fn configure_allocated_deflate_state(
         state.owned_storage = Some(owned);
     } else {
         let callback_storage = storage.callback_storage_plan();
-        state.window =
-            ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                callback_storage.window.items,
-                callback_storage.window.item_size,
-            ) as *mut crate::stdlib::Bytef);
-        state.prev =
-            ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                callback_storage.prev.items,
-                callback_storage.prev.item_size,
-            ) as *mut crate::src::deflate::Posf);
-        state.head =
-            ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                callback_storage.head.items,
-                callback_storage.head.item_size,
-            ) as *mut crate::src::deflate::Posf);
-        state.pending_buf =
-            ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                callback_storage.pending.items,
-                callback_storage.pending.item_size,
-            ) as *mut crate::zutil_h::uchf
-                as *mut crate::stdlib::Bytef);
+        callback_storage.allocate_into(strm, state);
     }
     if state.window.is_none()
         || state.prev.is_none()
@@ -4116,43 +4122,9 @@ pub fn deflateCopy(
                 return crate::zlib_h::Z_OK;
             }
             let copy_layout = &callback_copy_plan.layout;
-            dest_state.window = ::core::ptr::NonNull::new(Some(
-                dest_stream.zalloc.expect("non-null function pointer"),
-            )
-            .expect("non-null function pointer")(
-                dest_stream.opaque,
-                callback_copy_plan.storage.window.items,
-                callback_copy_plan.storage.window.item_size,
-            )
-                as *mut crate::stdlib::Bytef);
-            dest_state.prev = ::core::ptr::NonNull::new(Some(
-                dest_stream.zalloc.expect("non-null function pointer"),
-            )
-            .expect("non-null function pointer")(
-                dest_stream.opaque,
-                callback_copy_plan.storage.prev.items,
-                callback_copy_plan.storage.prev.item_size,
-            )
-                as *mut crate::src::deflate::Posf);
-            dest_state.head = ::core::ptr::NonNull::new(Some(
-                dest_stream.zalloc.expect("non-null function pointer"),
-            )
-            .expect("non-null function pointer")(
-                dest_stream.opaque,
-                callback_copy_plan.storage.head.items,
-                callback_copy_plan.storage.head.item_size,
-            )
-                as *mut crate::src::deflate::Posf);
-            dest_state.pending_buf = ::core::ptr::NonNull::new(Some(
-                dest_stream.zalloc.expect("non-null function pointer"),
-            )
-            .expect("non-null function pointer")(
-                dest_stream.opaque,
-                callback_copy_plan.storage.pending.items,
-                callback_copy_plan.storage.pending.item_size,
-            )
-                as *mut crate::zutil_h::uchf
-                as *mut crate::stdlib::Bytef);
+            callback_copy_plan
+                .storage
+                .allocate_into(dest_stream, dest_state);
             if dest_state.window.is_none()
                 || dest_state.prev.is_none()
                 || dest_state.head.is_none()
