@@ -61,6 +61,30 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+// A write handle's paired allocations are owned by `GzBuffers`, but the
+// compressed-write setup needs only these bounded byte views and the checked
+// buffer size.  Keep that hand-off pointer-free so the embedded-deflate owner
+// can eventually take this view instead of reaching into `gz_state`.
+pub(crate) struct GzWriteBufferView<'a> {
+    size: crate::stdlib::uInt,
+    input: &'a mut [u8],
+    output: Option<&'a mut [u8]>,
+}
+
+impl<'a> GzWriteBufferView<'a> {
+    pub(crate) fn size(&self) -> crate::stdlib::uInt {
+        self.size
+    }
+
+    pub(crate) fn input_mut(&mut self) -> &mut [u8] {
+        self.input
+    }
+
+    pub(crate) fn output_mut(&mut self) -> Option<&mut [u8]> {
+        self.output.as_deref_mut()
+    }
+}
+
 impl crate::gzguts_h::GzBuffers {
     // Allocate gzip write storage as the same single owner transaction used
     // by the read side.  Direct writes intentionally retain only the doubled
@@ -98,6 +122,21 @@ impl crate::gzguts_h::GzBuffers {
             output: Some(output),
             input_cursor: Some(GzCodecInput::empty()),
             output_cursor: None,
+        })
+    }
+
+    // Construct the write-side byte view only after both owned allocations
+    // have been installed.  Direct handles intentionally have no output
+    // allocation, whereas compressed handles must obtain one before an ABI
+    // deflate cursor is published.
+    pub(crate) fn write_buffer_view(&mut self) -> Option<GzWriteBufferView<'_>> {
+        let size = self.size;
+        let input = self.input.as_deref_mut()?;
+        let output = self.output.as_deref_mut();
+        Some(GzWriteBufferView {
+            size,
+            input,
+            output,
         })
     }
 

@@ -200,8 +200,37 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
     if state.direct == 0 {
-        state.strm.avail_out = state.buffers.size as crate::stdlib::uInt;
-        state.strm.next_out = state.buffers.output.as_deref_mut().unwrap().as_mut_ptr();
+        // The allocation owner proves that this is the bounded compressed
+        // output buffer before its address is published to the ABI stream.
+        // Keep the view separate from `gz_state` so an embedded-deflate owner
+        // can replace this one cursor projection without changing setup.
+        let Some(mut buffers) = state.buffers.write_buffer_view() else {
+            state.buffers.clear();
+            crate::src::gzlib::GzErrorState {
+                message: &mut state.msg,
+                error: &mut state.err,
+                buffered: &mut state.x.have,
+                again: state.again,
+                path: state.path.as_deref(),
+            }
+            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+            return -1;
+        };
+        let size = buffers.size();
+        let Some(output) = buffers.output_mut() else {
+            state.buffers.clear();
+            crate::src::gzlib::GzErrorState {
+                message: &mut state.msg,
+                error: &mut state.err,
+                buffered: &mut state.x.have,
+                again: state.again,
+                path: state.path.as_deref(),
+            }
+            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+            return -1;
+        };
+        state.strm.avail_out = size;
+        state.strm.next_out = output.as_mut_ptr();
         state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
     }
     return 0 as ::core::ffi::c_int;
