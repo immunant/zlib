@@ -3155,12 +3155,13 @@ fn inflate_sync_point(
         && bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int
 }
 
-pub unsafe extern "C" fn inflateSyncPoint(
-    mut strm: crate::zlib_h::z_streamp,
+// The export boundary validates the ABI handle before this state adapter is
+// entered.  Keeping the projection here makes the implementation's borrow
+// explicitly live for the full state access without retaining a raw stream
+// cursor in the core API.
+pub unsafe fn inflateSyncPoint(
+    strm: &mut crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3171,6 +3172,9 @@ pub unsafe extern "C" fn inflateSyncPoint(
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateSyncPoint(strm)
 }
 
