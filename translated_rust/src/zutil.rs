@@ -19,13 +19,13 @@ pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
     b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
     b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
 ];
-pub unsafe extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
-    return crate::zlib_h::ZLIB_VERSION.as_ptr();
+pub fn zlibVersion() -> &'static [::core::ffi::c_char; 15] {
+    &crate::zlib_h::ZLIB_VERSION
 }
 #[export_name = "zlibVersion"]
 
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
-    zlibVersion()
+    zlibVersion().as_ptr()
 }
 fn zlib_compile_flags() -> crate::stdlib::uLong {
     let mut flags: crate::stdlib::uLong = 0;
