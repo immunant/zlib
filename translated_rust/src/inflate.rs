@@ -1470,7 +1470,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
                         let output = ::core::slice::from_raw_parts(
-                            put.offset(-(out as isize)),
+                            put.wrapping_sub(out as usize),
                             out as usize,
                         );
                         (*state).check = inflate_update_output_check(
@@ -2827,34 +2827,21 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     ::core::ptr::write(dest, *source);
     ::core::ptr::write(copy, *state);
     (*copy).strm = dest;
-    if (*state).lencode
-        >= &raw mut (*state).codes as *mut crate::src::inftrees::code
-            as *const crate::src::inftrees::code
-        && (*state).lencode
-            <= (&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                .offset(crate::src::inftrees::ENOUGH as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize))
-                as *const crate::src::inftrees::code
-    {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .lencode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as ::core::ffi::c_long as isize,
-        );
-        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .distcode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as ::core::ffi::c_long as isize,
-        );
+    let state_codes_base = (*state).codes.as_ptr();
+    let state_codes_base_addr = state_codes_base as usize;
+    let state_codes_end_addr =
+        state_codes_base.wrapping_add(crate::src::inftrees::ENOUGH as usize) as usize;
+    let copy_codes_base = (*copy).codes.as_mut_ptr();
+    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+    let lencode_addr = (*state).lencode as usize;
+    if lencode_addr >= state_codes_base_addr && lencode_addr < state_codes_end_addr {
+        let lencode_index = (lencode_addr - state_codes_base_addr) / code_size;
+        let distcode_index = ((*state).distcode as usize - state_codes_base_addr) / code_size;
+        (*copy).lencode = copy_codes_base.wrapping_add(lencode_index) as *const _;
+        (*copy).distcode = copy_codes_base.wrapping_add(distcode_index) as *const _;
     }
-    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-        (*state)
-            .next
-            .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-            as ::core::ffi::c_long as isize,
-    );
+    let next_index = ((*state).next as usize - state_codes_base_addr) / code_size;
+    (*copy).next = copy_codes_base.wrapping_add(next_index);
     if !window.is_null() && (*state).whave != 0 {
         let len = (*state).whave as usize;
         let source_window = ::core::slice::from_raw_parts((*state).window, len);
