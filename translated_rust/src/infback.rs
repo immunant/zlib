@@ -232,9 +232,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
                             (*state).mode = crate::src::inflate::STORED;
                         }
                         1 => {
-                            crate::src::inftrees::inflate_fixed_ffi(
-                                state as *mut crate::src::inflate::inflate_state,
-                            );
+                            let fixed = crate::src::inftrees::inflate_fixed_tables();
+                            (*state).lencode = fixed.lencode.as_ptr();
+                            (*state).lenbits = fixed.lenbits;
+                            (*state).distcode = fixed.distcode.as_ptr();
+                            (*state).distbits = fixed.distbits;
                             (*state).mode = crate::src::inflate::LEN;
                         }
                         2 => {

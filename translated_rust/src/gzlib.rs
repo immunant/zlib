@@ -343,6 +343,16 @@ fn gz_state_open(state: &crate::gzguts_h::gz_state) -> bool {
     state.mode == crate::gzguts_h::GZ_READ || state.mode == crate::gzguts_h::GZ_WRITE
 }
 
+fn gzbuffer_normalized_size(size: crate::stdlib::uInt) -> Option<crate::stdlib::uInt> {
+    if (size << 1 as ::core::ffi::c_int) < size {
+        None
+    } else if size < 8 as crate::stdlib::uInt {
+        Some(8 as crate::stdlib::uInt)
+    } else {
+        Some(size)
+    }
+}
+
 pub fn gzbuffer(
     state: &mut crate::gzguts_h::gz_state,
     mut size: ::core::ffi::c_uint,
@@ -353,12 +363,10 @@ pub fn gzbuffer(
     if state.size != 0 as ::core::ffi::c_uint {
         return -1 as ::core::ffi::c_int;
     }
-    if (size << 1 as ::core::ffi::c_int) < size {
+    let Some(normalized_size) = gzbuffer_normalized_size(size) else {
         return -1 as ::core::ffi::c_int;
-    }
-    if size < 8 as ::core::ffi::c_uint {
-        size = 8 as ::core::ffi::c_uint;
-    }
+    };
+    size = normalized_size;
     state.want = size;
     return 0 as ::core::ffi::c_int;
 }

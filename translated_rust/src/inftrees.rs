@@ -2805,6 +2805,23 @@ pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
 
 pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
+
+pub(crate) struct InflateFixedTables {
+    pub(crate) lencode: &'static [crate::src::inftrees::code; 512],
+    pub(crate) lenbits: crate::stdlib::uInt,
+    pub(crate) distcode: &'static [crate::src::inftrees::code; 32],
+    pub(crate) distbits: crate::stdlib::uInt,
+}
+
+pub(crate) fn inflate_fixed_tables() -> InflateFixedTables {
+    InflateFixedTables {
+        lencode: &lenfix,
+        lenbits: 9 as crate::stdlib::uInt,
+        distcode: &distfix,
+        distbits: 5 as crate::stdlib::uInt,
+    }
+}
+
 #[no_mangle]
 
 pub static inflate_copyright: [::core::ffi::c_char; 49] =
@@ -3184,8 +3201,9 @@ pub unsafe extern "C" fn inflate_table_ffi(
 #[export_name = "inflate_fixed"]
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
-    (*state).lencode = &raw const lenfix as *const crate::src::inftrees::code;
-    (*state).lenbits = 9 as ::core::ffi::c_uint;
-    (*state).distcode = &raw const distfix as *const crate::src::inftrees::code;
-    (*state).distbits = 5 as ::core::ffi::c_uint;
+    let fixed = inflate_fixed_tables();
+    (*state).lencode = fixed.lencode.as_ptr();
+    (*state).lenbits = fixed.lenbits;
+    (*state).distcode = fixed.distcode.as_ptr();
+    (*state).distbits = fixed.distbits;
 }

@@ -408,9 +408,7 @@ unsafe extern "C" fn gz_read(
     loop {
         n = gz_z_size_to_uInt_chunk(len);
         if (*state).x.have != 0 {
-            if (*state).x.have < n {
-                n = (*state).x.have;
-            }
+            n = gz_read_buffered_copy_len(len, (*state).x.have);
             crate::stdlib::memcpy(
                 buf as *mut ::core::ffi::c_void,
                 (*state).x.next as *const ::core::ffi::c_void,
@@ -507,6 +505,18 @@ fn gz_advance_buffered_read_cursor(
 ) {
     state.x.have = state.x.have.wrapping_sub(count);
     state.x.next = state.x.next.wrapping_add(count as usize);
+}
+
+fn gz_read_buffered_copy_len(
+    len: crate::stdlib::z_size_t,
+    have: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    let n = gz_z_size_to_uInt_chunk(len);
+    if have < n {
+        have
+    } else {
+        n
+    }
 }
 
 fn gz_note_buffered_read(state: &mut crate::gzguts_h::gz_state, count: ::core::ffi::c_uint) {
