@@ -818,12 +818,6 @@ fn gzputc_impl(compressor: &mut GzCompressor<'_>, c: ::core::ffi::c_int) -> ::co
     return c & 0xff as ::core::ffi::c_int;
 }
 
-pub unsafe extern "C" fn gzputc(
-    state: &mut crate::gzguts_h::gz_state,
-    c: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzputc_impl(&mut GzCompressor { state }, c)
-}
 #[export_name = "gzputc"]
 
 pub unsafe extern "C" fn gzputc_ffi(
@@ -833,7 +827,7 @@ pub unsafe extern "C" fn gzputc_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1;
     };
-    gzputc(state, c)
+    gzputc_impl(&mut GzCompressor { state }, c)
 }
 /// Write a C-string payload through the state-carrying compressor facade.
 ///
