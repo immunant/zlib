@@ -854,8 +854,9 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_reset_keep_state(&mut *strm, &mut *state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    return inflate_reset_keep_state(strm_ref, state);
 }
 #[export_name = "inflateReset"]
 
@@ -865,8 +866,9 @@ pub unsafe extern "C" fn inflateReset_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_reset_state(&mut *strm, &mut *state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    return inflate_reset_state(strm_ref, state);
 }
 
 pub(crate) fn inflate_reset_state(
@@ -2463,7 +2465,8 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &*((*strm).state as *mut crate::src::inflate::inflate_state);
+    let strm_ref = &*strm;
+    let state = &*(strm_ref.state as *mut crate::src::inflate::inflate_state);
     let (wnext, whave) = inflateGetDictionary(state);
     if whave != 0 && !dictionary.is_null() {
         let dictionary_slice = ::core::slice::from_raw_parts_mut(dictionary, whave as usize);

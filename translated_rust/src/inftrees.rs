@@ -3279,9 +3279,11 @@ pub unsafe extern "C" fn inflate_table_ffi(
     bits: *mut ::core::ffi::c_uint,
     work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
+    let table_ref = &mut *table;
+    let bits_ref = &mut *bits;
     let lens_slice = ::core::slice::from_raw_parts(lens, codes as usize);
     let work_slice = ::core::slice::from_raw_parts_mut(work, codes as usize);
-    let table_slice = ::core::slice::from_raw_parts_mut(*table, inflate_table_capacity(type_0));
+    let table_slice = ::core::slice::from_raw_parts_mut(*table_ref, inflate_table_capacity(type_0));
     let mut table_used = 0usize;
     let ret = inflate_table_impl(
         type_0,
@@ -3289,11 +3291,11 @@ pub unsafe extern "C" fn inflate_table_ffi(
         codes,
         table_slice,
         &mut table_used,
-        &mut *bits,
+        bits_ref,
         work_slice,
     );
     if ret == 0 {
-        *table = (*table).add(table_used);
+        *table_ref = (*table_ref).add(table_used);
     }
     ret
 }

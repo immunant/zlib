@@ -1671,52 +1671,7 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    let mut bound: crate::stdlib::z_size_t = if deflate_state_check_raw!(strm) != 0 {
-        deflate_bound_z_impl(sourceLen as crate::stdlib::z_size_t, None, None)
-    } else {
-        let s = &*((*strm).state as *mut crate::src::deflate::deflate_state);
-        let state = DeflateBoundState {
-            wrap: s.wrap,
-            strstart: s.strstart,
-            w_bits: s.w_bits,
-            hash_bits: s.hash_bits,
-            level: s.level,
-        };
-        let gzip_header = if deflate_bound_uses_gzip_header(state.wrap) && !s.gzhead.is_null() {
-            let head = &*s.gzhead;
-            let extra_len = if head.extra.is_null() {
-                None
-            } else {
-                Some(head.extra_len)
-            };
-            let name_len = if head.name.is_null() {
-                0 as crate::stdlib::z_size_t
-            } else {
-                let name = ::core::ffi::CStr::from_ptr(head.name as *const ::core::ffi::c_char);
-                deflate_bound_cstring_len(name)
-            };
-            let comment_len = if head.comment.is_null() {
-                0 as crate::stdlib::z_size_t
-            } else {
-                let comment =
-                    ::core::ffi::CStr::from_ptr(head.comment as *const ::core::ffi::c_char);
-                deflate_bound_cstring_len(comment)
-            };
-            Some(DeflateBoundGzipHeader {
-                extra_len,
-                name_len,
-                comment_len,
-                has_hcrc: head.hcrc != 0,
-            })
-        } else {
-            None
-        };
-        deflate_bound_z_impl(
-            sourceLen as crate::stdlib::z_size_t,
-            Some(state),
-            gzip_header,
-        )
-    };
+    let bound = deflateBound_z_ffi(strm, sourceLen as crate::stdlib::z_size_t);
     return if bound != bound {
         -1 as ::core::ffi::c_int as crate::stdlib::uLong
     } else {
