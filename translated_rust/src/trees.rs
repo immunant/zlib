@@ -3427,7 +3427,7 @@ unsafe fn flush_block_data(
     Some(unsafe { core::slice::from_raw_parts(buf.cast::<u8>(), len) }.to_vec())
 }
 
-unsafe fn tr_flush_block_impl(
+pub(crate) unsafe fn tr_flush_block_impl(
     s: &mut crate::src::deflate::deflate_state,
     buf: Option<&[u8]>,
     stored_len: crate::zutil_h::ulg,
