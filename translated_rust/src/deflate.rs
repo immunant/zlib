@@ -2585,14 +2585,14 @@ pub fn deflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm as *mut _).is_none()
-        || flush > crate::zlib_h::Z_BLOCK
+    let Some((stream, state)) = deflateStateCheck(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if flush > crate::zlib_h::Z_BLOCK
         || flush < 0 as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let (stream, state) =
-        deflateStateCheck(strm as *mut _).expect("stream validated above");
     let preparation = deflate_prepare_call(stream, state, flush);
     if let Some(result) = deflate_finish_prepared(stream, state, flush, preparation) {
         return result;
