@@ -545,6 +545,31 @@ fn fill_window_bound(
     *input_used += consumed;
     stream.next_in = stream.next_in.wrapping_add(consumed);
 }
+
+// Default callbacks are an implementation detail of stream initialization.
+// Keeping their selection reference-bound means the ABI entry point only has
+// to validate and bind its caller-provided stream once.
+fn deflate_prepare_stream(stream: &mut crate::zlib_h::z_stream) {
+    stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if stream.zalloc.is_none() {
+        stream.zalloc = Some(
+            crate::src::zutil::zcalloc
+                as unsafe extern "C" fn(
+                    crate::stdlib::voidpf,
+                    ::core::ffi::c_uint,
+                    ::core::ffi::c_uint,
+                ) -> crate::stdlib::voidpf,
+        ) as crate::zlib_h::alloc_func;
+        stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if stream.zfree.is_none() {
+        stream.zfree = Some(
+            crate::src::zutil::zcfree
+                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+        ) as crate::zlib_h::free_func;
+    }
+}
+
 pub unsafe extern "C" fn deflateInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
@@ -600,24 +625,7 @@ pub unsafe extern "C" fn deflateInit2_(
     // initialization so the allocation and state setup below do not keep
     // recovering the same reference from the raw stream pointer.
     let stream = &mut *strm;
-    stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if stream.zalloc.is_none() {
-        stream.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if stream.zfree.is_none() {
-        stream.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
+    deflate_prepare_stream(stream);
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }

@@ -381,6 +381,31 @@ fn inflate_initialize_state(
     };
     inflate_reset_with_window_bits(strm, state, wrap, window_bits)
 }
+
+// Default callbacks belong to initialization, after the ABI entry point has
+// bound the stream. This keeps callback selection out of the exported
+// forwarding wrapper and leaves the allocation sequence below unchanged.
+fn inflate_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
+            crate::src::zutil::zcalloc
+                as unsafe extern "C" fn(
+                    crate::stdlib::voidpf,
+                    ::core::ffi::c_uint,
+                    ::core::ffi::c_uint,
+                ) -> crate::stdlib::voidpf,
+        ) as crate::zlib_h::alloc_func;
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
+            crate::src::zutil::zcfree
+                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+        ) as crate::zlib_h::free_func;
+    }
+}
+
 #[export_name = "inflateReset2"]
 
 pub unsafe extern "C" fn inflateReset2_ffi(
@@ -407,27 +432,13 @@ pub unsafe extern "C" fn inflateInit2_(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
+    // Bind the valid caller stream once. The remaining initialization is
+    // ordinary stream/state work, including default callback selection.
+    let strm = &mut *strm;
+    inflate_prepare_stream(strm);
+    state = Some(strm.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
@@ -439,8 +450,7 @@ pub unsafe extern "C" fn inflateInit2_(
         0 as ::core::ffi::c_int,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
     );
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
-    let strm = &mut *strm;
+    strm.state = state as *mut crate::src::deflate::internal_state;
     let state = &mut *state;
     state.strm = strm;
     let ret = inflate_initialize_state(strm, state, windowBits);
