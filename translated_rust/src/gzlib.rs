@@ -1536,6 +1536,13 @@ struct GzFdPath {
     len: usize,
 }
 
+// Keep path selection in the implementation layer. In particular, the FFI
+// wrapper for gzdopen() must not assemble its diagnostic path itself.
+enum GzOpenPath<'a> {
+    Path(&'a [u8]),
+    Descriptor(::core::ffi::c_int),
+}
+
 impl GzFdPath {
     fn new(fd: ::core::ffi::c_int) -> Self {
         // This is the same bound used by the C implementation: enough for
@@ -1787,7 +1794,13 @@ fn gz_reset(mut reset: GzResetState) -> GzResetState {
     reset
 }
 
-unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zlib_h::gzFile {
+// Build the opaque handle while it is still owned. The FFI entry points are
+// solely responsible for publishing this Box as the C handle. Raw-FD
+// adoption remains here, after mode/path validation, for gzdopen().
+unsafe fn gz_open(
+    path: GzOpenPath<'_>,
+    mode: &[u8],
+) -> Option<Box<crate::gzguts_h::gz_state>> {
     // The gzip handle is opaque at the ABI.  Keep its allocation owned until
     // the handle is successfully returned, rather than using malloc/free for
     // the state record itself.
@@ -1795,27 +1808,35 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
     // the former Vec owner did, so allocation failure has the same ordering.
     // `Box::write()` publishes the initialized state without an intermediate
     // raw handle; close can now reclaim the matching one-state Box directly.
+    let fd_path;
+    let (path, fd) = match path {
+        GzOpenPath::Path(path) => (path, -1 as ::core::ffi::c_int),
+        GzOpenPath::Descriptor(fd) => {
+            fd_path = GzFdPath::new(fd);
+            (fd_path.as_bytes(), fd)
+        }
+    };
     let state_owner = match Box::<crate::gzguts_h::gz_state>::try_new_uninit() {
         Ok(owner) => owner,
-        Err(_) => return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>(),
+        Err(_) => return None,
     };
     let Some(mode) = parse_gz_open_mode(mode).and_then(GzOpenMode::normalize) else {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+        return None;
     };
     let Some(config) = GzOpenConfig::new(path, mode) else {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+        return None;
     };
     let source = if fd == -1 as ::core::ffi::c_int {
         GzOpenSource::Path
     } else {
-        // This is the only raw-FD adoption.  Keep it after mode/path
-        // validation so invalid `gzdopen()` modes do not consume the caller's
+        // This is the only raw-FD adoption. Keep it after mode/path
+        // validation so invalid gzdopen() modes do not consume the caller's
         // descriptor, matching the original failure ordering.
         let fd = <rustix::fd::OwnedFd as rustix::fd::FromRawFd>::from_raw_fd(fd);
         GzOpenSource::Adopted(fd)
     };
     let Some(initial) = gz_open_state(config, path, source) else {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+        return None;
     };
     let state_owner = Box::write(state_owner, crate::gzguts_h::gz_state {
         x: crate::zlib_h::gzFile_s {
@@ -1864,7 +1885,7 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
             reserved: 0,
         },
     });
-    return Box::into_raw(state_owner) as crate::zlib_h::gzFile;
+    Some(state_owner)
 }
 
 #[export_name = "gzopen"]
@@ -1877,10 +1898,12 @@ pub unsafe extern "C" fn gzopen_ffi(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     gz_open(
-        ::core::ffi::CStr::from_ptr(path).to_bytes(),
-        -1 as ::core::ffi::c_int,
+        GzOpenPath::Path(::core::ffi::CStr::from_ptr(path).to_bytes()),
         ::core::ffi::CStr::from_ptr(mode).to_bytes(),
     )
+    .map_or(::core::ptr::null_mut(), |state| {
+        Box::into_raw(state).cast::<crate::zlib_h::gzFile_s>()
+    })
 }
 #[export_name = "gzopen64"]
 
@@ -1892,17 +1915,12 @@ pub unsafe extern "C" fn gzopen64_ffi(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     gz_open(
-        ::core::ffi::CStr::from_ptr(path).to_bytes(),
-        -1 as ::core::ffi::c_int,
+        GzOpenPath::Path(::core::ffi::CStr::from_ptr(path).to_bytes()),
         ::core::ffi::CStr::from_ptr(mode).to_bytes(),
     )
-}
-unsafe fn gzdopen(fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zlib_h::gzFile {
-    if fd == -1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    let path = GzFdPath::new(fd);
-    gz_open(path.as_bytes(), fd, mode)
+    .map_or(::core::ptr::null_mut(), |state| {
+        Box::into_raw(state).cast::<crate::zlib_h::gzFile_s>()
+    })
 }
 #[export_name = "gzdopen"]
 
@@ -1913,7 +1931,14 @@ pub unsafe extern "C" fn gzdopen_ffi(
     if fd == -1 as ::core::ffi::c_int || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    gzdopen(fd, ::core::ffi::CStr::from_ptr(mode).to_bytes())
+    gz_open(
+        GzOpenPath::Descriptor(fd),
+        ::core::ffi::CStr::from_ptr(mode).to_bytes(),
+    )
+    .map_or(
+        ::core::ptr::null_mut(),
+        |state| Box::into_raw(state).cast::<crate::zlib_h::gzFile_s>(),
+    )
 }
 fn gzbuffer(
     mode: ::core::ffi::c_int,
