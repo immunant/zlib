@@ -2492,26 +2492,14 @@ pub unsafe fn inflate(
     *message = error_message;
     return ret;
 }
-/// Converts the ABI stream's current buffers once before entering the
-/// slice-based decoder.  Keeping this boundary out of the exported wrapper
-/// leaves the latter responsible only for validating and borrowing `strm`.
+/// Enter the slice-based decoder after the exported boundary has validated
+/// and borrowed the ABI buffers.
 fn inflate_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     flush: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    if strm.next_out.is_null() || (strm.next_in.is_null() && strm.avail_in != 0) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let input = if strm.avail_in == 0 {
-        &[]
-    } else {
-        // `next_in` was checked above and the caller owns the advertised
-        // range for the duration of this FFI call.
-        unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
-    };
-    // zlib requires `next_out` even for a zero-sized output range.
-    let output =
-        unsafe { ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize) };
     let mut message = None;
     unsafe { inflate(strm, flush, input, output, &mut message) }
 }
@@ -2521,10 +2509,22 @@ pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if strm.next_out.is_null() || (strm.next_in.is_null() && strm.avail_in != 0) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    inflate_from_stream(&mut *strm, flush)
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        // `next_in` was checked above and the caller owns the advertised
+        // range for the duration of this FFI call.
+        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+    };
+    // zlib requires `next_out` even for a zero-sized output range.
+    let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+    inflate_from_stream(strm, flush, input, output)
 }
 pub unsafe fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if inflate_validate_state(strm).is_none() {
