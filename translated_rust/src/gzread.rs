@@ -765,71 +765,66 @@ pub unsafe extern "C" fn gzungetc_ffi(
 ) -> ::core::ffi::c_int {
     gzungetc(c, file)
 }
-pub unsafe extern "C" fn gzgets(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: *mut ::core::ffi::c_char,
-    mut len: ::core::ffi::c_int,
+unsafe fn gzgets(
+    file: crate::zlib_h::gzFile,
+    output: &mut [u8],
 ) -> *mut ::core::ffi::c_char {
-    let mut left: ::core::ffi::c_uint = 0;
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
+    if file.is_null() || output.is_empty() {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_READ {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
+        state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    str = buf;
-    left = (len as ::core::ffi::c_uint).wrapping_sub(1 as ::core::ffi::c_uint);
+    let str = output.as_mut_ptr().cast::<::core::ffi::c_char>();
+    let mut left = output.len() - 1;
+    let mut written = 0;
     if left != 0 {
-        while !((*state).x.have == 0 as ::core::ffi::c_uint
+        while !(state.x.have == 0 as ::core::ffi::c_uint
             && gz_fetch(state) == -1 as ::core::ffi::c_int)
         {
-            if (*state).x.have == 0 as ::core::ffi::c_uint {
-                (*state).past = 1 as ::core::ffi::c_int;
+            if state.x.have == 0 as ::core::ffi::c_uint {
+                state.past = 1 as ::core::ffi::c_int;
                 break;
             } else {
-                n = if (*state).x.have > left {
+                let mut n = if state.x.have as usize > left {
                     left
                 } else {
-                    (*state).x.have
+                    state.x.have as usize
                 };
-                let input = ::core::slice::from_raw_parts((*state).x.next, n as usize);
-                let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), n as usize);
-                let (copied, found_newline) = copy_through_newline(input, output);
-                n = copied as ::core::ffi::c_uint;
-                (*state).x.have = (*state).x.have.wrapping_sub(n);
-                (*state).x.next = (*state).x.next.offset(n as isize);
-                (*state).x.pos += n as crate::stdlib::off64_t;
-                left = left.wrapping_sub(n);
-                buf = buf.offset(n as isize);
+                let input = ::core::slice::from_raw_parts(state.x.next, n);
+                let (copied, found_newline) =
+                    copy_through_newline(input, &mut output[written..written + n]);
+                n = copied;
+                state.x.have = state.x.have.wrapping_sub(n as ::core::ffi::c_uint);
+                state.x.next = state.x.next.offset(n as isize);
+                state.x.pos += n as crate::stdlib::off64_t;
+                left -= n;
+                written += n;
                 if !(left != 0 && !found_newline) {
                     break;
                 }
             }
         }
     }
-    if buf == str {
+    if written == 0 {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    *buf.offset(0 as isize) = 0 as ::core::ffi::c_char;
+    output[written] = 0;
     return str;
 }
 #[export_name = "gzgets"]
@@ -839,7 +834,11 @@ pub unsafe extern "C" fn gzgets_ffi(
     mut buf: *mut ::core::ffi::c_char,
     mut len: ::core::ffi::c_int,
 ) -> *mut ::core::ffi::c_char {
-    gzgets(file, buf, len)
+    if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    }
+    let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize);
+    gzgets(file, output)
 }
 pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
