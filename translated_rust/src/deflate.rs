@@ -1074,7 +1074,8 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         1
     }
 }
-pub unsafe extern "C" fn deflateSetDictionary(
+#[export_name = "deflateSetDictionary"]
+pub unsafe extern "C" fn deflateSetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
@@ -1176,15 +1177,6 @@ pub unsafe extern "C" fn deflateSetDictionary(
     (*strm).avail_in = avail as crate::stdlib::uInt;
     (*s).wrap = wrap;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "deflateSetDictionary"]
-
-pub unsafe extern "C" fn deflateSetDictionary_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    deflateSetDictionary(strm, dictionary, dictLength)
 }
 fn deflate_dictionary_range_state(
     state: &crate::src::deflate::deflate_state,
@@ -1356,7 +1348,8 @@ pub unsafe extern "C" fn deflateReset_ffi(
 ) -> ::core::ffi::c_int {
     deflateReset(strm)
 }
-pub unsafe extern "C" fn deflateSetHeader(
+#[export_name = "deflateSetHeader"]
+pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
@@ -1365,14 +1358,6 @@ pub unsafe extern "C" fn deflateSetHeader(
     }
     (*(*strm).state).gzhead = head;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "deflateSetHeader"]
-
-pub unsafe extern "C" fn deflateSetHeader_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
-) -> ::core::ffi::c_int {
-    deflateSetHeader(strm, head)
 }
 fn deflate_pending_state(
     state: &crate::src::deflate::deflate_state,
@@ -1457,7 +1442,8 @@ fn prime_bits_step(
     })
 }
 
-pub unsafe extern "C" fn deflatePrime(
+#[export_name = "deflatePrime"]
+pub unsafe extern "C" fn deflatePrime_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
@@ -1634,16 +1620,6 @@ struct DeflateBoundHeader {
     comment_len: Option<usize>,
     hcrc: bool,
 }
-#[export_name = "deflatePrime"]
-
-pub unsafe extern "C" fn deflatePrime_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    deflatePrime(strm, bits, value)
-}
-
 #[derive(Copy, Clone)]
 struct DeflateBoundState {
     wrap: ::core::ffi::c_int,
@@ -2702,7 +2678,8 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     deflateEnd(strm)
 }
-pub unsafe extern "C" fn deflateCopy(
+#[export_name = "deflateCopy"]
+pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -2810,14 +2787,6 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).sym_next as crate::__stddef_size_t_h::size_t,
     );
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "deflateCopy"]
-
-pub unsafe extern "C" fn deflateCopy_ffi(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    deflateCopy(dest, source)
 }
 fn longest_match_state(
     s: &mut crate::src::deflate::deflate_state,
