@@ -398,6 +398,18 @@ enum GzDecompInflateStep {
     DataError,
 }
 
+/// Map an inflate diagnostic address token to the immutable message bytes it
+/// designates. The gzip boundary turns its ABI message pointer into this
+/// scalar token, so owned gzip error storage never needs to borrow arbitrary
+/// C text. A null or unrecognised token keeps zlib's generic diagnostic.
+fn gz_inflate_error_message(message_address: usize) -> &'static [u8] {
+    crate::src::inflate::INFLATE_ERROR_MESSAGES
+        .iter()
+        .find(|candidate| candidate.as_ptr() as usize == message_address)
+        .copied()
+        .unwrap_or(b"compressed data error\0")
+}
+
 /// Convert a codec output-capacity transition into produced bytes.  Both gzip
 /// adapters take the pre-call capacity from the same owned output span, so a
 /// larger post-call value is corrupt state rather than wrapping progress.
@@ -507,28 +519,13 @@ macro_rules! gz_decomp_at_boundary {
                     }
                     GzDecompInflateStep::DataError => {
                         // `inflate()` assigns every data-error message from its
-                        // immutable diagnostic table. Match that storage by
-                        // address rather than borrowing an arbitrary C pointer.
-                        // A null message retains zlib's generic diagnostic.
-                        let message = crate::src::inflate::INFLATE_ERROR_MESSAGES
-                            .iter()
-                            .find(|candidate| {
-                                ::core::ptr::eq(
-                                    candidate.as_ptr(),
-                                    state.strm.msg.cast_const().cast::<u8>(),
-                                )
-                            })
-                            .and_then(|candidate| {
-                                ::std::ffi::CStr::from_bytes_with_nul(candidate).ok()
-                            })
-                            .or_else(|| {
-                                ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0")
-                                    .ok()
-                            });
-                        crate::src::gzlib::gz_error_update_state(
+                        // immutable diagnostic table. Pass only its address
+                        // token into the safe lookup; arbitrary C text is
+                        // never borrowed by the owned gzip state.
+                        crate::src::gzlib::gz_error_static(
                             state,
                             crate::zlib_h::Z_DATA_ERROR,
-                            message,
+                            gz_inflate_error_message(state.strm.msg as usize),
                         );
                         break;
                     }
