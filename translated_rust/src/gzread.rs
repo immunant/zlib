@@ -1615,11 +1615,13 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     gz_decomp_apply_result(&mut state.how, &mut state.junk, ret)
 }
 
-unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         let action = gz_fetch_action(state.how);
         let failed = match action {
-            GzFetchAction::Look => gz_fetch_look_failed(gz_look(state)),
+            // `gz_look` is still the owning gzip-buffer boundary.  Keep that
+            // call narrow while the fetch control flow itself remains safe.
+            GzFetchAction::Look => gz_fetch_look_failed(unsafe { gz_look(state) }),
             GzFetchAction::Copy => {
                 let out = state.out;
                 let size = state.size;
@@ -1634,14 +1636,18 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             GzFetchAction::Gzip => {
                 state.strm.avail_out = gz_fetch_output_capacity(state.size) as crate::stdlib::uInt;
                 state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
-                gz_decomp(state) == -1 as ::core::ffi::c_int
+                // `gz_decomp` still crosses the inflate and gzip-buffer
+                // boundaries; only that call needs an unsafe boundary here.
+                (unsafe { gz_decomp(state) }) == -1 as ::core::ffi::c_int
             }
             GzFetchAction::StateCorrupt => {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
-                );
+                unsafe {
+                    crate::src::gzlib::gz_error(
+                        state as *mut crate::gzguts_h::gz_state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                }
                 return -1 as ::core::ffi::c_int;
             }
         };
