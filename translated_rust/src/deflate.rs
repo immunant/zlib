@@ -239,19 +239,26 @@ pub struct config_s {
     pub max_chain: crate::zutil_h::ush,
     pub func: compress_func,
 }
+const fn copyright_chars(bytes: [u8; 70]) -> [::core::ffi::c_char; 70] {
+    let mut chars = [0; 70];
+    let mut index = 0;
+    while index < bytes.len() {
+        chars[index] = bytes[index] as ::core::ffi::c_char;
+        index += 1;
+    }
+    chars
+}
+
 #[no_mangle]
 
-pub static mut deflate_copyright: [::core::ffi::c_char; 70] = unsafe {
-    ::core::mem::transmute::<[u8; 70], [::core::ffi::c_char; 70]>(
-        *b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0",
-    )
-};
+pub static deflate_copyright: [::core::ffi::c_char; 70] =
+    copyright_chars(*b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0");
 
 pub const NIL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 
 pub const TOO_FAR: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
 
-static mut configuration_table: [config; 10] = [
+static configuration_table: [config; 10] = [
     config_s {
         good_length: 0 as crate::zutil_h::ush,
         max_lazy: 0 as crate::zutil_h::ush,
@@ -619,7 +626,7 @@ pub unsafe extern "C" fn deflateInit2_(
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    static mut my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
+    let my_version = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
         || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
             != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
