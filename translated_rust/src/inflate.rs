@@ -1054,19 +1054,68 @@ fn update_owned_inflate_window(
     result
 }
 
+/// The typed operations that can borrow a callback-owned inflate window.
+///
+/// Keeping this enum pointer-free lets a single monomorphic boundary service
+/// the history update and the fast decoder without spreading raw slice
+/// construction into either algorithm.
+enum CallbackInflateWindowOperation<'a> {
+    Update(&'a [crate::stdlib::Bytef]),
+    Fast {
+        strm: &'a mut crate::zlib_h::z_stream,
+        out: crate::stdlib::uInt,
+        input: &'a [crate::stdlib::Bytef],
+        output: &'a mut [crate::stdlib::Bytef],
+    },
+}
+
+/// Borrow exactly one callback-owned inflate window for a typed operation.
+///
+/// The ABI allocator owns this buffer, so its handle stays at this
+/// type-specific boundary. Both the history updater and fast decoder receive
+/// ordinary slices, which keeps the rest of their work safe.
+fn use_callback_inflate_window(
+    state: &mut crate::src::inflate::inflate_state,
+    len: usize,
+    operation: CallbackInflateWindowOperation<'_>,
+) -> Result<(), ()> {
+    let window = state.window.ok_or(())?;
+    let window = unsafe { ::core::slice::from_raw_parts_mut(window.as_ptr(), len) };
+    match operation {
+        CallbackInflateWindowOperation::Update(input) => {
+            InflateWindow::borrowed(window).update(state, input)
+        }
+        CallbackInflateWindowOperation::Fast {
+            strm,
+            out,
+            input,
+            output,
+        } => {
+            crate::src::inffast::inflate_fast(
+                strm,
+                state,
+                out,
+                Some(&*window),
+                false,
+                input,
+                output,
+            );
+            Ok(())
+        }
+    }
+}
+
 /// Update exactly the validated callback-owned inflate window.
 ///
-/// Callers must establish the allocation layout first. This keeps allocator-
-/// derived slice formation out of the safe update algorithm and gives an
-/// eventual owned-storage facade one interchange point.
+/// Callers must establish the allocation layout first. The typed borrowing
+/// boundary above keeps the allocator-derived slice out of this safe update
+/// algorithm.
 fn update_callback_owned_inflate_window(
     state: &mut crate::src::inflate::inflate_state,
     len: usize,
     input: &[crate::stdlib::Bytef],
 ) -> Result<(), ()> {
-    let window = state.window.expect("validated inflate window");
-    let window = unsafe { ::core::slice::from_raw_parts_mut(window.as_ptr(), len) };
-    InflateWindow::borrowed(window).update(state, input)
+    use_callback_inflate_window(state, len, CallbackInflateWindowOperation::Update(input))
 }
 
 fn copy_literal_block(input: &[crate::stdlib::Bytef], output: &mut [crate::stdlib::Bytef]) {
@@ -2397,24 +2446,14 @@ pub fn inflate(
                                                 // raw storage boundary until allocator ownership is
                                                 // represented safely.
                                                 let mut owned_history = state.window_storage.take_owned();
-                                                let history = if let Some(window) = owned_history.as_ref() {
+                                                if let Some(window) = owned_history.as_ref() {
                                                     if !window.matches_state(state) {
                                                         state.window_storage.install_owned(
                                                             owned_history.take().expect("checked owner"),
                                                         );
                                                         return crate::zlib_h::Z_STREAM_ERROR;
                                                     }
-                                                    Some(window.bytes.as_slice())
-                                                } else if state.window.is_none() || state.wsize == 0 {
-                                                    None
-                                                } else {
-                                                    Some(::core::slice::from_raw_parts(
-                                                        state.window
-                                                            .expect("checked non-null window")
-                                                            .as_ptr(),
-                                                        state.wsize as usize,
-                                                    ))
-                                                };
+                                                }
                                                 // `input` remains the one checked span for this
                                                 // inflate call. `next` and `have` select its live
                                                 // suffix, while `output` is the original caller
@@ -2426,15 +2465,40 @@ pub fn inflate(
                                                     state.mode = crate::src::inflate::BAD;
                                                     break 'c_2322;
                                                 };
-                                                crate::src::inffast::inflate_fast(
-                                                    strm,
+                                                if let Some(window) = owned_history.as_ref() {
+                                                    crate::src::inffast::inflate_fast(
+                                                        strm,
+                                                        state,
+                                                        out,
+                                                        Some(window.bytes.as_slice()),
+                                                        false,
+                                                        fast_input,
+                                                        output,
+                                                    );
+                                                } else if state.window.is_none() || state.wsize == 0 {
+                                                    crate::src::inffast::inflate_fast(
+                                                        strm,
+                                                        state,
+                                                        out,
+                                                        None,
+                                                        false,
+                                                        fast_input,
+                                                        output,
+                                                    );
+                                                } else if use_callback_inflate_window(
                                                     state,
-                                                    out,
-                                                    history,
-                                                    false,
-                                                    fast_input,
-                                                    output,
-                                                );
+                                                    state.wsize as usize,
+                                                    CallbackInflateWindowOperation::Fast {
+                                                        strm,
+                                                        out,
+                                                        input: fast_input,
+                                                        output,
+                                                    },
+                                                )
+                                                .is_err()
+                                                {
+                                                    return crate::zlib_h::Z_STREAM_ERROR;
+                                                }
                                                 if let Some(window) = owned_history {
                                                     state.window_storage.install_owned(window);
                                                 }
