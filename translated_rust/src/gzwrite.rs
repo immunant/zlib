@@ -665,6 +665,10 @@ struct GzFlushFailures {
 
 enum GzFlushBehavior<'a> {
     Public,
+    /// Drain only pending input before changing compression parameters.  This
+    /// deliberately differs from a public flush: when there is no input it
+    /// must not manufacture a `Z_BLOCK` call to deflate.
+    ParameterUpdate,
     Closing(&'a mut GzFlushFailures),
 }
 
@@ -673,9 +677,16 @@ unsafe fn gzflush(
     flush: ::core::ffi::c_int,
     behavior: GzFlushBehavior<'_>,
 ) -> ::core::ffi::c_int {
-    let (validate_state, clear_error, stop_after_zero_failure, mut failures) = match behavior {
-        GzFlushBehavior::Public => (true, true, true, None),
-        GzFlushBehavior::Closing(failures) => (false, false, false, Some(failures)),
+    let (
+        validate_state,
+        clear_error,
+        stop_after_zero_failure,
+        drain_pending_input_only,
+        mut failures,
+    ) = match behavior {
+        GzFlushBehavior::Public => (true, true, true, false, None),
+        GzFlushBehavior::ParameterUpdate => (false, false, true, true, None),
+        GzFlushBehavior::Closing(failures) => (false, false, false, false, Some(failures)),
     };
     if validate_state
         && (state.mode != crate::gzguts_h::GZ_WRITE
@@ -697,7 +708,10 @@ unsafe fn gzflush(
             return state.err;
         }
     }
-    if gz_comp(state, flush, Some(GzCompInput::Buffered)) == -1 as ::core::ffi::c_int {
+    let compression_failed = (!drain_pending_input_only
+        || (state.size != 0 && state.strm.avail_in != 0))
+        && gz_comp(state, flush, Some(GzCompInput::Buffered)) == -1 as ::core::ffi::c_int;
+    if compression_failed {
         if let Some(failures) = failures.as_deref_mut() {
             failures.compression = Some(state.err);
         }
@@ -715,23 +729,11 @@ pub unsafe extern "C" fn gzflush_ffi(
     };
     gzflush(state, flush, GzFlushBehavior::Public)
 }
-fn gzsetparams_impl<Zero, Comp, Params>(
+unsafe fn gzsetparams(
     state: &mut crate::gzguts_h::gz_state,
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
-    mut zero: Zero,
-    mut comp: Comp,
-    mut params: Params,
-) -> ::core::ffi::c_int
-where
-    Zero: FnMut(&mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int,
-    Comp: FnMut(&mut crate::gzguts_h::gz_state, ::core::ffi::c_int) -> ::core::ffi::c_int,
-    Params: FnMut(
-        &mut crate::zlib_h::z_stream,
-        ::core::ffi::c_int,
-        ::core::ffi::c_int,
-    ) -> ::core::ffi::c_int,
-{
+) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_WRITE
         || state.err != crate::zlib_h::Z_OK && state.again == 0
         || state.direct != 0
@@ -742,35 +744,20 @@ where
     if level == state.level && strategy == state.strategy {
         return crate::zlib_h::Z_OK;
     }
-    if state.skip != 0 && zero(state) == -1 as ::core::ffi::c_int {
+    if gzflush(
+        state,
+        crate::zlib_h::Z_BLOCK,
+        GzFlushBehavior::ParameterUpdate,
+    ) != crate::zlib_h::Z_OK
+    {
         return state.err;
     }
     if state.size != 0 {
-        if state.strm.avail_in != 0
-            && comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
-        {
-            return state.err;
-        }
-        params(&mut state.strm, level, strategy);
+        crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
     }
     state.level = level;
     state.strategy = strategy;
     return crate::zlib_h::Z_OK;
-}
-
-unsafe fn gzsetparams(
-    state: &mut crate::gzguts_h::gz_state,
-    level: ::core::ffi::c_int,
-    strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzsetparams_impl(
-        state,
-        level,
-        strategy,
-        |state| gz_zero(state),
-        |state, flush| gz_comp(state, flush, Some(GzCompInput::Buffered)),
-        |strm, level, strategy| crate::src::deflate::deflateParams(strm, level, strategy),
-    )
 }
 #[export_name = "gzsetparams"]
 
