@@ -989,6 +989,36 @@ fn inflate_match_copy_plan(
     })
 }
 
+/// Copy an output-backed match in distance-sized chunks. A single bulk copy
+/// would not preserve deflate's repeated-pattern behavior when `len` exceeds
+/// `distance`, so every source range must end at the output cursor that was
+/// valid before the corresponding chunk is written.
+pub(crate) fn inflate_output_match_copy(
+    output: &mut [u8],
+    distance: usize,
+    len: usize,
+) -> Option<()> {
+    if distance == 0 || distance > output.len() {
+        return None;
+    }
+
+    let mut output_at = distance;
+    let mut remaining = len;
+    while remaining != 0 {
+        let take = remaining.min(distance);
+        let source = output_at.checked_sub(distance)?;
+        let source_end = source.checked_add(take)?;
+        let destination_end = output_at.checked_add(take)?;
+        if source_end > output_at || destination_end > output.len() {
+            return None;
+        }
+        output.copy_within(source..source_end, output_at);
+        output_at = destination_end;
+        remaining = remaining.checked_sub(take)?;
+    }
+    Some(())
+}
+
 /// Decode zlib's overloaded `windowBits` argument without touching the ABI
 /// stream or inflate state.  The boundary remains responsible for freeing a
 /// mismatched history allocation and publishing the accepted settings.

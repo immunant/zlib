@@ -198,10 +198,9 @@ fn inflate_fast_pull_byte(
     Ok(true)
 }
 
-/// Copy a match whose source is entirely in already-produced output.  Copy in
-/// distance-sized chunks so each source range precedes its destination: this
-/// preserves deflate's repeated-pattern behavior for matches longer than the
-/// distance while still using slice-checked overlapping copies.
+/// Lend the source-to-destination portion of an output-backed fast match to
+/// the shared checked copy core. This keeps the fast decoder's cursor policy
+/// local while ordinary and fast paths agree on repeated-pattern semantics.
 fn inflate_fast_copy_output_match(
     output: &mut [u8],
     output_at: &mut usize,
@@ -219,23 +218,23 @@ fn inflate_fast_copy_output_match(
         return false;
     }
 
-    let mut remaining = len;
-    while remaining != 0 {
-        let copy = remaining.min(dist);
-        let source = *output_at - dist;
-        let Some(source_end) = source.checked_add(copy) else {
-            return false;
-        };
-        let Some(destination_end) = output_at.checked_add(copy) else {
-            return false;
-        };
-        if source_end > *output_at || destination_end > output.len() {
-            return false;
-        }
-        output.copy_within(source..source_end, *output_at);
-        *output_at = destination_end;
-        remaining -= copy;
+    let source = *output_at - dist;
+    let Some(span_len) = dist.checked_add(len) else {
+        return false;
+    };
+    let Some(end) = source.checked_add(span_len) else {
+        return false;
+    };
+    let Some(match_output) = output.get_mut(source..end) else {
+        return false;
+    };
+    if crate::src::inflate::inflate_output_match_copy(match_output, dist, len).is_none() {
+        return false;
     }
+    let Some(next_output_at) = output_at.checked_add(len) else {
+        return false;
+    };
+    *output_at = next_output_at;
     true
 }
 
