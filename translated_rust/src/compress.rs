@@ -106,10 +106,8 @@ pub fn compress2_z(
         }
     }
     // The stream is initialized successfully before the loop, so it has the
-    // lifecycle required by the translated cleanup routine.
-    unsafe {
-        crate::src::deflate::deflateEnd(&mut stream);
-    }
+    // lifecycle required by the validated cleanup routine.
+    crate::src::deflate::deflateEnd(&mut stream);
     return (
         if err == crate::zlib_h::Z_STREAM_END {
             crate::zlib_h::Z_OK

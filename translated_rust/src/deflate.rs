@@ -2750,11 +2750,15 @@ pub unsafe extern "C" fn deflate_ffi(
     };
     deflate(strm, flush)
 }
-pub unsafe fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if stream.zalloc.is_none() || stream.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) = (stream.state as *mut crate::src::deflate::deflate_state).as_mut() else {
+    // The allocator pair above and stream-state validation below make this
+    // ABI handle conversion local to the teardown boundary.
+    let Some(state) =
+        (unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() })
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if !deflate_stream_state_valid(Some(stream), Some(state)) {
@@ -2762,33 +2766,47 @@ pub unsafe fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi:
     }
     let status = state.status;
     if !state.pending_buf.is_null() {
-        Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            stream.opaque,
-            state.pending_buf as crate::stdlib::voidpf,
-        );
+        unsafe {
+            Some(stream.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                stream.opaque,
+                state.pending_buf as crate::stdlib::voidpf,
+            );
+        }
     }
     if !state.head.is_null() {
-        Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            stream.opaque,
-            state.head as crate::stdlib::voidpf,
-        );
+        unsafe {
+            Some(stream.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                stream.opaque,
+                state.head as crate::stdlib::voidpf,
+            );
+        }
     }
     if !state.prev.is_null() {
-        Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            stream.opaque,
-            state.prev as crate::stdlib::voidpf,
-        );
+        unsafe {
+            Some(stream.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                stream.opaque,
+                state.prev as crate::stdlib::voidpf,
+            );
+        }
     }
     if !state.window.is_null() {
+        unsafe {
+            Some(stream.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                stream.opaque,
+                state.window as crate::stdlib::voidpf,
+            );
+        }
+    }
+    unsafe {
         Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             stream.opaque,
-            state.window as crate::stdlib::voidpf,
+            stream.state as crate::stdlib::voidpf,
         );
     }
-    Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        stream.opaque,
-        stream.state as crate::stdlib::voidpf,
-    );
     stream.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
