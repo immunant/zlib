@@ -789,6 +789,44 @@ impl WindowHistory {
     }
 }
 
+/// A validated mutable view of the initialized inflate history window.
+///
+/// This is deliberately only a short-lived safe view: the ABI state still
+/// keeps callback- or caller-provided storage as an opaque pointer.  Keeping
+/// the history metadata tied to the slice here lets callers update it without
+/// recreating the partial-versus-wrapped invariants, and is the seam for the
+/// eventual owned/borrowed window representation.
+struct WindowStorage<'a> {
+    history: WindowHistory,
+    bytes: &'a mut [crate::stdlib::Bytef],
+}
+
+impl<'a> WindowStorage<'a> {
+    fn new(
+        bytes: &'a mut [crate::stdlib::Bytef],
+        next: ::core::ffi::c_uint,
+        have: ::core::ffi::c_uint,
+    ) -> Option<Self> {
+        let size = ::core::ffi::c_uint::try_from(bytes.len()).ok()?;
+        Some(Self {
+            history: WindowHistory::new(size, next, have)?,
+            bytes,
+        })
+    }
+
+    fn apply(&mut self, produced: &[crate::stdlib::Bytef]) -> Option<WindowUpdate> {
+        self.history.apply(self.bytes, produced)
+    }
+
+    fn metadata(&self) -> WindowMetadata {
+        WindowMetadata {
+            wsize: self.history.size,
+            wnext: self.history.next,
+            whave: self.history.have,
+        }
+    }
+}
+
 fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> Option<WindowMetadata> {
     Some(WindowMetadata {
         wsize: (1 as ::core::ffi::c_uint).checked_shl(wbits)?,
@@ -1517,14 +1555,25 @@ fn update_window_state_core(
     window: &mut [crate::stdlib::Bytef],
     produced: &[crate::stdlib::Bytef],
 ) -> Option<()> {
-    update_window_core(
-        state.wbits,
-        &mut state.wsize,
-        &mut state.wnext,
-        &mut state.whave,
-        window,
-        produced,
-    )
+    let initial = if state.wsize == 0 {
+        Some(initial_window_metadata(state.wbits)?)
+    } else {
+        None
+    };
+    let expected_size = initial.map(|metadata| metadata.wsize).unwrap_or(state.wsize);
+    if window.len() != expected_size as usize {
+        return None;
+    }
+    let (next, have) = initial
+        .map(|metadata| (metadata.wnext, metadata.whave))
+        .unwrap_or((state.wnext, state.whave));
+    let mut storage = WindowStorage::new(window, next, have)?;
+    storage.apply(produced)?;
+    let metadata = storage.metadata();
+    state.wsize = metadata.wsize;
+    state.wnext = metadata.wnext;
+    state.whave = metadata.whave;
+    Some(())
 }
 
 fn updatewindow(
