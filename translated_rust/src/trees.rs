@@ -4452,43 +4452,97 @@ pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_s
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 
-unsafe extern "C" fn pqdownheap(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut k: ::core::ffi::c_int,
-) {
-    let mut v: ::core::ffi::c_int = (*s).heap[k as usize];
-    let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
-    while j <= (*s).heap_len {
-        if j < (*s).heap_len
-            && (((*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                .fc
-                .freq as ::core::ffi::c_int)
-                < (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                || (*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                    .fc
-                    .freq as ::core::ffi::c_int
-                    == (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                    && (*s).depth[(*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
-                        as ::core::ffi::c_int
-                        <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int)
-        {
-            j += 1;
+fn tree_node_leq(
+    tree: &[crate::src::deflate::ct_data],
+    depth: &[crate::zutil_h::uch],
+    left: ::core::ffi::c_int,
+    right: ::core::ffi::c_int,
+) -> Option<bool> {
+    let left = usize::try_from(left).ok()?;
+    let right = usize::try_from(right).ok()?;
+    let left_freq = tree.get(left)?.fc.freq;
+    let right_freq = tree.get(right)?.fc.freq;
+    Some(
+        left_freq < right_freq
+            || left_freq == right_freq && depth.get(left)? <= depth.get(right)?,
+    )
+}
+
+fn pqdownheap_state(
+    heap: &mut [::core::ffi::c_int],
+    heap_len: ::core::ffi::c_int,
+    depth: &[crate::zutil_h::uch],
+    tree: &[crate::src::deflate::ct_data],
+    k: ::core::ffi::c_int,
+) -> bool {
+    let Ok(heap_len) = usize::try_from(heap_len) else {
+        return false;
+    };
+    let Ok(mut k) = usize::try_from(k) else {
+        return false;
+    };
+    if heap_len >= heap.len() || k == 0 || k > heap_len {
+        return false;
+    }
+    let Some(v) = heap.get(k).copied() else {
+        return false;
+    };
+    let Some(mut j) = k.checked_mul(2) else {
+        return false;
+    };
+    while j <= heap_len {
+        if j < heap_len {
+            let Some(right) = heap.get(j + 1).copied() else {
+                return false;
+            };
+            let Some(left) = heap.get(j).copied() else {
+                return false;
+            };
+            let Some(right_leq_left) = tree_node_leq(tree, depth, right, left) else {
+                return false;
+            };
+            if right_leq_left {
+                j += 1;
+            }
         }
-        if ((*tree.offset(v as isize)).fc.freq as ::core::ffi::c_int)
-            < (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-            || (*tree.offset(v as isize)).fc.freq as ::core::ffi::c_int
-                == (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                && (*s).depth[v as usize] as ::core::ffi::c_int
-                    <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int
-        {
+        let Some(child) = heap.get(j).copied() else {
+            return false;
+        };
+        let Some(v_leq_child) = tree_node_leq(tree, depth, v, child) else {
+            return false;
+        };
+        if v_leq_child {
             break;
         }
-        (*s).heap[k as usize] = (*s).heap[j as usize];
+        let Some(slot) = heap.get_mut(k) else {
+            return false;
+        };
+        *slot = child;
         k = j;
-        j <<= 1 as ::core::ffi::c_int;
+        let Some(next) = j.checked_mul(2) else {
+            return false;
+        };
+        j = next;
     }
-    (*s).heap[k as usize] = v;
+    let Some(slot) = heap.get_mut(k) else {
+        return false;
+    };
+    *slot = v;
+    true
+}
+
+unsafe extern "C" fn pqdownheap(
+    s: *mut crate::src::deflate::deflate_state,
+    tree: *const crate::src::deflate::ct_data,
+    tree_len: usize,
+    k: ::core::ffi::c_int,
+) {
+    if s.is_null() || tree.is_null() {
+        return;
+    }
+    let tree = ::core::slice::from_raw_parts(tree, tree_len);
+    let heap_len = (*s).heap_len;
+    let _ = pqdownheap_state(&mut (*s).heap, heap_len, &(*s).depth, tree, k);
 }
 
 unsafe extern "C" fn gen_bitlen(
@@ -4654,7 +4708,7 @@ unsafe extern "C" fn build_tree(
     (*desc).max_code = max_code;
     n = (*s).heap_len / 2 as ::core::ffi::c_int;
     while n >= 1 as ::core::ffi::c_int {
-        pqdownheap(s, tree, n);
+        pqdownheap(s, tree, (elems as usize) * 2 + 1, n);
         n -= 1;
     }
     node = elems;
@@ -4663,7 +4717,7 @@ unsafe extern "C" fn build_tree(
         let c2rust_fresh55 = (*s).heap_len;
         (*s).heap_len = (*s).heap_len - 1;
         (*s).heap[SMALLEST as usize] = (*s).heap[c2rust_fresh55 as usize];
-        pqdownheap(s, tree, SMALLEST);
+        pqdownheap(s, tree, (elems as usize) * 2 + 1, SMALLEST);
         m = (*s).heap[SMALLEST as usize];
         (*s).heap_max -= 1;
         (*s).heap[(*s).heap_max as usize] = n;
@@ -4685,7 +4739,7 @@ unsafe extern "C" fn build_tree(
         let c2rust_fresh56 = node;
         node = node + 1;
         (*s).heap[SMALLEST as usize] = c2rust_fresh56;
-        pqdownheap(s, tree, SMALLEST);
+        pqdownheap(s, tree, (elems as usize) * 2 + 1, SMALLEST);
         if (*s).heap_len < 2 as ::core::ffi::c_int {
             break;
         }
