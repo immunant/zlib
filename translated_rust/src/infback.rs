@@ -445,6 +445,15 @@ struct InflateBackDecodeResult {
     message: Option<&'static [u8]>,
 }
 
+// A completed callback-back request carries every decoder-visible result as
+// one pointer-free value.  The ABI adapter must consume this only after the
+// callback and caller-window borrows have ended, so status/diagnostics cannot
+// be published ahead of the state that produced them.
+struct InflateBackCompletion {
+    result: InflateBackDecodeResult,
+    state: InflateBackDecoderScalars,
+}
+
 // One callback-back operation owns all decoder-visible borrows.  In
 // particular, this keeps the implementation entry point free of the ABI
 // stream, callback descriptors, and caller-window address: the adapter only
@@ -461,9 +470,12 @@ where
     InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
     OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
 {
-    fn decode(&mut self) -> (InflateBackDecodeResult, InflateBackDecoderScalars) {
+    fn decode(&mut self) -> InflateBackCompletion {
         let result = inflate_back_decode(&mut self.state, &mut self.input, &mut self.output);
-        (result, self.state.scalars())
+        InflateBackCompletion {
+            result,
+            state: self.state.scalars(),
+        }
     }
 }
 
@@ -1308,32 +1320,32 @@ pub unsafe extern "C" fn inflateBack(
         input,
         output,
     };
-    let (result, final_state) = invocation.decode();
+    let completion = invocation.decode();
     // Release callback/window borrows before writing either the backing state
     // or the ABI stream.  The completion above carries only scalar state.
     drop(invocation);
-    raw_state.decoder.normal.mode = final_state.mode;
-    raw_state.decoder.normal.last = final_state.last;
-    raw_state.decoder.normal.whave = final_state.whave;
-    raw_state.decoder.normal.wnext = final_state.wnext;
-    raw_state.decoder.normal.length = final_state.length;
-    raw_state.decoder.normal.offset = final_state.offset;
-    raw_state.decoder.normal.extra = final_state.extra;
-    raw_state.decoder.normal.lencode = final_state.lencode;
-    raw_state.decoder.normal.distcode = final_state.distcode;
-    raw_state.decoder.normal.lenbits = final_state.lenbits;
-    raw_state.decoder.normal.distbits = final_state.distbits;
-    raw_state.decoder.normal.ncode = final_state.ncode;
-    raw_state.decoder.normal.nlen = final_state.nlen;
-    raw_state.decoder.normal.ndist = final_state.ndist;
-    raw_state.decoder.normal.have = final_state.have;
-    raw_state.decoder.normal.next = final_state.next;
-    if let Some(message) = result.message {
+    raw_state.decoder.normal.mode = completion.state.mode;
+    raw_state.decoder.normal.last = completion.state.last;
+    raw_state.decoder.normal.whave = completion.state.whave;
+    raw_state.decoder.normal.wnext = completion.state.wnext;
+    raw_state.decoder.normal.length = completion.state.length;
+    raw_state.decoder.normal.offset = completion.state.offset;
+    raw_state.decoder.normal.extra = completion.state.extra;
+    raw_state.decoder.normal.lencode = completion.state.lencode;
+    raw_state.decoder.normal.distcode = completion.state.distcode;
+    raw_state.decoder.normal.lenbits = completion.state.lenbits;
+    raw_state.decoder.normal.distbits = completion.state.distbits;
+    raw_state.decoder.normal.ncode = completion.state.ncode;
+    raw_state.decoder.normal.nlen = completion.state.nlen;
+    raw_state.decoder.normal.ndist = completion.state.ndist;
+    raw_state.decoder.normal.have = completion.state.have;
+    raw_state.decoder.normal.next = completion.state.next;
+    if let Some(message) = completion.result.message {
         strm.msg = message.as_ptr().cast_mut().cast();
     }
     strm.next_in = next as *mut crate::stdlib::Bytef;
     strm.avail_in = have as crate::stdlib::uInt;
-    result.status
+    completion.result.status
 }
 #[export_name = "inflateBack"]
 
