@@ -1055,6 +1055,15 @@ struct GzOpenState {
     reset: GzResetState,
 }
 
+// Opening by path and adopting an already-open descriptor share the same
+// pointer-free owner construction.  Keep the distinction explicit so raw-FD
+// adoption remains at the ABI boundary, while flag adjustment and all gzip
+// state initialization are reusable by the eventual owned-handle facade.
+enum GzOpenSource {
+    Path,
+    Adopted(rustix::fd::OwnedFd),
+}
+
 impl GzOpenConfig {
     // Callers normalize the parsed mode before path allocation, matching
     // gz_open's existing failure ordering for invalid mode combinations.
@@ -1155,6 +1164,26 @@ impl GzOpenConfig {
     }
 }
 
+fn gz_open_state(config: GzOpenConfig, path: &[u8], source: GzOpenSource) -> Option<GzOpenState> {
+    match source {
+        GzOpenSource::Path => config.open(path),
+        GzOpenSource::Adopted(fd) => {
+            let oflag = config.open_flags();
+            if oflag & crate::stdlib::O_NONBLOCK != 0 {
+                if let Ok(flags) = rustix::fs::fcntl_getfl(&fd) {
+                    let _ = rustix::fs::fcntl_setfl(&fd, flags | rustix::fs::OFlags::NONBLOCK);
+                }
+            }
+            if oflag & crate::stdlib::O_CLOEXEC != 0 {
+                if let Ok(flags) = rustix::io::fcntl_getfd(&fd) {
+                    let _ = rustix::io::fcntl_setfd(&fd, flags | rustix::io::FdFlags::CLOEXEC);
+                }
+            }
+            Some(config.into_open_state(fd))
+        }
+    }
+}
+
 impl GzOpenMode {
     // Normalize the state selected by the mode string before allocating a
     // path or adopting a descriptor.  The result contains no ABI cursor or
@@ -1230,25 +1259,17 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
     let Some(config) = GzOpenConfig::new(path, mode) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    let initial = if fd == -1 as ::core::ffi::c_int {
-        let Some(initial) = config.open(path) else {
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        };
-        initial
+    let source = if fd == -1 as ::core::ffi::c_int {
+        GzOpenSource::Path
     } else {
-        let oflag = config.open_flags();
+        // This is the only raw-FD adoption.  Keep it after mode/path
+        // validation so invalid `gzdopen()` modes do not consume the caller's
+        // descriptor, matching the original failure ordering.
         let fd = <rustix::fd::OwnedFd as rustix::fd::FromRawFd>::from_raw_fd(fd);
-        if oflag & crate::stdlib::O_NONBLOCK != 0 {
-            if let Ok(flags) = rustix::fs::fcntl_getfl(&fd) {
-                let _ = rustix::fs::fcntl_setfl(&fd, flags | rustix::fs::OFlags::NONBLOCK);
-            }
-        }
-        if oflag & crate::stdlib::O_CLOEXEC != 0 {
-            if let Ok(flags) = rustix::io::fcntl_getfd(&fd) {
-                let _ = rustix::io::fcntl_setfd(&fd, flags | rustix::io::FdFlags::CLOEXEC);
-            }
-        }
-        config.into_open_state(fd)
+        GzOpenSource::Adopted(fd)
+    };
+    let Some(initial) = gz_open_state(config, path, source) else {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
     state_owner.push(crate::gzguts_h::gz_state {
         x: crate::zlib_h::gzFile_s {
