@@ -309,8 +309,12 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 
 fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let mut had: ::core::ffi::c_uint = 0;
-    had = state.strm.avail_out as ::core::ffi::c_uint;
+    // Keep the caller's output start instead of deriving it later by walking
+    // backwards from inflate's cursor.  `gz_decomp` is used for both the
+    // state-owned buffer and a caller buffer, so this is the only pointer we
+    // need to retain here.
+    let output_start = state.strm.next_out;
+    let had = state.strm.avail_out as ::core::ffi::c_uint;
     loop {
         if state.strm.avail_in == 0 as crate::stdlib::uInt
             && gz_avail(state) == -1 as ::core::ffi::c_int
@@ -366,10 +370,16 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
         }
     }
-    state.x.have =
-        (had as crate::stdlib::uInt).wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
-    state.x.next =
-        state.strm.next_out.wrapping_sub(state.x.have as usize) as *mut ::core::ffi::c_uchar;
+    let Some(have) = had.checked_sub(state.strm.avail_out) else {
+        crate::src::gzlib::gz_static_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"internal inflate stream corrupt\0",
+        );
+        return -1 as ::core::ffi::c_int;
+    };
+    state.x.have = have;
+    state.x.next = output_start as *mut ::core::ffi::c_uchar;
     if ret == crate::zlib_h::Z_STREAM_END {
         state.junk = 0 as ::core::ffi::c_int;
         state.how = crate::gzguts_h::LOOK;
