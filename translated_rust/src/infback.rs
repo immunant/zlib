@@ -1471,10 +1471,19 @@ pub unsafe extern "C" fn inflateBack_ffi(
     inflateBack(&mut *strm, in_0, in_desc, out, out_desc)
 }
 // The FFI wrapper has already established that `strm` is a valid mutable
-// stream. Keep the teardown state transition in a reference-based helper;
+// stream. Keep validation and the post-release transition reference-bound;
 // only the configured C deallocator remains an unsafe boundary here.
+fn inflate_back_end_can_release(strm: &crate::zlib_h::z_stream) -> bool {
+    !strm.state.is_null() && strm.zfree.is_some()
+}
+
+fn inflate_back_end_complete(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    crate::zlib_h::Z_OK
+}
+
 pub fn inflateBackEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    if strm.state.is_null() || strm.zfree.is_none() {
+    if !inflate_back_end_can_release(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // A user deallocator may re-enter unrelated code, so capture all values
@@ -1490,8 +1499,7 @@ pub fn inflateBackEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int 
     unsafe {
         Some(zfree).expect("non-null function pointer")(opaque, state);
     }
-    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    crate::zlib_h::Z_OK
+    inflate_back_end_complete(strm)
 }
 #[export_name = "inflateBackEnd"]
 
