@@ -2117,11 +2117,10 @@ pub unsafe extern "C" fn deflateBound_ffi(
 ) -> crate::stdlib::uLong {
     deflateBound(strm.as_ref(), sourceLen)
 }
-unsafe extern "C" fn putShortMSB(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut b: crate::stdlib::uInt,
+fn put_short_msb(
+    s: &mut crate::src::deflate::deflate_state,
+    b: crate::stdlib::uInt,
 ) {
-    let s = unsafe { &mut *s };
     s.put_pending_byte((b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte);
     s.put_pending_byte((b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte);
 }
@@ -2275,13 +2274,13 @@ pub unsafe fn deflate(
             (31 as crate::stdlib::uInt)
                 .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
         );
-        putShortMSB(s, header);
+        put_short_msb(s, header);
         if (*s).strstart != 0 as crate::stdlib::uInt {
-            putShortMSB(
+            put_short_msb(
                 s,
                 (strm.adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
             );
-            putShortMSB(
+            put_short_msb(
                 s,
                 (strm.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
             );
@@ -2611,11 +2610,11 @@ pub unsafe fn deflate(
         (*s).put_pending_byte((strm.total_in >> 16 & 0xff) as crate::stdlib::Byte);
         (*s).put_pending_byte((strm.total_in >> 24 & 0xff) as crate::stdlib::Byte);
     } else {
-        putShortMSB(
+        put_short_msb(
             s,
             (strm.adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
         );
-        putShortMSB(
+        put_short_msb(
             s,
             (strm.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
         );
