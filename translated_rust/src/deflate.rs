@@ -4124,108 +4124,69 @@ fn deflate_distance_tree_code(distance_minus_one: crate::zutil_h::ush) -> crate:
     crate::src::trees::_dist_code[table_index]
 }
 
-unsafe fn longest_match(
-    mut s: *mut crate::src::deflate::deflate_state,
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct LongestMatchResult {
+    match_start: crate::src::deflate::IPos,
+    length: crate::stdlib::uInt,
+}
+
+/// Search the hash chain for the longest prefix shared with `strstart`.
+///
+/// The caller establishes the callback-backed window and hash-chain views.
+/// Once those views exist, this is ordinary checked slice indexing: a corrupt
+/// cursor simply aborts the search instead of deriving an out-of-bounds raw
+/// pointer.
+fn longest_match_core(
+    window: &[crate::stdlib::Bytef],
+    prev: &[crate::src::deflate::Posf],
     mut cur_match: crate::src::deflate::IPos,
-) -> crate::stdlib::uInt {
-    let (mut chain_length, mut nice_match) = longest_match_search_parameters(
-        (*s).max_chain_length,
-        (*s).prev_length,
-        (*s).good_match,
-        (*s).nice_match,
-        (*s).lookahead,
+    max_chain_length: crate::stdlib::uInt,
+    prev_length: crate::stdlib::uInt,
+    good_match: crate::stdlib::uInt,
+    nice_match: ::core::ffi::c_int,
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+) -> Option<LongestMatchResult> {
+    let (mut chain_length, nice_match) = longest_match_search_parameters(
+        max_chain_length,
+        prev_length,
+        good_match,
+        nice_match,
+        lookahead,
     );
-    let mut scan: *mut crate::stdlib::Bytef = (*s).window.offset((*s).strstart as isize);
-    let mut match_0: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    let mut len: ::core::ffi::c_int = 0;
-    let mut best_len: ::core::ffi::c_int = (*s).prev_length as ::core::ffi::c_int;
-    let mut limit: crate::src::deflate::IPos = longest_match_limit((*s).strstart, (*s).w_size);
-    let mut prev: *mut crate::src::deflate::Posf = (*s).prev;
-    let mut wmask: crate::stdlib::uInt = (*s).w_mask;
-    let mut strend: *mut crate::stdlib::Bytef = (*s)
-        .window
-        .offset((*s).strstart as isize)
-        .offset(crate::zutil_h::MAX_MATCH as isize);
-    let mut scan_end1: crate::stdlib::Byte =
-        *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize) as crate::stdlib::Byte;
-    let mut scan_end: crate::stdlib::Byte = *scan.offset(best_len as isize) as crate::stdlib::Byte;
+    let max_match = usize::try_from(crate::zutil_h::MAX_MATCH).ok()?;
+    let scan_start = usize::try_from(strstart).ok()?;
+    let scan_end = scan_start.checked_add(max_match)?;
+    let scan = window.get(scan_start..scan_end)?;
+    let mut best_len = usize::try_from(prev_length).ok()?;
+    if best_len > max_match {
+        return None;
+    }
+    let limit = longest_match_limit(strstart, w_size);
+    let mut best_match_start = 0;
+
     loop {
-        match_0 = (*s).window.offset(cur_match as isize);
-        if !(*match_0.offset(best_len as isize) as ::core::ffi::c_int
-            != scan_end as ::core::ffi::c_int
-            || *match_0.offset((best_len - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_int
-                != scan_end1 as ::core::ffi::c_int
-            || *match_0 as ::core::ffi::c_int != *scan as ::core::ffi::c_int
-            || {
-                match_0 = match_0.offset(1);
-                *match_0 as ::core::ffi::c_int
-                    != *scan.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            })
-        {
-            scan = scan.offset(2 as ::core::ffi::c_int as isize);
-            match_0 = match_0.offset(1);
-            loop {
-                scan = scan.offset(1);
-                match_0 = match_0.offset(1);
-                if !(*scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && scan < strend)
-                {
-                    break;
-                }
-            }
-            len = crate::zutil_h::MAX_MATCH
-                - strend.offset_from(scan) as ::core::ffi::c_long as ::core::ffi::c_int;
-            scan = strend.offset(-(crate::zutil_h::MAX_MATCH as isize));
-            if let Some((match_start, new_best_length, reached_nice_match)) =
-                longest_match_candidate_update(len, best_len, cur_match, nice_match)
-            {
-                (*s).match_start = match_start as crate::stdlib::uInt;
-                best_len = new_best_length;
-                if reached_nice_match {
-                    break;
-                }
-                scan_end1 = *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize)
-                    as crate::stdlib::Byte;
-                scan_end = *scan.offset(best_len as isize) as crate::stdlib::Byte;
+        let match_start = usize::try_from(cur_match).ok()?;
+        let match_end = match_start.checked_add(max_match)?;
+        let candidate = window.get(match_start..match_end)?;
+        let candidate_len = scan
+            .iter()
+            .zip(candidate)
+            .take(max_match)
+            .take_while(|(left, right)| left == right)
+            .count();
+
+        if candidate_len > best_len {
+            best_match_start = cur_match;
+            best_len = candidate_len;
+            if candidate_len >= nice_match.max(0) as usize {
+                break;
             }
         }
-        cur_match = *prev.offset((cur_match as crate::stdlib::uInt & wmask) as isize)
-            as crate::src::deflate::IPos;
+
+        cur_match = *prev.get((cur_match & w_mask) as usize)? as crate::src::deflate::IPos;
         let Some(next_chain_length) =
             longest_match_next_chain_length(cur_match, limit, chain_length)
         else {
@@ -4233,7 +4194,46 @@ unsafe fn longest_match(
         };
         chain_length = next_chain_length;
     }
-    longest_match_clamp_length(best_len, (*s).lookahead)
+
+    Some(LongestMatchResult {
+        match_start: best_match_start,
+        length: longest_match_clamp_length(best_len as ::core::ffi::c_int, lookahead),
+    })
+}
+
+unsafe fn longest_match(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut cur_match: crate::src::deflate::IPos,
+) -> crate::stdlib::uInt {
+    let state = &mut *s;
+    if state.window.is_null() || state.prev.is_null() {
+        return longest_match_clamp_length(
+            state.prev_length as ::core::ffi::c_int,
+            state.lookahead,
+        );
+    }
+    let window = core::slice::from_raw_parts(state.window, state.window_size as usize);
+    let prev = core::slice::from_raw_parts(state.prev, state.w_size as usize);
+    let Some(result) = longest_match_core(
+        window,
+        prev,
+        cur_match,
+        state.max_chain_length,
+        state.prev_length,
+        state.good_match,
+        state.nice_match,
+        state.lookahead,
+        state.strstart,
+        state.w_size,
+        state.w_mask,
+    ) else {
+        return longest_match_clamp_length(
+            state.prev_length as ::core::ffi::c_int,
+            state.lookahead,
+        );
+    };
+    state.match_start = result.match_start as crate::stdlib::uInt;
+    result.length
 }
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
@@ -5339,8 +5339,9 @@ mod tests {
         gzip_header_crc_bytes, gzip_header_crc_pending_range, gzip_custom_header_bytes,
         gzip_trailer_bytes,
         lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
-        longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
-        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
+        longest_match_candidate_update, longest_match_clamp_length, longest_match_core,
+        longest_match_limit, longest_match_next_chain_length, longest_match_search_parameters,
+        normalize_deflate_params,
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors,
         pending_storage_copy_plan, pending_storage_layout,
         pending_storage_layout_from_metadata, put_short_msb_core, read_buf_checksum, read_buf_core,
@@ -5354,7 +5355,8 @@ mod tests {
         DeflateBoundGzipHeader, DeflateBoundState, DeflateFastMatchProgress,
         DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
         DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, PendingDrainState,
-        PendingStorageReadView, PendingStorageView, ReadBufChecksum, ReadBufResult,
+        LongestMatchResult, PendingStorageReadView, PendingStorageView, ReadBufChecksum,
+        ReadBufResult,
     };
 
     #[test]
@@ -6905,6 +6907,41 @@ mod tests {
         assert_eq!(longest_match_clamp_length(8, 8), 8);
         assert_eq!(longest_match_clamp_length(9, 8), 8);
         assert_eq!(longest_match_clamp_length(-1, 8), 8);
+    }
+
+    #[test]
+    fn longest_match_core_follows_the_hash_chain_with_checked_slices() {
+        let mut window = vec![0_u8; 700];
+        let scan_start = 400usize;
+        for offset in 0..crate::zutil_h::MAX_MATCH as usize {
+            window[scan_start + offset] = (offset % 251) as u8;
+        }
+        let (candidates, scan_and_tail) = window.split_at_mut(scan_start);
+        candidates[200..206].copy_from_slice(&scan_and_tail[..6]);
+        candidates[206] = 255;
+        candidates[180..192].copy_from_slice(&scan_and_tail[..12]);
+        window[192] = 254;
+        let mut prev = vec![0 as crate::src::deflate::Posf; 256];
+        prev[200] = 180;
+
+        assert_eq!(
+            longest_match_core(
+                &window, &prev, 200, 8, 3, 4, 258, 258, scan_start as crate::stdlib::uInt,
+                256, 255,
+            ),
+            Some(LongestMatchResult {
+                match_start: 180,
+                length: 12,
+            })
+        );
+    }
+
+    #[test]
+    fn longest_match_core_rejects_out_of_range_storage() {
+        assert_eq!(
+            longest_match_core(&[0; 16], &[0; 1], 0, 1, 3, 4, 8, 8, 0, 1, 0),
+            None
+        );
     }
 
     #[test]
