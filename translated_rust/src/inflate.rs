@@ -3357,24 +3357,6 @@ fn inflate_copy_impl(
     Ok(source.state.clone())
 }
 
-/// Install a prepared decoder-state clone using the shared state-storage
-/// facade.  Cloning and validation remain in `inflate_copy_impl`; allocator
-/// callbacks and writes are confined to `inflate_allocate_state`.
-unsafe fn inflate_copy_install(
-    dest: &mut crate::zlib_h::z_stream_s,
-    source: &crate::zlib_h::z_stream_s,
-    source_state: &crate::src::inflate::inflate_state,
-    copied_state: crate::src::inflate::inflate_state,
-) -> ::core::ffi::c_int {
-    inflate_allocate_state(
-        dest,
-        copied_state,
-        InflateStateInstallation::Copy {
-            source_stream: source,
-            source_state,
-        },
-    )
-}
 #[export_name = "inflateCopy"]
 
 pub unsafe extern "C" fn inflateCopy_ffi(
@@ -3397,7 +3379,14 @@ pub unsafe extern "C" fn inflateCopy_ffi(
         Ok(copy) => copy,
         Err(error) => return error,
     };
-    inflate_copy_install(&mut *dest, &source, state, copied_state)
+    inflate_allocate_state(
+        &mut *dest,
+        copied_state,
+        InflateStateInstallation::Copy {
+            source_stream: &source,
+            source_state: state,
+        },
+    )
 }
 fn inflate_undermine_impl(
     strm: &mut crate::zlib_h::z_stream_s,
