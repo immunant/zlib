@@ -19,6 +19,31 @@ pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+/// Clear the read-side resources owned by opaque gzip state after its codec
+/// has been stopped at the ABI boundary.  The descriptor remains open here:
+/// callers must close it before releasing the ABI allocation.
+pub(crate) fn gzclose_read_release_state(
+    state: &mut crate::gzguts_h::gz_state,
+) -> (::core::ffi::c_int, ::core::ffi::c_int) {
+    state.buffers = None;
+    let err = state.err;
+    state.msg = None;
+    state.err = crate::zlib_h::Z_OK;
+    (state.fd, err)
+}
+
+/// Clear the write-side resources owned by opaque gzip state after its codec
+/// has been flushed and stopped at the ABI boundary.  This deliberately does
+/// not close the descriptor or destroy the ABI allocation.
+pub(crate) fn gzclose_write_release_state(
+    state: &mut crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_int {
+    state.buffers = None;
+    state.msg = None;
+    state.err = crate::zlib_h::Z_OK;
+    state.fd
+}
+
 // These macros are deliberately invoked only by exported close entry points.
 // They keep destruction of the malloc-backed ABI state, descriptor close,
 // and the legacy compressor/inflater calls at that boundary.
@@ -32,16 +57,14 @@ macro_rules! gzclose_read_at_boundary {
             if (*state).mode != crate::gzguts_h::GZ_READ {
                 crate::zlib_h::Z_STREAM_ERROR
             } else {
-                if (*state).size != 0 {
+                let state_ref = &mut *state;
+                if state_ref.size != 0 {
                     crate::src::inflate::inflateEnd(
-                        &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                        &raw mut state_ref.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
                     );
                 }
-                (*state).buffers = None;
-                let state_err = (*state).err;
-                (*state).msg = None;
-                (*state).err = crate::zlib_h::Z_OK;
-                let close_result = crate::stdlib::close((*state).fd);
+                let (fd, state_err) = crate::src::gzclose::gzclose_read_release_state(state_ref);
+                let close_result = crate::stdlib::close(fd);
                 ::core::ptr::drop_in_place(state);
                 crate::stdlib::free(state as *mut ::core::ffi::c_void);
                 crate::src::gzread::gzclose_read_result(state_err, close_result)
@@ -61,28 +84,27 @@ macro_rules! gzclose_write_at_boundary {
             if (*state).mode != crate::gzguts_h::GZ_WRITE {
                 crate::zlib_h::Z_STREAM_ERROR
             } else {
+                let state_ref = &mut *state;
                 let mut ret = crate::zlib_h::Z_OK;
-                if (*state).skip != 0
-                    && crate::src::gzwrite::gz_zero(state) == -1 as ::core::ffi::c_int
+                if state_ref.skip != 0
+                    && crate::src::gzwrite::gz_zero(state_ref) == -1 as ::core::ffi::c_int
                 {
-                    ret = (*state).err;
+                    ret = state_ref.err;
                 }
-                if crate::src::gzwrite::gz_comp(state, crate::zlib_h::Z_FINISH)
+                if crate::src::gzwrite::gz_comp(state_ref, crate::zlib_h::Z_FINISH)
                     == -1 as ::core::ffi::c_int
                 {
-                    ret = (*state).err;
+                    ret = state_ref.err;
                 }
-                if (*state).size != 0 {
-                    if (*state).direct == 0 {
+                if state_ref.size != 0 {
+                    if state_ref.direct == 0 {
                         crate::src::deflate::deflateEnd(
-                            &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                            &raw mut state_ref.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
                         );
                     }
                 }
-                (*state).buffers = None;
-                (*state).msg = None;
-                (*state).err = crate::zlib_h::Z_OK;
-                let close_result = crate::stdlib::close((*state).fd);
+                let fd = crate::src::gzclose::gzclose_write_release_state(state_ref);
+                let close_result = crate::stdlib::close(fd);
                 ::core::ptr::drop_in_place(state);
                 crate::stdlib::free(state as *mut ::core::ffi::c_void);
                 crate::src::gzwrite::gzclose_write_result(close_result, ret)
