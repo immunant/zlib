@@ -2955,23 +2955,14 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     let dict_length = dictLength.as_mut();
     inflate_get_dictionary(request, dictionary, dict_length)
 }
-pub unsafe extern "C" fn inflateSetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
+pub unsafe fn inflateSetDictionary(
+    strm: &mut crate::zlib_h::z_stream_s,
+    dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
     let mut dictid: ::core::ffi::c_ulong = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let dictionary = if dictLength == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
     if state.normal.wrap != 0 as ::core::ffi::c_int
         && state.normal.mode as ::core::ffi::c_uint
@@ -3012,7 +3003,18 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    inflateSetDictionary(strm, dictionary, dictLength)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if dictionary.is_null() && dictLength != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dictionary = if dictLength == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
+    };
+    inflateSetDictionary(strm, dictionary)
 }
 // A registered gzip header must retain the original pointer's provenance for
 // later decoder calls.  The export boundary forms that handle after checking
