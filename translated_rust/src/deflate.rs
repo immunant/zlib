@@ -1942,7 +1942,12 @@ pub unsafe extern "C" fn deflate(
         if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                crate::src::trees::_tr_align(s as *mut crate::src::deflate::internal_state);
+                let state = &mut *s;
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    state.pending_buf,
+                    state.pending_buf_size as usize,
+                );
+                crate::src::trees::_tr_align(state, pending_buf);
             } else if flush != crate::zlib_h::Z_BLOCK {
                 crate::src::trees::_tr_stored_block(
                     s as *mut crate::src::deflate::internal_state,
@@ -1951,22 +1956,23 @@ pub unsafe extern "C" fn deflate(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *(*s)
+                    let state = &mut *s;
+                    *state
                         .head
-                        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
+                        .offset(state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
                         NIL as crate::src::deflate::Posf;
                     crate::stdlib::memset(
-                        (*s).head as *mut ::core::ffi::c_void,
+                        state.head as *mut ::core::ffi::c_void,
                         0 as ::core::ffi::c_int,
-                        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
+                        (state.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
                             as crate::__stddef_size_t_h::size_t)
                             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
                     );
-                    (*s).slid = 0 as ::core::ffi::c_int;
-                    if (*s).lookahead == 0 as crate::stdlib::uInt {
-                        (*s).strstart = 0 as crate::stdlib::uInt;
-                        (*s).block_start = 0 as ::core::ffi::c_long;
-                        (*s).insert = 0 as crate::stdlib::uInt;
+                    state.slid = 0 as ::core::ffi::c_int;
+                    if state.lookahead == 0 as crate::stdlib::uInt {
+                        state.strstart = 0 as crate::stdlib::uInt;
+                        state.block_start = 0 as ::core::ffi::c_long;
+                        state.insert = 0 as crate::stdlib::uInt;
                     }
                 }
             }
