@@ -1376,11 +1376,8 @@ fn gz_open(
     let oflag = gz_open_flags(state_ref, &options);
     match gz_open_fd_plan(fd, oflag) {
         GzOpenFdPlan::Open => {
-            // SAFETY: `path` is the valid, NUL-terminated C string bound by
-            // the FFI entry point for this descriptor-open call.
-            state_ref.fd = unsafe {
-                crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int)
-            };
+            state_ref.fd =
+                crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
         }
         GzOpenFdPlan::Use {
             nonblocking,

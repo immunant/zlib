@@ -260,7 +260,11 @@ pub mod stdlib {
             ...
         ) -> ::core::ffi::c_int;
 
-        pub fn open(
+        // `open()` passes the pathname to the kernel, which reports an
+        // invalid user address as `EFAULT`; it does not dereference or retain
+        // Rust-managed memory. The gzip implementation supplies a live C
+        // string, but the syscall itself has no Rust-side safety precondition.
+        pub safe fn open(
             __file: *const ::core::ffi::c_char,
             __oflag: ::core::ffi::c_int,
             ...
