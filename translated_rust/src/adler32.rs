@@ -14,7 +14,7 @@ pub use crate::zlib_h::Z_NULL;
 pub const BASE: ::core::ffi::c_uint = 65521 as ::core::ffi::c_uint;
 
 pub const NMAX: ::core::ffi::c_int = 5552 as ::core::ffi::c_int;
-fn adler32_bytes(
+pub(crate) fn adler32_bytes(
     mut adler: crate::stdlib::uLong,
     buf: &[crate::stdlib::Bytef],
 ) -> crate::stdlib::uLong {
