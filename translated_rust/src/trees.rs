@@ -4493,25 +4493,15 @@ fn reset_block(s: &mut crate::src::deflate::deflate_state) {
     s.sym_next = s.matches;
 }
 
-unsafe extern "C" fn init_block(s: *mut crate::src::deflate::deflate_state) {
-    reset_block(&mut *s);
-}
-
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
     tr_static_init();
-    (*s).l_desc.dyn_tree = &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     (*s).l_desc.stat_desc = Some(&static_l_desc);
-    (*s).d_desc.dyn_tree = &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     (*s).d_desc.stat_desc = Some(&static_d_desc);
-    (*s).bl_desc.dyn_tree = &raw mut (*s).bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     (*s).bl_desc.stat_desc = Some(&static_bl_desc);
     (*s).bi_buf = 0 as crate::zutil_h::ush;
     (*s).bi_valid = 0 as ::core::ffi::c_int;
     (*s).bi_used = 0 as ::core::ffi::c_int;
-    init_block(s);
+    reset_block(&mut *s);
 }
 #[export_name = "_tr_init"]
 

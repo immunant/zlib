@@ -65,7 +65,6 @@ pub type tree_desc = crate::src::deflate::tree_desc_s;
 #[repr(C)]
 
 pub struct tree_desc_s {
-    pub dyn_tree: *mut crate::src::deflate::ct_data,
     pub max_code: ::core::ffi::c_int,
     pub stat_desc: Option<&'static crate::src::deflate::static_tree_desc>,
 }
@@ -2321,12 +2320,6 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).sym_buf as *const ::core::ffi::c_void,
         (*ss).sym_next as crate::__stddef_size_t_h::size_t,
     );
-    (*ds).l_desc.dyn_tree = &raw mut (*ds).dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).d_desc.dyn_tree = &raw mut (*ds).dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).bl_desc.dyn_tree = &raw mut (*ds).bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
