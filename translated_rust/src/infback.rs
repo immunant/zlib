@@ -429,11 +429,16 @@ pub fn inflateBack(
                             ret = crate::zlib_h::Z_STREAM_ERROR;
                             break '_inf_leave;
                         };
-                        crate::stdlib::memcpy(
-                            destination.as_mut_ptr() as *mut ::core::ffi::c_void,
-                            next as *const ::core::ffi::c_void,
-                            copy as crate::__stddef_size_t_h::size_t,
-                        );
+                        // `copy` is clamped to `have` above, and the initial
+                        // cursor treats a null input pointer as no input. A
+                        // callback that reports bytes must likewise provide a
+                        // non-null span before it can be borrowed.
+                        if next.is_null() {
+                            ret = crate::zlib_h::Z_STREAM_ERROR;
+                            break '_inf_leave;
+                        }
+                        let source = ::core::slice::from_raw_parts(next, copy_len);
+                        destination.copy_from_slice(source);
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
                         left = left.wrapping_sub(copy);
