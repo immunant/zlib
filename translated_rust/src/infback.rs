@@ -79,34 +79,28 @@ fn initialize_inflate_back_state(
     state.sane = 1 as ::core::ffi::c_int;
 }
 
-/// Borrow inflateBack's caller-owned window only after checking the span that
-/// `inflateBackInit_` established.  The state has no ownership of this buffer,
-/// so malformed internal metadata must not be used as a slice capacity.
-fn inflate_back_window(
-    state: &mut crate::src::inflate::inflate_state,
+/// Validate the one caller-owned window span established by
+/// `inflateBackInit_`.  The FFI boundary constructs that span once; the
+/// decoder shares it for both history and output instead of rebuilding it from
+/// opaque state metadata.
+fn inflate_back_window<'a>(
+    state: &crate::src::inflate::inflate_state,
+    window: &'a mut [u8],
     put: usize,
     length: usize,
-) -> Option<&mut [u8]> {
+) -> Option<&'a mut [u8]> {
     let window_bits = usize::try_from(state.wbits).ok()?;
-    if !(8..=15).contains(&window_bits) || state.window.is_none() {
+    if !(8..=15).contains(&window_bits) {
         return None;
     }
     let window_len = 1usize.checked_shl(window_bits as u32)?;
-    if usize::try_from(state.wsize).ok()? != window_len {
+    if usize::try_from(state.wsize).ok()? != window_len || window.len() != window_len {
         return None;
     }
     if put.checked_add(length)? > window_len {
         return None;
     }
-
-    // `inflateBackInit__ffi` creates exactly this validated span from the
-    // caller's window, and no inflateBack path changes its allocation or size.
-    Some(unsafe {
-        ::core::slice::from_raw_parts_mut(
-            state.window.expect("checked non-null window").as_ptr(),
-            window_len,
-        )
-    })
+    Some(window)
 }
 
 /// Copy a possibly overlapping match within the caller-owned inflateBack
@@ -228,6 +222,7 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
 pub fn inflateBack(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
+    window: &mut [u8],
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
     mut out: crate::zlib_h::out_func,
@@ -288,7 +283,7 @@ pub fn inflateBack(
     }) as ::core::ffi::c_uint;
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
-    put = state.window.expect("inflateBack installs its caller window").as_ptr();
+    put = window.as_mut_ptr();
     left = state.wsize;
     '_inf_leave: loop {
         match state.mode as ::core::ffi::c_uint {
@@ -387,7 +382,7 @@ pub fn inflateBack(
                             }
                         }
                         if left == 0 as ::core::ffi::c_uint {
-                            put = state.window.expect("inflateBack installs its caller window").as_ptr();
+                            put = window.as_mut_ptr();
                             left = state.wsize;
                             state.whave = left;
                             if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
@@ -892,7 +887,7 @@ pub fn inflateBack(
             state.length = here.val as ::core::ffi::c_uint;
             if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                 if left == 0 as ::core::ffi::c_uint {
-                    put = state.window.expect("inflateBack installs its caller window").as_ptr();
+                    put = window.as_mut_ptr();
                     left = state.wsize;
                     state.whave = left;
                     if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
@@ -913,7 +908,7 @@ pub fn inflateBack(
                     ret = crate::zlib_h::Z_STREAM_ERROR;
                     break '_inf_leave;
                 };
-                let Some(window) = inflate_back_window(state, put_index, 1) else {
+                let Some(window) = inflate_back_window(state, window, put_index, 1) else {
                     ret = crate::zlib_h::Z_STREAM_ERROR;
                     break '_inf_leave;
                 };
@@ -1082,7 +1077,7 @@ pub fn inflateBack(
                     } else {
                         loop {
                             if left == 0 as ::core::ffi::c_uint {
-                                put = state.window.expect("inflateBack installs its caller window").as_ptr();
+                                put = window.as_mut_ptr();
                                 left = state.wsize;
                                 state.whave = left;
                                 if out.expect("non-null function pointer")(out_desc, put, left) != 0
@@ -1110,7 +1105,7 @@ pub fn inflateBack(
                             };
                             let copy_len = copy as usize;
                             let distance = state.offset as usize;
-                            let Some(window) = inflate_back_window(state, put_index, copy_len)
+                            let Some(window) = inflate_back_window(state, window, put_index, copy_len)
                             else {
                                 ret = crate::zlib_h::Z_STREAM_ERROR;
                                 break '_inf_leave;
@@ -1128,11 +1123,7 @@ pub fn inflateBack(
                             }
                             state.length = state.length.wrapping_sub(copy);
                             left = left.wrapping_sub(copy);
-                            put = state
-                                .window
-                                .expect("inflateBack installs its caller window")
-                                .as_ptr()
-                                .wrapping_add(put_index + copy_len);
+                            put = window.as_mut_ptr().wrapping_add(put_index + copy_len);
                             if state.length == 0 as ::core::ffi::c_uint {
                                 break;
                             }
@@ -1145,7 +1136,7 @@ pub fn inflateBack(
     if left < state.wsize {
         if out.expect("non-null function pointer")(
             out_desc,
-            state.window.expect("inflateBack installs its caller window").as_ptr(),
+            window.as_mut_ptr(),
             state.wsize.wrapping_sub(left),
         ) != 0
             && ret == crate::zlib_h::Z_STREAM_END
@@ -1173,7 +1164,23 @@ pub unsafe extern "C" fn inflateBack_ffi(
     let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateBack(strm, state, in_0, in_desc, out, out_desc)
+    let window_bits = match usize::try_from(state.wbits) {
+        Ok(bits) if (8..=15).contains(&bits) => bits,
+        _ => return crate::zlib_h::Z_STREAM_ERROR,
+    };
+    let Some(window_len) = 1usize.checked_shl(window_bits as u32) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if usize::try_from(state.wsize).ok() != Some(window_len) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(window) = state.window else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // The buffer was checked and retained by inflateBackInit_; it is the
+    // decoder's single history/output span for this call.
+    let window = ::core::slice::from_raw_parts_mut(window.as_ptr(), window_len);
+    inflateBack(strm, state, window, in_0, in_desc, out, out_desc)
 }
 fn inflate_back_end<F>(
     strm: &mut crate::zlib_h::z_stream,
