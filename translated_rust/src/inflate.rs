@@ -1553,8 +1553,9 @@ pub unsafe extern "C" fn inflate(
                                                                     crate::src::inflate::STORED;
                                                             }
                                                             1 => {
-                                                                crate::src::inftrees::inflate_fixed(state as *mut crate::src::inflate::inflate_state);
-                                                                (*state).mode =
+                                                                let state = &mut *state;
+                                                                crate::src::inftrees::inflate_fixed(state);
+                                                                state.mode =
                                                                     crate::src::inflate::LEN_;
                                                                 if flush == crate::zlib_h::Z_TREES {
                                                                     hold >>=
