@@ -403,11 +403,12 @@ fn fill_window(s: *mut crate::src::deflate::deflate_state) {
                 )
             {
                 let state = &mut *s;
-                crate::stdlib::memcpy(
-                    state.window as *mut ::core::ffi::c_void,
-                    state.window.wrapping_add(wsize as usize) as *const ::core::ffi::c_void,
-                    wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
-                );
+                {
+                    let window =
+                        ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+                    let copy_len = wsize.wrapping_sub(more) as usize;
+                    window.copy_within(wsize as usize..wsize as usize + copy_len, 0);
+                }
                 state.match_start = state.match_start.wrapping_sub(wsize);
                 state.strstart = state.strstart.wrapping_sub(wsize);
                 state.block_start -= wsize as ::core::ffi::c_long;
@@ -474,36 +475,41 @@ fn fill_window(s: *mut crate::src::deflate::deflate_state) {
                 break;
             }
         }
-        if (*s).high_water < (*s).window_size {
-            let curr: crate::zutil_h::ulg = ((*s).strstart as crate::zutil_h::ulg)
-                .wrapping_add((*s).lookahead as crate::zutil_h::ulg);
+        let state = &mut *s;
+        if state.high_water < state.window_size {
+            let curr: crate::zutil_h::ulg = (state.strstart as crate::zutil_h::ulg)
+                .wrapping_add(state.lookahead as crate::zutil_h::ulg);
             let mut init: crate::zutil_h::ulg = 0;
-            if (*s).high_water < curr {
-                init = (*s).window_size.wrapping_sub(curr);
+            if state.high_water < curr {
+                init = state.window_size.wrapping_sub(curr);
                 if init > crate::src::deflate::WIN_INIT as crate::zutil_h::ulg {
                     init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
                 }
-                crate::stdlib::memset(
-                    (*s).window.wrapping_add(curr as usize) as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-                );
-                (*s).high_water = curr.wrapping_add(init);
-            } else if (*s).high_water
+                {
+                    let window =
+                        ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+                    let start = curr as usize;
+                    let end = start + init as usize;
+                    window[start..end].fill(0);
+                }
+                state.high_water = curr.wrapping_add(init);
+            } else if state.high_water
                 < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
             {
                 init = curr
                     .wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-                    .wrapping_sub((*s).high_water);
-                if init > (*s).window_size.wrapping_sub((*s).high_water) {
-                    init = (*s).window_size.wrapping_sub((*s).high_water);
+                    .wrapping_sub(state.high_water);
+                if init > state.window_size.wrapping_sub(state.high_water) {
+                    init = state.window_size.wrapping_sub(state.high_water);
                 }
-                crate::stdlib::memset(
-                    (*s).window.wrapping_add((*s).high_water as usize) as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-                );
-                (*s).high_water = (*s).high_water.wrapping_add(init);
+                {
+                    let window =
+                        ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+                    let start = state.high_water as usize;
+                    let end = start + init as usize;
+                    window[start..end].fill(0);
+                }
+                state.high_water = state.high_water.wrapping_add(init);
             }
         }
     }
@@ -2139,16 +2145,16 @@ pub unsafe extern "C" fn deflate_ffi(
     {
         let mut bstate: block_state = need_more;
         bstate = (if (*s).level == 0 as ::core::ffi::c_int {
-            deflate_stored(s, flush) as ::core::ffi::c_uint
+            deflate_stored(&mut *s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(s, flush) as ::core::ffi::c_uint
+            deflate_huff(&mut *s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
-            deflate_rle(s, flush) as ::core::ffi::c_uint
+            deflate_rle(&mut *s, flush) as ::core::ffi::c_uint
         } else {
             (match configuration_table[(*s).level as usize].func {
-                DeflateFunc::Stored => deflate_stored(s, flush),
-                DeflateFunc::Fast => deflate_fast(s, flush),
-                DeflateFunc::Slow => deflate_slow(s, flush),
+                DeflateFunc::Stored => deflate_stored(&mut *s, flush),
+                DeflateFunc::Fast => deflate_fast(&mut *s, flush),
+                DeflateFunc::Slow => deflate_slow(&mut *s, flush),
             }) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
@@ -2678,9 +2684,10 @@ fn deflate_flush_blocked_state(final_flush: bool) -> block_state {
 }
 
 fn deflate_stored(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
+    let s = s as *mut crate::src::deflate::deflate_state;
     unsafe {
         let min_block = deflate_stored_min_block((*s).pending_buf_size, (*s).w_size);
         let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
@@ -2885,9 +2892,10 @@ fn deflate_stored(
 }
 
 fn deflate_fast(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
+    let s = s as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
@@ -3078,9 +3086,10 @@ fn deflate_fast(
 }
 
 fn deflate_slow(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
+    let s = s as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
@@ -3323,9 +3332,10 @@ fn deflate_slow(
 }
 
 fn deflate_rle(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
+    let s = s as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         let mut prev: crate::stdlib::uInt = 0;
@@ -3575,9 +3585,10 @@ fn deflate_rle(
 }
 
 fn deflate_huff(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
+    let s = s as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
