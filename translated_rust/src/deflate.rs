@@ -1372,8 +1372,59 @@ fn fill_window_lookahead_after_read(
     lookahead.wrapping_add(read)
 }
 
+/// Slide the retained window suffix to the front.
+///
+/// `fill_window()` establishes the callback-owned window view at its state
+/// boundary.  Keeping the overlapping move here avoids recreating raw
+/// pointers for an operation that is naturally expressed by a slice.
+fn fill_window_slide(
+    window: &mut [crate::stdlib::Bytef],
+    wsize: crate::stdlib::uInt,
+    more: ::core::ffi::c_uint,
+) -> bool {
+    let source_start = wsize as usize;
+    let copy_len = wsize.wrapping_sub(more) as usize;
+    let Some(source_end) = source_start.checked_add(copy_len) else {
+        return false;
+    };
+    if source_end > window.len() {
+        return false;
+    }
+    window.copy_within(source_start..source_end, 0);
+    true
+}
+
+/// Clear the uninitialized tail needed by the longest-match lookahead.
+fn fill_window_zero(
+    window: &mut [crate::stdlib::Bytef],
+    start: crate::zutil_h::ulg,
+    len: crate::zutil_h::ulg,
+) -> bool {
+    let Ok(start) = usize::try_from(start) else {
+        return false;
+    };
+    let Ok(len) = usize::try_from(len) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(len) else {
+        return false;
+    };
+    let Some(range) = window.get_mut(start..end) else {
+        return false;
+    };
+    range.fill(0);
+    true
+}
+
 unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
+    // The callback allocation has exactly `window_size` bytes.  All window
+    // movement, initialization, and byte reads below use this one bounded
+    // view; only `read_buf()` still crosses the stream input boundary.
+    let window = &mut *::core::ptr::slice_from_raw_parts_mut(
+        state.window,
+        state.window_size as usize,
+    );
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
     let mut wsize: crate::stdlib::uInt = state.w_size;
@@ -1386,11 +1437,9 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             ::core::mem::size_of::<::core::ffi::c_int>() <= 2,
         );
         if fill_window_should_slide(state.strstart, wsize) {
-            crate::stdlib::memcpy(
-                state.window as *mut ::core::ffi::c_void,
-                state.window.wrapping_add(wsize as usize) as *const ::core::ffi::c_void,
-                wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
-            );
+            if !fill_window_slide(window, wsize, more) {
+                return;
+            }
             (
                 state.match_start,
                 state.strstart,
@@ -1423,16 +1472,21 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             break;
         }
         let cursor = fill_window_cursor(state.strstart, state.lookahead);
-        n = read_buf(state.strm, state.window.wrapping_add(cursor as usize), more);
+        let Ok(cursor) = usize::try_from(cursor) else {
+            return;
+        };
+        let output_ptr = match window.get_mut(cursor..) {
+            Some(output) if output.len() >= more as usize => output.as_mut_ptr(),
+            _ => return,
+        };
+        n = read_buf(state.strm, output_ptr, more);
         state.lookahead = fill_window_lookahead_after_read(state.lookahead, n);
         if fill_window_has_insertable_match(state.lookahead, state.insert) {
             let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
-            state.ins_h = *state.window.wrapping_add(str as usize) as crate::stdlib::uInt;
+            state.ins_h = window[str as usize] as crate::stdlib::uInt;
             state.ins_h = fill_window_hash_update(
                 state.ins_h,
-                *state
-                    .window
-                    .wrapping_add(str.wrapping_add(1 as crate::stdlib::uInt) as usize)
+                window[str.wrapping_add(1 as crate::stdlib::uInt) as usize]
                     as crate::stdlib::uInt,
                 state.hash_shift,
                 state.hash_mask,
@@ -1440,11 +1494,11 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             while state.insert != 0 {
                 state.ins_h = fill_window_hash_update(
                     state.ins_h,
-                    *state.window.wrapping_add(
+                    window[
                         str.wrapping_add(3 as crate::stdlib::uInt)
                             .wrapping_sub(1 as crate::stdlib::uInt)
-                            as usize,
-                    ) as crate::stdlib::uInt,
+                            as usize
+                    ] as crate::stdlib::uInt,
                     state.hash_shift,
                     state.hash_mask,
                 );
@@ -1469,11 +1523,9 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         state.strstart,
         state.lookahead,
     ) {
-        crate::stdlib::memset(
-            state.window.wrapping_add(start as usize) as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            len as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-        );
+        if !fill_window_zero(window, start, len) {
+            return;
+        }
         state.high_water = fill_window_high_water_after_zero(start, len);
     }
 }
@@ -5139,7 +5191,8 @@ mod tests {
         fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
-        fill_window_state_after_slide, fill_window_zero_range, drain_pending, flush_pending_core,
+        fill_window_slide, fill_window_state_after_slide, fill_window_zero, fill_window_zero_range,
+        drain_pending, flush_pending_core,
         gzip_default_header_bytes, gzip_default_xfl, gzip_extra_copy_chunk, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_bytes, gzip_header_crc_pending_range, gzip_custom_header_bytes,
         gzip_trailer_bytes,
@@ -6986,6 +7039,22 @@ mod tests {
             Some((1000, 24))
         );
         assert_eq!(fill_window_zero_range(300, 1024, 0, 0), None);
+    }
+
+    #[test]
+    fn fill_window_slice_helpers_preserve_overlap_and_reject_bad_ranges() {
+        let mut window = *b"0123456789abcdef";
+        assert!(fill_window_slide(&mut window, 8, 2));
+        assert_eq!(&window[..6], b"89abcd");
+        assert_eq!(&window[6..], b"6789abcdef");
+        assert!(!fill_window_slide(&mut window, 12, 0));
+        assert_eq!(&window[..6], b"89abcd");
+
+        assert!(fill_window_zero(&mut window, 4, 3));
+        assert_eq!(&window[..8], b"89ab\0\0\07");
+        let before = window;
+        assert!(!fill_window_zero(&mut window, 15, 2));
+        assert_eq!(window, before);
     }
 
     #[test]
