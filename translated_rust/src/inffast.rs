@@ -327,6 +327,13 @@ struct InflateFastCursors {
     output_len: usize,
 }
 
+// `from_raw_parts()` requires a Rust slice length, not merely a zlib `uInt`.
+// Keep that platform limit in the safe preflight so the remaining cursor
+// adapter never tries to construct an unrepresentable foreign view.
+fn inflate_fast_view_len_is_valid(len: usize) -> bool {
+    len <= isize::MAX as usize
+}
+
 fn inflate_fast_cursor_lengths(
     strm: &crate::zlib_h::z_stream,
     start: ::core::ffi::c_uint,
@@ -336,6 +343,11 @@ fn inflate_fast_cursor_lengths(
     }
     let used = start.checked_sub(strm.avail_out)? as usize;
     let output_len = used.checked_add(strm.avail_out as usize)?;
+    if !inflate_fast_view_len_is_valid(strm.avail_in as usize)
+        || !inflate_fast_view_len_is_valid(output_len)
+    {
+        return None;
+    }
     Some(InflateFastCursors { used, output_len })
 }
 
