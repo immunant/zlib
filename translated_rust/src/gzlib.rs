@@ -146,6 +146,18 @@ fn gz_open_option_byte(mut options: GzOpenOptions, byte: u8) -> Option<GzOpenOpt
     Some(options)
 }
 
+/// Parse the complete, NUL-free mode payload before the FFI boundary touches
+/// the descriptor or opaque gzip state.  This keeps the legacy permissive
+/// handling of unknown mode bytes while making the rejection and defaulting
+/// rules independently testable from raw C-string traversal.
+fn gz_open_options(mode: &[u8]) -> Option<GzOpenOptions> {
+    let mut options = GzOpenOptions::new();
+    for &byte in mode {
+        options = gz_open_option_byte(options, byte)?;
+    }
+    gz_open_options_finalize(options)
+}
+
 /// Reject impossible mode/direct combinations and normalize the default
 /// read mode to transparent-operation probing, matching zlib's open path.
 fn gz_open_options_finalize(mut options: GzOpenOptions) -> Option<GzOpenOptions> {
@@ -196,7 +208,7 @@ unsafe extern "C" fn gz_open(
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut options = GzOpenOptions::new();
+    let mut options: GzOpenOptions;
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -209,17 +221,7 @@ unsafe extern "C" fn gz_open(
     (*state).want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
     (*state).err = crate::zlib_h::Z_OK;
     (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    while *mode != 0 {
-        options = match gz_open_option_byte(options, *mode as u8) {
-            Some(options) => options,
-            None => {
-                crate::stdlib::free(state as *mut ::core::ffi::c_void);
-                return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-            }
-        };
-        mode = mode.offset(1);
-    }
-    options = match gz_open_options_finalize(options) {
+    options = match gz_open_options(::std::ffi::CStr::from_ptr(mode).to_bytes()) {
         Some(options) => options,
         None => {
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
