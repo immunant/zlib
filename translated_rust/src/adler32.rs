@@ -177,7 +177,7 @@ pub fn adler32_combine(
 }
 #[export_name = "adler32_combine"]
 
-pub unsafe extern "C" fn adler32_combine_ffi(
+pub extern "C" fn adler32_combine_ffi(
     mut adler1: crate::stdlib::uLong,
     mut adler2: crate::stdlib::uLong,
     mut len2: crate::stdlib::off_t,
@@ -193,7 +193,7 @@ pub fn adler32_combine64(
 }
 #[export_name = "adler32_combine64"]
 
-pub unsafe extern "C" fn adler32_combine64_ffi(
+pub extern "C" fn adler32_combine64_ffi(
     mut adler1: crate::stdlib::uLong,
     mut adler2: crate::stdlib::uLong,
     mut len2: crate::stdlib::off64_t,

@@ -37,7 +37,7 @@ pub fn zlibVersion() -> &'static [::core::ffi::c_char; 15] {
 }
 #[export_name = "zlibVersion"]
 
-pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
+pub extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
     zlibVersion().as_ptr()
 }
 pub fn zlibCompileFlags() -> crate::stdlib::uLong {
@@ -113,7 +113,7 @@ pub fn zlibCompileFlags() -> crate::stdlib::uLong {
 }
 #[export_name = "zlibCompileFlags"]
 
-pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
+pub extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
     zlibCompileFlags()
 }
 fn z_error_index(err: ::core::ffi::c_int) -> usize {
@@ -140,7 +140,7 @@ pub fn zError(err: ::core::ffi::c_int) -> &'static [u8] {
 }
 #[export_name = "zError"]
 
-pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+pub extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     zError(err).as_ptr() as *const ::core::ffi::c_char
 }
 #[export_name = "zcalloc"]

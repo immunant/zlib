@@ -914,6 +914,6 @@ pub fn gz_intmax() -> ::core::ffi::c_uint {
 }
 #[export_name = "gz_intmax"]
 
-pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
+pub extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
     gz_intmax()
 }
