@@ -1200,6 +1200,25 @@ pub unsafe extern "C" fn deflateParams_ffi(
 ) -> ::core::ffi::c_int {
     deflateParams(strm, level, strategy)
 }
+fn deflate_tune_values(
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
+) -> (
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+    ::core::ffi::c_int,
+    crate::stdlib::uInt,
+) {
+    (
+        good_length as crate::stdlib::uInt,
+        max_lazy as crate::stdlib::uInt,
+        nice_length,
+        max_chain as crate::stdlib::uInt,
+    )
+}
+
 pub unsafe extern "C" fn deflateTune(
     mut strm: crate::zlib_h::z_streamp,
     mut good_length: ::core::ffi::c_int,
@@ -1207,16 +1226,16 @@ pub unsafe extern "C" fn deflateTune(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    (*s).good_match = good_length as crate::stdlib::uInt;
-    (*s).max_lazy_match = max_lazy as crate::stdlib::uInt;
-    (*s).nice_match = nice_length;
-    (*s).max_chain_length = max_chain as crate::stdlib::uInt;
+    let s = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    let (good_match, max_lazy_match, nice_match, max_chain_length) =
+        deflate_tune_values(good_length, max_lazy, nice_length, max_chain);
+    s.good_match = good_match;
+    s.max_lazy_match = max_lazy_match;
+    s.nice_match = nice_match;
+    s.max_chain_length = max_chain_length;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateTune"]
