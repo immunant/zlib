@@ -190,8 +190,7 @@ fn gz_input_range(state: &crate::gzguts_h::gz_state) -> Option<::core::ops::Rang
     (end <= state.in_0.len()).then_some(offset..end)
 }
 
-unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let state = &mut *state;
+fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
         let want = state.want as usize;
         let Some(output_len) = want.checked_mul(2) else {
@@ -224,15 +223,19 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         state.strm.avail_in = 0 as crate::stdlib::uInt;
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        if crate::src::inflate::inflateInit2_(
-            &mut state.strm as *mut crate::zlib_h::z_stream_s,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        ) != crate::zlib_h::Z_OK
+        if unsafe {
+            crate::src::inflate::inflateInit2_(
+                &mut state.strm as *mut crate::zlib_h::z_stream_s,
+                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+            )
+        } != crate::zlib_h::Z_OK
         {
-            ::core::mem::ManuallyDrop::drop(&mut state.out);
-            ::core::mem::ManuallyDrop::drop(&mut state.in_0);
+            unsafe {
+                ::core::mem::ManuallyDrop::drop(&mut state.out);
+                ::core::mem::ManuallyDrop::drop(&mut state.in_0);
+            }
             state.size = 0 as ::core::ffi::c_uint;
             crate::src::gzlib::gz_static_error(
                 state,
@@ -243,7 +246,9 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         }
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
-        let inflate_state = &mut *(state.strm.state as *mut crate::src::inflate::inflate_state);
+        let inflate_state = unsafe {
+            &mut *(state.strm.state as *mut crate::src::inflate::inflate_state)
+        };
         crate::src::inflate::inflateReset(&mut state.strm, inflate_state);
         state.how = crate::gzguts_h::GZIP;
         state.junk = (state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
@@ -251,7 +256,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         return 0 as ::core::ffi::c_int;
     }
     let fd = if state.eof == 0 && state.fd >= 0 {
-        Some(BorrowedFd::borrow_raw(state.fd))
+        Some(unsafe { BorrowedFd::borrow_raw(state.fd) })
     } else {
         None
     };
@@ -277,7 +282,9 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         && state.in_0[input.start + 2] == 8
         && state.in_0[input.start + 3] < 32
     {
-        let inflate_state = &mut *(state.strm.state as *mut crate::src::inflate::inflate_state);
+        let inflate_state = unsafe {
+            &mut *(state.strm.state as *mut crate::src::inflate::inflate_state)
+        };
         crate::src::inflate::inflateReset(&mut state.strm, inflate_state);
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
@@ -396,7 +403,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
     loop {
         match (*state).how {
             crate::gzguts_h::LOOK => {
-                if gz_look(state) == -1 as ::core::ffi::c_int {
+                if gz_look(&mut *state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
                 if (*state).how == crate::gzguts_h::LOOK {
@@ -733,9 +740,7 @@ fn gzungetc(
         return -1 as ::core::ffi::c_int;
     }
     if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
-        unsafe {
-            gz_look(state);
-        }
+        gz_look(state);
     }
     if state.err != crate::zlib_h::Z_OK
         && state.err != crate::zlib_h::Z_BUF_ERROR
@@ -890,9 +895,7 @@ pub fn gzdirect(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c
         && state.how == crate::gzguts_h::LOOK
         && state.x.have == 0 as ::core::ffi::c_uint
     {
-        unsafe {
-            gz_look(state);
-        }
+        gz_look(state);
     }
     return (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
 }
