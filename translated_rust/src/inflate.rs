@@ -147,70 +147,60 @@ impl<'input, 'output> InflateOneShotOwner<'input, 'output> {
     }
 }
 
-// This is the local ABI adapter for uncompress*. Initialization failure
-// returns before cleanup, while every initialized stream is ended after its
-// final inflate call. The slice-backed owner keeps policy and accounting safe.
+// The one-shot decoder keeps the zlib wrapper, bounded caller borrows, and
+// uInt-sized request accounting entirely in pointer-free state.
 pub(crate) fn inflate_one_shot(
     owner: &mut InflateOneShotOwner<'_, '_>,
 ) -> Result<InflateOneShotProgress, ::core::ffi::c_int> {
-    let mut stream = crate::zlib_h::z_stream {
-        next_in: owner.input.as_ptr().cast_mut(),
-        avail_in: 0,
-        total_in: 0,
-        next_out: ::core::ptr::null_mut(),
-        avail_out: 0,
-        total_out: 0,
-        msg: ::core::ptr::null_mut(),
-        state: None,
-        zalloc: None,
-        zfree: None,
-        opaque: ::core::ptr::null_mut(),
-        data_type: 0,
-        adler: 0,
-        reserved: 0,
-    };
     let max = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut status = unsafe {
-        inflateInit2_(
-            Some(&mut stream),
-            crate::zutil_h::DEF_WBITS,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        )
-    };
-    if status != crate::zlib_h::Z_OK {
-        return Err(status);
-    }
-    stream.next_out = if owner.output.is_empty() {
-        &raw mut stream.reserved as *mut crate::stdlib::Bytef
-    } else {
-        owner.output.as_mut_ptr()
-    };
+    // One-shot decoding has no ABI-visible stream and never registers a
+    // header, so it can use the same pointer-free bounded decoder that gzip
+    // embeds.  This preserves the zlib wrapper selection while leaving each
+    // caller buffer borrowed only for its individual decoder request.
+    let mut decoder = InflateGzipOwner::with_window_bits(crate::zutil_h::DEF_WBITS);
+    let mut input_offset = 0usize;
+    let mut output_offset = 0usize;
+    let mut input_available = 0 as crate::stdlib::uInt;
+    let mut output_available = 0 as crate::stdlib::uInt;
+    let status;
     loop {
-        if stream.avail_out == 0 {
-            stream.avail_out = owner.next_output_chunk(max);
+        if output_available == 0 {
+            output_available = owner.next_output_chunk(max);
         }
-        if stream.avail_in == 0 {
-            stream.avail_in = owner.next_input_chunk(max);
+        if input_available == 0 {
+            input_available = owner.next_input_chunk(max);
         }
-        status = unsafe { inflate_from_stream(&mut stream, crate::zlib_h::Z_NO_FLUSH) };
-        if status != crate::zlib_h::Z_OK {
+        let (next_input_available, next_output_available, next_status) = {
+            let input_end = input_offset + input_available as usize;
+            let output_end = output_offset + output_available as usize;
+            let result = decoder.inflate(
+                &owner.input[input_offset..input_end],
+                &mut owner.output[output_offset..output_end],
+            );
+            (
+                result.input_remaining,
+                result.output_remaining,
+                result.status,
+            )
+        };
+        input_offset += (input_available - next_input_available) as usize;
+        output_offset += (output_available - next_output_available) as usize;
+        input_available = next_input_available;
+        output_available = next_output_available;
+        if next_status != crate::zlib_h::Z_OK {
+            status = next_status;
             break;
         }
     }
-    let progress = InflateOneShotProgress {
+    Ok(InflateOneShotProgress {
         status,
         source_remaining: owner
             .input_remaining
-            .wrapping_add(stream.avail_in as crate::stdlib::z_size_t),
+            .wrapping_add(input_available as crate::stdlib::z_size_t),
         output_remaining: owner
             .output_remaining
-            .wrapping_add(stream.avail_out as crate::stdlib::z_size_t),
-    };
-    unsafe {
-        inflateEnd(&mut stream);
-    }
-    Ok(progress)
+            .wrapping_add(output_available as crate::stdlib::z_size_t),
+    })
 }
 
 #[repr(C)]
@@ -342,12 +332,17 @@ pub(crate) struct InflateGzipResult {
 
 impl InflateGzipOwner {
     pub(crate) fn new() -> Self {
+        Self::with_window_bits(15 + 16)
+    }
+
+    // Both gzip's embedded decoder and the temporary one-shot zlib decoder
+    // own only normal decoder state.  Keep wrapper selection in this
+    // pointer-free constructor so their bounded-call behavior remains one
+    // implementation.
+    fn with_window_bits(window_bits: ::core::ffi::c_int) -> Self {
         let mut normal = initial_inflate_normal_state();
-        // `inflateInit2_(..., 15 + 16, ...)` selects gzip wrapping and then
-        // runs the normal reset policy.  Keep that policy shared so moving
-        // gzip off the temporary ABI stream cannot change its initial state.
-        let reset = inflate_reset2_normal(&mut normal, 15 + 16)
-            .expect("gzip window bits are valid");
+        let reset = inflate_reset2_normal(&mut normal, window_bits)
+            .expect("one-shot and gzip window bits are valid");
         Self {
             normal,
             total_in: 0,
