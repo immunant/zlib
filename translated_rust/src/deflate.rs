@@ -2729,6 +2729,11 @@ unsafe fn deflate_stored(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = &mut *s;
+    // The compression-function dispatcher has already validated this state
+    // and its stream. Bind that stream once at this internal raw boundary so
+    // stored-block accounting below remains ordinary reference work.
+    let stream_ptr = state.strm;
+    let stream = &mut *stream_ptr;
     let mut min_block: ::core::ffi::c_uint =
         (if state.pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
             > state.w_size as crate::zutil_h::ulg
@@ -2741,15 +2746,15 @@ unsafe fn deflate_stored(
     let mut len: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    let mut used: ::core::ffi::c_uint = (*state.strm).avail_in as ::core::ffi::c_uint;
+    let mut used: ::core::ffi::c_uint = stream.avail_in as ::core::ffi::c_uint;
     loop {
         left = (state.strstart as ::core::ffi::c_long - state.block_start) as ::core::ffi::c_uint;
         let Some((block_len, is_last)) = stored_block_size(
             min_block,
             state.bi_valid,
-            (*state.strm).avail_out,
+            stream.avail_out,
             left,
-            (*state.strm).avail_in,
+            stream.avail_in,
             flush,
         ) else {
             break;
@@ -2763,12 +2768,11 @@ unsafe fn deflate_stored(
         crate::src::trees::tr_stored_block(state, pending, &[], last);
         let header_start = state.pending.wrapping_sub(4 as crate::zutil_h::ulg) as usize;
         stored_block_length_bytes(&mut pending[header_start..header_start + 4], len);
-        flush_pending(state.strm);
+        flush_pending(stream_ptr);
         if left != 0 {
             if left > len {
                 left = len;
             }
-            let stream = &mut *state.strm;
             let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
             let output = ::core::slice::from_raw_parts_mut(stream.next_out, left as usize);
             if let Some(copied) = copy_stored_window(output, window, state.block_start, left) {
@@ -2782,7 +2786,6 @@ unsafe fn deflate_stored(
             }
         }
         if len != 0 {
-            let stream = &mut *state.strm;
             let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
             let output = ::core::slice::from_raw_parts_mut(stream.next_out, len as usize);
             let copied = read_buf_bytes(stream, output, input, state.wrap);
@@ -2796,14 +2799,14 @@ unsafe fn deflate_stored(
             break;
         }
     }
-    used = used.wrapping_sub((*state.strm).avail_in as ::core::ffi::c_uint);
+    used = used.wrapping_sub(stream.avail_in as ::core::ffi::c_uint);
     if used != 0 {
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let input = ::core::slice::from_raw_parts(
             // `used` is the amount consumed from `next_in` in this call, so
             // wrapping subtraction recovers that bounded input range without
             // relying on `offset`'s unsafe provenance requirement.
-            (*state.strm).next_in.wrapping_sub(used as usize),
+            stream.next_in.wrapping_sub(used as usize),
             used as usize,
         );
         update_stored_window(state, window, input);
@@ -2818,7 +2821,7 @@ unsafe fn deflate_stored(
     }
     if flush != crate::zlib_h::Z_NO_FLUSH
         && flush != crate::zlib_h::Z_FINISH
-        && (*state.strm).avail_in == 0 as crate::stdlib::uInt
+        && stream.avail_in == 0 as crate::stdlib::uInt
         && state.strstart as ::core::ffi::c_long == state.block_start
     {
         return block_done;
@@ -2826,7 +2829,7 @@ unsafe fn deflate_stored(
     have = state
         .window_size
         .wrapping_sub(state.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
-    if (*state.strm).avail_in > have && state.block_start >= state.w_size as ::core::ffi::c_long {
+    if stream.avail_in > have && state.block_start >= state.w_size as ::core::ffi::c_long {
         state.block_start -= state.w_size as ::core::ffi::c_long;
         state.strstart = state.strstart.wrapping_sub(state.w_size);
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
@@ -2842,11 +2845,10 @@ unsafe fn deflate_stored(
             state.insert = state.strstart;
         }
     }
-    if have > (*state.strm).avail_in {
-        have = (*state.strm).avail_in as ::core::ffi::c_uint;
+    if have > stream.avail_in {
+        have = stream.avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
-        let stream = &mut *state.strm;
         let input = ::core::slice::from_raw_parts(stream.next_in, have as usize);
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let output_start = state.strstart as usize;
@@ -2893,12 +2895,12 @@ unsafe fn deflate_stored(
     if left >= min_block
         || (left != 0 || flush == crate::zlib_h::Z_FINISH)
             && flush != crate::zlib_h::Z_NO_FLUSH
-            && (*state.strm).avail_in == 0 as crate::stdlib::uInt
+            && stream.avail_in == 0 as crate::stdlib::uInt
             && left <= have
     {
         len = if left > have { have } else { left };
         last = if flush == crate::zlib_h::Z_FINISH
-            && (*state.strm).avail_in == 0 as crate::stdlib::uInt
+            && stream.avail_in == 0 as crate::stdlib::uInt
             && len == left
         {
             1 as ::core::ffi::c_int
@@ -2913,7 +2915,7 @@ unsafe fn deflate_stored(
             );
             crate::src::trees::tr_stored_block(state, pending, block, last);
             state.block_start += len as ::core::ffi::c_long;
-            flush_pending(state.strm);
+            flush_pending(stream_ptr);
         }
     }
     if last != 0 {
