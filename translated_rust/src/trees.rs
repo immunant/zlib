@@ -3675,11 +3675,11 @@ unsafe extern "C" fn gen_codes(
     }
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
-        let mut len: ::core::ffi::c_int = (*tree.offset(n as isize)).dl.len as ::core::ffi::c_int;
+        let mut len: ::core::ffi::c_int = (*tree.offset(n as isize)).dl.dad as ::core::ffi::c_int;
         if !(len == 0 as ::core::ffi::c_int) {
             let c2rust_fresh58 = next_code[len as usize];
             next_code[len as usize] = next_code[len as usize].wrapping_add(1);
-            (*tree.offset(n as isize)).fc.code =
+            (*tree.offset(n as isize)).fc.freq =
                 bi_reverse(c2rust_fresh58 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
         n += 1;
@@ -3796,20 +3796,18 @@ unsafe extern "C" fn gen_bitlen(
         bits += 1;
     }
     (*tree.offset((*s).heap[(*s).heap_max as usize] as isize))
-        .dl
-        .len = 0 as crate::zutil_h::ush;
+        .dl.dad = 0 as crate::zutil_h::ush;
     h = (*s).heap_max + 1 as ::core::ffi::c_int;
     while h < crate::src::deflate::HEAP_SIZE {
         n = (*s).heap[h as usize];
         bits = (*tree.offset((*tree.offset(n as isize)).dl.dad as isize))
-            .dl
-            .len as ::core::ffi::c_int
+            .dl.dad as ::core::ffi::c_int
             + 1 as ::core::ffi::c_int;
         if bits > max_length {
             bits = max_length;
             overflow += 1;
         }
-        (*tree.offset(n as isize)).dl.len = bits as crate::zutil_h::ush;
+        (*tree.offset(n as isize)).dl.dad = bits as crate::zutil_h::ush;
         if !(n > max_code) {
             (*s).bl_count[bits as usize] = (*s).bl_count[bits as usize].wrapping_add(1);
             xbits = 0 as ::core::ffi::c_int;
@@ -3826,7 +3824,7 @@ unsafe extern "C" fn gen_bitlen(
                 (*s).static_len =
                     (*s).static_len
                         .wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
-                            ((*stree.offset(n as isize)).dl.len as ::core::ffi::c_int + xbits)
+                            ((*stree.offset(n as isize)).dl.dad as ::core::ffi::c_int + xbits)
                                 as ::core::ffi::c_uint
                                 as crate::zutil_h::ulg,
                         ));
@@ -3861,15 +3859,15 @@ unsafe extern "C" fn gen_bitlen(
             if m > max_code {
                 continue;
             }
-            if (*tree.offset(m as isize)).dl.len as ::core::ffi::c_uint
+            if (*tree.offset(m as isize)).dl.dad as ::core::ffi::c_uint
                 != bits as ::core::ffi::c_uint
             {
                 (*s).opt_len = (*s).opt_len.wrapping_add(
                     (bits as crate::zutil_h::ulg)
-                        .wrapping_sub((*tree.offset(m as isize)).dl.len as crate::zutil_h::ulg)
+                        .wrapping_sub((*tree.offset(m as isize)).dl.dad as crate::zutil_h::ulg)
                         .wrapping_mul((*tree.offset(m as isize)).fc.freq as crate::zutil_h::ulg),
                 );
-                (*tree.offset(m as isize)).dl.len = bits as crate::zutil_h::ush;
+                (*tree.offset(m as isize)).dl.dad = bits as crate::zutil_h::ush;
             }
             n -= 1;
         }
@@ -3898,7 +3896,7 @@ unsafe extern "C" fn build_tree(
             (*s).heap[(*s).heap_len as usize] = max_code;
             (*s).depth[n as usize] = 0 as crate::zutil_h::uch;
         } else {
-            (*tree.offset(n as isize)).dl.len = 0 as crate::zutil_h::ush;
+            (*tree.offset(n as isize)).dl.dad = 0 as crate::zutil_h::ush;
         }
         n += 1;
     }
@@ -3917,7 +3915,7 @@ unsafe extern "C" fn build_tree(
         if !stree.is_null() {
             (*s).static_len = (*s)
                 .static_len
-                .wrapping_sub((*stree.offset(node as isize)).dl.len as crate::zutil_h::ulg);
+                .wrapping_sub((*stree.offset(node as isize)).dl.dad as crate::zutil_h::ulg);
         }
     }
     (*desc).max_code = max_code;
@@ -3979,7 +3977,7 @@ unsafe extern "C" fn scan_tree(
     let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
     let mut nextlen: ::core::ffi::c_int =
-        (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
+        (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.dad as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
     let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
@@ -3988,14 +3986,12 @@ unsafe extern "C" fn scan_tree(
         min_count = 3 as ::core::ffi::c_int;
     }
     (*tree.offset((max_code + 1 as ::core::ffi::c_int) as isize))
-        .dl
-        .len = 0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
+        .dl.dad = 0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
         nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize))
-            .dl
-            .len as ::core::ffi::c_int;
+            .dl.dad as ::core::ffi::c_int;
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
@@ -4043,7 +4039,7 @@ unsafe extern "C" fn send_tree(
     let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
     let mut nextlen: ::core::ffi::c_int =
-        (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
+        (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.dad as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
     let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
@@ -4055,17 +4051,16 @@ unsafe extern "C" fn send_tree(
     while n <= max_code {
         curlen = nextlen;
         nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize))
-            .dl
-            .len as ::core::ffi::c_int;
+            .dl.dad as ::core::ffi::c_int;
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
                 loop {
                     let mut len: ::core::ffi::c_int =
-                        (*s).bl_tree[curlen as usize].dl.len as ::core::ffi::c_int;
+                        (*s).bl_tree[curlen as usize].dl.dad as ::core::ffi::c_int;
                     if (*s).bi_valid > crate::src::deflate::Buf_size - len {
                         let mut val: ::core::ffi::c_int =
-                            (*s).bl_tree[curlen as usize].fc.code as ::core::ffi::c_int;
+                            (*s).bl_tree[curlen as usize].fc.freq as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -4085,7 +4080,7 @@ unsafe extern "C" fn send_tree(
                         (*s).bi_valid += len - crate::src::deflate::Buf_size;
                     } else {
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[curlen as usize].fc.code as ::core::ffi::c_int)
+                            | ((*s).bl_tree[curlen as usize].fc.freq as ::core::ffi::c_int)
                                 << (*s).bi_valid)
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len;
@@ -4098,10 +4093,10 @@ unsafe extern "C" fn send_tree(
             } else if curlen != 0 as ::core::ffi::c_int {
                 if curlen != prevlen {
                     let mut len_0: ::core::ffi::c_int =
-                        (*s).bl_tree[curlen as usize].dl.len as ::core::ffi::c_int;
+                        (*s).bl_tree[curlen as usize].dl.dad as ::core::ffi::c_int;
                     if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
                         let mut val_0: ::core::ffi::c_int =
-                            (*s).bl_tree[curlen as usize].fc.code as ::core::ffi::c_int;
+                            (*s).bl_tree[curlen as usize].fc.freq as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -4121,7 +4116,7 @@ unsafe extern "C" fn send_tree(
                         (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
                     } else {
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[curlen as usize].fc.code as ::core::ffi::c_int)
+                            | ((*s).bl_tree[curlen as usize].fc.freq as ::core::ffi::c_int)
                                 << (*s).bi_valid)
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len_0;
@@ -4129,10 +4124,10 @@ unsafe extern "C" fn send_tree(
                     count -= 1;
                 }
                 let mut len_1: ::core::ffi::c_int =
-                    (*s).bl_tree[16 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
+                    (*s).bl_tree[16 as ::core::ffi::c_int as usize].dl.dad as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_1 {
                     let mut val_1: ::core::ffi::c_int =
-                        (*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.code
+                        (*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.freq
                             as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_1 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4153,7 +4148,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bi_valid += len_1 - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.code
+                        | ((*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.freq
                             as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4189,10 +4184,10 @@ unsafe extern "C" fn send_tree(
                 }
             } else if count <= 10 as ::core::ffi::c_int {
                 let mut len_3: ::core::ffi::c_int =
-                    (*s).bl_tree[17 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
+                    (*s).bl_tree[17 as ::core::ffi::c_int as usize].dl.dad as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_3 {
                     let mut val_3: ::core::ffi::c_int =
-                        (*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.code
+                        (*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.freq
                             as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_3 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4213,7 +4208,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bi_valid += len_3 - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.code
+                        | ((*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.freq
                             as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4249,10 +4244,10 @@ unsafe extern "C" fn send_tree(
                 }
             } else {
                 let mut len_5: ::core::ffi::c_int =
-                    (*s).bl_tree[18 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
+                    (*s).bl_tree[18 as ::core::ffi::c_int as usize].dl.dad as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_5 {
                     let mut val_5: ::core::ffi::c_int =
-                        (*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.code
+                        (*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.freq
                             as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_5 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4273,7 +4268,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bi_valid += len_5 - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.code
+                        | ((*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.freq
                             as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4347,7 +4342,7 @@ unsafe extern "C" fn build_bl_tree(
     );
     max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
     while max_blindex >= 3 as ::core::ffi::c_int {
-        if (*s).bl_tree[bl_order[max_blindex as usize] as usize].dl.len as ::core::ffi::c_int
+        if (*s).bl_tree[bl_order[max_blindex as usize] as usize].dl.dad as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
         {
             break;
@@ -4450,7 +4445,7 @@ unsafe extern "C" fn send_all_trees(
         let mut len_2: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
             let mut val_2: ::core::ffi::c_int =
-                (*s).bl_tree[bl_order[rank as usize] as usize].dl.len as ::core::ffi::c_int;
+                (*s).bl_tree[bl_order[rank as usize] as usize].dl.dad as ::core::ffi::c_int;
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                 | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                 as crate::zutil_h::ush;
@@ -4470,7 +4465,7 @@ unsafe extern "C" fn send_all_trees(
             (*s).bi_valid += len_2 - crate::src::deflate::Buf_size;
         } else {
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | ((*s).bl_tree[bl_order[rank as usize] as usize].dl.len as ::core::ffi::c_int)
+                | ((*s).bl_tree[bl_order[rank as usize] as usize].dl.dad as ::core::ffi::c_int)
                     << (*s).bi_valid) as crate::zutil_h::ush;
             (*s).bi_valid += len_2;
         }
@@ -4596,10 +4591,10 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
         (*s).bi_valid += len;
     }
     let mut len_0: ::core::ffi::c_int =
-        static_ltree[256 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
+        static_ltree[256 as ::core::ffi::c_int as usize].dl.dad as ::core::ffi::c_int;
     if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
         let mut val_0: ::core::ffi::c_int =
-            static_ltree[256 as ::core::ffi::c_int as usize].fc.code as ::core::ffi::c_int;
+            static_ltree[256 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;
@@ -4617,7 +4612,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
         (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
     } else {
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | (static_ltree[256 as ::core::ffi::c_int as usize].fc.code as ::core::ffi::c_int)
+            | (static_ltree[256 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int)
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len_0;
     }
@@ -4656,10 +4651,10 @@ unsafe extern "C" fn compress_block(
             lc = *(*s).sym_buf.offset(c2rust_fresh12 as isize) as ::core::ffi::c_int;
             if dist == 0 as ::core::ffi::c_uint {
                 let mut len: ::core::ffi::c_int =
-                    (*ltree.offset(lc as isize)).dl.len as ::core::ffi::c_int;
+                    (*ltree.offset(lc as isize)).dl.dad as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len {
                     let mut val: ::core::ffi::c_int =
-                        (*ltree.offset(lc as isize)).fc.code as ::core::ffi::c_int;
+                        (*ltree.offset(lc as isize)).fc.freq as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4679,7 +4674,7 @@ unsafe extern "C" fn compress_block(
                     (*s).bi_valid += len - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*ltree.offset(lc as isize)).fc.code as ::core::ffi::c_int)
+                        | ((*ltree.offset(lc as isize)).fc.freq as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
                     (*s).bi_valid += len;
@@ -4690,16 +4685,14 @@ unsafe extern "C" fn compress_block(
                     code.wrapping_add(256 as ::core::ffi::c_uint)
                         .wrapping_add(1 as ::core::ffi::c_uint) as isize,
                 ))
-                .dl
-                .len as ::core::ffi::c_int;
+                .dl.dad as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
                     let mut val_0: ::core::ffi::c_int = (*ltree.offset(
                         code.wrapping_add(256 as ::core::ffi::c_uint)
                             .wrapping_add(1 as ::core::ffi::c_uint)
                             as isize,
                     ))
-                    .fc
-                    .code
+                    .fc.freq
                         as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4725,8 +4718,7 @@ unsafe extern "C" fn compress_block(
                                 .wrapping_add(1 as ::core::ffi::c_uint)
                                 as isize,
                         ))
-                        .fc
-                        .code as ::core::ffi::c_int)
+                        .fc.freq as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
                     (*s).bi_valid += len_0;
@@ -4770,10 +4762,10 @@ unsafe extern "C" fn compress_block(
                         as usize] as ::core::ffi::c_int
                 }) as ::core::ffi::c_uint;
                 let mut len_2: ::core::ffi::c_int =
-                    (*dtree.offset(code as isize)).dl.len as ::core::ffi::c_int;
+                    (*dtree.offset(code as isize)).dl.dad as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
                     let mut val_2: ::core::ffi::c_int =
-                        (*dtree.offset(code as isize)).fc.code as ::core::ffi::c_int;
+                        (*dtree.offset(code as isize)).fc.freq as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4793,7 +4785,7 @@ unsafe extern "C" fn compress_block(
                     (*s).bi_valid += len_2 - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*dtree.offset(code as isize)).fc.code as ::core::ffi::c_int)
+                        | ((*dtree.offset(code as isize)).fc.freq as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
                     (*s).bi_valid += len_2;
@@ -4837,10 +4829,10 @@ unsafe extern "C" fn compress_block(
         }
     }
     let mut len_4: ::core::ffi::c_int =
-        (*ltree.offset(256 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
+        (*ltree.offset(256 as ::core::ffi::c_int as isize)).dl.dad as ::core::ffi::c_int;
     if (*s).bi_valid > crate::src::deflate::Buf_size - len_4 {
         let mut val_4: ::core::ffi::c_int =
-            (*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.code as ::core::ffi::c_int;
+            (*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.freq as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_4 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;
@@ -4858,7 +4850,7 @@ unsafe extern "C" fn compress_block(
         (*s).bi_valid += len_4 - crate::src::deflate::Buf_size;
     } else {
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | ((*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.code as ::core::ffi::c_int)
+            | ((*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.freq as ::core::ffi::c_int)
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len_4;
     };

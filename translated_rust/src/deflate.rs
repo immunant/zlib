@@ -46,16 +46,14 @@ pub struct ct_data_s {
 #[derive(Copy, Clone)]
 #[repr(C)]
 
-pub union C2Rust_Unnamed_1 {
+pub struct C2Rust_Unnamed_1 {
     pub freq: crate::zutil_h::ush,
-    pub code: crate::zutil_h::ush,
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
 
-pub union C2Rust_Unnamed_0 {
+pub struct C2Rust_Unnamed_0 {
     pub dad: crate::zutil_h::ush,
-    pub len: crate::zutil_h::ush,
 }
 
 pub type static_tree_desc = crate::src::deflate::static_tree_desc_s;
@@ -612,7 +610,7 @@ pub unsafe extern "C" fn deflateInit2_(
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    static mut my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
+    static my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
         || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
             != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
