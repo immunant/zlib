@@ -1529,6 +1529,10 @@ fn gz_skip_loop_decision(
     }
 }
 
+fn gz_skip_fetch_failed(action: &GzSkipAction, fetch_result: Option<::core::ffi::c_int>) -> bool {
+    matches!(action, GzSkipAction::Fetch) && fetch_result == Some(-1 as ::core::ffi::c_int)
+}
+
 fn gzgets_copy_len(
     have: ::core::ffi::c_uint,
     left: ::core::ffi::c_uint,
@@ -1620,8 +1624,12 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
         }
-        let fetch_failed =
-            matches!(action, GzSkipAction::Fetch) && gz_fetch(state) == -1 as ::core::ffi::c_int;
+        let fetch_result = if matches!(action, GzSkipAction::Fetch) {
+            Some(gz_fetch(state))
+        } else {
+            None
+        };
+        let fetch_failed = gz_skip_fetch_failed(&action, fetch_result);
         match gz_skip_loop_decision(action, fetch_failed, state.skip) {
             GzSkipLoopDecision::Error => return -1 as ::core::ffi::c_int,
             GzSkipLoopDecision::Done => break,
@@ -3210,6 +3218,28 @@ mod tests {
             gz_skip_loop_decision(GzSkipAction::Fetch, false, 0),
             GzSkipLoopDecision::Done
         );
+    }
+
+    #[test]
+    fn gz_skip_fetch_failed_accepts_only_failed_fetches() {
+        assert!(gz_skip_fetch_failed(
+            &GzSkipAction::Fetch,
+            Some(-1 as ::core::ffi::c_int),
+        ));
+        assert!(!gz_skip_fetch_failed(&GzSkipAction::Fetch, Some(0)));
+        assert!(!gz_skip_fetch_failed(&GzSkipAction::Fetch, None));
+    }
+
+    #[test]
+    fn gz_skip_fetch_failed_ignores_results_for_non_fetch_actions() {
+        assert!(!gz_skip_fetch_failed(
+            &GzSkipAction::ConsumeBuffered,
+            Some(-1 as ::core::ffi::c_int),
+        ));
+        assert!(!gz_skip_fetch_failed(
+            &GzSkipAction::StopAtEof,
+            Some(-1 as ::core::ffi::c_int),
+        ));
     }
 
     #[test]

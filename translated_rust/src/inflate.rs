@@ -826,6 +826,23 @@ fn inflate_add_and_consume_extra_bits(
     (value, hold >> extra_bits, bits.wrapping_sub(extra_bits))
 }
 
+fn inflate_distance_extra_update(
+    offset: ::core::ffi::c_uint,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+    extra_bits: ::core::ffi::c_uint,
+    back: ::core::ffi::c_int,
+) -> (
+    ::core::ffi::c_uint,
+    crate::stdlib::uLong,
+    ::core::ffi::c_uint,
+    ::core::ffi::c_int,
+) {
+    let (offset, hold, bits) = inflate_add_and_consume_extra_bits(offset, hold, bits, extra_bits);
+    let back = (back as ::core::ffi::c_uint).wrapping_add(extra_bits) as ::core::ffi::c_int;
+    (offset, hold, bits, back)
+}
+
 unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return inflate_state_check_impl(None, None, false);
@@ -2368,15 +2385,13 @@ pub unsafe extern "C" fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh29 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    ((*state).offset, hold, bits) = inflate_add_and_consume_extra_bits(
+                    ((*state).offset, hold, bits, (*state).back) = inflate_distance_extra_update(
                         (*state).offset,
                         hold,
                         bits,
                         (*state).extra,
+                        (*state).back,
                     );
-                    (*state).back = ((*state).back as ::core::ffi::c_uint)
-                        .wrapping_add((*state).extra)
-                        as ::core::ffi::c_int;
                 }
                 (*state).mode = crate::src::inflate::MATCH;
             }
@@ -3273,10 +3288,11 @@ mod tests {
         inflate_call_progress, inflate_can_use_fast_path, inflate_codes_used_offset_value,
         inflate_copy_match_from_output, inflate_copy_progress, inflate_data_type_value,
         inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
-        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_bytes,
-        inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
-        inflate_gzip_header_has_crc, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflate_distance_extra_update, inflate_get_dictionary_result, inflate_gzip_extra_progress,
+        inflate_gzip_flags, inflate_gzip_flags_error, inflate_gzip_flags_validation,
+        inflate_gzip_header_crc_bytes, inflate_gzip_header_crc_is_valid,
+        inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_text_field_should_continue,
         inflate_gzip_window_bits, inflate_head_skip_mode, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
@@ -3314,6 +3330,15 @@ mod tests {
             inflate_add_and_consume_extra_bits(::core::ffi::c_uint::MAX, 1, 1, 1),
             (0, 0, 0)
         );
+    }
+
+    #[test]
+    fn inflate_distance_extra_update_keeps_distance_and_backtracking_in_sync() {
+        assert_eq!(
+            inflate_distance_extra_update(257, 0b1_1010, 9, 4, 12),
+            (267, 0b1, 5, 16)
+        );
+        assert_eq!(inflate_distance_extra_update(0, 1, 1, 1, -1), (1, 0, 0, 0));
     }
 
     #[test]

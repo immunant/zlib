@@ -4477,6 +4477,18 @@ fn tree_run_limits(
     }
 }
 
+fn initial_tree_run_state(
+    first_length: ::core::ffi::c_int,
+) -> (
+    ::core::ffi::c_int,
+    ::core::ffi::c_int,
+    ::core::ffi::c_int,
+    ::core::ffi::c_int,
+) {
+    let (max_count, min_count) = tree_run_limits(0, first_length);
+    (-1, 0, max_count, min_count)
+}
+
 fn tree_run_continues(
     count: ::core::ffi::c_int,
     max_count: ::core::ffi::c_int,
@@ -4675,11 +4687,9 @@ unsafe fn scan_tree(
     mut max_code: ::core::ffi::c_int,
 ) {
     let mut n: ::core::ffi::c_int = 0;
-    let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
     let mut nextlen: ::core::ffi::c_int = (*tree).dl.len as ::core::ffi::c_int;
-    let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let (mut max_count, mut min_count) = tree_run_limits(0, nextlen);
+    let (mut prevlen, mut count, mut max_count, mut min_count) = initial_tree_run_state(nextlen);
     (*tree.wrapping_add(tree_next_cursor(max_code))).dl.len =
         0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
     n = 0 as ::core::ffi::c_int;
@@ -4706,11 +4716,9 @@ unsafe fn send_tree(
     mut max_code: ::core::ffi::c_int,
 ) {
     let mut n: ::core::ffi::c_int = 0;
-    let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
     let mut nextlen: ::core::ffi::c_int = (*tree).dl.len as ::core::ffi::c_int;
-    let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let (mut max_count, mut min_count) = tree_run_limits(0, nextlen);
+    let (mut prevlen, mut count, mut max_count, mut min_count) = initial_tree_run_state(nextlen);
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
@@ -5739,20 +5747,20 @@ mod tests {
         combined_tree_frequency, compress_block_symbol, decode_symbol_triplet,
         detect_data_type_from_ltree, dist_code_index, dynamic_tree_header_counts,
         gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
-        last_nonzero_bl_code_rank, length_extra_bits, mark_bl_code_nonzero_at_rank,
-        match_tree_codes, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_bit_length_counts,
-        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
-        supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
-        symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
-        tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
-        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_code_count,
-        tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth,
-        tree_run_continues, tree_run_extra_bits, tree_run_limits, tree_run_step,
-        tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode,
-        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
-        TreeInitialLeafPlan, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138,
-        REPZ_3_10, REP_3_6,
+        initial_tree_run_state, last_nonzero_bl_code_rank, length_extra_bits,
+        mark_bl_code_nonzero_at_rank, match_tree_codes, next_code_for_len, next_codes,
+        pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
+        reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
+        static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
+        supplemental_tree_static_len, symbol_buffer_has_entries, symbol_buffer_is_full,
+        symbol_triplet_cursors, tally_match_tree_indices, tally_scan_tree_action,
+        tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
+        tree_bit_length_totals_after_node, tree_code_count, tree_heap_has_pair,
+        tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth, tree_run_continues,
+        tree_run_extra_bits, tree_run_limits, tree_run_step, tree_run_step_after_increment,
+        BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode, GenBitlenOverflowReassignment,
+        HeapChild, ScanTreeAction, TallyTreeUpdate, TreeInitialLeafPlan, TreeRunStep,
+        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6115,6 +6123,12 @@ mod tests {
             tree_run_extra_bits(ScanTreeAction::RepeatZeroLong, 138),
             Some((127, 7))
         );
+    }
+
+    #[test]
+    fn initial_tree_run_state_uses_zero_length_run_limits() {
+        assert_eq!(initial_tree_run_state(0), (-1, 0, 138, 3));
+        assert_eq!(initial_tree_run_state(1), (-1, 0, 7, 4));
     }
 
     #[test]
