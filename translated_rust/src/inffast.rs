@@ -373,23 +373,6 @@ fn inflate_fast_state_is_usable(state: &crate::src::inflate::inflate_state) -> b
     state.wnext < state.wsize
 }
 
-// Validate every stream- and state-derived condition before the raw cursor
-// adapter constructs either caller view.  The adapter then only performs the
-// two foreign-range bindings selected by this reference-bound preflight.
-fn inflate_fast_preflight(
-    strm: &crate::zlib_h::z_stream,
-    state: &crate::src::inflate::inflate_state,
-    start: ::core::ffi::c_uint,
-) -> Option<InflateFastCursors> {
-    if !inflate_fast_state_is_usable(state)
-        || strm.next_in.is_null()
-        || strm.next_out.is_null()
-    {
-        return None;
-    }
-    inflate_fast_cursor_lengths(strm, start)
-}
-
 // Once its caller has bound the stream cursors, the fast decoder is entirely
 // reference- and slice-based. Keeping the cursor binding in the adapter
 // below removes raw pointer work from this core implementation.
@@ -482,39 +465,22 @@ pub(crate) fn inflate_fast_bound_cursors(
     inflate_fast_dispatch(strm, state, cursors, input, output)
 }
 
-// This adapter retains the existing raw cursor boundary for translated
-// callers. Its preflight must happen before either foreign cursor is bound;
-// the dispatch target above receives only bounded slices.
+// `inflate_fast` is an internal C symbol, not an application entry point.
+// Regular inflation reaches the bounded fast core above after it has already
+// borrowed both caller cursors. A direct internal-symbol call has no such
+// views, so use the reference-bound full inflater instead of recreating a
+// second raw cursor adapter. Direct internal-symbol callers therefore use
+// the full inflater as a functional fallback, while the ABI forwarder stays
+// thin.
 pub fn inflate_fast(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
+    strm: Option<&mut crate::zlib_h::z_stream>,
+    start: ::core::ffi::c_uint,
 ) {
-    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
+    let Some(strm) = strm else {
         return;
     };
-    let Some(cursors) = inflate_fast_preflight(strm, state, start) else {
-        return;
-    };
-    let input = if strm.avail_in == 0 {
-        &[]
-    } else {
-        // SAFETY: preflight rejected a null cursor, and zlib's fast-path
-        // contract supplies exactly `avail_in` readable bytes.
-        unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
-    };
-    let output = if cursors.output_len == 0 {
-        &mut []
-    } else {
-        // SAFETY: preflight computed this range from the caller's output
-        // cursor and the fast-path's already-produced byte count.
-        unsafe {
-            ::core::slice::from_raw_parts_mut(
-                strm.next_out.wrapping_sub(cursors.used),
-                cursors.output_len,
-            )
-        }
-    };
-    inflate_fast_dispatch(strm, state, cursors, input, output)
+    let _ = start;
+    let _ = crate::src::inflate::inflate(strm, crate::zlib_h::Z_NO_FLUSH);
 }
 
 #[export_name = "inflate_fast"]
@@ -522,5 +488,8 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
 ) {
+    // SAFETY: the ABI adapter only binds the optional stream reference. The
+    // implementation owns the fallback dispatch and stream validation.
+    let strm = unsafe { strm.as_mut() };
     inflate_fast(strm, start)
 }
