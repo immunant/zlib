@@ -6,19 +6,31 @@ pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
-#[no_mangle]
 
-pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    b"need dictionary\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream end\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"file error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"data error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"insufficient memory\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"buffer error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+static Z_ERRMSG_NEED_DICT: [::core::ffi::c_char; 16] = crate::c_char_array(b"need dictionary\0");
+static Z_ERRMSG_STREAM_END: [::core::ffi::c_char; 11] = crate::c_char_array(b"stream end\0");
+static Z_ERRMSG_EMPTY: [::core::ffi::c_char; 1] = crate::c_char_array(b"\0");
+static Z_ERRMSG_FILE_ERROR: [::core::ffi::c_char; 11] = crate::c_char_array(b"file error\0");
+static Z_ERRMSG_STREAM_ERROR: [::core::ffi::c_char; 13] = crate::c_char_array(b"stream error\0");
+static Z_ERRMSG_DATA_ERROR: [::core::ffi::c_char; 11] = crate::c_char_array(b"data error\0");
+static Z_ERRMSG_MEM_ERROR: [::core::ffi::c_char; 20] =
+    crate::c_char_array(b"insufficient memory\0");
+static Z_ERRMSG_BUF_ERROR: [::core::ffi::c_char; 13] = crate::c_char_array(b"buffer error\0");
+static Z_ERRMSG_VERSION_ERROR: [::core::ffi::c_char; 21] =
+    crate::c_char_array(b"incompatible version\0");
+
+#[no_mangle]
+pub static z_errmsg: [&'static ::core::ffi::c_char; 10] = [
+    &Z_ERRMSG_NEED_DICT[0],
+    &Z_ERRMSG_STREAM_END[0],
+    &Z_ERRMSG_EMPTY[0],
+    &Z_ERRMSG_FILE_ERROR[0],
+    &Z_ERRMSG_STREAM_ERROR[0],
+    &Z_ERRMSG_DATA_ERROR[0],
+    &Z_ERRMSG_MEM_ERROR[0],
+    &Z_ERRMSG_BUF_ERROR[0],
+    &Z_ERRMSG_VERSION_ERROR[0],
+    &Z_ERRMSG_EMPTY[0],
 ];
 pub fn zlibVersion() -> &'static [::core::ffi::c_char; 15] {
     return &crate::zlib_h::ZLIB_VERSION;
