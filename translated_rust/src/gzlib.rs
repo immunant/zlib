@@ -82,6 +82,17 @@ fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0;
 }
 
+/// Copy a boundary C string into fallibly reserved owned storage before it is
+/// retained in opaque gzip state.  In particular, do not let Rust's infallible
+/// collection growth turn zlib's normal open-allocation failure into a panic.
+fn gz_owned_c_string(value: &::std::ffi::CStr) -> Option<::std::ffi::CString> {
+    let bytes = value.to_bytes_with_nul();
+    let mut owned = Vec::new();
+    owned.try_reserve_exact(bytes.len()).ok()?;
+    owned.extend_from_slice(bytes);
+    ::std::ffi::CString::from_vec_with_nul(owned).ok()
+}
+
 /// Check whether a gzip byte length fits the signed `int` result range used
 /// by the legacy API.  The FFI adapters retain their raw buffers and error
 /// reporting; this is only the shared scalar admission rule.
@@ -342,6 +353,10 @@ macro_rules! gz_open_at_boundary {
 
             let path = ::std::ffi::CStr::from_ptr(path_ptr);
             let mode = ::std::ffi::CStr::from_ptr(mode_ptr);
+            let path = match gz_owned_c_string(path) {
+                Some(path) => path,
+                None => break 'open ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>(),
+            };
             let state = crate::stdlib::malloc(::core::mem::size_of::<crate::gzguts_h::gz_state>())
                 as crate::gzguts_h::gz_statep;
             if state.is_null() {
@@ -358,7 +373,7 @@ macro_rules! gz_open_at_boundary {
                 },
                 mode: crate::gzguts_h::GZ_NONE,
                 fd: -1,
-                path: ::core::ptr::null_mut(),
+                path,
                 size: 0,
                 want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
                 in_0: ::core::ptr::null_mut(),
@@ -398,6 +413,7 @@ macro_rules! gz_open_at_boundary {
             let plan = match gz_open_plan(mode.to_bytes()) {
                 Some(plan) => plan,
                 None => {
+                    ::core::ptr::drop_in_place(state);
                     crate::stdlib::free(
                         state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void,
                     );
@@ -409,20 +425,6 @@ macro_rules! gz_open_at_boundary {
             state.level = level;
             state.strategy = strategy;
             state.direct = direct;
-
-            let path_bytes = path.to_bytes_with_nul();
-            state.path = crate::stdlib::malloc(path_bytes.len()) as *mut ::core::ffi::c_char;
-            if state.path.is_null() {
-                crate::stdlib::free(
-                    state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void,
-                );
-                break 'open ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-            }
-            ::core::ptr::copy_nonoverlapping(
-                path_bytes.as_ptr(),
-                state.path as *mut u8,
-                path_bytes.len(),
-            );
 
             if supplied_fd == -1 {
                 state.fd = crate::stdlib::open(path_ptr, plan.descriptor_flags, 0o666);
@@ -446,7 +448,7 @@ macro_rules! gz_open_at_boundary {
                 state.fd = supplied_fd;
             }
             if state.fd == -1 {
-                crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
+                ::core::ptr::drop_in_place(state);
                 crate::stdlib::free(
                     state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void,
                 );
@@ -1185,8 +1187,8 @@ pub unsafe extern "C" fn gz_error(
     } else {
         Some(::std::ffi::CStr::from_ptr(msg))
     };
-    let path = if message.is_some() && !state.path.is_null() {
-        Some(::std::ffi::CStr::from_ptr(state.path))
+    let path = if message.is_some() {
+        Some(state.path.as_c_str())
     } else {
         None
     };

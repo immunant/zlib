@@ -50,8 +50,8 @@ macro_rules! gzclose_read_at_boundary {
                 if release_message {
                     crate::stdlib::free(message as *mut ::core::ffi::c_void);
                 }
-                crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
                 let close_result = crate::stdlib::close((*state).fd);
+                ::core::ptr::drop_in_place(state);
                 crate::stdlib::free(state as *mut ::core::ffi::c_void);
                 crate::src::gzread::gzclose_read_result(state_err, close_result)
             }
@@ -100,8 +100,8 @@ macro_rules! gzclose_write_at_boundary {
                 if release_message {
                     crate::stdlib::free(message as *mut ::core::ffi::c_void);
                 }
-                crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
                 let close_result = crate::stdlib::close((*state).fd);
+                ::core::ptr::drop_in_place(state);
                 crate::stdlib::free(state as *mut ::core::ffi::c_void);
                 crate::src::gzwrite::gzclose_write_result(close_result, ret)
             }
