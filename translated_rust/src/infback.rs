@@ -158,20 +158,18 @@ where
     }
 }
 
-struct BackInitPreparation<'a> {
-    strm: &'a mut crate::zlib_h::z_stream_s,
+struct BackInitPreparation {
     state: crate::src::inflate::inflate_state,
 }
 
 /// Validate the public initialization arguments and construct all Rust-owned
 /// decoder state before asking an ABI allocator for its state slot.
-fn prepare_inflate_back_init<'a>(
-    strm: Option<&'a mut crate::zlib_h::z_stream_s>,
+fn prepare_inflate_back_init(
     window: Option<&mut [u8]>,
     window_bits: ::core::ffi::c_int,
     version: Option<::core::ffi::c_char>,
     stream_size: ::core::ffi::c_int,
-) -> Result<BackInitPreparation<'a>, ::core::ffi::c_int> {
+) -> Result<BackInitPreparation, ::core::ffi::c_int> {
     if version != Some(crate::zlib_h::ZLIB_VERSION[0])
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
@@ -180,9 +178,6 @@ fn prepare_inflate_back_init<'a>(
     if !(8..=15).contains(&window_bits) {
         return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    let Some(strm) = strm else {
-        return Err(crate::zlib_h::Z_STREAM_ERROR);
-    };
     let Some(window) = window else {
         return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
@@ -195,7 +190,6 @@ fn prepare_inflate_back_init<'a>(
         return Err(crate::zlib_h::Z_MEM_ERROR);
     }
     window_storage.resize(window_len, 0);
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     let mut state = crate::src::inflate::new_inflate_state();
     state.dmax = 32768;
     state.wbits = window_bits as crate::stdlib::uInt;
@@ -204,51 +198,7 @@ fn prepare_inflate_back_init<'a>(
     state.wnext = 0;
     state.whave = 0;
     state.sane = 1;
-    Ok(BackInitPreparation { strm, state })
-}
-
-/// Install a fully prepared back-inflater.  A custom ABI allocation is only an
-/// opaque token; the actual decoder state remains Rust-owned.
-unsafe fn inflate_back_init_boundary(
-    strm: Option<&mut crate::zlib_h::z_stream_s>,
-    window: Option<&mut [u8]>,
-    window_bits: ::core::ffi::c_int,
-    version: Option<::core::ffi::c_char>,
-    stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let BackInitPreparation { strm, state } =
-        match prepare_inflate_back_init(strm, window, window_bits, version, stream_size) {
-            Ok(preparation) => preparation,
-            Err(error) => return error,
-        };
-    if strm.zalloc.is_none() && strm.zfree.is_none() {
-        let state = Box::new(state);
-        let state_allocation = core::ptr::from_ref(state.as_ref());
-        if !crate::src::inflate::retain_default_inflate_state(state) {
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-        strm.state = state_allocation.cast_mut().cast();
-        return crate::zlib_h::Z_OK;
-    }
-    let (Some(_), Some(_)) = (strm.zalloc, strm.zfree) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let state = Box::new(state);
-    let state_pointer = core::ptr::from_ref(state.as_ref());
-    let Some(state_address) = crate::src::inflate::retain_callback_inflate_state(state) else {
-        return crate::zlib_h::Z_MEM_ERROR;
-    };
-    if let Err(error) = crate::src::inflate::with_inflate_callback_allocation(
-        strm,
-        None,
-        state_address,
-    ) {
-        return error;
-    }
-    strm.state = state_pointer
-        .cast_mut()
-        .cast::<crate::src::deflate::internal_state>();
-    crate::zlib_h::Z_OK
+    Ok(BackInitPreparation { state })
 }
 #[export_name = "inflateBackInit_"]
 
@@ -259,7 +209,6 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let stream = strm.as_mut();
     let version = version.as_ref().copied();
     let window = if (8..=15).contains(&windowBits) && !window.is_null() {
         Some(core::slice::from_raw_parts_mut(
@@ -269,7 +218,19 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     } else {
         None
     };
-    unsafe { inflate_back_init_boundary(stream, window, windowBits, version, stream_size) }
+    let BackInitPreparation { state } =
+        match prepare_inflate_back_init(window, windowBits, version, stream_size) {
+            Ok(preparation) => preparation,
+            Err(error) => return error,
+        };
+    let Some(stream) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    crate::src::inflate::inflate_install_state(
+        crate::src::inflate::InflateStateStream::new(stream),
+        state,
+        crate::src::inflate::InflateStateInstallation::Back,
+    )
 }
 fn inflate_back_impl<'a, I, O>(
     strm: &mut crate::zlib_h::z_stream_s,

@@ -609,8 +609,11 @@ pub unsafe extern "C" fn inflateReset2_ffi(
 /// association (the copy path) happen only after that value has been written
 /// to its final storage.
 #[derive(Copy, Clone)]
-enum InflateStateInstallation<'a> {
+pub(crate) enum InflateStateInstallation<'a> {
     Initialize(::core::ffi::c_int),
+    /// Install an already-prepared state for `inflateBackInit_()` without the
+    /// ordinary inflater reset, which has different wrapper semantics.
+    Back,
     Copy {
         source_stream: &'a crate::zlib_h::z_stream_s,
         source_state: &'a crate::src::inflate::inflate_state,
@@ -622,12 +625,12 @@ enum InflateStateInstallation<'a> {
 /// The carrier is constructed only from an already-borrowed ABI stream.  It
 /// does not expose raw state storage, and keeps the allocator pairing local to
 /// installation rather than to an exported wrapper.
-struct InflateStateStream<'a> {
+pub(crate) struct InflateStateStream<'a> {
     stream: &'a mut crate::zlib_h::z_stream_s,
 }
 
 impl<'a> InflateStateStream<'a> {
-    fn new(stream: &'a mut crate::zlib_h::z_stream_s) -> Self {
+    pub(crate) fn new(stream: &'a mut crate::zlib_h::z_stream_s) -> Self {
         Self { stream }
     }
 }
@@ -693,7 +696,7 @@ fn initialize_new_inflate_state(
 /// initialization and copying.  Callers construct codec-owned data first;
 /// this helper alone invokes the paired allocator and writes the resulting
 /// state slot.
-fn inflate_install_state(
+pub(crate) fn inflate_install_state(
     stream: InflateStateStream<'_>,
     mut initialized: crate::src::inflate::inflate_state,
     installation: InflateStateInstallation<'_>,
@@ -705,6 +708,7 @@ fn inflate_install_state(
             source_stream,
             source_state,
         } => (Some(source_stream), Some(source_state)),
+        InflateStateInstallation::Back => (None, None),
     };
     let initialization_adler = match installation {
         InflateStateInstallation::Initialize(window_bits) => {
@@ -716,8 +720,11 @@ fn inflate_install_state(
                 }
             }
         }
-        InflateStateInstallation::Copy { .. } => None,
+        InflateStateInstallation::Copy { .. } | InflateStateInstallation::Back => None,
     };
+    if matches!(installation, InflateStateInstallation::Back) {
+        strm.msg = core::ptr::null_mut();
+    }
     if strm.zalloc.is_none() && strm.zfree.is_none() {
         let mut state = Box::new(initialized);
         let state_pointer = core::ptr::from_mut(state.as_mut());
