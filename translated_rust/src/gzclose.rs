@@ -35,6 +35,10 @@ fn gz_close_mode(mode: ::core::ffi::c_int) -> GzCloseMode {
     }
 }
 
+fn gz_close_uses_read_handler(mode: ::core::ffi::c_int) -> bool {
+    gz_close_mode(mode) == GzCloseMode::Read
+}
+
 fn gz_close_validation_status(file_is_null: bool) -> Result<(), ::core::ffi::c_int> {
     if file_is_null {
         Err(crate::zlib_h::Z_STREAM_ERROR)
@@ -50,19 +54,18 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
     }
 
     let state = unsafe { &*(file as *const crate::gzguts_h::gz_state) };
-    match gz_close_mode(state.mode) {
-        GzCloseMode::Read => unsafe {
-            crate::src::gzread::gzclose_r(file as *mut crate::zlib_h::gzFile_s)
-        },
-        GzCloseMode::Write => unsafe {
-            crate::src::gzwrite::gzclose_w(file as *mut crate::zlib_h::gzFile_s)
-        },
+    if gz_close_uses_read_handler(state.mode) {
+        unsafe { crate::src::gzread::gzclose_r(file as *mut crate::zlib_h::gzFile_s) }
+    } else {
+        unsafe { crate::src::gzwrite::gzclose_w(file as *mut crate::zlib_h::gzFile_s) }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{gz_close_mode, gz_close_validation_status, GzCloseMode};
+    use super::{
+        gz_close_mode, gz_close_uses_read_handler, gz_close_validation_status, GzCloseMode,
+    };
 
     #[test]
     fn selects_read_close_for_read_mode() {
@@ -73,6 +76,13 @@ mod tests {
     fn selects_write_close_for_non_read_modes() {
         assert_eq!(gz_close_mode(crate::gzguts_h::GZ_WRITE), GzCloseMode::Write);
         assert_eq!(gz_close_mode(crate::gzguts_h::GZ_NONE), GzCloseMode::Write);
+    }
+
+    #[test]
+    fn uses_read_handler_only_for_read_mode() {
+        assert!(gz_close_uses_read_handler(crate::gzguts_h::GZ_READ));
+        assert!(!gz_close_uses_read_handler(crate::gzguts_h::GZ_WRITE));
+        assert!(!gz_close_uses_read_handler(crate::gzguts_h::GZ_NONE));
     }
 
     #[test]

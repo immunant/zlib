@@ -31,6 +31,15 @@ fn chunk_len(remaining: usize) -> usize {
     remaining.min(MAX_CHUNK)
 }
 
+fn compress2_buffers_are_valid(
+    source_len: crate::stdlib::z_size_t,
+    dest_capacity: crate::stdlib::z_size_t,
+    source_is_null: bool,
+    dest_is_null: bool,
+) -> bool {
+    !(source_len > 0 && source_is_null || dest_capacity > 0 && dest_is_null)
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct CompressProgress {
     total: usize,
@@ -98,7 +107,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
     }
 
     let dest_capacity = *destLen;
-    if sourceLen > 0 && source.is_null() || dest_capacity > 0 && dest.is_null() {
+    if !compress2_buffers_are_valid(sourceLen, dest_capacity, source.is_null(), dest.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
@@ -258,7 +267,33 @@ pub unsafe extern "C" fn compressBound_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{compress_bound, compress_bound_z_impl, CompressProgress, MAX_CHUNK};
+    use super::{
+        compress2_buffers_are_valid, compress_bound, compress_bound_z_impl, CompressProgress,
+        MAX_CHUNK,
+    };
+
+    #[test]
+    fn compress2_buffer_validation_allows_null_for_empty_buffers() {
+        assert!(compress2_buffers_are_valid(0, 0, true, true));
+        assert!(compress2_buffers_are_valid(0, 0, false, false));
+    }
+
+    #[test]
+    fn compress2_buffer_validation_rejects_null_nonempty_source() {
+        assert!(!compress2_buffers_are_valid(1, 0, true, false));
+        assert!(!compress2_buffers_are_valid(1, 0, true, true));
+    }
+
+    #[test]
+    fn compress2_buffer_validation_rejects_null_nonempty_destination() {
+        assert!(!compress2_buffers_are_valid(0, 1, false, true));
+        assert!(!compress2_buffers_are_valid(0, 1, true, true));
+    }
+
+    #[test]
+    fn compress2_buffer_validation_accepts_present_nonempty_buffers() {
+        assert!(compress2_buffers_are_valid(1, 1, false, false));
+    }
 
     #[test]
     fn progress_schedules_uint_sized_chunks_and_tracks_consumption() {

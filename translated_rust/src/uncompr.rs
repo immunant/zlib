@@ -80,6 +80,15 @@ fn normalize_uncompress_status(
     }
 }
 
+fn has_invalid_uncompress_buffers(
+    dest_is_null: bool,
+    dest_len: crate::stdlib::z_size_t,
+    source_is_null: bool,
+    source_len: crate::stdlib::z_size_t,
+) -> bool {
+    source_len > 0 && source_is_null || dest_len > 0 && dest_is_null
+}
+
 #[export_name = "uncompress2_z"]
 pub unsafe extern "C" fn uncompress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -92,7 +101,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     }
     let source_len = *sourceLen;
     let dest_len = *destLen;
-    if source_len > 0 && source.is_null() || dest_len > 0 && dest.is_null() {
+    if has_invalid_uncompress_buffers(dest.is_null(), dest_len, source.is_null(), source_len) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
@@ -191,7 +200,23 @@ pub unsafe extern "C" fn uncompress_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::ChunkedProgress;
+    use super::{has_invalid_uncompress_buffers, ChunkedProgress};
+
+    #[test]
+    fn buffer_validation_allows_null_pointers_for_empty_buffers() {
+        assert!(!has_invalid_uncompress_buffers(true, 0, true, 0));
+    }
+
+    #[test]
+    fn buffer_validation_rejects_null_pointer_for_nonempty_buffer() {
+        assert!(has_invalid_uncompress_buffers(true, 1, false, 0));
+        assert!(has_invalid_uncompress_buffers(false, 0, true, 1));
+    }
+
+    #[test]
+    fn buffer_validation_accepts_present_nonempty_buffers() {
+        assert!(!has_invalid_uncompress_buffers(false, 1, false, 1));
+    }
 
     #[test]
     fn progress_refills_in_uint_sized_chunks() {
