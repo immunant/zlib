@@ -659,6 +659,16 @@ fn gz_comp_reset_value(
     }
 }
 
+fn gz_comp_reset_transition(
+    reset: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> (GzCompResetAction, ::core::ffi::c_int) {
+    let action = gz_comp_reset_action(reset, avail_in, flush);
+    let next_reset = gz_comp_reset_value(&action, reset);
+    (action, next_reset)
+}
+
 fn gz_comp_reset_after_flush(
     flush: ::core::ffi::c_int,
     current_reset: ::core::ffi::c_int,
@@ -1061,17 +1071,16 @@ unsafe fn gz_comp(
         }
         return 0 as ::core::ffi::c_int;
     }
-    let mut reset = state.reset;
-    let reset_action = gz_comp_reset_action(reset, state.strm.avail_in, flush);
-    match &reset_action {
+    let (reset_action, next_reset) =
+        gz_comp_reset_transition(state.reset, state.strm.avail_in, flush);
+    match reset_action {
         GzCompResetAction::Skip => return 0 as ::core::ffi::c_int,
         GzCompResetAction::Reset => {
             crate::src::deflate::deflateReset(&mut state.strm as *mut crate::zlib_h::z_stream_s);
         }
         GzCompResetAction::Continue => {}
     }
-    reset = gz_comp_reset_value(&reset_action, reset);
-    state.reset = reset;
+    state.reset = next_reset;
     ret = crate::zlib_h::Z_OK;
     loop {
         if gz_comp_needs_output_write(state.strm.avail_out, flush, ret) {
@@ -1132,7 +1141,7 @@ unsafe fn gz_comp(
             GzCompDeflateAction::Continue => {}
         }
     }
-    state.reset = gz_comp_reset_after_flush(flush, reset);
+    state.reset = gz_comp_reset_after_flush(flush, state.reset);
     return 0 as ::core::ffi::c_int;
 }
 
@@ -1689,8 +1698,8 @@ mod tests {
         gz_comp_output_buffer_action, gz_comp_output_buffer_progress, gz_comp_output_produced,
         gz_comp_output_write_chunk_len, gz_comp_output_write_progress, gz_comp_output_write_result,
         gz_comp_pending_after_write, gz_comp_reset_action, gz_comp_reset_after_flush,
-        gz_comp_reset_value, gz_comp_skips_empty_flush, gz_comp_write_again,
-        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
+        gz_comp_reset_transition, gz_comp_reset_value, gz_comp_skips_empty_flush,
+        gz_comp_write_again, gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
         gz_comp_write_progress, gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip,
         gz_init_allocation_plan, gz_init_deflate_failed, gz_init_failed, gz_init_mode,
         gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_buffered_progress,
@@ -2383,6 +2392,30 @@ mod tests {
     fn gz_comp_skips_empty_no_flush_when_reset_is_pending() {
         assert!(gz_comp_skips_empty_flush(1, 0, crate::zlib_h::Z_NO_FLUSH));
         assert!(gz_comp_skips_empty_flush(-1, 0, crate::zlib_h::Z_NO_FLUSH));
+    }
+
+    #[test]
+    fn gz_comp_reset_transition_preserves_reset_state_and_action() {
+        assert!(matches!(
+            gz_comp_reset_transition(1, 0, crate::zlib_h::Z_NO_FLUSH),
+            (GzCompResetAction::Skip, 1)
+        ));
+        assert!(matches!(
+            gz_comp_reset_transition(-1, 0, crate::zlib_h::Z_NO_FLUSH),
+            (GzCompResetAction::Skip, -1)
+        ));
+        assert!(matches!(
+            gz_comp_reset_transition(1, 1, crate::zlib_h::Z_NO_FLUSH),
+            (GzCompResetAction::Reset, 0)
+        ));
+        assert!(matches!(
+            gz_comp_reset_transition(1, 0, crate::zlib_h::Z_BLOCK),
+            (GzCompResetAction::Reset, 0)
+        ));
+        assert!(matches!(
+            gz_comp_reset_transition(0, 0, crate::zlib_h::Z_NO_FLUSH),
+            (GzCompResetAction::Continue, 0)
+        ));
     }
 
     #[test]

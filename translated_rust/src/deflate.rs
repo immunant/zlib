@@ -3324,6 +3324,15 @@ fn stored_insert_after_input(
     })
 }
 
+fn stored_block_length_bytes(len: ::core::ffi::c_uint) -> [crate::stdlib::Bytef; 4] {
+    [
+        len as crate::stdlib::Bytef,
+        (len >> 8) as crate::stdlib::Bytef,
+        !len as crate::stdlib::Bytef,
+        (!len >> 8) as crate::stdlib::Bytef,
+    ]
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3355,22 +3364,19 @@ unsafe extern "C" fn deflate_stored(
             0 as crate::zutil_h::ulg,
             last,
         );
+        let length_bytes = stored_block_length_bytes(len);
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len as crate::stdlib::Bytef;
+            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) = length_bytes[0];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) = length_bytes[1];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            !len as crate::stdlib::Bytef;
+            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) = length_bytes[2];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) = length_bytes[3];
         flush_pending((*s).strm);
         let (window_len, input_len) = stored_block_copy_lengths(left, len);
         if window_len != 0 {
@@ -4352,11 +4358,11 @@ mod tests {
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_entry, stored_block_available_output,
         stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
-        stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
-        stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
-        symbol_buffer_is_full, symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress,
-        DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
-        DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
+        stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
+        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
+        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
+        DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
     };
 
     #[test]
@@ -5481,6 +5487,18 @@ mod tests {
         assert_eq!(stored_block_header_bytes(13), 6);
         assert_eq!(stored_block_header_bytes(14), 7);
         assert_eq!(stored_block_header_bytes(-1), 5);
+    }
+
+    #[test]
+    fn stored_block_length_bytes_preserves_len_and_nlen_encoding() {
+        assert_eq!(stored_block_length_bytes(0x0000), [0x00, 0x00, 0xff, 0xff]);
+        assert_eq!(stored_block_length_bytes(0x0001), [0x01, 0x00, 0xfe, 0xff]);
+        assert_eq!(stored_block_length_bytes(0x00ff), [0xff, 0x00, 0x00, 0xff]);
+        assert_eq!(stored_block_length_bytes(0xff00), [0x00, 0xff, 0xff, 0x00]);
+        assert_eq!(
+            stored_block_length_bytes(crate::src::deflate::MAX_STORED as ::core::ffi::c_uint),
+            [0xff, 0xff, 0x00, 0x00]
+        );
     }
 
     #[test]
