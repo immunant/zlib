@@ -1855,6 +1855,27 @@ fn inflate_input_from_cursor(
     input[(initial_have as usize - have as usize) + offset]
 }
 
+/// Publish ordinary inflate's checked invocation-local cursors back to the
+/// ABI stream.  Both exits that can expose cursors use this one boundary, so
+/// an incoherent local offset is rejected instead of indexing a slice there.
+/// A valid empty input cursor is intentionally left untouched: zlib permits
+/// it to be null, and callers must observe that same cursor on return.
+fn inflate_publish_cursors(
+    strm: &mut crate::zlib_h::z_stream,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    next: usize,
+    put: usize,
+) -> Option<()> {
+    let input_tail = input.get(next..)?;
+    let output_tail = output.get_mut(put..)?;
+    if !input.is_empty() {
+        strm.next_in = input_tail.as_ptr() as *mut crate::stdlib::Bytef;
+    }
+    strm.next_out = output_tail.as_mut_ptr();
+    Some(())
+}
+
 pub fn inflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
@@ -2498,9 +2519,19 @@ pub fn inflate(
                                                                                         let state_ref =
                                                                                         &mut *state_ref;
                                                                                         if state_ref.havedict == 0 as ::core::ffi::c_int {
-                                                                                        strm_ref.next_out = output[put..].as_mut_ptr();
+                                                                                        if inflate_publish_cursors(
+                                                                                            strm_ref,
+                                                                                            input,
+                                                                                            output,
+                                                                                            next,
+                                                                                            put,
+                                                                                        )
+                                                                                        .is_none()
+                                                                                        {
+                                                                                            state_ref.mode = crate::src::inflate::BAD;
+                                                                                            return crate::zlib_h::Z_STREAM_ERROR;
+                                                                                        }
                                                                                         strm_ref.avail_out = left as crate::stdlib::uInt;
-                                                                                        strm_ref.next_in = input[next..].as_ptr() as *mut crate::stdlib::Bytef;
                                                                                         strm_ref.avail_in = have as crate::stdlib::uInt;
                                                                                         state_ref.hold = hold;
                                                                                         state_ref.bits = bits;
@@ -3740,10 +3771,10 @@ pub fn inflate(
         }
             // Publish the final checked offsets as ABI cursors while their
             // bounded views still make the resulting positions explicit.
-            if in_0 != 0 {
-                strm_ref.next_in = input[next..].as_ptr() as *mut crate::stdlib::Bytef;
+            if inflate_publish_cursors(strm_ref, input, output, next, put).is_none() {
+                state_ref.mode = crate::src::inflate::BAD;
+                return crate::zlib_h::Z_STREAM_ERROR;
             }
-            strm_ref.next_out = output[put..].as_mut_ptr();
         }
         // The invocation-local ABI views above have ended before this exit
         // boundary can invoke an allocator callback.
