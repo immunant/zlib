@@ -120,8 +120,11 @@ pub struct internal_state {
     // pointer field.
     pub window: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
     pub window_size: crate::zutil_h::ulg,
-    pub prev: *mut crate::src::deflate::Posf,
-    pub head: *mut crate::src::deflate::Posf,
+    // These hash tables share the callback-owned allocation model used by the
+    // window and pending buffer.  Keep allocation failure explicit instead of
+    // storing nullable raw pointers in the state.
+    pub prev: Option<::core::ptr::NonNull<crate::src::deflate::Posf>>,
+    pub head: Option<::core::ptr::NonNull<crate::src::deflate::Posf>>,
     pub ins_h: crate::stdlib::uInt,
     pub hash_size: crate::stdlib::uInt,
     pub hash_bits: crate::stdlib::uInt,
@@ -632,8 +635,14 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             }
             // `head` and `prev` are allocated at these exact element counts
             // in `deflateInit2_()` and `deflateCopy()`.
-            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-            let prev = ::core::slice::from_raw_parts_mut(state.prev, wsize as usize);
+            let head = ::core::slice::from_raw_parts_mut(
+                state.head.expect("initialized head table").as_ptr(),
+                state.hash_size as usize,
+            );
+            let prev = ::core::slice::from_raw_parts_mut(
+                state.prev.expect("initialized prev table").as_ptr(),
+                wsize as usize,
+            );
             slide_hash_table(head, wsize);
             slide_hash_table(prev, wsize);
             state.slid = 1 as ::core::ffi::c_int;
@@ -668,8 +677,14 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             // and `deflateCopy()`. Keep the raw views local to this update,
             // rather than repeatedly indexing through the raw cursors.
             let window = ::core::slice::from_raw_parts(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
-            let prev = ::core::slice::from_raw_parts_mut(state.prev, wsize as usize);
-            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+            let prev = ::core::slice::from_raw_parts_mut(
+                state.prev.expect("initialized prev table").as_ptr(),
+                wsize as usize,
+            );
+            let head = ::core::slice::from_raw_parts_mut(
+                state.head.expect("initialized head table").as_ptr(),
+                state.hash_size as usize,
+            );
             state.ins_h = window[str as usize] as crate::stdlib::uInt;
             state.ins_h = (state.ins_h << state.hash_shift
                 ^ window[str.wrapping_add(1 as crate::stdlib::uInt) as usize]
@@ -808,18 +823,18 @@ pub unsafe extern "C" fn deflateInit2_(
         storage.window.items,
         storage.window.size,
     ) as *mut crate::stdlib::Bytef);
-    (*s).prev = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).prev = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
         storage.prev.items,
         storage.prev.size,
-    ) as *mut crate::src::deflate::Posf;
-    (*s).head = Some((*strm).zalloc.expect("non-null function pointer"))
+    ) as *mut crate::src::deflate::Posf);
+    (*s).head = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
         storage.head.items,
         storage.head.size,
-    ) as *mut crate::src::deflate::Posf;
+    ) as *mut crate::src::deflate::Posf);
     (*s).high_water = 0 as crate::zutil_h::ulg;
     (*s).lit_bufsize = layout.lit_bufsize;
     (*s).pending_buf = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
@@ -833,8 +848,8 @@ pub unsafe extern "C" fn deflateInit2_(
         .byte_len()
         .expect("validated pending allocation geometry") as crate::zutil_h::ulg;
     if (*s).window.is_none()
-        || (*s).prev.is_null()
-        || (*s).head.is_null()
+        || (*s).prev.is_none()
+        || (*s).head.is_none()
         || (*s).pending_buf.is_none()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
@@ -1010,7 +1025,10 @@ pub unsafe extern "C" fn deflateSetDictionary(
         if wrap == 0 as ::core::ffi::c_int {
             // `head` has exactly `hash_size` elements from `deflateInit2_()`
             // or `deflateCopy()`.
-            let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+            let head = ::core::slice::from_raw_parts_mut(
+                (*s).head.expect("initialized head table").as_ptr(),
+                (*s).hash_size as usize,
+            );
             clear_hash_table(head);
             (*s).slid = 0 as ::core::ffi::c_int;
             (*s).strstart = 0 as crate::stdlib::uInt;
@@ -1035,8 +1053,14 @@ pub unsafe extern "C" fn deflateSetDictionary(
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
         );
         let window = ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
-        let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
-        let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
+        let head = ::core::slice::from_raw_parts_mut(
+            (*s).head.expect("initialized head table").as_ptr(),
+            (*s).hash_size as usize,
+        );
+        let prev = ::core::slice::from_raw_parts_mut(
+            (*s).prev.expect("initialized prev table").as_ptr(),
+            (*s).w_size as usize,
+        );
         (str, (*s).ins_h) = insert_dictionary_hashes(
             window,
             head,
@@ -1175,7 +1199,10 @@ pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
             .wrapping_mul(state.w_size as crate::zutil_h::ulg);
         // `head` has exactly `hash_size` elements from `deflateInit2_()` or
         // `deflateCopy()`.
-        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+        let head = ::core::slice::from_raw_parts_mut(
+            state.head.expect("initialized head table").as_ptr(),
+            state.hash_size as usize,
+        );
         clear_hash_table(head);
         state.slid = 0 as ::core::ffi::c_int;
         state.max_lazy_match =
@@ -1453,15 +1480,24 @@ pub unsafe extern "C" fn deflateParams(
                 let state = &mut *s;
                 // `head` and `prev` are allocated at these exact element
                 // counts in `deflateInit2_()` and `deflateCopy()`.
-                let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-                let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+                let head = ::core::slice::from_raw_parts_mut(
+                    state.head.expect("initialized head table").as_ptr(),
+                    state.hash_size as usize,
+                );
+                let prev = ::core::slice::from_raw_parts_mut(
+                    state.prev.expect("initialized prev table").as_ptr(),
+                    state.w_size as usize,
+                );
                 slide_hash_table(head, state.w_size);
                 slide_hash_table(prev, state.w_size);
                 state.slid = 1 as ::core::ffi::c_int;
             } else {
                 // `head` has exactly `hash_size` elements from
                 // `deflateInit2_()` or `deflateCopy()`.
-                let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+                let head = ::core::slice::from_raw_parts_mut(
+                    (*s).head.expect("initialized head table").as_ptr(),
+                    (*s).hash_size as usize,
+                );
                 clear_hash_table(head);
                 (*s).slid = 0 as ::core::ffi::c_int;
             }
@@ -2440,8 +2476,10 @@ pub unsafe extern "C" fn deflate(
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
                     // `head` has exactly `hash_size` elements from
                     // `deflateInit2_()` or `deflateCopy()`.
-                    let head =
-                        ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+                    let head = ::core::slice::from_raw_parts_mut(
+                        (*s).head.expect("initialized head table").as_ptr(),
+                        (*s).hash_size as usize,
+                    );
                     clear_hash_table(head);
                     (*s).slid = 0 as ::core::ffi::c_int;
                     if (*s).lookahead == 0 as crate::stdlib::uInt {
@@ -2545,16 +2583,16 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
             pending_buf.as_ptr() as crate::stdlib::voidpf,
         );
     }
-    if !(*(*strm).state).head.is_null() {
+    if let Some(head) = (*(*strm).state).head {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*(*strm).state).head as crate::stdlib::voidpf,
+            head.as_ptr() as crate::stdlib::voidpf,
         );
     }
-    if !(*(*strm).state).prev.is_null() {
+    if let Some(prev) = (*(*strm).state).prev {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*(*strm).state).prev as crate::stdlib::voidpf,
+            prev.as_ptr() as crate::stdlib::voidpf,
         );
     }
     if let Some(window) = (*(*strm).state).window {
@@ -2626,18 +2664,18 @@ pub unsafe extern "C" fn deflateCopy(
         storage.window.items,
         storage.window.size,
     ) as *mut crate::stdlib::Bytef);
-    (*ds).prev = Some((*dest).zalloc.expect("non-null function pointer"))
+    (*ds).prev = ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
         storage.prev.items,
         storage.prev.size,
-    ) as *mut crate::src::deflate::Posf;
-    (*ds).head = Some((*dest).zalloc.expect("non-null function pointer"))
+    ) as *mut crate::src::deflate::Posf);
+    (*ds).head = ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
         storage.head.items,
         storage.head.size,
-    ) as *mut crate::src::deflate::Posf;
+    ) as *mut crate::src::deflate::Posf);
     (*ds).pending_buf = ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
@@ -2645,8 +2683,8 @@ pub unsafe extern "C" fn deflateCopy(
         storage.pending.size,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef);
     if (*ds).window.is_none()
-        || (*ds).prev.is_null()
-        || (*ds).head.is_null()
+        || (*ds).prev.is_none()
+        || (*ds).head.is_none()
         || (*ds).pending_buf.is_none()
     {
         deflateEnd(dest);
@@ -2670,13 +2708,13 @@ pub unsafe extern "C" fn deflateCopy(
         copy_layout.window_bytes,
     );
     crate::stdlib::memcpy(
-        (*ds).prev as *mut ::core::ffi::c_void,
-        (*ss).prev as *const ::core::ffi::c_void,
+        (*ds).prev.expect("initialized prev table").as_ptr() as *mut ::core::ffi::c_void,
+        (*ss).prev.expect("initialized prev table").as_ptr() as *const ::core::ffi::c_void,
         copy_layout.prev_bytes,
     );
     crate::stdlib::memcpy(
-        (*ds).head as *mut ::core::ffi::c_void,
-        (*ss).head as *const ::core::ffi::c_void,
+        (*ds).head.expect("initialized head table").as_ptr() as *mut ::core::ffi::c_void,
+        (*ss).head.expect("initialized head table").as_ptr() as *const ::core::ffi::c_void,
         copy_layout.head_bytes,
     );
     (*ds).pending_out = (*ss).pending_out;
@@ -2809,7 +2847,10 @@ unsafe extern "C" fn longest_match(
     // deflateInit2_() and retained by deflateCopy().  Keep the raw views
     // bounded by those capacities before handing matching to the safe core.
     let window = ::core::slice::from_raw_parts(state.window.expect("initialized window").as_ptr(), state.window_size as usize);
-    let prev = ::core::slice::from_raw_parts(state.prev, state.w_size as usize);
+    let prev = ::core::slice::from_raw_parts(
+        state.prev.expect("initialized prev table").as_ptr(),
+        state.w_size as usize,
+    );
     let result = longest_match_core(
         window,
         prev,
@@ -3128,8 +3169,14 @@ unsafe extern "C" fn deflate_fast(
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let window = ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
-            let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
-            let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
+            let head = ::core::slice::from_raw_parts_mut(
+                (*s).head.expect("initialized head table").as_ptr(),
+                (*s).hash_size as usize,
+            );
+            let prev = ::core::slice::from_raw_parts_mut(
+                (*s).prev.expect("initialized prev table").as_ptr(),
+                (*s).w_size as usize,
+            );
             ((*s).ins_h, hash_head) = insert_hash(
                 window,
                 head,
@@ -3173,9 +3220,14 @@ unsafe extern "C" fn deflate_fast(
                     (*s).strstart = (*s).strstart.wrapping_add(1);
                     let window =
                         ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
-                    let head =
-                        ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
-                    let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
+                    let head = ::core::slice::from_raw_parts_mut(
+                        (*s).head.expect("initialized head table").as_ptr(),
+                        (*s).hash_size as usize,
+                    );
+                    let prev = ::core::slice::from_raw_parts_mut(
+                        (*s).prev.expect("initialized prev table").as_ptr(),
+                        (*s).w_size as usize,
+                    );
                     ((*s).ins_h, hash_head) = insert_hash(
                         window,
                         head,
@@ -3322,8 +3374,14 @@ unsafe extern "C" fn deflate_slow(
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let window = ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
-            let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
-            let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
+            let head = ::core::slice::from_raw_parts_mut(
+                (*s).head.expect("initialized head table").as_ptr(),
+                (*s).hash_size as usize,
+            );
+            let prev = ::core::slice::from_raw_parts_mut(
+                (*s).prev.expect("initialized prev table").as_ptr(),
+                (*s).w_size as usize,
+            );
             ((*s).ins_h, hash_head) = insert_hash(
                 window,
                 head,
@@ -3389,9 +3447,14 @@ unsafe extern "C" fn deflate_slow(
                 if (*s).strstart <= max_insert {
                     let window =
                         ::core::slice::from_raw_parts((*s).window.expect("initialized window").as_ptr(), (*s).window_size as usize);
-                    let head =
-                        ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
-                    let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
+                    let head = ::core::slice::from_raw_parts_mut(
+                        (*s).head.expect("initialized head table").as_ptr(),
+                        (*s).hash_size as usize,
+                    );
+                    let prev = ::core::slice::from_raw_parts_mut(
+                        (*s).prev.expect("initialized prev table").as_ptr(),
+                        (*s).w_size as usize,
+                    );
                     ((*s).ins_h, hash_head) = insert_hash(
                         window,
                         head,
