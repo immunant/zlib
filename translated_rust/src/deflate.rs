@@ -123,7 +123,10 @@ pub struct internal_state {
     pub w_size: crate::stdlib::uInt,
     pub w_bits: crate::stdlib::uInt,
     pub w_mask: crate::stdlib::uInt,
-    pub window: *mut crate::stdlib::Bytef,
+    // The LZ history window is a fixed-size allocation owned by the stream
+    // state.  Store the owner directly rather than retaining an allocator
+    // pointer across compression calls.
+    pub window: Option<Vec<crate::stdlib::Bytef>>,
     pub window_size: crate::zutil_h::ulg,
     // The LZ predecessor chain has one entry per window position.  Owning it
     // as a vector keeps the chain's allocation paired with the state instead
@@ -322,17 +325,14 @@ impl internal_state {
         let start = usize::try_from(start).ok()?;
         let window_len = usize::try_from(self.window_size).ok()?;
         let end = start.checked_add(len)?;
-        if self.window.is_null() || end > window_len {
+        let window = self.window.as_deref()?;
+        if end > window_len || end > window.len() {
             return None;
         }
-
-        Some(unsafe { core::slice::from_raw_parts(self.window.add(start), len) })
+        Some(&window[start..end])
     }
 
-    /// Mutable counterpart to `window_bytes()`.  The allocation is owned by
-    /// the state for the complete lifetime of the deflate stream; keep the
-    /// one raw conversion here so the compression engines can work with
-    /// checked ranges only.
+    /// Mutable counterpart to `window_bytes()`.
     #[inline]
     fn window_bytes_mut(
         &mut self,
@@ -342,11 +342,11 @@ impl internal_state {
         let start = usize::try_from(start).ok()?;
         let window_len = usize::try_from(self.window_size).ok()?;
         let end = start.checked_add(len)?;
-        if self.window.is_null() || end > window_len {
+        let window = self.window.as_deref_mut()?;
+        if end > window_len || end > window.len() {
             return None;
         }
-
-        Some(unsafe { core::slice::from_raw_parts_mut(self.window.add(start), len) })
+        Some(&mut window[start..end])
     }
 
     /// Preserve the input most recently consumed by the stored-block engine
@@ -804,6 +804,13 @@ fn allocate_pending_buffer(len: usize) -> Option<Vec<crate::stdlib::Bytef>> {
     Some(pending)
 }
 
+fn allocate_window(len: usize) -> Option<Vec<crate::stdlib::Bytef>> {
+    let mut window = Vec::new();
+    window.try_reserve_exact(len).ok()?;
+    window.resize(len, 0);
+    Some(window)
+}
+
 fn clone_head_table(
     head: &[crate::src::deflate::Posf],
 ) -> Option<Vec<crate::src::deflate::Posf>> {
@@ -950,13 +957,9 @@ unsafe fn fill_window_impl(s: &mut crate::src::deflate::deflate_state) {
     let Ok(window_len) = usize::try_from(s.window_size) else {
         return;
     };
-    if s.window.is_null() {
+    if s.window.as_ref().is_none_or(|window| window.len() != window_len) {
         return;
     }
-    // The stream state owns this fixed allocation for the duration of the
-    // deflate session.  Keep the one conversion at this boundary; the window
-    // algorithm below uses only checked slice indexing and copying.
-    let window = unsafe { core::slice::from_raw_parts_mut(s.window, window_len) };
     // `strm` is installed with the state and verified before any compressor
     // invokes an engine.  A malformed internal state simply cannot refill.
     let Some(strm) = (unsafe { s.strm.as_mut() }) else {
@@ -993,9 +996,12 @@ unsafe fn fill_window_impl(s: &mut crate::src::deflate::deflate_state) {
             let Some(copy_end) = window_base.checked_add(copy_len) else {
                 return;
             };
-            if copy_end > window.len() {
+            if copy_end > window_len {
                 return;
             }
+            let Some(window) = s.window.as_deref_mut() else {
+                return;
+            };
             window.copy_within(window_base..copy_end, 0);
             s.match_start = s.match_start.wrapping_sub(wsize);
             s.strstart = s.strstart.wrapping_sub(wsize);
@@ -1019,13 +1025,16 @@ unsafe fn fill_window_impl(s: &mut crate::src::deflate::deflate_state) {
         let Some(end) = start.checked_add(n_usize) else {
             return;
         };
-        if end > window.len() || (n != 0 && strm.next_in.is_null()) {
+        if end > window_len || (n != 0 && strm.next_in.is_null()) {
             return;
         }
         if n != 0 {
             // `n` is bounded by `avail_in`, and the stream validator ensures
             // that a nonempty input range is live for exactly that extent.
             let input = unsafe { core::slice::from_raw_parts(strm.next_in, n_usize) };
+            let Some(window) = s.window.as_deref_mut() else {
+                return;
+            };
             read_buf_impl(strm, input, &mut window[start..end], s.wrap);
             strm.next_in = strm.next_in.wrapping_add(n_usize);
         }
@@ -1038,6 +1047,9 @@ unsafe fn fill_window_impl(s: &mut crate::src::deflate::deflate_state) {
                 return;
             };
             let Some(second) = first.checked_add(1) else {
+                return;
+            };
+            let Some(window) = s.window.as_deref() else {
                 return;
             };
             let (Some(&first_byte), Some(&second_byte)) = (window.get(first), window.get(second))
@@ -1117,9 +1129,12 @@ unsafe fn fill_window_impl(s: &mut crate::src::deflate::deflate_state) {
         let Some(end) = start.checked_add(init) else {
             return;
         };
-        if end > window.len() {
+        if end > window_len {
             return;
         }
+        let Some(window) = s.window.as_deref_mut() else {
+            return;
+        };
         window[start..end].fill(0);
     }
 }
@@ -1274,13 +1289,7 @@ pub unsafe fn deflateInit2_(
             .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
             .wrapping_sub(1 as crate::stdlib::uInt)
             .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-        s.window = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            s.w_size,
-            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                as crate::stdlib::uInt,
-        ) as *mut crate::stdlib::Bytef;
+        s.window = allocate_window(s.w_size as usize * 2);
         s.prev = allocate_prev_table(s.w_size as usize);
         s.head = Some(allocate_head_table(s.hash_size as usize).unwrap_or_default());
         s.high_water = 0 as crate::zutil_h::ulg;
@@ -1288,7 +1297,7 @@ pub unsafe fn deflateInit2_(
             ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
         s.pending_buf_size = (s.lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
         s.pending_buf = allocate_pending_buffer(s.pending_buf_size as usize);
-        if s.window.is_null()
+        if s.window.is_none()
             || s.prev.is_none()
             || s.head.as_ref().is_none_or(|head| head.len() != s.hash_size as usize)
             || s.pending_buf.is_none()
@@ -1447,11 +1456,13 @@ pub unsafe extern "C" fn deflateSetDictionary(
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
         );
         loop {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset(
-                    str.wrapping_add(3 as crate::stdlib::uInt)
-                        .wrapping_sub(1 as crate::stdlib::uInt) as isize,
-                ) as crate::stdlib::uInt)
+            let Some(byte) = (*s).window_byte(
+                str.wrapping_add(3 as crate::stdlib::uInt)
+                    .wrapping_sub(1 as crate::stdlib::uInt),
+            ) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            (*s).ins_h = ((*s).ins_h << (*s).hash_shift ^ byte as crate::stdlib::uInt)
                 & (*s).hash_mask;
             let head_index = (*s).ins_h as usize;
             let Some(head) = (*s).head.as_mut() else {
@@ -1519,12 +1530,13 @@ pub unsafe extern "C" fn deflateGetDictionary(
         len = (*s).w_size;
     }
     if !dictionary.is_null() && len != 0 {
+        let start = (*s).strstart.wrapping_add((*s).lookahead).wrapping_sub(len);
+        let Some(source) = (*s).window_bytes(start, len as usize) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         crate::stdlib::memcpy(
             dictionary as *mut ::core::ffi::c_void,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize)
-                .offset(-(len as isize)) as *const ::core::ffi::c_void,
+            source.as_ptr() as *const ::core::ffi::c_void,
             len as crate::__stddef_size_t_h::size_t,
         );
     }
@@ -2613,7 +2625,7 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
             state.head.take(),
             state.prev.take(),
             state.pending_buf.take(),
-            [state.window.cast::<::core::ffi::c_void>()],
+            state.window.take(),
             strm.state.cast::<::core::ffi::c_void>(),
         )
     };
@@ -2621,12 +2633,8 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
     drop(head);
     drop(prev);
     drop(pending);
+    drop(allocations);
     let zfree = strm.zfree.expect("non-null function pointer");
-    for allocation in allocations {
-        if !allocation.is_null() {
-            unsafe { zfree(strm.opaque, allocation) };
-        }
-    }
     unsafe { zfree(strm.opaque, state_allocation) };
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
@@ -2679,7 +2687,7 @@ fn deflate_copy_state_is_valid(
 
     deflate_params_stream_is_valid(strm)
         && deflate_params_state_is_valid(strm, state)
-        && !state.window.is_null()
+        && state.window.as_ref().is_some_and(|window| window.len() == window_size)
         && window_size == w_size.saturating_mul(2)
         && high_water <= window_size
         && state.head.as_ref().is_some_and(|head| head.len() == hash_size)
@@ -2714,9 +2722,7 @@ fn deflate_copy_state(
         w_size: source.w_size,
         w_bits: source.w_bits,
         w_mask: source.w_mask,
-        // The implementation installs the independently allocated window
-        // immediately after building this fully owned state value.
-        window: source.window,
+        window: None,
         window_size: source.window_size,
         prev: Some(prev),
         head: Some(head),
@@ -2817,17 +2823,24 @@ unsafe fn deflate_copy_impl(
     if state_memory.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let window = zalloc(dest.opaque, source_state.w_size, 2).cast::<crate::stdlib::Bytef>();
-    if window.is_null() {
+    let Some(source_window) = source_state.window.as_deref() else {
+        zfree(dest.opaque, state_memory.cast());
+        dest.state = ::core::ptr::null_mut();
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(window) = allocate_window(source_window.len()) else {
         zfree(dest.opaque, state_memory.cast());
         dest.state = ::core::ptr::null_mut();
         return crate::zlib_h::Z_MEM_ERROR;
-    }
-
+    };
     let high_water = source_state.high_water as usize;
-    let source_window = core::slice::from_raw_parts(source_state.window, high_water);
-    let destination_window = core::slice::from_raw_parts_mut(window, high_water);
-    destination_window.copy_from_slice(source_window);
+    if high_water > source_window.len() {
+        zfree(dest.opaque, state_memory.cast());
+        dest.state = ::core::ptr::null_mut();
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let mut window = window;
+    window[..high_water].copy_from_slice(&source_window[..high_water]);
 
     let copied_state = deflate_copy_state(
         source_state,
@@ -2838,7 +2851,7 @@ unsafe fn deflate_copy_impl(
         gzip_header_store(gzhead),
     );
     let mut copied_state = copied_state;
-    copied_state.window = window;
+    copied_state.window = Some(window);
     core::ptr::write(state_memory, copied_state);
     dest.state = state_memory;
     crate::zlib_h::Z_OK
@@ -2870,7 +2883,17 @@ unsafe extern "C" fn longest_match(
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
     let mut chain_length: ::core::ffi::c_uint = (*s).max_chain_length as ::core::ffi::c_uint;
-    let mut scan: *mut crate::stdlib::Bytef = (*s).window.offset((*s).strstart as isize);
+    let lookahead = (*s).lookahead;
+    let Some(window) = (*s).window.as_deref() else {
+        return lookahead;
+    };
+    let Ok(scan_start) = usize::try_from((*s).strstart) else {
+        return lookahead;
+    };
+    let Some(scan) = window.get(scan_start..) else {
+        return lookahead;
+    };
+    let mut scan: *mut crate::stdlib::Bytef = scan.as_ptr().cast_mut();
     let mut match_0: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     let mut len: ::core::ffi::c_int = 0;
     let mut best_len: ::core::ffi::c_int = (*s).prev_length as ::core::ffi::c_int;
@@ -2887,15 +2910,17 @@ unsafe extern "C" fn longest_match(
     } else {
         NIL as crate::src::deflate::IPos
     };
-    let lookahead = (*s).lookahead;
     let Some(prev) = (*s).prev.as_deref() else {
         return lookahead;
     };
     let mut wmask: crate::stdlib::uInt = (*s).w_mask;
-    let mut strend: *mut crate::stdlib::Bytef = (*s)
-        .window
-        .offset((*s).strstart as isize)
-        .offset(crate::zutil_h::MAX_MATCH as isize);
+    let Some(strend_start) = scan_start.checked_add(crate::zutil_h::MAX_MATCH as usize) else {
+        return lookahead;
+    };
+    let Some(strend) = window.get(strend_start..) else {
+        return lookahead;
+    };
+    let mut strend: *mut crate::stdlib::Bytef = strend.as_ptr().cast_mut();
     let mut scan_end1: crate::stdlib::Byte =
         *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize) as crate::stdlib::Byte;
     let mut scan_end: crate::stdlib::Byte = *scan.offset(best_len as isize) as crate::stdlib::Byte;
@@ -2906,7 +2931,13 @@ unsafe extern "C" fn longest_match(
         nice_match = (*s).lookahead as ::core::ffi::c_int;
     }
     loop {
-        match_0 = (*s).window.offset(cur_match as isize);
+        let Ok(match_start) = usize::try_from(cur_match) else {
+            break;
+        };
+        let Some(match_bytes) = window.get(match_start..) else {
+            break;
+        };
+        match_0 = match_bytes.as_ptr().cast_mut();
         if !(*match_0.offset(best_len as isize) as ::core::ffi::c_int
             != scan_end as ::core::ffi::c_int
             || *match_0.offset((best_len - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_int
@@ -3448,8 +3479,11 @@ unsafe fn deflate_slow(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
                         (*s).window
-                            .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                            as *mut crate::stdlib::charf
+                            .as_deref()
+                            .and_then(|window| window.get((*s).block_start as usize))
+                            .map_or(::core::ptr::null_mut(), |byte| {
+                                core::ptr::from_ref(byte).cast_mut().cast::<crate::stdlib::charf>()
+                            })
                     } else {
                         ::core::ptr::null_mut::<crate::stdlib::charf>()
                     },
@@ -3479,8 +3513,11 @@ unsafe fn deflate_slow(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
                         (*s).window
-                            .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                            as *mut crate::stdlib::charf
+                            .as_deref()
+                            .and_then(|window| window.get((*s).block_start as usize))
+                            .map_or(::core::ptr::null_mut(), |byte| {
+                                core::ptr::from_ref(byte).cast_mut().cast::<crate::stdlib::charf>()
+                            })
                     } else {
                         ::core::ptr::null_mut::<crate::stdlib::charf>()
                     },
@@ -3523,8 +3560,11 @@ unsafe fn deflate_slow(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
+                    .as_deref()
+                    .and_then(|window| window.get((*s).block_start as usize))
+                    .map_or(::core::ptr::null_mut(), |byte| {
+                        core::ptr::from_ref(byte).cast_mut().cast::<crate::stdlib::charf>()
+                    })
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
@@ -3547,8 +3587,11 @@ unsafe fn deflate_slow(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
+                    .as_deref()
+                    .and_then(|window| window.get((*s).block_start as usize))
+                    .map_or(::core::ptr::null_mut(), |byte| {
+                        core::ptr::from_ref(byte).cast_mut().cast::<crate::stdlib::charf>()
+                    })
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },

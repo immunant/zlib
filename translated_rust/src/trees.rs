@@ -3488,17 +3488,13 @@ unsafe fn flush_block_data(
         return Some(Vec::new());
     }
     let window_len = usize::try_from(s.window_size).ok()?;
-    if s.window.is_null() {
-        return None;
-    }
-    let start = (buf as *const u8) as usize;
-    let window_start = s.window as usize;
-    let offset = start.checked_sub(window_start)?;
+    let window = s.window.as_deref()?;
+    let offset = buf.addr().checked_sub(window.as_ptr().addr())?;
     let end = offset.checked_add(len)?;
-    if end > window_len {
+    if end > window_len || end > window.len() {
         return None;
     }
-    Some(unsafe { core::slice::from_raw_parts(buf.cast::<u8>(), len) }.to_vec())
+    Some(window[offset..end].to_vec())
 }
 
 pub(crate) unsafe fn tr_flush_block_impl(
