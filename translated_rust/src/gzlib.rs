@@ -609,6 +609,55 @@ struct GzOpenConfig {
     path: Box<[u8]>,
 }
 
+// `gzdopen()` needs a byte-exact synthetic pathname for diagnostics, but that
+// formatting is independent of both the ABI handle and raw-FD adoption.  Keep
+// it as an owned, pointer-free value so the future owned-open constructor can
+// use the same label without rebuilding it at an unsafe boundary.
+struct GzFdPath {
+    bytes: [u8; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()],
+    len: usize,
+}
+
+impl GzFdPath {
+    fn new(fd: ::core::ffi::c_int) -> Self {
+        // This is the same bound used by the C implementation: enough for
+        // the literal label, every decimal digit of a C int, its sign, and
+        // the NUL.
+        let mut path = Self {
+            bytes: [0; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()],
+            len: 4,
+        };
+        path.bytes[..4].copy_from_slice(b"<fd:");
+        if fd < 0 as ::core::ffi::c_int {
+            path.bytes[path.len] = b'-';
+            path.len += 1;
+        }
+        let mut digits = [0u8; 10];
+        let mut value = fd.unsigned_abs();
+        let mut count = 0usize;
+        loop {
+            digits[count] = (value % 10) as u8;
+            count += 1;
+            value /= 10;
+            if value == 0 {
+                break;
+            }
+        }
+        while count != 0 {
+            count -= 1;
+            path.bytes[path.len] = b'0' + digits[count];
+            path.len += 1;
+        }
+        path.bytes[path.len] = b'>';
+        path.len += 1;
+        path
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
 // The resource-owning portion of a freshly opened gzip handle.  This is the
 // first complete pointer-free owner projection for gzip open: the ABI cursor
 // and embedded codec stream are assembled only at the boundary below.  Keep
@@ -902,33 +951,8 @@ unsafe fn gzdopen(fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zlib_h::gzFile 
     if fd == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    // This is the same bound used by the C implementation: enough for the
-    // literal label, every decimal digit of a C int, its sign, and the NUL.
-    let mut path = [0u8; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()];
-    path[..4].copy_from_slice(b"<fd:");
-    let mut at = 4usize;
-    if fd < 0 as ::core::ffi::c_int {
-        path[at] = b'-';
-        at += 1;
-    }
-    let mut digits = [0u8; 10];
-    let mut value = fd.unsigned_abs();
-    let mut count = 0usize;
-    loop {
-        digits[count] = (value % 10) as u8;
-        count += 1;
-        value /= 10;
-        if value == 0 {
-            break;
-        }
-    }
-    while count != 0 {
-        count -= 1;
-        path[at] = b'0' + digits[count];
-        at += 1;
-    }
-    path[at] = b'>';
-    gz_open(&path[..at + 1], fd, mode)
+    let path = GzFdPath::new(fd);
+    gz_open(path.as_bytes(), fd, mode)
 }
 #[export_name = "gzdopen"]
 
