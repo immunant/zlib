@@ -2894,14 +2894,14 @@ fn inflate_table_entry(
     }
 }
 
-pub unsafe extern "C" fn inflate_table(
+fn inflate_table_impl(
     mut type_0: crate::src::inftrees::codetype,
-    mut lens: *mut ::core::ffi::c_ushort,
+    lens: &[::core::ffi::c_ushort],
     mut codes: ::core::ffi::c_uint,
-    mut table: *mut *mut crate::src::inftrees::code,
-    mut bits: *mut ::core::ffi::c_uint,
-    mut work: *mut ::core::ffi::c_ushort,
-) -> ::core::ffi::c_int {
+    table_entries: &mut [crate::src::inftrees::code],
+    bits: &mut ::core::ffi::c_uint,
+    work: &mut [::core::ffi::c_ushort],
+) -> Result<usize, ::core::ffi::c_int> {
     let mut len: ::core::ffi::c_uint = 0;
     let mut sym: ::core::ffi::c_uint = 0;
     let mut min: ::core::ffi::c_uint = 0;
@@ -3061,8 +3061,6 @@ pub unsafe extern "C" fn inflate_table(
         64 as ::core::ffi::c_ushort,
         64 as ::core::ffi::c_ushort,
     ];
-    let lens = ::core::slice::from_raw_parts(lens, codes as usize);
-    let work = ::core::slice::from_raw_parts_mut(work, codes as usize);
     len = 0 as ::core::ffi::c_uint;
     while len <= MAXBITS as ::core::ffi::c_uint {
         count[len as usize] = 0 as ::core::ffi::c_ushort;
@@ -3079,13 +3077,10 @@ pub unsafe extern "C" fn inflate_table(
             here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-            let table_start = *table;
-            let table_entries = ::core::slice::from_raw_parts_mut(table_start, 2);
             table_entries[0] = here;
             table_entries[1] = here;
-            *table = table_start.wrapping_add(2);
             *bits = 1 as ::core::ffi::c_uint;
-            return 0 as ::core::ffi::c_int;
+            return Ok(2);
         }
         Ok(InflateTableBounds::Ready {
             min: table_min,
@@ -3096,7 +3091,7 @@ pub unsafe extern "C" fn inflate_table(
             max = table_max;
             root = table_root;
         }
-        Err(error) => return error,
+        Err(error) => return Err(error),
     }
     offs[1 as ::core::ffi::c_int as usize] = 0 as ::core::ffi::c_ushort;
     len = 1 as ::core::ffi::c_uint;
@@ -3134,13 +3129,6 @@ pub unsafe extern "C" fn inflate_table(
     huff = 0 as ::core::ffi::c_uint;
     sym = 0 as ::core::ffi::c_uint;
     len = min;
-    let table_start = *table;
-    let table_len = match type_0 {
-        LENS => ENOUGH_LENS as usize,
-        DISTS => ENOUGH_DISTS as usize,
-        _ => (1usize) << root,
-    };
-    let table_entries = ::core::slice::from_raw_parts_mut(table_start, table_len);
     next = 0;
     curr = root;
     drop_0 = 0 as ::core::ffi::c_uint;
@@ -3154,7 +3142,7 @@ pub unsafe extern "C" fn inflate_table(
             == crate::src::inftrees::DISTS as ::core::ffi::c_int as ::core::ffi::c_uint
             && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
     {
-        return 1 as ::core::ffi::c_int;
+        return Err(1);
     }
     loop {
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
@@ -3212,7 +3200,7 @@ pub unsafe extern "C" fn inflate_table(
                     == crate::src::inftrees::DISTS as ::core::ffi::c_int as ::core::ffi::c_uint
                     && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
             {
-                return 1 as ::core::ffi::c_int;
+                return Err(1);
             }
             low = huff & mask;
             table_entries[low as usize].op = curr as ::core::ffi::c_uchar;
@@ -3226,9 +3214,53 @@ pub unsafe extern "C" fn inflate_table(
         here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
         table_entries[next + huff as usize] = here;
     }
-    *table = table_start.wrapping_add(used as usize);
     *bits = root;
-    return 0 as ::core::ffi::c_int;
+    Ok(used as usize)
+}
+
+fn inflate_table_capacity(
+    type_0: crate::src::inftrees::codetype,
+    lens: &[::core::ffi::c_ushort],
+    bits: ::core::ffi::c_uint,
+) -> Result<usize, ::core::ffi::c_int> {
+    let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
+    for &len in lens {
+        count[len as usize] = count[len as usize].wrapping_add(1);
+    }
+    match inflate_table_bounds(type_0, &count, bits)? {
+        InflateTableBounds::Empty => Ok(2),
+        InflateTableBounds::Ready { root, .. } => Ok(match type_0 {
+            LENS => ENOUGH_LENS as usize,
+            DISTS => ENOUGH_DISTS as usize,
+            _ => (1usize) << root,
+        }),
+    }
+}
+
+pub unsafe extern "C" fn inflate_table(
+    type_0: crate::src::inftrees::codetype,
+    lens: *mut ::core::ffi::c_ushort,
+    codes: ::core::ffi::c_uint,
+    table: *mut *mut crate::src::inftrees::code,
+    bits: *mut ::core::ffi::c_uint,
+    work: *mut ::core::ffi::c_ushort,
+) -> ::core::ffi::c_int {
+    let lens = ::core::slice::from_raw_parts(lens, codes as usize);
+    let work = ::core::slice::from_raw_parts_mut(work, codes as usize);
+    let bits = &mut *bits;
+    let table_len = match inflate_table_capacity(type_0, lens, *bits) {
+        Ok(table_len) => table_len,
+        Err(error) => return error,
+    };
+    let table_start = *table;
+    let table_entries = ::core::slice::from_raw_parts_mut(table_start, table_len);
+    match inflate_table_impl(type_0, lens, codes, table_entries, bits, work) {
+        Ok(used) => {
+            *table = table_start.wrapping_add(used);
+            0
+        }
+        Err(error) => error,
+    }
 }
 #[export_name = "inflate_table"]
 
