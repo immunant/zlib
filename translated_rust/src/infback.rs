@@ -159,6 +159,25 @@ fn inflate_back_low_bits(
         & ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
 }
 
+fn inflate_back_drop_bits(
+    hold: &mut ::core::ffi::c_ulong,
+    bits: &mut ::core::ffi::c_uint,
+    count: ::core::ffi::c_uint,
+) {
+    *hold >>= count;
+    *bits = bits.wrapping_sub(count);
+}
+
+fn inflate_back_take_bits(
+    hold: &mut ::core::ffi::c_ulong,
+    bits: &mut ::core::ffi::c_uint,
+    count: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let value = inflate_back_low_bits(*hold, count);
+    inflate_back_drop_bits(hold, bits, count);
+    value
+}
+
 fn inflate_back_push_code_length(
     lens: &mut [::core::ffi::c_ushort; 320],
     have: &mut ::core::ffi::c_uint,
@@ -344,8 +363,8 @@ pub unsafe extern "C" fn inflateBack(
         match (*state).mode as ::core::ffi::c_uint {
             16191 => {
                 if (*state).last != 0 {
-                    hold >>= bits & 7 as ::core::ffi::c_uint;
-                    bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
+                    let padding = bits & 7;
+                    inflate_back_drop_bits(&mut hold, &mut bits, padding);
                     (*state).mode = crate::src::inflate::DONE;
                     continue;
                 } else {
@@ -366,8 +385,7 @@ pub unsafe extern "C" fn inflateBack(
                     }
                     let (last, block_type) = inflate_back_block_header(hold);
                     (*state).last = last;
-                    hold >>= 3;
-                    bits = bits.wrapping_sub(3);
+                    inflate_back_drop_bits(&mut hold, &mut bits, 3);
                     match block_type {
                         InflateBackBlockType::Stored => {
                             (*state).mode = crate::src::inflate::STORED;
@@ -391,8 +409,8 @@ pub unsafe extern "C" fn inflateBack(
                 }
             }
             16193 => {
-                hold >>= bits & 7 as ::core::ffi::c_uint;
-                bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
+                let padding = bits & 7;
+                inflate_back_drop_bits(&mut hold, &mut bits, padding);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
                     if have == 0 as ::core::ffi::c_uint {
                         have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
@@ -478,8 +496,7 @@ pub unsafe extern "C" fn inflateBack(
                 (*state).nlen = header.nlen;
                 (*state).ndist = header.ndist;
                 (*state).ncode = header.ncode;
-                hold >>= 14;
-                bits = bits.wrapping_sub(14);
+                inflate_back_drop_bits(&mut hold, &mut bits, 14);
                 if !inflate_back_dynamic_header_is_valid(header) {
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
@@ -513,8 +530,7 @@ pub unsafe extern "C" fn inflateBack(
                             &mut (*state).have,
                             hold,
                         );
-                        hold >>= 3 as ::core::ffi::c_int;
-                        bits = bits.wrapping_sub(3 as ::core::ffi::c_int as ::core::ffi::c_uint);
+                        inflate_back_drop_bits(&mut hold, &mut bits, 3);
                     }
                     inflate_back_finish_code_length_order(
                         &mut (*state).lens,
@@ -569,8 +585,11 @@ pub unsafe extern "C" fn inflateBack(
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             }
                             if (here.val as ::core::ffi::c_int) < 16 as ::core::ffi::c_int {
-                                hold >>= here.bits as ::core::ffi::c_int;
-                                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                inflate_back_drop_bits(
+                                    &mut hold,
+                                    &mut bits,
+                                    here.bits as ::core::ffi::c_uint,
+                                );
                                 inflate_back_push_code_length(
                                     &mut (*state).lens,
                                     &mut (*state).have,
@@ -599,8 +618,11 @@ pub unsafe extern "C" fn inflateBack(
                                     );
                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                 }
-                                hold >>= here.bits as ::core::ffi::c_int;
-                                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                inflate_back_drop_bits(
+                                    &mut hold,
+                                    &mut bits,
+                                    here.bits as ::core::ffi::c_uint,
+                                );
                                 let Some(repeated_length) = inflate_back_repeat_length(
                                     &(*state).lens,
                                     (*state).have,
@@ -613,9 +635,11 @@ pub unsafe extern "C" fn inflateBack(
                                     break;
                                 };
                                 len = repeated_length;
-                                copy = repeat_base.wrapping_add(inflate_back_low_bits(hold, repeat_bits));
-                                hold >>= repeat_bits;
-                                bits = bits.wrapping_sub(repeat_bits);
+                                copy = repeat_base.wrapping_add(inflate_back_take_bits(
+                                    &mut hold,
+                                    &mut bits,
+                                    repeat_bits,
+                                ));
                                 if !inflate_back_repeat_fits(
                                     (*state).have,
                                     copy,
@@ -789,11 +813,17 @@ pub unsafe extern "C" fn inflateBack(
                     hold = hold.wrapping_add((*c2rust_fresh14 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                hold >>= last.bits as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
+                inflate_back_drop_bits(
+                    &mut hold,
+                    &mut bits,
+                    last.bits as ::core::ffi::c_uint,
+                );
             }
-            hold >>= here.bits as ::core::ffi::c_int;
-            bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+            inflate_back_drop_bits(
+                &mut hold,
+                &mut bits,
+                here.bits as ::core::ffi::c_uint,
+            );
             (*state).length = here.val as ::core::ffi::c_uint;
             if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                 if left == 0 as ::core::ffi::c_uint {
@@ -835,13 +865,11 @@ pub unsafe extern "C" fn inflateBack(
                         hold = hold.wrapping_add((*c2rust_fresh16 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).length = (*state).length.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                    );
-                    hold >>= (*state).extra;
-                    bits = bits.wrapping_sub((*state).extra);
+                    (*state).length = (*state).length.wrapping_add(inflate_back_take_bits(
+                        &mut hold,
+                        &mut bits,
+                        (*state).extra,
+                    ));
                 }
                 loop {
                     here = *(*state).distcode.offset(
@@ -902,11 +930,17 @@ pub unsafe extern "C" fn inflateBack(
                         hold = hold.wrapping_add((*c2rust_fresh18 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    hold >>= last.bits as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
+                    inflate_back_drop_bits(
+                        &mut hold,
+                        &mut bits,
+                        last.bits as ::core::ffi::c_uint,
+                    );
                 }
-                hold >>= here.bits as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                inflate_back_drop_bits(
+                    &mut hold,
+                    &mut bits,
+                    here.bits as ::core::ffi::c_uint,
+                );
                 if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
                     (*strm).msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
@@ -934,13 +968,11 @@ pub unsafe extern "C" fn inflateBack(
                                 .wrapping_add((*c2rust_fresh19 as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
-                        (*state).offset = (*state).offset.wrapping_add(
-                            hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                        );
-                        hold >>= (*state).extra;
-                        bits = bits.wrapping_sub((*state).extra);
+                        (*state).offset = (*state).offset.wrapping_add(inflate_back_take_bits(
+                            &mut hold,
+                            &mut bits,
+                            (*state).extra,
+                        ));
                     }
                     if (*state).offset
                         > (*state).wsize.wrapping_sub(
