@@ -2370,19 +2370,20 @@ pub unsafe extern "C" fn inflate_ffi(
             (*state).mode = crate::src::inflate::LEN;
         }
     }
-    (*strm).next_out = put as *mut crate::stdlib::Bytef;
-    (*strm).avail_out = left as crate::stdlib::uInt;
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = have as crate::stdlib::uInt;
-    (*state).hold = hold;
-    (*state).bits = bits;
-    let produced = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
-    if inflate_should_update_window((*state).wsize, produced, (*state).mode, flush) {
-        let state_ref = &mut *state;
+    let strm_ref = &mut *strm;
+    let state_ref = &mut *state;
+    strm_ref.next_out = put as *mut crate::stdlib::Bytef;
+    strm_ref.avail_out = left as crate::stdlib::uInt;
+    strm_ref.next_in = next as *mut crate::stdlib::Bytef;
+    strm_ref.avail_in = have as crate::stdlib::uInt;
+    state_ref.hold = hold;
+    state_ref.bits = bits;
+    let produced = out.wrapping_sub(strm_ref.avail_out as ::core::ffi::c_uint);
+    if inflate_should_update_window(state_ref.wsize, produced, state_ref.mode, flush) {
         if state_ref.window.is_null() {
-            state_ref.window = Some((*strm).zalloc.expect("non-null function pointer"))
+            state_ref.window = Some(strm_ref.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
-                (*strm).opaque,
+                strm_ref.opaque,
                 (1 as crate::stdlib::uInt) << state_ref.wbits,
                 ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
             ) as *mut ::core::ffi::c_uchar;
@@ -2397,7 +2398,7 @@ pub unsafe extern "C" fn inflate_ffi(
             &[][..]
         } else {
             ::core::slice::from_raw_parts(
-                (*strm).next_out.offset(-(produced as isize)),
+                strm_ref.next_out.wrapping_sub(produced as usize),
                 produced as usize,
             )
         };
@@ -2410,37 +2411,49 @@ pub unsafe extern "C" fn inflate_ffi(
             output,
         );
     }
-    in_0 = in_0.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-    out = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
-    (*strm).total_in = (*strm).total_in.wrapping_add(in_0 as crate::stdlib::uLong);
-    (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
-    (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
-    if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
-        let output =
-            ::core::slice::from_raw_parts((*strm).next_out.offset(-(out as isize)), out as usize);
-        (*state).check = inflate_update_output_check(
-            (*state).check as crate::stdlib::uLong,
-            (*state).flags,
+    in_0 = in_0.wrapping_sub(strm_ref.avail_in as ::core::ffi::c_uint);
+    out = out.wrapping_sub(strm_ref.avail_out as ::core::ffi::c_uint);
+    strm_ref.total_in = strm_ref.total_in.wrapping_add(in_0 as crate::stdlib::uLong);
+    strm_ref.total_out = strm_ref.total_out.wrapping_add(out as crate::stdlib::uLong);
+    state_ref.total = state_ref.total.wrapping_add(out as ::core::ffi::c_ulong);
+    if state_ref.wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
+        let output = ::core::slice::from_raw_parts(
+            strm_ref.next_out.wrapping_sub(out as usize),
+            out as usize,
+        );
+        state_ref.check = inflate_update_output_check(
+            state_ref.check as crate::stdlib::uLong,
+            state_ref.flags,
             output,
         ) as ::core::ffi::c_ulong;
-        (*strm).adler = (*state).check as crate::stdlib::uLong;
+        strm_ref.adler = state_ref.check as crate::stdlib::uLong;
     }
-    (*strm).data_type = inflate_data_type((*state).bits, (*state).last, (*state).mode);
+    strm_ref.data_type = inflate_data_type(state_ref.bits, state_ref.last, state_ref.mode);
     return inflate_finish_return(ret, in_0, out, flush);
 }
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if inflate_state_check_raw!(strm) != 0 {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm_ref = &mut *strm;
+    if strm_ref.zalloc.is_none() || strm_ref.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let state_ptr = strm_ref.state as *mut crate::src::inflate::inflate_state;
+    if state_ptr.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let state = &mut *state_ptr;
+    if state.strm != strm || !inflate_state_fields_are_valid(state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let zfree = strm_ref.zfree.expect("non-null function pointer");
     let opaque = strm_ref.opaque;
-    if !state.window.is_null() {
-        zfree(opaque, state.window as crate::stdlib::voidpf);
+    let window = state.window;
+    if !window.is_null() {
+        zfree(opaque, window as crate::stdlib::voidpf);
     }
     zfree(opaque, state_ptr as crate::stdlib::voidpf);
     strm_ref.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
@@ -2670,11 +2683,21 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     let mut flags: ::core::ffi::c_int = 0;
     let mut in_0: ::core::ffi::c_ulong = 0;
     let mut out: ::core::ffi::c_ulong = 0;
-    if inflate_state_check_raw!(strm) != 0 {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm_ref = &mut *strm;
-    let state_ref = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    if strm_ref.zalloc.is_none() || strm_ref.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+    if state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state_ref = &mut *state;
+    if state_ref.strm != strm || !inflate_state_fields_are_valid(state_ref) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     if strm_ref.avail_in == 0 as crate::stdlib::uInt && state_ref.bits < 8 as ::core::ffi::c_uint {
         return crate::zlib_h::Z_BUF_ERROR;
     }

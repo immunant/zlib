@@ -2242,26 +2242,39 @@ pub unsafe extern "C" fn deflate_ffi(
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut status: ::core::ffi::c_int = 0;
-    if deflate_state_check_raw!(strm) != 0 {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm_ref = &mut *strm;
+    if strm_ref.zalloc.is_none() || strm_ref.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let state_ptr = strm_ref.state;
+    if state_ptr.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let state = &mut *state_ptr;
+    if state.strm != strm || !deflate_state_fields_are_valid(state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let zfree = strm_ref.zfree.expect("non-null function pointer");
     let opaque = strm_ref.opaque;
     status = state.status;
-    if !state.pending_buf.is_null() {
-        zfree(opaque, state.pending_buf as crate::stdlib::voidpf);
+    let pending_buf = state.pending_buf;
+    let head = state.head;
+    let prev = state.prev;
+    let window = state.window;
+    if !pending_buf.is_null() {
+        zfree(opaque, pending_buf as crate::stdlib::voidpf);
     }
-    if !state.head.is_null() {
-        zfree(opaque, state.head as crate::stdlib::voidpf);
+    if !head.is_null() {
+        zfree(opaque, head as crate::stdlib::voidpf);
     }
-    if !state.prev.is_null() {
-        zfree(opaque, state.prev as crate::stdlib::voidpf);
+    if !prev.is_null() {
+        zfree(opaque, prev as crate::stdlib::voidpf);
     }
-    if !state.window.is_null() {
-        zfree(opaque, state.window as crate::stdlib::voidpf);
+    if !window.is_null() {
+        zfree(opaque, window as crate::stdlib::voidpf);
     }
     zfree(opaque, state_ptr as crate::stdlib::voidpf);
     strm_ref.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
