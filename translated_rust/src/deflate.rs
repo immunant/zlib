@@ -1525,8 +1525,8 @@ unsafe extern "C" fn putShortMSB(
     let bytes = short_msb_bytes(b);
     let (cursors, next_pending) = pending_short_cursors((*s).pending);
     (*s).pending = next_pending;
-    *(*s).pending_buf.offset(cursors[0] as isize) = bytes[0];
-    *(*s).pending_buf.offset(cursors[1] as isize) = bytes[1];
+    *(*s).pending_buf.wrapping_add(cursors[0] as usize) = bytes[0];
+    *(*s).pending_buf.wrapping_add(cursors[1] as usize) = bytes[1];
 }
 
 fn pending_output_len(
