@@ -136,6 +136,10 @@ pub struct inflate_state {
     // implementation code keeps the raw allocation access at explicit
     // borrowing boundaries.
     pub window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>>,
+    // Only streams for which zlib installed both allocator callbacks may
+    // retain their history in Rust-owned storage. Custom and mixed callback
+    // pairs continue to use `window`'s callback allocation exactly as before.
+    owned_window: Option<InflateOwnedWindow>,
     pub hold: ::core::ffi::c_ulong,
     pub bits: ::core::ffi::c_uint,
     pub length: ::core::ffi::c_uint,
@@ -168,10 +172,9 @@ struct InflateWindowLayout {
     len: usize,
 }
 
-/// The eventual safe owner for inflate's history window.  Live streams still
-/// use their callback-provided allocation, but keeping the exact checked
-/// representation here gives the allocator facade a ready-to-use owner for
-/// the window without changing the decoder's window-update algorithm.
+/// Safe owner for a default-allocator inflate history window. Custom and
+/// mixed allocator streams keep their callback-provided allocation.
+#[derive(Clone)]
 struct InflateOwnedWindow {
     bytes: Vec<crate::stdlib::Bytef>,
 }
@@ -205,10 +208,8 @@ impl InflateWindowLayout {
         state.wsize == 0 || usize::try_from(state.wsize).ok() == Some(self.len)
     }
 
-    /// Allocate the future owned window with the same fallible, checked size
-    /// that the legacy callback allocation uses.  This remains separate from
-    /// the ABI state until the allocator facade can preserve custom callback
-    /// behavior.
+    /// Allocate an owned default-allocator window with the same fallible,
+    /// checked size used by the legacy callback path.
     fn try_owned(&self) -> Option<InflateOwnedWindow> {
         let mut bytes = Vec::new();
         bytes.try_reserve_exact(self.len).ok()?;
@@ -219,9 +220,7 @@ impl InflateWindowLayout {
 
 impl InflateOwnedWindow {
     /// Confirm that an owned allocation still matches the scalar state before
-    /// handing it to the resumable window-update core.  The eventual
-    /// allocator facade must use this check rather than rebuilding a span
-    /// from `state.window` and its capacity.
+    /// handing it to the resumable window-update core.
     fn matches_state(&self, state: &inflate_state) -> bool {
         let Some(layout) = InflateWindowLayout::from_state(state) else {
             return false;
@@ -232,9 +231,7 @@ impl InflateOwnedWindow {
             && self.bytes.len() == layout.len
     }
 
-    /// Keep the owned hand-off explicit and state-validated so a future
-    /// allocator-facade switch cannot recreate an allocation-derived raw
-    /// slice for history updates.
+    /// Hand the owned bytes to the resumable window-update core.
     fn window(&mut self, state: &inflate_state) -> Option<InflateWindow<'_>> {
         self.matches_state(state).then_some(InflateWindow {
             bytes: &mut self.bytes,
@@ -244,9 +241,7 @@ impl InflateOwnedWindow {
     /// Attach this owned history allocation to an already-initialized state.
     /// The checked scalar/window agreement is established before exposing the
     /// legacy nullable handle, and the owning vector remains in place for the
-    /// rest of the stream lifetime.  This is the ownership facade's future
-    /// handoff point; it must not be replaced with a slice made from an
-    /// allocator-reported capacity.
+    /// rest of the stream lifetime.
     fn bind_state_window(&mut self, state: &mut inflate_state) -> bool {
         if !self.matches_state(state) {
             return false;
@@ -256,8 +251,6 @@ impl InflateOwnedWindow {
     }
 
     /// Deep-copy exactly the initialized history retained by `inflateCopy`.
-    /// This gives the future allocator-preserving owner a pointer-free copy
-    /// route; live ABI-backed streams still use the existing callback bridge.
     fn try_copy_for_state(&self, state: &inflate_state) -> Option<Self> {
         if !self.matches_state(state) {
             return None;
@@ -322,6 +315,7 @@ pub(crate) fn empty_inflate_state() -> inflate_state {
         whave: 0,
         wnext: 0,
         window: None,
+        owned_window: None,
         hold: 0,
         bits: 0,
         length: 0,
@@ -366,7 +360,11 @@ fn copy_inflate_state(source: &inflate_state) -> inflate_state {
         wsize: source.wsize,
         whave: source.whave,
         wnext: source.wnext,
-        window: source.window,
+        // `initialize_inflate_copy` installs either an independent
+        // callback-owned allocation or an independent owned-window clone.
+        // Never temporarily retain the source's window handle here.
+        window: None,
+        owned_window: None,
         hold: source.hold,
         bits: source.bits,
         length: source.length,
@@ -553,6 +551,7 @@ struct InflateReset2Plan {
     wrap: ::core::ffi::c_int,
     window_bits: ::core::ffi::c_int,
     release_window: bool,
+    release_callback_window: bool,
 }
 
 /// Validate and describe an `inflateReset2` operation without invoking the
@@ -588,6 +587,9 @@ fn prepare_inflate_reset2(
         wrap,
         window_bits: windowBits,
         release_window: state.window.is_some() && state.wbits != windowBits as ::core::ffi::c_uint,
+        release_callback_window: state.window.is_some()
+            && state.owned_window.is_none()
+            && state.wbits != windowBits as ::core::ffi::c_uint,
     })
 }
 
@@ -600,6 +602,7 @@ fn apply_inflate_reset2(
 ) -> ::core::ffi::c_int {
     if plan.release_window {
         state.window = None;
+        state.owned_window = None;
     }
     state.wrap = plan.wrap;
     state.wbits = plan.window_bits as crate::stdlib::uInt;
@@ -624,7 +627,7 @@ pub unsafe extern "C" fn inflateReset2_ffi(
         Ok(plan) => plan,
         Err(error) => return error,
     };
-    if plan.release_window {
+    if plan.release_callback_window {
         let window = state.window.expect("plan requires an installed window");
         // This is the existing custom-allocator boundary.  It deliberately
         // precedes the safe reset mutation, matching zlib's callback order.
@@ -641,6 +644,7 @@ fn initialize_inflate_state_base(
     state.strm = stream_identity(strm);
     state.allocator_provenance = allocator_provenance;
     state.window = None;
+    state.owned_window = None;
     state.mode = crate::src::inflate::HEAD;
 }
 
@@ -908,18 +912,25 @@ fn updatewindow(
         return 1 as ::core::ffi::c_int;
     }
     if state.window.is_none() {
-        let Some(zalloc) = strm.zalloc else {
-            return 1 as ::core::ffi::c_int;
-        };
-        state.window = ::core::ptr::NonNull::new(unsafe {
-            zalloc(
-                strm.opaque,
-                layout.allocation_items,
-                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-            ) as *mut ::core::ffi::c_uchar
-        });
-        if state.window.is_none() {
-            return 1 as ::core::ffi::c_int;
+        if crate::src::zutil::allocator_pair_is_fully_default(&state.allocator_provenance) {
+            let Some(owned_window) = layout.try_owned() else {
+                return 1 as ::core::ffi::c_int;
+            };
+            install_owned_inflate_window(state, owned_window);
+        } else {
+            let Some(zalloc) = strm.zalloc else {
+                return 1 as ::core::ffi::c_int;
+            };
+            state.window = ::core::ptr::NonNull::new(unsafe {
+                zalloc(
+                    strm.opaque,
+                    layout.allocation_items,
+                    ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+                ) as *mut ::core::ffi::c_uchar
+            });
+            if state.window.is_none() {
+                return 1 as ::core::ffi::c_int;
+            }
         }
     }
     if state.wsize == 0 as ::core::ffi::c_uint {
@@ -930,12 +941,44 @@ fn updatewindow(
     if state.wnext > state.wsize || state.whave > state.wsize {
         return 1 as ::core::ffi::c_int;
     }
-    // Allocation above establishes the window's `wsize` bytes for this
-    // initialized stream state. Keep the raw allocator handle behind this
-    // named unsafe borrowing boundary; callers use only references and
-    // slices.
-    update_callback_owned_inflate_window(state, layout.len, input).is_err()
-        as ::core::ffi::c_int
+    let result = if state.owned_window.is_some() {
+        update_owned_inflate_window(state, input)
+    } else {
+        // The callback allocation establishes the window's `wsize` bytes for
+        // this initialized stream state. Keep its raw handle behind the named
+        // borrowing boundary; callers use only references and slices.
+        update_callback_owned_inflate_window(state, layout.len, input)
+    };
+    result.is_err() as ::core::ffi::c_int
+}
+
+/// Bind a fully default-allocator window without exposing its allocation to
+/// implementation callers. The vector's buffer is stable while the state
+/// retains the owner, and the ABI handle remains available to legacy engines.
+fn install_owned_inflate_window(
+    state: &mut crate::src::inflate::inflate_state,
+    mut owned_window: InflateOwnedWindow,
+) {
+    debug_assert!(owned_window.matches_state(state));
+    state.window = ::core::ptr::NonNull::new(owned_window.bytes.as_mut_ptr());
+    debug_assert!(state.window.is_some());
+    state.owned_window = Some(owned_window);
+}
+
+/// Update a fully default-allocator window through its owner. Temporarily
+/// taking the owner avoids aliasing the state while retaining the stable ABI
+/// handle that the legacy decoder uses between calls.
+fn update_owned_inflate_window(
+    state: &mut crate::src::inflate::inflate_state,
+    input: &[crate::stdlib::Bytef],
+) -> Result<(), ()> {
+    let mut owned_window = state.owned_window.take().ok_or(())?;
+    let result = owned_window
+        .window(state)
+        .ok_or(())?
+        .update(state, input);
+    state.owned_window = Some(owned_window);
+    result
 }
 
 /// Update exactly the validated callback-owned inflate window.
@@ -2894,9 +2937,14 @@ fn release_inflate_allocations(
     strm: &mut crate::zlib_h::z_stream_s,
     state: &mut crate::src::inflate::inflate_state,
 ) {
-    let window = match state.window {
-        Some(window) => window.as_ptr().cast(),
-        None => ::core::ptr::null_mut(),
+    let window = if state.owned_window.take().is_some() {
+        state.window = None;
+        ::core::ptr::null_mut()
+    } else {
+        match state.window {
+            Some(window) => window.as_ptr().cast(),
+            None => ::core::ptr::null_mut(),
+        }
     };
     let allocations = [window, strm.state as crate::stdlib::voidpf];
     for allocation in allocations {
@@ -3284,8 +3332,14 @@ fn initialize_inflate_copy(
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    let mut owned_window = None;
+    let mut owned_window_failed = false;
+    if let Some(source_window) = source_state.owned_window.as_ref() {
+        owned_window = source_window.try_copy_for_state(source_state);
+        owned_window_failed = owned_window.is_none();
+    }
     let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if source_state.window.is_some() {
+    if source_state.window.is_some() && owned_window.is_none() && !owned_window_failed {
         let layout = InflateWindowLayout::from_state(source_state)
             .expect("inflateCopy validated the source window layout");
         window = unsafe {
@@ -3296,13 +3350,13 @@ fn initialize_inflate_copy(
                 ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
             ) as *mut ::core::ffi::c_uchar
         };
-        if window.is_null() {
-            unsafe {
-                Some(source.zfree.expect("validated allocator"))
-                    .expect("validated allocator")(source.opaque, copy.cast());
-            }
-            return crate::zlib_h::Z_MEM_ERROR;
+    }
+    if owned_window_failed || (source_state.window.is_some() && window.is_null() && owned_window.is_none()) {
+        unsafe {
+            Some(source.zfree.expect("validated allocator"))
+                .expect("validated allocator")(source.opaque, copy.cast());
         }
+        return crate::zlib_h::Z_MEM_ERROR;
     }
     crate::zlib_h::copy_z_stream(dest, source);
     let copy_ref = unsafe { &mut *copy };
@@ -3317,7 +3371,11 @@ fn initialize_inflate_copy(
             );
         }
     }
-    copy_ref.window = ::core::ptr::NonNull::new(window);
+    if let Some(owned_window) = owned_window {
+        install_owned_inflate_window(copy_ref, owned_window);
+    } else {
+        copy_ref.window = ::core::ptr::NonNull::new(window);
+    }
     dest.state = copy.cast::<crate::src::deflate::internal_state>();
     crate::zlib_h::Z_OK
 }
