@@ -2827,23 +2827,23 @@ fn pending_buffer_offset(
     Some(offset)
 }
 
-pub unsafe extern "C" fn deflateCopy(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
+pub fn deflateCopy(
+    dest: Option<&mut crate::zlib_h::z_stream>,
+    source: Option<&crate::zlib_h::z_stream>,
 ) -> ::core::ffi::c_int {
     let mut ds: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let Some(source_stream) = source.as_ref() else {
+    let Some(source_stream) = source else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if source_stream.zalloc.is_none() || source_stream.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(dest_stream) = dest.as_mut() else {
+    let Some(dest_stream) = dest else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some(source_state) =
-        (source_stream.state as *const crate::src::deflate::deflate_state).as_ref()
+        (unsafe { (source_stream.state as *const crate::src::deflate::deflate_state).as_ref() })
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2862,44 +2862,54 @@ pub unsafe extern "C" fn deflateCopy(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     *dest_stream = *source_stream;
-    ds = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
+    ds = unsafe {
+        Some(dest_stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            dest_stream.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::deflate_state
+    };
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
     dest_stream.state = ds as *mut crate::src::deflate::internal_state;
-    let dest_state = &mut *ds;
+    let dest_state = unsafe { &mut *ds };
     *dest_state = *source_state;
-    dest_state.strm = dest;
-    dest_state.window = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        dest_state.w_size,
-        (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-            as crate::stdlib::uInt,
-    ) as *mut crate::stdlib::Bytef;
-    dest_state.prev = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        dest_state.w_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    dest_state.head = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        dest_state.hash_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    dest_state.pending_buf = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        dest_state.lit_bufsize,
-        4 as crate::stdlib::uInt,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    dest_state.strm = ::core::ptr::from_mut(dest_stream);
+    dest_state.window = unsafe {
+        Some(dest_stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            dest_stream.opaque,
+            dest_state.w_size,
+            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+                as crate::stdlib::uInt,
+        ) as *mut crate::stdlib::Bytef
+    };
+    dest_state.prev = unsafe {
+        Some(dest_stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            dest_stream.opaque,
+            dest_state.w_size,
+            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::Posf
+    };
+    dest_state.head = unsafe {
+        Some(dest_stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            dest_stream.opaque,
+            dest_state.hash_size,
+            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::Posf
+    };
+    dest_state.pending_buf = unsafe {
+        Some(dest_stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            dest_stream.opaque,
+            dest_state.lit_bufsize,
+            4 as crate::stdlib::uInt,
+        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
+    };
     if dest_state.window.is_null()
         || dest_state.prev.is_null()
         || dest_state.head.is_null()
@@ -2908,43 +2918,54 @@ pub unsafe extern "C" fn deflateCopy(
         deflateEnd(dest_stream);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memcpy(
-        dest_state.window as *mut ::core::ffi::c_void,
-        source_state.window as *const ::core::ffi::c_void,
-        source_state.high_water as crate::__stddef_size_t_h::size_t,
-    );
-    crate::stdlib::memcpy(
-        dest_state.prev as *mut ::core::ffi::c_void,
-        source_state.prev as *const ::core::ffi::c_void,
-        ((if source_state.slid != 0
-            || source_state.strstart.wrapping_sub(source_state.insert) > dest_state.w_size
-        {
-            dest_state.w_size
-        } else {
-            source_state.strstart.wrapping_sub(source_state.insert)
-        }) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-    );
-    crate::stdlib::memcpy(
-        dest_state.head as *mut ::core::ffi::c_void,
-        source_state.head as *const ::core::ffi::c_void,
-        (dest_state.hash_size as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-    );
+    unsafe {
+        crate::stdlib::memcpy(
+            dest_state.window as *mut ::core::ffi::c_void,
+            source_state.window as *const ::core::ffi::c_void,
+            source_state.high_water as crate::__stddef_size_t_h::size_t,
+        )
+    };
+    unsafe {
+        crate::stdlib::memcpy(
+            dest_state.prev as *mut ::core::ffi::c_void,
+            source_state.prev as *const ::core::ffi::c_void,
+            ((if source_state.slid != 0
+                || source_state.strstart.wrapping_sub(source_state.insert) > dest_state.w_size
+            {
+                dest_state.w_size
+            } else {
+                source_state.strstart.wrapping_sub(source_state.insert)
+            }) as crate::__stddef_size_t_h::size_t)
+                .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        )
+    };
+    unsafe {
+        crate::stdlib::memcpy(
+            dest_state.head as *mut ::core::ffi::c_void,
+            source_state.head as *const ::core::ffi::c_void,
+            (dest_state.hash_size as crate::__stddef_size_t_h::size_t)
+                .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        )
+    };
     dest_state.pending_out = dest_state.pending_buf.wrapping_add(pending_offset);
-    crate::stdlib::memcpy(
-        dest_state.pending_out as *mut ::core::ffi::c_void,
-        source_state.pending_out as *const ::core::ffi::c_void,
-        source_state.pending as crate::__stddef_size_t_h::size_t,
-    );
+    unsafe {
+        crate::stdlib::memcpy(
+            dest_state.pending_out as *mut ::core::ffi::c_void,
+            source_state.pending_out as *const ::core::ffi::c_void,
+            source_state.pending as crate::__stddef_size_t_h::size_t,
+        )
+    };
     dest_state.sym_buf = dest_state
         .pending_buf
-        .wrapping_add(dest_state.lit_bufsize as usize) as *mut crate::zutil_h::uchf;
-    crate::stdlib::memcpy(
-        dest_state.sym_buf as *mut ::core::ffi::c_void,
-        source_state.sym_buf as *const ::core::ffi::c_void,
-        source_state.sym_next as crate::__stddef_size_t_h::size_t,
-    );
+        .wrapping_add(dest_state.lit_bufsize as usize)
+        as *mut crate::zutil_h::uchf;
+    unsafe {
+        crate::stdlib::memcpy(
+            dest_state.sym_buf as *mut ::core::ffi::c_void,
+            source_state.sym_buf as *const ::core::ffi::c_void,
+            source_state.sym_next as crate::__stddef_size_t_h::size_t,
+        )
+    };
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
@@ -2953,6 +2974,8 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let source = source.as_ref();
+    let dest = dest.as_mut();
     deflateCopy(dest, source)
 }
 fn longest_match(
