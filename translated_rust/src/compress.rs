@@ -108,9 +108,9 @@ pub unsafe extern "C" fn compress2_z(
     stream.zfree = None;
     stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     err = crate::src::deflate::deflateInit_(
-        &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+        Some(&mut stream),
         level,
-        crate::zlib_h::ZLIB_VERSION.as_ptr(),
+        Some(&crate::zlib_h::ZLIB_VERSION[0]),
         ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
     );
     if err != crate::zlib_h::Z_OK {

@@ -503,12 +503,32 @@ pub unsafe extern "C" fn inflateInit2__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit2_(strm, windowBits, version, stream_size)
 }
-pub unsafe extern "C" fn inflateInit_(
-    mut strm: crate::zlib_h::z_streamp,
-    mut version: *const ::core::ffi::c_char,
+// This internal dispatcher only supplies zlib's default window size and
+// accepts references already bound by its callers. Keep the raw-pointer
+// contract contained in `inflateInit2_`.
+pub fn inflateInit_(
+    strm: Option<&mut crate::zlib_h::z_stream>,
+    version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    return inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size);
+    let Some(version) = version else {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    };
+    let Some(strm) = strm else {
+        // Match `inflateInit2_`'s version/size validation before its stream
+        // binding so the FFI dispatcher remains behaviorally identical.
+        return if *version as ::core::ffi::c_int
+            != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
+            || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+        {
+            crate::zlib_h::Z_VERSION_ERROR
+        } else {
+            crate::zlib_h::Z_STREAM_ERROR
+        };
+    };
+    // SAFETY: references prove the stream and version byte are valid for the
+    // initializer's checks and setup.
+    unsafe { inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size) }
 }
 #[export_name = "inflateInit_"]
 
@@ -517,6 +537,10 @@ pub unsafe extern "C" fn inflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this is the ABI boundary that binds optional foreign pointers.
+    // The safe dispatcher preserves `inflateInit2_`'s validation order.
+    let strm = unsafe { strm.as_mut() };
+    let version = unsafe { version.as_ref() };
     inflateInit_(strm, version, stream_size)
 }
 #[export_name = "inflatePrime"]

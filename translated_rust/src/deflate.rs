@@ -548,22 +548,42 @@ fn deflate_prepare_stream(stream: &mut crate::zlib_h::z_stream) {
     }
 }
 
-pub unsafe extern "C" fn deflateInit_(
-    mut strm: crate::zlib_h::z_streamp,
+// This internal parameter-defaulting dispatcher only accepts references
+// already bound by its callers. The actual raw initialization boundary
+// remains `deflateInit2_` below.
+pub fn deflateInit_(
+    strm: Option<&mut crate::zlib_h::z_stream>,
     mut level: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
+    version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    return deflateInit2_(
-        strm,
-        level,
-        crate::zlib_h::Z_DEFLATED,
-        crate::stdlib::MAX_WBITS,
-        crate::zutil_h::DEF_MEM_LEVEL,
-        crate::zlib_h::Z_DEFAULT_STRATEGY,
-        version,
-        stream_size,
-    );
+    let Some(version) = version else {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    };
+    let Some(strm) = strm else {
+        // `deflateInit2_` checks version and stream size before the stream
+        // pointer, so preserve that externally visible error ordering.
+        return if *version as ::core::ffi::c_int
+            != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
+            || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+        {
+            crate::zlib_h::Z_VERSION_ERROR
+        } else {
+            crate::zlib_h::Z_STREAM_ERROR
+        };
+    };
+    unsafe {
+        deflateInit2_(
+            strm,
+            level,
+            crate::zlib_h::Z_DEFLATED,
+            crate::stdlib::MAX_WBITS,
+            crate::zutil_h::DEF_MEM_LEVEL,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+            version,
+            stream_size,
+        )
+    }
 }
 #[export_name = "deflateInit_"]
 
@@ -573,6 +593,10 @@ pub unsafe extern "C" fn deflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this is the ABI boundary that binds optional foreign pointers.
+    // The safe dispatcher preserves `deflateInit2_`'s validation order.
+    let strm = unsafe { strm.as_mut() };
+    let version = unsafe { version.as_ref() };
     deflateInit_(strm, level, version, stream_size)
 }
 pub unsafe extern "C" fn deflateInit2_(
