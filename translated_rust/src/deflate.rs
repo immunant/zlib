@@ -1455,10 +1455,7 @@ fn deflate_stream_state_valid(
 /// state allocation, avoiding repeated opaque-state conversions.
 fn with_deflate_stream_state<R>(
     stream: &mut crate::zlib_h::z_stream,
-    action: impl FnOnce(
-        &mut crate::zlib_h::z_stream,
-        &mut crate::src::deflate::deflate_state,
-    ) -> R,
+    action: impl FnOnce(&mut crate::zlib_h::z_stream, &mut crate::src::deflate::deflate_state) -> R,
 ) -> Option<R> {
     let state = stream.state as *mut crate::src::deflate::deflate_state;
     if state.is_null() {
@@ -3073,8 +3070,8 @@ fn update_callback_deflate_workspace(
     flush: ::core::ffi::c_int,
 ) -> Option<DeflateUpdateResult> {
     let bstate = deflate_update(state, strm, workspace, flush)?;
-    let block_handled = bstate as ::core::ffi::c_uint
-        == block_done as ::core::ffi::c_int as ::core::ffi::c_uint;
+    let block_handled =
+        bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint;
     if block_handled
         && !finish_callback_deflate_block(
             state,
@@ -3175,9 +3172,7 @@ fn initialize_deflate_wrapper(
     pending_buf: &mut [crate::stdlib::Bytef],
     output_buffer: &mut [crate::stdlib::Bytef],
 ) -> Result<Option<::core::ffi::c_int>, ()> {
-    if state.status == crate::src::deflate::INIT_STATE
-        && state.wrap == 0 as ::core::ffi::c_int
-    {
+    if state.status == crate::src::deflate::INIT_STATE && state.wrap == 0 as ::core::ffi::c_int {
         state.status = crate::src::deflate::BUSY_STATE;
     }
     if state.status != crate::src::deflate::INIT_STATE {
@@ -3197,14 +3192,10 @@ fn initialize_deflate_wrapper(
 
 pub fn deflate(
     strm: &mut crate::zlib_h::z_stream,
-    mut flush: ::core::ffi::c_int,
+    flush: ::core::ffi::c_int,
     input: Option<&[crate::stdlib::Bytef]>,
     output: Option<&mut [crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
-    // The exported wrapper and internal callers provide a live stream
-    // reference. Keep the translated raw-state implementation below local
-    // until stream ownership is converted.
-    let mut old_flush: ::core::ffi::c_int = 0;
     if strm.zalloc.is_none()
         || strm.zfree.is_none()
         || strm.state.is_null()
@@ -3213,21 +3204,33 @@ pub fn deflate(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // The stream/state handle has now passed the ABI validation above. Keep
-    // the raw handle conversion inside its own legacy boundary.
-    let Some(state) = (unsafe { (strm.state as *mut crate::src::deflate::deflate_state).as_mut() })
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !deflate_stream_state_valid(Some(strm), Some(state)) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    // State validation remains part of `deflate`'s API operation. The
+    // type-specific helper owns the sole opaque-handle conversion, leaving
+    // this streaming implementation free of a second raw state cast.
+    with_deflate_stream_state(strm, |strm, state| {
+        if !deflate_stream_state_valid(Some(strm), Some(state)) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        deflate_validated(strm, state, flush, input, output)
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
+
+/// Run a deflate operation after `deflate` has validated the stream/state
+/// relationship through the type-specific opaque-state boundary.
+fn deflate_validated(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    flush: ::core::ffi::c_int,
+    input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
+) -> ::core::ffi::c_int {
+    let mut old_flush: ::core::ffi::c_int = 0;
     if strm.avail_in != 0 as crate::stdlib::uInt
-            && (strm.next_in.is_null()
-                || input.map_or(true, |input| input.len() != strm.avail_in as usize))
+        && (strm.next_in.is_null()
+            || input.map_or(true, |input| input.len() != strm.avail_in as usize))
         || output.as_ref().map_or(true, |output| {
-            output.len() != strm.avail_out as usize
-                || output.as_ptr() != strm.next_out
+            output.len() != strm.avail_out as usize || output.as_ptr() != strm.next_out
         })
         || state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
     {
@@ -3582,8 +3585,7 @@ pub fn deflate(
                 &mut pending_buffer,
                 flush,
                 update_callback_deflate_workspace,
-            )
-            else {
+            ) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             bstate
@@ -3626,9 +3628,7 @@ pub fn deflate(
                         with_callback_deflate_storage(
                             state,
                             CallbackDeflateStorageNeed::HeadOnly,
-                            |state, _, head, _| {
-                                head.map(|head| clear_full_flush_hash(state, head))
-                            },
+                            |state, _, head, _| head.map(|head| clear_full_flush_hash(state, head)),
                         )
                         .flatten()
                         .unwrap_or(false)
