@@ -683,15 +683,28 @@ fn update_window(
     }
 }
 
-// Updating a bound inflater window is an internal operation, not an ABI
-// entry point. A first call with no output ensures the allocation exists; a
-// second call consumes the produced output after that allocator callback has
-// returned.
-fn updatewindow(
+// The inflater's window is an internal allocation.  Keep allocation, update,
+// and read-only inspection behind this existing implementation boundary so
+// ABI wrappers never need to bind that state-owned raw pointer themselves.
+enum InflateWindowAccess<'a> {
+    Ensure,
+    Update(&'a [crate::stdlib::Bytef]),
+    Inspect,
+}
+
+// A first `Ensure` call keeps the allocator callback separate from use of the
+// resulting slice. `Update` consumes produced output, while `Inspect` lends
+// the bound window to a reference-only implementation such as dictionary
+// retrieval.
+fn updatewindow<T>(
     stream: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
-    output: Option<&[crate::stdlib::Bytef]>,
-) -> ::core::ffi::c_int {
+    access: InflateWindowAccess<'_>,
+    operation: impl FnOnce(
+        &mut crate::src::inflate::inflate_state,
+        Option<&mut [crate::stdlib::Bytef]>,
+    ) -> T,
+) -> Result<T, ()> {
     let layout = inflate_window_layout(state.wbits);
     if state.window.is_null() {
         // SAFETY: zlib's initialized allocator is invoked with the same
@@ -705,22 +718,32 @@ fn updatewindow(
             ) as *mut ::core::ffi::c_uchar
         };
         if state.window.is_null() {
-            return 1;
+            return Err(());
         }
     }
-    let Some(output) = output else {
-        return 0;
-    };
+    let needs_window = !matches!(access, InflateWindowAccess::Ensure);
     // SAFETY: a successful allocation above (or the initialized existing
-    // window) has exactly the configured window length.
-    let window = unsafe {
-        ::core::slice::from_raw_parts_mut(
-            state.window,
-            layout.len,
-        )
+    // window) has exactly the configured window length. `Ensure` does not
+    // need to expose that allocation at all.
+    let window = if needs_window {
+        Some(unsafe { ::core::slice::from_raw_parts_mut(state.window, layout.len) })
+    } else {
+        None
     };
-    update_window(state, window, output);
-    0
+    match access {
+        InflateWindowAccess::Ensure => Ok(operation(state, None)),
+        InflateWindowAccess::Update(output) => {
+            update_window(
+                state,
+                window.expect("window updates require a bound window"),
+                output,
+            );
+            Ok(operation(state, None))
+        }
+        InflateWindowAccess::Inspect => {
+            Ok(operation(state, window))
+        }
+    }
 }
 pub unsafe extern "C" fn inflate(
     mut strm: crate::zlib_h::z_streamp,
@@ -2438,7 +2461,7 @@ pub unsafe extern "C" fn inflate(
                 < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
                 || flush != crate::zlib_h::Z_FINISH);
     if update_window {
-        if updatewindow(strm, state, None) != 0 {
+        if updatewindow(strm, state, InflateWindowAccess::Ensure, |_, _| ()).is_err() {
             state.mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2451,7 +2474,7 @@ pub unsafe extern "C" fn inflate(
         ::core::slice::from_raw_parts(put.wrapping_sub(produced as usize), produced as usize)
     };
     if update_window {
-        updatewindow(strm, state, Some(output));
+        let _ = updatewindow(strm, state, InflateWindowAccess::Update(output), |_, _| ());
     }
     in_0 = in_0.wrapping_sub(strm.avail_in as ::core::ffi::c_uint);
     out = out.wrapping_sub(strm.avail_out as ::core::ffi::c_uint);
@@ -2568,22 +2591,37 @@ pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     inflateEnd(strm)
 }
 fn inflate_get_dictionary(
-    state: &crate::src::inflate::inflate_state,
-    window: Option<&[crate::stdlib::Bytef]>,
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
     dictionary: Option<&mut [crate::stdlib::Bytef]>,
     dict_length: Option<&mut crate::stdlib::uInt>,
 ) -> ::core::ffi::c_int {
-    if let (Some(window), Some(dictionary)) = (window, dictionary) {
-        let whave = state.whave as usize;
-        let wnext = state.wnext as usize;
-        let first = whave - wnext;
-        dictionary[..first].copy_from_slice(&window[wnext..whave]);
-        dictionary[first..whave].copy_from_slice(&window[..wnext]);
+    if state.whave == 0 {
+        if let Some(dict_length) = dict_length {
+            *dict_length = 0;
+        }
+        return crate::zlib_h::Z_OK;
     }
-    if let Some(dict_length) = dict_length {
-        *dict_length = state.whave as crate::stdlib::uInt;
-    }
-    crate::zlib_h::Z_OK
+    let result = updatewindow(
+        strm,
+        state,
+        InflateWindowAccess::Inspect,
+        |state, window| {
+            let window = window.expect("a nonempty inflater dictionary has a window");
+            if let Some(dictionary) = dictionary {
+                let whave = state.whave as usize;
+                let wnext = state.wnext as usize;
+                let first = whave - wnext;
+                dictionary[..first].copy_from_slice(&window[wnext..whave]);
+                dictionary[first..whave].copy_from_slice(&window[..wnext]);
+            }
+            if let Some(dict_length) = dict_length {
+                *dict_length = state.whave as crate::stdlib::uInt;
+            }
+            crate::zlib_h::Z_OK
+        },
+    );
+    result.unwrap_or(crate::zlib_h::Z_MEM_ERROR)
 }
 #[export_name = "inflateGetDictionary"]
 
@@ -2593,8 +2631,8 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
     // The ABI boundary validates the stream and binds optional caller output
-    // storage. The named implementation only operates on those references.
-    let Some((_strm, state)) = inflateStateCheck(strm) else {
+    // storage. The named implementation binds its own state-owned window.
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let dictionary = if !dictionary.is_null() && state.whave != 0 {
@@ -2605,20 +2643,12 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     } else {
         None
     };
-    let window = if state.whave != 0 {
-        Some(::core::slice::from_raw_parts(
-            state.window,
-            state.wsize as usize,
-        ))
-    } else {
-        None
-    };
     let dict_length = if dictLength.is_null() {
         None
     } else {
         Some(&mut *dictLength)
     };
-    inflate_get_dictionary(state, window, dictionary, dict_length)
+    inflate_get_dictionary(strm, state, dictionary, dict_length)
 }
 pub fn inflateSetDictionary(
     strm: &mut crate::zlib_h::z_stream,
@@ -2641,7 +2671,14 @@ fn inflate_set_dictionary(
     if let Err(error) = inflate_dictionary_check(state, dictionary) {
         return error;
     }
-    if updatewindow(strm, state, Some(dictionary)) != 0 {
+    if updatewindow(
+        strm,
+        state,
+        InflateWindowAccess::Update(dictionary),
+        |_, _| (),
+    )
+    .is_err()
+    {
         state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
