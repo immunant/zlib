@@ -350,9 +350,6 @@ pub unsafe extern "C" fn inflateInit2_(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if version.is_null()
         || *version.offset(0 as isize) as ::core::ffi::c_int
             != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
@@ -363,9 +360,13 @@ pub unsafe extern "C" fn inflateInit2_(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    // Keep the caller's stream projection at the allocator boundary. The
+    // callback-owned state is published only after it has been fully
+    // initialized below, since zalloc() need not return initialized bytes.
+    let strm = &mut *strm;
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -373,39 +374,80 @@ pub unsafe extern "C" fn inflateInit2_(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
             crate::src::zutil::zcfree
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
+    let state = Some(strm.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    // `inflateReset2()` below establishes every field before the new state is
-    // observed, so clearing allocator-provided storage here is dead work.
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).stream_identity = strm.addr();
-    (*state).window = None;
-    // zalloc() is caller-defined and need not return initialized storage.
-    // Initialize the Rust owner without attempting to drop those bytes.
-    ::core::ptr::write(::core::ptr::addr_of_mut!((*state).owned_window), None);
-    (*state).mode = crate::src::inflate::HEAD;
-    ret = inflateReset2(strm, windowBits);
+    // Publish one complete value into the callback-owned allocation.  The
+    // reset below then applies the requested wrapper/window policy.  Writing
+    // fields piecemeal here would briefly treat uninitialized callback bytes
+    // as Rust fields with drop glue.
+    ::core::ptr::write(
+        state,
+        crate::src::inflate::inflate_state {
+            stream_identity: ::core::ptr::from_mut(strm).addr(),
+            mode: crate::src::inflate::HEAD,
+            last: 0,
+            wrap: 0,
+            havedict: 0,
+            flags: 0,
+            dmax: 0,
+            check: 0,
+            total: 0,
+            head: None,
+            wbits: 0,
+            wsize: 0,
+            whave: 0,
+            wnext: 0,
+            window: None,
+            owned_window: None,
+            hold: 0,
+            bits: 0,
+            length: 0,
+            offset: 0,
+            extra: 0,
+            lencode: crate::src::inflate::CodeTableRef::Dynamic(0),
+            distcode: crate::src::inflate::CodeTableRef::Dynamic(0),
+            lenbits: 0,
+            distbits: 0,
+            ncode: 0,
+            nlen: 0,
+            ndist: 0,
+            have: 0,
+            next: 0,
+            lens: [0; 320],
+            work: [0; 288],
+            codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
+                op: 0,
+                bits: 0,
+                val: 0,
+            }),
+            sane: 1,
+            back: -1,
+            was: 0,
+        },
+    );
+    strm.state = state as *mut crate::src::deflate::internal_state;
+    let ret = inflateReset2(strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
             state as crate::stdlib::voidpf,
         );
-        (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     return ret;
 }
