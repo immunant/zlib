@@ -399,7 +399,6 @@ fn gz_write(
     mut buf: &[u8],
 ) -> crate::stdlib::z_size_t {
     let put = buf.len();
-    let mut ret: ::core::ffi::c_int = 0;
     if buf.is_empty() {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -409,7 +408,11 @@ fn gz_write(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if buf.len() < state.size as crate::stdlib::z_size_t {
+    // Compressed writes must keep any unconsumed input in the state-owned
+    // buffer: `gz_comp` may return after a short output write and resume on a
+    // later API call.  Only transparent direct writes can use the caller
+    // slice synchronously.
+    if state.direct == 0 || buf.len() < state.size as crate::stdlib::z_size_t {
         loop {
             if state.strm.avail_in == 0 as crate::stdlib::uInt {
                 state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
@@ -492,54 +495,30 @@ fn gz_write(
         {
             return 0 as crate::stdlib::z_size_t;
         }
-        if state.direct != 0 {
-            let write_result = {
-                let Some(fd) = state.fd.as_ref() else {
-                    state.again = 0 as ::core::ffi::c_int;
-                    gz_write_error(state, rustix::io::Errno::BADF);
-                    gz_set_errno(rustix::io::Errno::BADF);
-                    return 0 as crate::stdlib::z_size_t;
-                };
-                gz_direct_write(fd, buf, &mut state.again)
+        let write_result = {
+            let Some(fd) = state.fd.as_ref() else {
+                state.again = 0 as ::core::ffi::c_int;
+                gz_write_error(state, rustix::io::Errno::BADF);
+                gz_set_errno(rustix::io::Errno::BADF);
+                return 0 as crate::stdlib::z_size_t;
             };
-            let written = match write_result {
-                Ok(written) => written,
-                Err((written, error)) => {
-                    state.x.pos += written as crate::stdlib::off64_t;
-                    gz_write_error(state, error);
-                    gz_set_errno(error);
-                    return if state.again != 0 {
-                        written
-                    } else {
-                        0 as crate::stdlib::z_size_t
-                    };
-                }
-            };
-            state.x.pos += written as crate::stdlib::off64_t;
-            return written;
-        }
-        state.strm.next_in = buf.as_ptr() as *mut crate::stdlib::Bytef;
-        loop {
-            let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            if n as crate::stdlib::z_size_t > buf.len() {
-                n = buf.len() as ::core::ffi::c_uint;
-            }
-            state.strm.avail_in = n as crate::stdlib::uInt;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
-            state.x.pos += n as crate::stdlib::off64_t;
-            buf = &buf[n as usize..];
-            if ret == -1 as ::core::ffi::c_int {
+            gz_direct_write(fd, buf, &mut state.again)
+        };
+        let written = match write_result {
+            Ok(written) => written,
+            Err((written, error)) => {
+                state.x.pos += written as crate::stdlib::off64_t;
+                gz_write_error(state, error);
+                gz_set_errno(error);
                 return if state.again != 0 {
-                    put.wrapping_sub(buf.len())
+                    written
                 } else {
                     0 as crate::stdlib::z_size_t
                 };
             }
-            if buf.is_empty() {
-                break;
-            }
-        }
+        };
+        state.x.pos += written as crate::stdlib::off64_t;
+        return written;
     }
     return put;
 }
