@@ -581,42 +581,35 @@ pub unsafe extern "C" fn gzputs_ffi(
 ) -> ::core::ffi::c_int {
     gzputs(file, s)
 }
-pub unsafe extern "C" fn gzflush(
-    mut file: crate::zlib_h::gzFile,
-    mut flush: ::core::ffi::c_int,
+unsafe fn gzflush(
+    state: &mut crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if !gzwrite_usable(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_OK, None);
     if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        return (*state).err;
+    if state.skip != 0
+        && gz_zero(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
+    {
+        return state.err;
     }
-    gz_comp(state, flush);
-    return (*state).err;
+    gz_comp(state as *mut crate::gzguts_h::gz_state, flush);
+    state.err
 }
 #[export_name = "gzflush"]
 
 pub unsafe extern "C" fn gzflush_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut flush: ::core::ffi::c_int,
+    file: crate::zlib_h::gzFile,
+    flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzflush(file, flush)
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    gzflush(&mut *(file as crate::gzguts_h::gz_statep), flush)
 }
 pub unsafe extern "C" fn gzsetparams(
     mut file: crate::zlib_h::gzFile,
