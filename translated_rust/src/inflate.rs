@@ -835,6 +835,14 @@ fn inflate_reset_keep_core(
     state.back = -1 as ::core::ffi::c_int;
 }
 
+fn inflate_reset_core(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+) {
+    reset_window_history(&mut state.wsize, &mut state.whave, &mut state.wnext);
+    inflate_reset_keep_core(strm, state);
+}
+
 pub unsafe extern "C" fn inflateResetKeep(strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -855,18 +863,16 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     inflateResetKeep(strm)
 }
 pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    reset_window_history(
-        &mut (*state).wsize,
-        &mut (*state).whave,
-        &mut (*state).wnext,
-    );
-    return inflateResetKeep(strm);
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    inflate_reset_core(strm, state);
+    state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
+    state.distcode = state.next;
+    state.lencode = state.distcode;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateReset"]
 
