@@ -1306,6 +1306,7 @@ pub(crate) enum InflateStreamRequest<'request> {
         dictionary: Option<&'request mut [crate::stdlib::Bytef]>,
         dict_length: Option<&'request mut crate::stdlib::uInt>,
     },
+    SetDictionary(&'request [crate::stdlib::Bytef]),
 }
 
 // The ABI adapter can service both streaming and scalar normal-inflate
@@ -3054,7 +3055,8 @@ pub(crate) unsafe fn inflate_from_stream(
             | InflateStreamRequest::Fast(_)
             | InflateStreamRequest::Sync
             | InflateStreamRequest::Reset(_)
-            | InflateStreamRequest::Dictionary { .. } => {
+            | InflateStreamRequest::Dictionary { .. }
+            | InflateStreamRequest::SetDictionary(_) => {
                 InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR)
             }
         };
@@ -3073,6 +3075,10 @@ pub(crate) unsafe fn inflate_from_stream(
             dictionary,
             dict_length,
         ));
+    }
+    if let InflateStreamRequest::SetDictionary(dictionary) = request {
+        let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
+        return InflateStreamResult::Status(inflateSetDictionary(&mut owner, dictionary));
     }
     if let InflateStreamRequest::Reset(kind) = request {
         // Reset shares this established stream/state projection with normal
@@ -3445,19 +3451,6 @@ fn inflateSetDictionary(
     return crate::zlib_h::Z_OK;
 }
 
-// The stream-bound opaque-state projection stays outside the pointer-free
-// dictionary policy.  The export wrapper validates the raw stream and forms
-// the bounded dictionary slice before dispatching here.
-unsafe fn inflate_set_dictionary_from_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    dictionary: &[crate::stdlib::Bytef],
-) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
-    inflateSetDictionary(&mut owner, dictionary)
-}
 #[export_name = "inflateSetDictionary"]
 
 pub unsafe extern "C" fn inflateSetDictionary_ffi(
@@ -3476,7 +3469,7 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     } else {
         ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
-    inflate_set_dictionary_from_stream(strm, dictionary)
+    inflate_from_stream(strm, InflateStreamRequest::SetDictionary(dictionary)).status()
 }
 // A registered gzip header must retain the original pointer's provenance for
 // later decoder calls.  The export boundary forms that handle after checking
