@@ -2424,7 +2424,7 @@ unsafe extern "C" fn gen_codes(
     }
 }
 
-unsafe extern "C" fn tr_static_init() {}
+fn tr_static_init() {}
 
 unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
