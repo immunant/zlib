@@ -2301,16 +2301,17 @@ fn deflate_tune_values(
     )
 }
 
-pub unsafe extern "C" fn deflateTune(
-    mut strm: crate::zlib_h::z_streamp,
-    mut good_length: ::core::ffi::c_int,
-    mut max_lazy: ::core::ffi::c_int,
-    mut nice_length: ::core::ffi::c_int,
-    mut max_chain: ::core::ffi::c_int,
+// The export wrapper owns the nullable ABI-stream conversion.  Retuning only
+// mutates scalar state, so the implementation retains the one opaque-state
+// projection and keeps the tuning policy over ordinary values.
+pub unsafe fn deflateTune(
+    strm: &mut crate::zlib_h::z_stream_s,
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, s)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
+    let Some((_strm, s)) = deflate_stream_and_state(strm)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2331,6 +2332,9 @@ pub unsafe extern "C" fn deflateTune_ffi(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
 }
 struct DeflateBoundState {
