@@ -129,9 +129,9 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
+    direct_input: Option<&[crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    let mut writ: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
     let mut max: ::core::ffi::c_uint = gz_io_chunk_limit();
@@ -139,28 +139,30 @@ fn gz_comp(
         return -1 as ::core::ffi::c_int;
     }
     if state.direct != 0 {
+        let mut input_offset = 0usize;
+        let input = direct_input.unwrap_or(&[]);
+        if input.len() < state.strm.avail_in as usize {
+            crate::src::gzlib::gz_error_static(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal error: direct write buffer missing\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        }
         while state.strm.avail_in != 0 {
             state.again = 0 as ::core::ffi::c_int;
             put = gz_io_chunk_len(state.strm.avail_in);
-            writ = unsafe {
-                crate::stdlib::write(
-                    state.fd,
-                    state.strm.next_in as *const ::core::ffi::c_void,
-                    put as crate::__stddef_size_t_h::size_t,
-                ) as ::core::ffi::c_int
-            };
-            let write_result = if writ < 0 as ::core::ffi::c_int {
-                gz_write_syscall_result(writ, gz_last_os_errno())
-            } else {
-                gz_write_syscall_result(writ, 0 as ::core::ffi::c_int)
-            };
+            let write_result =
+                gz_write_file(state, &input[input_offset..input_offset + put as usize]);
             match write_result {
                 GzWriteSyscallResult::Wrote(written) => {
                     state.strm.avail_in = state
                         .strm
                         .avail_in
                         .wrapping_sub(written as ::core::ffi::c_uint);
-                    state.strm.next_in = state.strm.next_in.wrapping_add(written as usize);
+                    input_offset = input_offset.wrapping_add(written as usize);
+                    state.strm.next_in =
+                        input[input_offset..].as_ptr() as *mut crate::stdlib::Bytef;
                 }
                 GzWriteSyscallResult::Error { errno, again } => {
                     state.again = again;
@@ -237,6 +239,31 @@ fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
+fn gz_direct_input_slice<'a>(
+    state: &crate::gzguts_h::gz_state,
+    input_buf: &'a [crate::stdlib::Bytef],
+) -> &'a [crate::stdlib::Bytef] {
+    let next_offset = (state.strm.next_in as usize).wrapping_sub(input_buf.as_ptr() as usize);
+    &input_buf[next_offset..next_offset + state.strm.avail_in as usize]
+}
+
+fn gz_comp_with_state_input(
+    state: &mut crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if state.direct != 0
+        && state.size != 0 as ::core::ffi::c_uint
+        && state.strm.avail_in != 0 as crate::stdlib::uInt
+    {
+        gz_with_input_buffer_mut(state, |state, input_buf| {
+            let input_buf = &input_buf[..state.size as usize];
+            gz_comp(state, flush, Some(gz_direct_input_slice(state, input_buf)))
+        })
+    } else {
+        gz_comp(state, flush, None)
+    }
+}
+
 fn gz_zero(
     state: &mut crate::gzguts_h::gz_state,
     input_buf: &mut [crate::stdlib::Bytef],
@@ -245,7 +272,11 @@ fn gz_zero(
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
     if state.strm.avail_in != 0
-        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+        && gz_comp(
+            state,
+            crate::zlib_h::Z_NO_FLUSH,
+            Some(gz_direct_input_slice(state, input_buf)),
+        ) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -258,7 +289,11 @@ fn gz_zero(
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
         state.strm.next_in = input_buf.as_mut_ptr();
-        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+        ret = gz_comp(
+            state,
+            crate::zlib_h::Z_NO_FLUSH,
+            Some(gz_direct_input_slice(state, input_buf)),
+        );
         n = gz_note_input_consumed(state, n);
         state.skip -= n as crate::stdlib::off64_t;
         if ret == -1 as ::core::ffi::c_int {
@@ -286,7 +321,7 @@ fn gz_write(
     if state.skip != 0 && gz_zero(state, input_buf) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if len < state.size as crate::stdlib::z_size_t {
+    if len < state.size as crate::stdlib::z_size_t || state.direct != 0 {
         loop {
             let mut have: ::core::ffi::c_uint = 0;
             let mut copy: ::core::ffi::c_uint = 0;
@@ -303,13 +338,18 @@ fn gz_write(
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+            if gz_comp(
+                state,
+                crate::zlib_h::Z_NO_FLUSH,
+                Some(gz_direct_input_slice(state, input_buf)),
+            ) == -1 as ::core::ffi::c_int
+            {
                 return gz_write_error_return(state.again, put, len);
             }
         }
     } else {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -317,7 +357,7 @@ fn gz_write(
         loop {
             let mut n: ::core::ffi::c_uint = gz_z_size_to_uInt_chunk(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None);
             n = gz_note_input_consumed(state, n);
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
@@ -359,32 +399,12 @@ fn gz_write_errno_again(errno: ::core::ffi::c_int) -> ::core::ffi::c_int {
     }
 }
 
-fn gz_last_os_errno() -> ::core::ffi::c_int {
-    ::std::io::Error::last_os_error()
-        .raw_os_error()
-        .unwrap_or(0 as ::core::ffi::c_int)
-}
-
 enum GzWriteSyscallResult {
     Wrote(::core::ffi::c_int),
     Error {
         errno: ::core::ffi::c_int,
         again: ::core::ffi::c_int,
     },
-}
-
-fn gz_write_syscall_result(
-    writ: ::core::ffi::c_int,
-    errno: ::core::ffi::c_int,
-) -> GzWriteSyscallResult {
-    if writ < 0 as ::core::ffi::c_int {
-        GzWriteSyscallResult::Error {
-            errno,
-            again: gz_write_errno_again(errno),
-        }
-    } else {
-        GzWriteSyscallResult::Wrote(writ)
-    }
 }
 
 fn gz_write_file(
@@ -772,7 +792,7 @@ pub unsafe extern "C" fn gzflush_ffi(
             return state.err;
         }
     }
-    gz_comp(state, flush);
+    gz_comp_with_state_input(state, flush);
     return state.err;
 }
 fn gzsetparams_unchanged(
@@ -835,7 +855,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     }
     if state.size != 0 {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
+            && gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int
         {
             return state.err;
         }
@@ -872,7 +892,8 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         false
     };
     ret = gzclose_w_after_step(ret, zero_failed, state.err);
-    let comp_failed = gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int;
+    let comp_failed =
+        gz_comp_with_state_input(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int;
     ret = gzclose_w_after_step(ret, comp_failed, state.err);
     if state.size != 0 {
         if state.direct == 0 {
