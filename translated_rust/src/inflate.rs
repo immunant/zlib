@@ -2566,6 +2566,17 @@ pub unsafe extern "C" fn inflateSetDictionary(
     } else {
         ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
+    inflate_set_dictionary(strm, state, dictionary)
+}
+
+// Once the ABI entry point has validated the stream/state pair and bound the
+// optional dictionary range, dictionary installation is only state and slice
+// work. Keep that transition out of the exported raw-pointer boundary.
+fn inflate_set_dictionary(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    dictionary: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
     if let Err(error) = inflate_dictionary_check(state, dictionary) {
         return error;
     }
