@@ -812,7 +812,8 @@ pub unsafe extern "C" fn deflateInit2_(
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf = (*s).pending_buf.offset((*s).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
+    (*s).sym_buf =
+        (*s).pending_buf.wrapping_add((*s).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
     (*s).sym_end = (*s)
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
