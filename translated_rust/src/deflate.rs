@@ -4561,251 +4561,240 @@ fn deflate_stored(
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
     pending_buf: &mut [crate::stdlib::Byte],
-    _window_hash: &mut DeflateWindowHashBuffers<'_>,
+    window_hash: &mut DeflateWindowHashBuffers<'_>,
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    // This transitional codec boundary still owns the compatibility-state
-    // adoption and temporary raw buffer lends.  Keep it scoped here so callers
-    // do not inherit an unsafe-function requirement.
-    unsafe {
-        let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-        let mut len: ::core::ffi::c_uint = 0;
-        let mut left: ::core::ffi::c_uint = 0;
-        let mut have: ::core::ffi::c_uint = 0;
-        // Snapshot the initial input availability together with the first block
-        // admission.  The planner is scalar-only, so this avoids a separate raw
-        // stream adoption before the loop without changing when input is read.
-        let mut used: ::core::ffi::c_uint = 0;
-        let mut remaining_avail_in: crate::stdlib::uInt = 0;
-        let mut input_start: &[crate::stdlib::Byte] = &[];
-        let mut first_block = true;
-        loop {
-            let (initial_avail_in, initial_input, plan) = {
-                (
+    // The ABI boundary has already lent the callback-owned window. Stored
+    // mode only reborrows that bounded span for its direct copies, history
+    // update, and tail refill; it does not need to recreate raw window lends.
+    let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+    let mut len: ::core::ffi::c_uint = 0;
+    let mut left: ::core::ffi::c_uint = 0;
+    let mut have: ::core::ffi::c_uint = 0;
+    // Snapshot the initial input availability together with the first block
+    // admission.  The planner is scalar-only, so this avoids a separate raw
+    // stream adoption before the loop without changing when input is read.
+    let mut used: ::core::ffi::c_uint = 0;
+    let mut remaining_avail_in: crate::stdlib::uInt = 0;
+    let mut input_start: &[crate::stdlib::Byte] = &[];
+    let mut first_block = true;
+    loop {
+        let (initial_avail_in, initial_input, plan) = {
+            (
+                strm.avail_in,
+                *input,
+                stored_initial_block_plan(
+                    s.pending_buf_size,
+                    s.w_size,
+                    s.bi_valid,
+                    strm.avail_out,
+                    s.strstart,
+                    s.block_start,
                     strm.avail_in,
-                    *input,
-                    stored_initial_block_plan(
-                        s.pending_buf_size,
-                        s.w_size,
-                        s.bi_valid,
-                        strm.avail_out,
-                        s.strstart,
-                        s.block_start,
-                        strm.avail_in,
-                        flush,
-                    ),
-                )
+                    flush,
+                ),
+            )
+        };
+        remaining_avail_in = initial_avail_in;
+        if first_block {
+            used = initial_avail_in;
+            input_start = initial_input;
+            first_block = false;
+        }
+        let Some(plan) = plan else {
+            break;
+        };
+        len = plan.len;
+        left = plan.left;
+        last = plan.last;
+        // The zero-length stored block needs only the already-owned pending
+        // buffer.  Lend that validated buffer directly to the safe core
+        // instead of round-tripping through the raw `_tr_stored_block`
+        // adapter.
+        let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
+            return need_more;
+        };
+        if pending_buf.len() != pending_len {
+            return need_more;
+        }
+        if !emit_stored_direct_header_state(s, pending_buf, len, last) {
+            return need_more;
+        }
+        flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never);
+        if left != 0 || len != 0 {
+            let Ok(output_len) = usize::try_from(strm.avail_out) else {
+                return need_more;
             };
-            remaining_avail_in = initial_avail_in;
-            if first_block {
-                used = initial_avail_in;
-                input_start = initial_input;
-                first_block = false;
+            if output_len != output.remaining_len() {
+                return need_more;
             }
-            let Some(plan) = plan else {
-                break;
+            let Some(output_slice) = output.remaining_mut() else {
+                return need_more;
             };
+            let mut output_used = 0usize;
+            if left != 0 {
+                let Ok(window_len) = usize::try_from(s.window_size) else {
+                    return need_more;
+                };
+                if window_hash.window.len() != window_len || window_len != 0 && s.window.is_null() {
+                    return need_more;
+                }
+                let window = &*window_hash.window;
+                let Some(copy) = copy_stored_window_to_output_state(
+                    window,
+                    output_slice,
+                    s.block_start,
+                    left,
+                    len,
+                ) else {
+                    return need_more;
+                };
+                let Ok(copied) = usize::try_from(copy.copied) else {
+                    return need_more;
+                };
+                output_used = copied;
+                if !record_stored_output_state(
+                    &mut strm.avail_out,
+                    &mut strm.total_out,
+                    copy.copied,
+                ) {
+                    return need_more;
+                }
+                s.block_start = copy.block_start;
+                len = copy.remaining;
+            }
+            if len != 0 {
+                let Some(destination) = output_slice.get_mut(output_used..) else {
+                    return need_more;
+                };
+                let progress = read_buf(strm, input, destination, len, s.wrap);
+                remaining_avail_in = progress.avail_in;
+                // Advance by the bytes actually copied. On valid zlib state
+                // this equals `len`; retaining the returned value keeps a
+                // malformed cursor/input pairing from publishing progress it
+                // did not make.
+                output_used = output_used.wrapping_add(progress.copied as usize);
+                if !record_stored_output_state(
+                    &mut strm.avail_out,
+                    &mut strm.total_out,
+                    progress.copied,
+                ) {
+                    return need_more;
+                }
+            }
+            if !output.advance(output_used) {
+                return need_more;
+            }
+            strm.next_out = strm.next_out.wrapping_add(output_used);
+        }
+        if last != 0 as ::core::ffi::c_int {
+            break;
+        }
+    }
+    used = stored_input_consumed(used, remaining_avail_in);
+    if used != 0 {
+        let Ok(window_len) = usize::try_from(s.window_size) else {
+            return need_more;
+        };
+        let Ok(used_len) = usize::try_from(used) else {
+            return need_more;
+        };
+        if s.window.is_null() || window_hash.window.len() != window_len {
+            return need_more;
+        }
+        let window = &mut *window_hash.window;
+        let Some(consumed) = input_start.get(..used_len) else {
+            return need_more;
+        };
+        if !update_stored_history_state(s, window, consumed) {
+            return need_more;
+        }
+    }
+    if last != 0 {
+        return finish_done;
+    }
+    {
+        if flush != crate::zlib_h::Z_NO_FLUSH
+            && flush != crate::zlib_h::Z_FINISH
+            && strm.avail_in == 0 as crate::stdlib::uInt
+            && s.strstart as ::core::ffi::c_long == s.block_start
+        {
+            return block_done;
+        }
+        let Ok(window_len) = usize::try_from(s.window_size) else {
+            return need_more;
+        };
+        if window_hash.window.len() != window_len || window_len != 0 && s.window.is_null() {
+            return need_more;
+        }
+        let window = &mut *window_hash.window;
+        let Some(next_have) = rebalance_stored_window_state(s, window, strm.avail_in) else {
+            return need_more;
+        };
+        have = next_have;
+        if have > strm.avail_in {
+            have = strm.avail_in as ::core::ffi::c_uint;
+        }
+        if have != 0 {
+            // Select the refill tail through the same checked slice plan as
+            // `fill_window`, rather than advancing a raw window cursor.
+            // The raw adapter remains responsible only for its existing
+            // ABI input/output lends.
+            // Validate the complete possible state commit before reading:
+            // `read_buf()` may advance the ABI input cursor, so a malformed
+            // history state must be rejected before that observable change.
+            if stored_input_progress_state(s, have).is_none() {
+                return need_more;
+            }
+            let Some(write_span) = fill_window_write_span(window.len(), s.strstart, 0, have) else {
+                return need_more;
+            };
+            let Some(output) = window.get_mut(write_span) else {
+                return need_more;
+            };
+            let progress = read_buf(strm, input, output, have, s.wrap);
+            if progress.copied > have || !record_stored_input_state(s, progress.copied) {
+                return need_more;
+            }
+        }
+        let tail_plan = stored_tail_block_plan(
+            s.pending_buf_size,
+            s.bi_valid,
+            s.w_size,
+            s.strstart,
+            s.block_start,
+            strm.avail_in,
+            flush,
+        );
+        if let Some(plan) = tail_plan {
             len = plan.len;
-            left = plan.left;
             last = plan.last;
-            // The zero-length stored block needs only the already-owned pending
-            // buffer.  Lend that validated buffer directly to the safe core
-            // instead of round-tripping through the raw `_tr_stored_block`
-            // adapter.
             let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
                 return need_more;
             };
             if pending_buf.len() != pending_len {
                 return need_more;
             }
-            if !emit_stored_direct_header_state(s, pending_buf, len, last) {
+            let stored = if len == 0 {
+                &[]
+            } else {
+                let Some(stored) = stored_block_window_slice(window, s.block_start, len) else {
+                    return need_more;
+                };
+                stored
+            };
+            if !emit_stored_window_block_state(s, pending_buf, stored, last) {
                 return need_more;
             }
             flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never);
-            if left != 0 || len != 0 {
-                let Ok(output_len) = usize::try_from(strm.avail_out) else {
-                    return need_more;
-                };
-                if output_len != output.remaining_len() {
-                    return need_more;
-                }
-                let Some(output_slice) = output.remaining_mut() else {
-                    return need_more;
-                };
-                let mut output_used = 0usize;
-                if left != 0 {
-                    let Ok(window_len) = usize::try_from(s.window_size) else {
-                        return need_more;
-                    };
-                    if window_len != 0 && s.window.is_null() {
-                        return need_more;
-                    }
-                    let window = if window_len == 0 {
-                        &[]
-                    } else {
-                        ::core::slice::from_raw_parts(s.window, window_len)
-                    };
-                    let Some(copy) = copy_stored_window_to_output_state(
-                        window,
-                        output_slice,
-                        s.block_start,
-                        left,
-                        len,
-                    ) else {
-                        return need_more;
-                    };
-                    let Ok(copied) = usize::try_from(copy.copied) else {
-                        return need_more;
-                    };
-                    output_used = copied;
-                    if !record_stored_output_state(
-                        &mut strm.avail_out,
-                        &mut strm.total_out,
-                        copy.copied,
-                    ) {
-                        return need_more;
-                    }
-                    s.block_start = copy.block_start;
-                    len = copy.remaining;
-                }
-                if len != 0 {
-                    let Some(destination) = output_slice.get_mut(output_used..) else {
-                        return need_more;
-                    };
-                    let progress = read_buf(strm, input, destination, len, s.wrap);
-                    remaining_avail_in = progress.avail_in;
-                    // Advance by the bytes actually copied. On valid zlib state
-                    // this equals `len`; retaining the returned value keeps a
-                    // malformed cursor/input pairing from publishing progress it
-                    // did not make.
-                    output_used = output_used.wrapping_add(progress.copied as usize);
-                    if !record_stored_output_state(
-                        &mut strm.avail_out,
-                        &mut strm.total_out,
-                        progress.copied,
-                    ) {
-                        return need_more;
-                    }
-                }
-                if !output.advance(output_used) {
-                    return need_more;
-                }
-                strm.next_out = strm.next_out.wrapping_add(output_used);
-            }
-            if last != 0 as ::core::ffi::c_int {
-                break;
-            }
         }
-        used = stored_input_consumed(used, remaining_avail_in);
-        if used != 0 {
-            let Ok(window_len) = usize::try_from(s.window_size) else {
-                return need_more;
-            };
-            let Ok(used_len) = usize::try_from(used) else {
-                return need_more;
-            };
-            if s.window.is_null() {
-                return need_more;
-            }
-            let window = ::core::slice::from_raw_parts_mut(s.window, window_len);
-            let Some(consumed) = input_start.get(..used_len) else {
-                return need_more;
-            };
-            if !update_stored_history_state(s, window, consumed) {
-                return need_more;
-            }
-        }
-        if last != 0 {
-            return finish_done;
-        }
-        {
-            if flush != crate::zlib_h::Z_NO_FLUSH
-                && flush != crate::zlib_h::Z_FINISH
-                && strm.avail_in == 0 as crate::stdlib::uInt
-                && s.strstart as ::core::ffi::c_long == s.block_start
-            {
-                return block_done;
-            }
-            let Ok(window_len) = usize::try_from(s.window_size) else {
-                return need_more;
-            };
-            if window_len != 0 && s.window.is_null() {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(s.window, window_len)
-            };
-            let Some(next_have) = rebalance_stored_window_state(s, window, strm.avail_in) else {
-                return need_more;
-            };
-            have = next_have;
-            if have > strm.avail_in {
-                have = strm.avail_in as ::core::ffi::c_uint;
-            }
-            if have != 0 {
-                // Select the refill tail through the same checked slice plan as
-                // `fill_window`, rather than advancing a raw window cursor.
-                // The raw adapter remains responsible only for its existing
-                // ABI input/output lends.
-                // Validate the complete possible state commit before reading:
-                // `read_buf()` may advance the ABI input cursor, so a malformed
-                // history state must be rejected before that observable change.
-                if stored_input_progress_state(s, have).is_none() {
-                    return need_more;
-                }
-                let Some(write_span) = fill_window_write_span(window.len(), s.strstart, 0, have)
-                else {
-                    return need_more;
-                };
-                let Some(output) = window.get_mut(write_span) else {
-                    return need_more;
-                };
-                let progress = read_buf(strm, input, output, have, s.wrap);
-                if progress.copied > have || !record_stored_input_state(s, progress.copied) {
-                    return need_more;
-                }
-            }
-            let tail_plan = stored_tail_block_plan(
-                s.pending_buf_size,
-                s.bi_valid,
-                s.w_size,
-                s.strstart,
-                s.block_start,
-                strm.avail_in,
-                flush,
-            );
-            if let Some(plan) = tail_plan {
-                len = plan.len;
-                last = plan.last;
-                let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
-                    return need_more;
-                };
-                if pending_buf.len() != pending_len {
-                    return need_more;
-                }
-                let stored = if len == 0 {
-                    &[]
-                } else {
-                    let Some(stored) = stored_block_window_slice(window, s.block_start, len) else {
-                        return need_more;
-                    };
-                    stored
-                };
-                if !emit_stored_window_block_state(s, pending_buf, stored, last) {
-                    return need_more;
-                }
-                flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never);
-            }
-        }
-        return (if last != 0 {
-            finish_started as ::core::ffi::c_int
-        } else {
-            need_more as ::core::ffi::c_int
-        }) as block_state;
     }
+    return (if last != 0 {
+        finish_started as ::core::ffi::c_int
+    } else {
+        need_more as ::core::ffi::c_int
+    }) as block_state;
 }
 
 fn deflate_fast(
