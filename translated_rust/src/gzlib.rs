@@ -389,44 +389,64 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     let state = &mut *(file as crate::gzguts_h::gz_statep);
     gzbuffer_state(state.mode, state.size, size, &mut state.want)
 }
-pub unsafe fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state.mode != crate::gzguts_h::GZ_READ
-        || state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR
+fn gzrewind(
+    fd: &std::os::fd::OwnedFd,
+    start: crate::stdlib::off64_t,
+    have: &mut crate::stdlib::uInt,
+    mode: ::core::ffi::c_int,
+    eof: &mut ::core::ffi::c_int,
+    past: &mut ::core::ffi::c_int,
+    how: &mut ::core::ffi::c_int,
+    junk: &mut ::core::ffi::c_int,
+    reset: &mut ::core::ffi::c_int,
+    again: &mut ::core::ffi::c_int,
+    skip: &mut crate::stdlib::off64_t,
+    err: &mut ::core::ffi::c_int,
+    msg: &mut Option<std::ffi::CString>,
+    pos: &mut crate::stdlib::off64_t,
+    avail_in: &mut crate::stdlib::uInt,
+) -> ::core::ffi::c_int {
+    if mode != crate::gzguts_h::GZ_READ
+        || *err != crate::zlib_h::Z_OK && *err != crate::zlib_h::Z_BUF_ERROR
     {
         return -1 as ::core::ffi::c_int;
     }
-    if crate::stdlib::lseek64(
-        state.fd.as_ref().expect("open gzip state owns its descriptor").as_raw_fd(),
-        state.start as crate::stdlib::__off64_t,
-        crate::stdlib::SEEK_SET,
-    ) == -1 as crate::stdlib::__off64_t
-    {
+    let Some(start) = u64::try_from(start).ok() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    if rustix::fs::seek(fd, rustix::fs::SeekFrom::Start(start)).is_err() {
         return -1 as ::core::ffi::c_int;
     }
     gz_reset(
-        &mut state.x.have,
-        state.mode,
-        &mut state.eof,
-        &mut state.past,
-        &mut state.how,
-        &mut state.junk,
-        &mut state.reset,
-        &mut state.again,
-        &mut state.skip,
-        &mut state.err,
-        &mut state.msg,
-        &mut state.x.pos,
-        &mut state.strm.avail_in,
+        have, mode, eof, past, how, junk, reset, again, skip, err, msg, pos, avail_in,
     );
     return 0 as ::core::ffi::c_int;
 }
+
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
         -1 as ::core::ffi::c_int
     } else {
-        gzrewind(&mut *(file as crate::gzguts_h::gz_statep))
+        let state = &mut *(file as crate::gzguts_h::gz_statep);
+        gzrewind(
+            state.fd.as_ref().expect("open gzip state owns its descriptor"),
+            state.start,
+            &mut state.x.have,
+            state.mode,
+            &mut state.eof,
+            &mut state.past,
+            &mut state.how,
+            &mut state.junk,
+            &mut state.reset,
+            &mut state.again,
+            &mut state.skip,
+            &mut state.err,
+            &mut state.msg,
+            &mut state.x.pos,
+            &mut state.strm.avail_in,
+        )
     }
 }
 pub unsafe fn gzseek64(
@@ -484,7 +504,24 @@ pub unsafe fn gzseek64(
         if offset < 0 as crate::stdlib::off64_t {
             return -1 as crate::stdlib::off64_t;
         }
-        if gzrewind(state) == -1 as ::core::ffi::c_int {
+        if gzrewind(
+            state.fd.as_ref().expect("open gzip state owns its descriptor"),
+            state.start,
+            &mut state.x.have,
+            state.mode,
+            &mut state.eof,
+            &mut state.past,
+            &mut state.how,
+            &mut state.junk,
+            &mut state.reset,
+            &mut state.again,
+            &mut state.skip,
+            &mut state.err,
+            &mut state.msg,
+            &mut state.x.pos,
+            &mut state.strm.avail_in,
+        ) == -1 as ::core::ffi::c_int
+        {
             return -1 as crate::stdlib::off64_t;
         }
     }
