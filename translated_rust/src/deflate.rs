@@ -1601,10 +1601,12 @@ enum DeflateStorageProjection<'request> {
 unsafe fn deflate_stream_and_state<'stream, 'request>(
     strm: &'stream mut crate::zlib_h::z_stream_s,
     projection: DeflateStorageProjection<'request>,
+    gzip_header: Option<crate::zlib_h::gz_headerp>,
 ) -> Option<(
     &'stream mut crate::zlib_h::z_stream_s,
     &'stream mut crate::src::deflate::deflate_state,
     DeflateCallbackStorage<'stream>,
+    Option<Option<GzipHeader>>,
 )> {
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return None;
@@ -1616,6 +1618,45 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     if !deflate_state_status_is_valid(state.status) {
         return None;
     }
+    // Header registration starts only after the stream/state association is
+    // known to be valid.  The snapshot owns every caller byte range before
+    // the pointer-free replacement policy below sees it.
+    let gzip_header = gzip_header.map(|head| {
+        if head.is_null() {
+            None
+        } else {
+            let header = &*head;
+            let extra_len = header.extra_len & 0xffff as crate::stdlib::uInt;
+            Some(GzipHeader {
+                text: header.text,
+                time: header.time,
+                os: header.os,
+                extra_len: header.extra_len,
+                extra: header.extra.map(|extra| {
+                    ::core::slice::from_raw_parts(extra.as_ptr(), extra_len as usize).into()
+                }),
+                name: if header.name.is_null() {
+                    None
+                } else {
+                    Some(
+                        ::std::ffi::CStr::from_ptr(header.name.cast())
+                            .to_bytes_with_nul()
+                            .into(),
+                    )
+                },
+                comment: if header.comment.is_null() {
+                    None
+                } else {
+                    Some(
+                        ::std::ffi::CStr::from_ptr(header.comment.cast())
+                            .to_bytes_with_nul()
+                            .into(),
+                    )
+                },
+                hcrc: header.hcrc != 0,
+            })
+        }
+    });
     let storage_layout = state.callback_storage.storage();
     let storage = match projection {
         DeflateStorageProjection::None => DeflateCallbackStorage {
@@ -1689,6 +1730,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                     head: None,
                     pending: None,
                 },
+                gzip_header,
             ));
         };
         let mut dictionary_state = DictionaryState {
@@ -1726,6 +1768,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                     head: None,
                     pending: None,
                 },
+                gzip_header,
             ));
         };
         state.wrap = dictionary_state.wrap;
@@ -1752,6 +1795,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                 head: None,
                 pending: None,
             },
+            gzip_header,
         ));
     }
     if let DeflateStorageProjection::DictionaryQuery {
@@ -1761,7 +1805,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     } = projection
     {
         let Some(window) = storage.window.as_deref() else {
-            return Some((strm, state, storage));
+            return Some((strm, state, storage, gzip_header));
         };
         let mut len = state.strstart.wrapping_add(state.lookahead);
         if len > state.w_size {
@@ -1778,9 +1822,9 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             dictionary,
             dict_length,
         );
-        return Some((strm, state, storage));
+        return Some((strm, state, storage, gzip_header));
     }
-    Some((strm, state, storage))
+    Some((strm, state, storage, gzip_header))
 }
 
 // Insert the initial dictionary strings into the hash chains.  The caller
@@ -2075,6 +2119,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
             dictionary,
             result: &mut result,
         },
+        None,
     );
     result
 }
@@ -2136,6 +2181,7 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
             dict_length: dictLength.as_mut(),
             result: &mut result,
         },
+        None,
     );
     result
 }
@@ -2331,48 +2377,12 @@ fn install_gzip_header(
 
 pub unsafe fn deflateSetHeader(
     strm: &mut crate::zlib_h::z_stream_s,
-    mut head: crate::zlib_h::gz_headerp,
+    head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    let Some((_strm, state, _storage, Some(header))) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None, Some(head))
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // Keep the state projection at this ABI boundary; header replacement
-    // below is entirely pointer-free once the caller-owned bytes are copied.
-    let header = if head.is_null() {
-        None
-    } else {
-        let header = &*head;
-        let extra_len = header.extra_len & 0xffff as crate::stdlib::uInt;
-        Some(GzipHeader {
-            text: header.text,
-            time: header.time,
-            os: header.os,
-            extra_len: header.extra_len,
-            extra: header.extra.map(|extra| {
-                ::core::slice::from_raw_parts(extra.as_ptr(), extra_len as usize).into()
-            }),
-            name: if header.name.is_null() {
-                None
-            } else {
-                Some(
-                    ::std::ffi::CStr::from_ptr(header.name.cast())
-                        .to_bytes_with_nul()
-                        .into(),
-                )
-            },
-            comment: if header.comment.is_null() {
-                None
-            } else {
-                Some(
-                    ::std::ffi::CStr::from_ptr(header.comment.cast())
-                        .to_bytes_with_nul()
-                        .into(),
-                )
-            },
-            hcrc: header.hcrc != 0,
-        })
     };
     install_gzip_header(state.wrap, &mut state.gzhead, header)
 }
@@ -2652,8 +2662,8 @@ pub unsafe fn deflate_params_from_stream(
     // borrow across that call; reproject afterwards instead of indexing the
     // raw cursors throughout the parameter policy.
     let needs_flush = {
-        let Some((_stream, state, _storage)) =
-            deflate_stream_and_state(strm, DeflateStorageProjection::None)
+        let Some((_stream, state, _storage, _)) =
+            deflate_stream_and_state(strm, DeflateStorageProjection::None, None)
         else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -2668,8 +2678,8 @@ pub unsafe fn deflate_params_from_stream(
             return err;
         }
         let flush_left_input = {
-            let Some((stream, state, _storage)) =
-                deflate_stream_and_state(strm, DeflateStorageProjection::None)
+            let Some((stream, state, _storage, _)) =
+                deflate_stream_and_state(strm, DeflateStorageProjection::None, None)
             else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
@@ -2682,8 +2692,8 @@ pub unsafe fn deflate_params_from_stream(
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    let Some((_stream, state, storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary)
+    let Some((_stream, state, storage, _)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2795,7 +2805,7 @@ pub(crate) unsafe fn deflateTune(
         | DeflateScalarAction::Used { .. }
         | DeflateScalarAction::Tune { .. } => DeflateStorageProjection::None,
     };
-    let Some((strm, s, mut storage)) = deflate_stream_and_state(strm, projection) else {
+    let Some((strm, s, mut storage, _)) = deflate_stream_and_state(strm, projection, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     match action {
@@ -4837,8 +4847,8 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
     // Dispatch needs the same three bounded history views as dictionary
     // handling. Reuse that single callback-storage projection instead of
     // rebuilding window, prev, and head slices at this boundary.
-    let Some((strm, state, storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary)
+    let Some((strm, state, storage, _)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -5061,8 +5071,8 @@ pub unsafe fn deflateEnd(
     mut strm: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
 ) -> ::core::ffi::c_int {
     let strm = strm.as_mut();
-    let Some((strm, state, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    let Some((strm, state, _storage, _)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
