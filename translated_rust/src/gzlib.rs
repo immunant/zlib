@@ -1004,19 +1004,44 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     }
 }
 
-/// Apply the scalar part of a gzip error transition.  The caller owns any
-/// previous or replacement C error string at the ABI boundary.  The return
-/// value says whether a non-static message still needs to be composed.
-fn gz_error_state(
+/// The scalar consequences of replacing a gzip error.  Message ownership and
+/// all ABI-state writes remain at the FFI boundary.
+#[derive(Clone, Copy)]
+struct GzErrorTransition {
+    clear_available: bool,
+    compose_message: bool,
+}
+
+/// Determine the error-state transition without borrowing the opaque gzip
+/// handle.  `Z_MEM_ERROR` uses zlib's static message, so a supplied message
+/// must not be allocated in that case.
+fn gz_error_transition(
+    again: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    has_message: bool,
+) -> GzErrorTransition {
+    GzErrorTransition {
+        clear_available: err != crate::zlib_h::Z_OK
+            && err != crate::zlib_h::Z_BUF_ERROR
+            && again == 0,
+        compose_message: has_message && err != crate::zlib_h::Z_MEM_ERROR,
+    }
+}
+
+/// Apply an already-safe scalar error decision to the ABI mirror.  Keeping
+/// these writes behind one temporary boundary borrow preserves the existing
+/// raw-pointer surface of `gz_error`.
+fn gz_error_apply_transition(
     state: &mut crate::gzguts_h::gz_state,
     err: ::core::ffi::c_int,
     has_message: bool,
 ) -> bool {
-    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && state.again == 0 {
+    let transition = gz_error_transition(state.again, err, has_message);
+    if transition.clear_available {
         state.x.have = 0;
     }
     state.err = err;
-    has_message && err != crate::zlib_h::Z_MEM_ERROR
+    transition.compose_message
 }
 
 /// Calculate the storage required for the legacy `"path: message"` error
@@ -1040,7 +1065,7 @@ pub unsafe extern "C" fn gz_error(
         }
         (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    if !gz_error_state(&mut *state, err, !msg.is_null()) {
+    if !gz_error_apply_transition(&mut *state, err, !msg.is_null()) {
         return;
     }
     let storage_len = gz_error_storage_len(
