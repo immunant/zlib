@@ -36,7 +36,6 @@ pub mod gzguts_h {
 
     pub const GZIP: ::core::ffi::c_int = 2;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct gz_state {
@@ -108,7 +107,6 @@ pub mod zlib_h {
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct z_stream_s {
@@ -132,7 +130,6 @@ pub mod zlib_h {
 
     pub type gz_header = crate::zlib_h::gz_header_s;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct gz_header_s {
@@ -222,7 +219,6 @@ pub mod zlib_h {
 
     pub type gzFile = *mut crate::zlib_h::gzFile_s;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct gzFile_s {
