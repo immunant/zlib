@@ -2472,43 +2472,53 @@ pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_s
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 
-unsafe extern "C" fn pqdownheap(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
+#[inline]
+fn tree_freq(
+    s: &crate::src::deflate::deflate_state,
+    tree_kind: u8,
+    node: usize,
+) -> ::core::ffi::c_int {
+    let tree = match tree_kind {
+        crate::src::deflate::STATIC_TREE_LITERAL => &s.dyn_ltree[..],
+        crate::src::deflate::STATIC_TREE_DISTANCE => &s.dyn_dtree[..],
+        _ => &s.bl_tree[..],
+    };
+    tree[node].freq() as ::core::ffi::c_int
+}
+
+unsafe fn pqdownheap(
+    s: &mut crate::src::deflate::deflate_state,
+    tree_kind: u8,
     mut k: ::core::ffi::c_int,
 ) {
-    let mut v: ::core::ffi::c_int = (*s).heap[k as usize];
-    let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
-    while j <= (*s).heap_len {
-        if j < (*s).heap_len
-            && (((*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                .fc
-                .freq as ::core::ffi::c_int)
-                < (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                || (*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                    .fc
-                    .freq as ::core::ffi::c_int
-                    == (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                    && (*s).depth[(*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
-                        as ::core::ffi::c_int
-                        <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int)
-        {
-            j += 1;
+    let v = s.heap[k as usize];
+    let mut j = k << 1 as ::core::ffi::c_int;
+    while j <= s.heap_len {
+        let mut child = s.heap[j as usize];
+        if j < s.heap_len {
+            let next_child = s.heap[(j + 1 as ::core::ffi::c_int) as usize];
+            if tree_freq(s, tree_kind, next_child as usize) < tree_freq(s, tree_kind, child as usize)
+                || tree_freq(s, tree_kind, next_child as usize)
+                    == tree_freq(s, tree_kind, child as usize)
+                    && s.depth[next_child as usize] as ::core::ffi::c_int
+                        <= s.depth[child as usize] as ::core::ffi::c_int
+            {
+                j += 1;
+                child = next_child;
+            }
         }
-        if ((*tree.offset(v as isize)).fc.freq as ::core::ffi::c_int)
-            < (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-            || (*tree.offset(v as isize)).fc.freq as ::core::ffi::c_int
-                == (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                && (*s).depth[v as usize] as ::core::ffi::c_int
-                    <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int
+        if tree_freq(s, tree_kind, v as usize) < tree_freq(s, tree_kind, child as usize)
+            || tree_freq(s, tree_kind, v as usize) == tree_freq(s, tree_kind, child as usize)
+                && s.depth[v as usize] as ::core::ffi::c_int
+                    <= s.depth[child as usize] as ::core::ffi::c_int
         {
             break;
         }
-        (*s).heap[k as usize] = (*s).heap[j as usize];
+        s.heap[k as usize] = child;
         k = j;
         j <<= 1 as ::core::ffi::c_int;
     }
-    (*s).heap[k as usize] = v;
+    s.heap[k as usize] = v;
 }
 
 unsafe fn gen_bitlen(s: &mut crate::src::deflate::deflate_state, tree_kind: u8) {
@@ -2693,7 +2703,7 @@ unsafe fn build_tree_impl(
     }
     n = s.heap_len / 2 as ::core::ffi::c_int;
     while n >= 1 as ::core::ffi::c_int {
-        pqdownheap(s as *mut crate::src::deflate::deflate_state, tree, n);
+        pqdownheap(s, tree_kind, n);
         n -= 1;
     }
     node = elems;
@@ -2702,7 +2712,7 @@ unsafe fn build_tree_impl(
         let heap_len = s.heap_len;
         s.heap_len -= 1;
         s.heap[SMALLEST as usize] = s.heap[heap_len as usize];
-        pqdownheap(s as *mut crate::src::deflate::deflate_state, tree, SMALLEST);
+        pqdownheap(s, tree_kind, SMALLEST);
         m = s.heap[SMALLEST as usize];
         s.heap_max -= 1;
         s.heap[s.heap_max as usize] = n;
@@ -2724,7 +2734,7 @@ unsafe fn build_tree_impl(
         let c2rust_fresh56 = node;
         node = node + 1;
         s.heap[SMALLEST as usize] = c2rust_fresh56;
-        pqdownheap(s as *mut crate::src::deflate::deflate_state, tree, SMALLEST);
+        pqdownheap(s, tree_kind, SMALLEST);
         if s.heap_len < 2 as ::core::ffi::c_int {
             break;
         }
