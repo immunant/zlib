@@ -325,7 +325,7 @@ static configuration_table: [config; 10] = [
     },
 ];
 
-fn slide_hash_state(
+pub(crate) fn slide_hash_state(
     head: &mut [crate::src::deflate::Posf],
     prev: &mut [crate::src::deflate::Posf],
     wsize: crate::stdlib::uInt,
@@ -349,6 +349,9 @@ pub(crate) fn clear_hash_state(
     *slid = 0;
 }
 
+/// Translate the legacy state-owned hash allocations into temporary slices for
+/// the pre-existing private window-fill adapter.  Export boundaries call the
+/// slice core directly instead.
 pub(crate) unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     if s.is_null() {
         return;
@@ -1584,7 +1587,29 @@ macro_rules! deflate_params_at_boundary {
                 if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt
                 {
                     if (*s).matches == 1 as crate::stdlib::uInt {
-                        crate::src::deflate::slide_hash(s);
+                        let Ok(head_len) = usize::try_from((*s).hash_size) else {
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
+                        let Ok(prev_len) = usize::try_from((*s).w_size) else {
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
+                        if (head_len != 0 && (*s).head.is_null())
+                            || (prev_len != 0 && (*s).prev.is_null())
+                        {
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        }
+                        let head = if head_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut((*s).head, head_len)
+                        };
+                        let prev = if prev_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut((*s).prev, prev_len)
+                        };
+                        crate::src::deflate::slide_hash_state(head, prev, (*s).w_size);
+                        (*s).slid = 1;
                     } else {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
