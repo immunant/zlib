@@ -1955,6 +1955,11 @@ pub fn inflate(
     };
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
+    // When no history update is needed, retain only the checksum word
+    // calculated from the invocation-local output view.  This keeps a
+    // checksum-only exit from rebuilding an output slice after that view has
+    // ended, while leaving the callback-owning history boundary unchanged.
+    let mut deferred_exit_checksum: Option<::core::ffi::c_ulong> = None;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
     static order: [::core::ffi::c_ushort; 19] = [
         16 as ::core::ffi::c_ushort,
@@ -3896,6 +3901,36 @@ pub fn inflate(
                 state_ref.mode = crate::src::inflate::BAD;
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
+            // A checksum-only exit needs no history allocation or update.
+            // Calculate it while the boundary-supplied output view is still
+            // alive, so the later scalar exit commit does not need to lend
+            // the completed ABI output again.
+            let state_ref = &mut *state_ref;
+            let exit = inflate_exit_progress(
+                in_0,
+                have,
+                out,
+                left,
+                state_ref.wsize,
+                state_ref.mode,
+                flush,
+                bits,
+                state_ref.last,
+            );
+            if !exit.update_window
+                && inflate_exit_needs_checksum(state_ref.wrap, exit.output_used as usize)
+            {
+                let Some(produced) = output.get(..exit.output_used as usize) else {
+                    state_ref.mode = crate::src::inflate::BAD;
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                deferred_exit_checksum = inflate_exit_checksum(
+                    state_ref.wrap,
+                    state_ref.check as crate::stdlib::uLong,
+                    state_ref.flags,
+                    produced,
+                );
+            }
         }
         // The invocation-local ABI views above have ended before this exit
         // boundary can invoke an allocator callback.
@@ -3926,9 +3961,9 @@ pub fn inflate(
             );
             let (window_error, produced): (bool, &[crate::stdlib::Bytef]) = 'window: {
                 // Invoke a possible allocator callback before lending the caller's
-                // completed-output span. History retention and final checksum then
+                // completed-output span. History retention, and any checksum
+                // not already computed from the invocation-local view, then
                 // consume that one exact bounded view.
-                let wrap = state_ref.wrap;
                 let window = if exit.update_window {
                     // The decoder boundary owns callback invocation and the one
                     // temporary ABI-window lend.  The plan and the subsequent
@@ -3972,9 +4007,7 @@ pub fn inflate(
                 if exit.update_window && window.is_none() {
                     break 'window (true, &[]);
                 }
-                let needs_output_view = exit.update_window
-                    || inflate_exit_needs_checksum(wrap, exit.output_used as usize);
-                let produced = if needs_output_view && exit.output_used != 0 {
+                let produced = if exit.update_window && exit.output_used != 0 {
                     ::core::slice::from_raw_parts(output_base, exit.output_used as usize)
                 } else {
                     &[]
@@ -4001,16 +4034,17 @@ pub fn inflate(
             state_ref.total = state_ref
                 .total
                 .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
-            if inflate_exit_needs_checksum(state_ref.wrap, exit.output_used as usize) {
-                if let Some(check) = inflate_exit_checksum(
+            let check = deferred_exit_checksum.or_else(|| {
+                inflate_exit_checksum(
                     state_ref.wrap,
                     state_ref.check as crate::stdlib::uLong,
                     state_ref.flags,
                     produced,
-                ) {
-                    state_ref.check = check;
-                    strm_ref.adler = state_ref.check as crate::stdlib::uLong;
-                }
+                )
+            });
+            if let Some(check) = check {
+                state_ref.check = check;
+                strm_ref.adler = state_ref.check as crate::stdlib::uLong;
             }
             strm_ref.data_type = exit.data_type;
         }
