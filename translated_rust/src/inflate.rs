@@ -844,19 +844,73 @@ fn inflate_match_copy_from_state_window(
     .expect("existing-window access cannot allocate or fail")
 }
 
-// Header parsing records only bounded source and destination ranges.  Once
-// the ABI adapter has bound a caller-provided header field, publishing one
-// record is ordinary slice work.  Keep that work separate from the narrow
-// raw-field binding at the decoder tail so it cannot drift back into an FFI
-// entry point.
+// Header parsing records only bounded source and destination ranges.  The ABI
+// adapter binds each caller-provided field as shared `Cell` storage: this
+// retains zlib's permitted aliasing between extra, name, and comment buffers
+// without creating overlapping mutable slices.  Publication then remains
+// entirely safe and preserves zlib's field order.
 fn inflate_publish_header_field(
-    header: &mut [crate::stdlib::Bytef],
+    header: &[::core::cell::Cell<crate::stdlib::Bytef>],
     copy: (usize, usize, usize),
     input: &[crate::stdlib::Bytef],
 ) {
     let (header_start, input_start, copy_len) = copy;
-    header[header_start..header_start + copy_len]
-        .copy_from_slice(&input[input_start..input_start + copy_len]);
+    for (destination, source) in header[header_start..header_start + copy_len]
+        .iter()
+        .zip(&input[input_start..input_start + copy_len])
+    {
+        destination.set(*source);
+    }
+}
+
+enum InflateHeaderField {
+    Extra,
+    Name,
+    Comment,
+}
+
+// This safe representation keeps the registered gzip header together with
+// the ABI-bound caller buffers. `Cell` is deliberately shared: zlib permits
+// these three buffers to alias, and publication has observable field order.
+pub struct InflateHeaderBindings<'a> {
+    header: &'a mut crate::zlib_h::gz_header,
+    extra: Option<&'a [::core::cell::Cell<crate::stdlib::Bytef>]>,
+    name: Option<&'a [::core::cell::Cell<crate::stdlib::Bytef>]>,
+    comment: Option<&'a [::core::cell::Cell<crate::stdlib::Bytef>]>,
+}
+
+impl ::core::ops::Deref for InflateHeaderBindings<'_> {
+    type Target = crate::zlib_h::gz_header;
+
+    fn deref(&self) -> &Self::Target {
+        self.header
+    }
+}
+
+impl ::core::ops::DerefMut for InflateHeaderBindings<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.header
+    }
+}
+
+impl InflateHeaderBindings<'_> {
+    fn publish(
+        &self,
+        field: InflateHeaderField,
+        copy: Option<(usize, usize, usize)>,
+        input: &[crate::stdlib::Bytef],
+    ) {
+        let Some(copy) = copy else {
+            return;
+        };
+        let header = match field {
+            InflateHeaderField::Extra => self.extra,
+            InflateHeaderField::Name => self.name,
+            InflateHeaderField::Comment => self.comment,
+        }
+        .expect("a recorded gzip-header copy has an ABI-bound destination");
+        inflate_publish_header_field(header, copy, input);
+    }
 }
 
 // The inflater's window is an internal allocation.  Keep allocation, update,
@@ -940,7 +994,7 @@ pub fn inflate(
     mut flush: ::core::ffi::c_int,
     input_storage: Option<&[crate::stdlib::Bytef]>,
     mut output_storage: &mut [crate::stdlib::Bytef],
-    mut head: Option<&mut crate::zlib_h::gz_header>,
+    mut head: Option<InflateHeaderBindings<'_>>,
 ) -> ::core::ffi::c_int {
     // The state adapter and cursor validation below bind the stream before
     // the translated decoder runs. Keep ordinary state transitions on those
@@ -2634,22 +2688,12 @@ pub fn inflate(
     // The decoder loop is complete. Bind the already-validated stream/state
     // pair once for the publication tail, so cursor updates, the optional
     // window allocation, and final accounting remain reference-bound.
-    if let Some(head) = head.as_deref_mut() {
+    if let Some(head) = head.as_ref() {
         // Preserve zlib's header-field order when callers deliberately alias
         // their extra, name, and comment buffers.
-        for (cursor, max, copy) in [
-            (head.extra, head.extra_max, header_extra_copy),
-            (head.name, head.name_max, header_name_copy),
-            (head.comment, head.comm_max, header_comment_copy),
-        ] {
-            let Some(copy) = copy else {
-                continue;
-            };
-            // Each record was collected only after this field's non-null
-            // cursor and advertised bound accepted every copied byte.
-            let header = unsafe { ::core::slice::from_raw_parts_mut(cursor, max as usize) };
-            inflate_publish_header_field(header, copy, input);
-        }
+        head.publish(InflateHeaderField::Extra, header_extra_copy, input);
+        head.publish(InflateHeaderField::Name, header_name_copy, input);
+        head.publish(InflateHeaderField::Comment, header_comment_copy, input);
     }
     strm.next_out = put as *mut crate::stdlib::Bytef;
     strm.avail_out = left as crate::stdlib::uInt;
@@ -2749,14 +2793,60 @@ pub unsafe extern "C" fn inflate_ffi(
     };
     let output =
         unsafe { ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize) };
-    // Bind the registered caller-owned gzip header at the ABI boundary. The
-    // safe decoder receives that temporary reference and retains all header
-    // parsing and publication work.
+    // Bind the registered caller-owned gzip header and its three output
+    // fields at this ABI boundary. Shared `Cell` views preserve the C API's
+    // allowed field aliasing; parsing and ordered publication stay in the
+    // safe decoder.
     let head = {
         let Some((_strm, state)) = inflateStateCheck(strm) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        unsafe { state.head.as_mut() }
+        if let Some(header) = unsafe { state.head.as_mut() } {
+            let extra = if header.extra.is_null() {
+                None
+            } else {
+                Some(unsafe {
+                    ::core::slice::from_raw_parts(
+                        header
+                            .extra
+                            .cast::<::core::cell::Cell<crate::stdlib::Bytef>>(),
+                        header.extra_max as usize,
+                    )
+                })
+            };
+            let name = if header.name.is_null() {
+                None
+            } else {
+                Some(unsafe {
+                    ::core::slice::from_raw_parts(
+                        header
+                            .name
+                            .cast::<::core::cell::Cell<crate::stdlib::Bytef>>(),
+                        header.name_max as usize,
+                    )
+                })
+            };
+            let comment = if header.comment.is_null() {
+                None
+            } else {
+                Some(unsafe {
+                    ::core::slice::from_raw_parts(
+                        header
+                            .comment
+                            .cast::<::core::cell::Cell<crate::stdlib::Bytef>>(),
+                        header.comm_max as usize,
+                    )
+                })
+            };
+            Some(InflateHeaderBindings {
+                header,
+                extra,
+                name,
+                comment,
+            })
+        } else {
+            None
+        }
     };
     inflate(strm, flush, Some(input), output, head)
 }
