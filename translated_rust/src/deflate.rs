@@ -1815,41 +1815,94 @@ impl DeflateResetCore<'_> {
     }
 }
 
-// The FFI wrapper validates and borrows the stream handle.  This adapter
-// retains the opaque-state projection, so reset policy remains outside the
-// export boundary while the implementation no longer accepts a raw handle.
-pub unsafe fn deflateResetKeep(
+// This owner deliberately exposes only the state slots reset by
+// `deflateResetKeep()`.  Its signature is pointer-free, allowing reset policy
+// to stay safe while the stream-lifetime-bound opaque-state projection remains
+// in the non-FFI adapter below.
+struct DeflateResetKeepOwner<'state> {
+    data_type: &'state mut ::core::ffi::c_int,
+    pending: &'state mut crate::zutil_h::ulg,
+    pending_out: &'state mut usize,
+    wrap: &'state mut ::core::ffi::c_int,
+    status: &'state mut ::core::ffi::c_int,
+    last_flush: &'state mut ::core::ffi::c_int,
+    dyn_ltree: &'state mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &'state mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &'state mut [crate::src::deflate::ct_data_s; 39],
+    l_desc: &'state mut crate::src::deflate::tree_desc_s,
+    d_desc: &'state mut crate::src::deflate::tree_desc_s,
+    bl_desc: &'state mut crate::src::deflate::tree_desc_s,
+    static_len: &'state mut crate::zutil_h::ulg,
+    opt_len: &'state mut crate::zutil_h::ulg,
+    matches: &'state mut crate::stdlib::uInt,
+    sym_next: &'state mut crate::stdlib::uInt,
+    bi_buf: &'state mut crate::zutil_h::ush,
+    bi_valid: &'state mut ::core::ffi::c_int,
+    bi_used: &'state mut ::core::ffi::c_int,
+}
+
+// The reset implementation has no ABI handles or allocation views.  Keep it
+// safe so both stream reset variants share the exact state transition.
+fn deflateResetKeep(owner: DeflateResetKeepOwner<'_>) -> crate::stdlib::uLong {
+    *owner.data_type = crate::zlib_h::Z_UNKNOWN;
+    reset_keep_core(
+        owner.pending,
+        owner.pending_out,
+        owner.wrap,
+        owner.status,
+        owner.last_flush,
+        owner.dyn_ltree,
+        owner.dyn_dtree,
+        owner.bl_tree,
+        owner.l_desc,
+        owner.d_desc,
+        owner.bl_desc,
+        owner.static_len,
+        owner.opt_len,
+        owner.matches,
+        owner.sym_next,
+        owner.bi_buf,
+        owner.bi_valid,
+        owner.bi_used,
+    )
+}
+
+// The FFI wrapper validates and borrows the stream handle.  This adapter owns
+// the opaque-state projection and stream publication, leaving the reset core
+// above free of raw-pointer-carrying types.
+unsafe fn deflate_reset_keep_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_int {
     let Some((strm, state)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let adler = deflateResetKeep(DeflateResetKeepOwner {
+        data_type: &mut state.data_type,
+        pending: &mut state.pending,
+        pending_out: &mut state.pending_out,
+        wrap: &mut state.wrap,
+        status: &mut state.status,
+        last_flush: &mut state.last_flush,
+        dyn_ltree: &mut state.dyn_ltree,
+        dyn_dtree: &mut state.dyn_dtree,
+        bl_tree: &mut state.bl_tree,
+        l_desc: &mut state.l_desc,
+        d_desc: &mut state.d_desc,
+        bl_desc: &mut state.bl_desc,
+        static_len: &mut state.static_len,
+        opt_len: &mut state.opt_len,
+        matches: &mut state.matches,
+        sym_next: &mut state.sym_next,
+        bi_buf: &mut state.bi_buf,
+        bi_valid: &mut state.bi_valid,
+        bi_used: &mut state.bi_used,
+    });
     strm.total_out = 0;
     strm.total_in = 0;
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
-    state.data_type = strm.data_type;
-    strm.adler = reset_keep_core(
-        &mut state.pending,
-        &mut state.pending_out,
-        &mut state.wrap,
-        &mut state.status,
-        &mut state.last_flush,
-        &mut state.dyn_ltree,
-        &mut state.dyn_dtree,
-        &mut state.bl_tree,
-        &mut state.l_desc,
-        &mut state.d_desc,
-        &mut state.bl_desc,
-        &mut state.static_len,
-        &mut state.opt_len,
-        &mut state.matches,
-        &mut state.sym_next,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-        &mut state.bi_used,
-    );
-    return crate::zlib_h::Z_OK;
+    strm.adler = adler;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateResetKeep"]
 
@@ -1859,13 +1912,13 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateResetKeep(strm)
+    deflate_reset_keep_from_stream(strm)
 }
 // As with `deflateResetKeep`, the raw stream handle belongs exclusively to
 // the export wrapper.  The reset extension keeps its state/table projection
 // here, after that handle has been validated and borrowed.
 pub unsafe fn deflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    let ret = deflateResetKeep(strm);
+    let ret = deflate_reset_keep_from_stream(strm);
     if ret == crate::zlib_h::Z_OK {
         let state = strm
             .state
