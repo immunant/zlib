@@ -1100,7 +1100,8 @@ fn deflate_reset_keep(
     crate::src::trees::_tr_init(state);
     return crate::zlib_h::Z_OK;
 }
-pub unsafe extern "C" fn deflateResetKeep(
+#[export_name = "deflateResetKeep"]
+pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
     // This check tests callbacks before it reads `state`.  Keep it ahead of
@@ -1112,13 +1113,6 @@ pub unsafe extern "C" fn deflateResetKeep(
     let stream = &mut *strm;
     let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
     deflate_reset_keep(stream, Some(state))
-}
-#[export_name = "deflateResetKeep"]
-
-pub unsafe extern "C" fn deflateResetKeep_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    deflateResetKeep(strm)
 }
 unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
@@ -1150,9 +1144,17 @@ unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
 }
 pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    ret = deflateResetKeep(strm);
+    // Validate callbacks and the state handle before borrowing either raw
+    // pointer.  In particular, a stale non-null state with absent callbacks
+    // must be rejected without being dereferenced.
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    ret = deflate_reset_keep(stream, Some(state));
     if ret == crate::zlib_h::Z_OK {
-        lm_init((*strm).state as *mut crate::src::deflate::deflate_state);
+        lm_init(state);
     }
     return ret;
 }
