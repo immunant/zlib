@@ -210,12 +210,19 @@ fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint
     }
 }
 
+fn gz_write_consumed(
+    chunk_len: ::core::ffi::c_uint,
+    remaining_avail_in: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    chunk_len.wrapping_sub(remaining_avail_in as ::core::ffi::c_uint)
+}
+
 fn gz_write_apply_chunk_progress(
     pos: &mut crate::stdlib::off64_t,
     chunk_len: ::core::ffi::c_uint,
     remaining_avail_in: crate::stdlib::uInt,
 ) -> ::core::ffi::c_uint {
-    let consumed = chunk_len.wrapping_sub(remaining_avail_in as ::core::ffi::c_uint);
+    let consumed = gz_write_consumed(chunk_len, remaining_avail_in);
     *pos = gz_write_advanced_pos(*pos, consumed);
     consumed
 }
@@ -246,7 +253,7 @@ fn gz_write_direct_progress(
     chunk_len: ::core::ffi::c_uint,
     remaining_avail_in: crate::stdlib::uInt,
 ) -> GzWriteDirectProgress {
-    let consumed = chunk_len.wrapping_sub(remaining_avail_in as ::core::ffi::c_uint);
+    let consumed = gz_write_consumed(chunk_len, remaining_avail_in);
 
     GzWriteDirectProgress {
         pos: gz_write_advanced_pos(pos, consumed),
@@ -1078,14 +1085,14 @@ mod tests {
         gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
         gz_write_apply_chunk_progress, gz_write_buffered_copy_len,
         gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
-        gz_write_direct_action, gz_write_direct_progress, gz_write_errno_is_retryable,
-        gz_write_error_result, gz_write_is_empty, gz_write_remaining_after_consumption,
-        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
-        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_result,
-        gzputc_result, gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure,
-        GzWriteDirectAction, GzZeroAction,
+        gz_write_consumed, gz_write_direct_action, gz_write_direct_progress,
+        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
+        gz_write_remaining_after_consumption, gz_write_state_is_usable,
+        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
+        gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
+        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
+        GzCompResetAction, GzCompWriteFailure, GzWriteDirectAction, GzZeroAction,
     };
 
     #[test]
@@ -1707,6 +1714,13 @@ mod tests {
 
         assert_eq!(gz_write_apply_chunk_progress(&mut pos, 1024, 1024), 0);
         assert_eq!(pos, 1100);
+    }
+
+    #[test]
+    fn gz_write_consumed_preserves_partial_and_wrapping_subtraction() {
+        assert_eq!(gz_write_consumed(80, 0), 80);
+        assert_eq!(gz_write_consumed(80, 20), 60);
+        assert_eq!(gz_write_consumed(0, 1), ::core::ffi::c_uint::MAX);
     }
 
     #[test]

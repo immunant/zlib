@@ -116,23 +116,8 @@ fn unread_input_state(
     )
 }
 
-fn fast_input_available(input_remaining: crate::stdlib::uInt) -> bool {
-    input_remaining > 5 as crate::stdlib::uInt
-}
-
 fn input_remaining_after_read(input_remaining: crate::stdlib::uInt) -> crate::stdlib::uInt {
     input_remaining.wrapping_sub(1)
-}
-
-fn fast_output_available(output_remaining: crate::stdlib::uInt) -> bool {
-    output_remaining > 257 as crate::stdlib::uInt
-}
-
-fn fast_path_available(
-    input_remaining: crate::stdlib::uInt,
-    output_remaining: crate::stdlib::uInt,
-) -> bool {
-    fast_input_available(input_remaining) && fast_output_available(output_remaining)
 }
 
 fn output_cursor_after_write(
@@ -561,7 +546,7 @@ pub unsafe extern "C" fn inflate_fast(
             }
             _ => {}
         }
-        if !fast_path_available(input_remaining, output_remaining) {
+        if !crate::src::inflate::inflate_can_use_fast_path(input_remaining, output_remaining) {
             break;
         }
     }
@@ -587,9 +572,9 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_dist_action, fast_input_available, fast_litlen_action, fast_output_available,
-        fast_path_available, input_remaining_after_read, low_bits, output_cursor_after_write,
-        subtable_offset, unread_input_state, window_match_start, FastDistAction, FastLitLenAction,
+        fast_dist_action, fast_litlen_action, input_remaining_after_read, low_bits,
+        output_cursor_after_write, subtable_offset, unread_input_state, window_match_start,
+        FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -708,12 +693,6 @@ mod tests {
     }
 
     #[test]
-    fn fast_input_cursor_reserves_five_bytes() {
-        assert!(!fast_input_available(5));
-        assert!(fast_input_available(6));
-    }
-
-    #[test]
     fn input_remaining_after_read_preserves_wrapping_decrement() {
         assert_eq!(input_remaining_after_read(6), 5);
         assert_eq!(input_remaining_after_read(0), ::core::ffi::c_uint::MAX);
@@ -728,22 +707,12 @@ mod tests {
     }
 
     #[test]
-    fn fast_output_cursor_reserves_match_space_and_tracks_writes() {
-        assert!(!fast_output_available(257));
-        assert!(fast_output_available(258));
+    fn fast_output_cursor_tracks_writes() {
         assert_eq!(output_cursor_after_write(4, 3), (5, 2));
         assert_eq!(
             output_cursor_after_write(::core::ffi::c_uint::MAX, 0),
             (0, ::core::ffi::c_uint::MAX),
         );
-    }
-
-    #[test]
-    fn fast_path_requires_input_and_output_reserves() {
-        assert!(!fast_path_available(5, 257));
-        assert!(!fast_path_available(6, 257));
-        assert!(!fast_path_available(5, 258));
-        assert!(fast_path_available(6, 258));
     }
 
     #[test]

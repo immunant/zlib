@@ -566,16 +566,24 @@ fn gz_open_recorded_offset(
     }
 }
 
-fn gz_open_should_set_nonblocking(oflag: ::core::ffi::c_int) -> bool {
-    oflag & crate::stdlib::O_NONBLOCK != 0
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzOpenFdPlan {
+    OpenPath,
+    AdoptFd {
+        set_nonblocking: bool,
+        set_close_on_exec: bool,
+    },
 }
 
-fn gz_open_should_set_close_on_exec(oflag: ::core::ffi::c_int) -> bool {
-    oflag & crate::stdlib::O_CLOEXEC != 0
-}
-
-fn gz_open_needs_open(fd: ::core::ffi::c_int) -> bool {
-    fd == -1 as ::core::ffi::c_int
+fn gz_open_fd_plan(fd: ::core::ffi::c_int, oflag: ::core::ffi::c_int) -> GzOpenFdPlan {
+    if fd == -1 as ::core::ffi::c_int {
+        GzOpenFdPlan::OpenPath
+    } else {
+        GzOpenFdPlan::AdoptFd {
+            set_nonblocking: oflag & crate::stdlib::O_NONBLOCK != 0,
+            set_close_on_exec: oflag & crate::stdlib::O_CLOEXEC != 0,
+        }
+    }
 }
 
 fn gz_open_path_buffer_len(len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
@@ -627,28 +635,34 @@ unsafe extern "C" fn gz_open(
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
         path as *const ::core::ffi::c_char,
     );
-    if gz_open_needs_open(fd) {
-        (*state).fd = crate::stdlib::open(
-            path as *const ::core::ffi::c_char,
-            plan.oflag,
-            0o666 as ::core::ffi::c_int,
-        );
-    } else {
-        if gz_open_should_set_nonblocking(plan.oflag) {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFL,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
+    match gz_open_fd_plan(fd, plan.oflag) {
+        GzOpenFdPlan::OpenPath => {
+            (*state).fd = crate::stdlib::open(
+                path as *const ::core::ffi::c_char,
+                plan.oflag,
+                0o666 as ::core::ffi::c_int,
             );
         }
-        if gz_open_should_set_close_on_exec(plan.oflag) {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFD,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
-            );
+        GzOpenFdPlan::AdoptFd {
+            set_nonblocking,
+            set_close_on_exec,
+        } => {
+            if set_nonblocking {
+                crate::stdlib::fcntl(
+                    fd,
+                    crate::stdlib::F_SETFL,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
+                );
+            }
+            if set_close_on_exec {
+                crate::stdlib::fcntl(
+                    fd,
+                    crate::stdlib::F_SETFD,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
+                );
+            }
+            (*state).fd = fd;
         }
-        (*state).fd = fd;
     }
     if (*state).fd == -1 as ::core::ffi::c_int {
         crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
@@ -1149,11 +1163,10 @@ mod tests {
     use super::{
         gz_clear_read_flags, gz_error_clears_buffer, gz_error_message_allocation_len,
         gz_error_needs_message_allocation, gz_error_plan, gz_is_read_or_write_mode,
-        gz_legacy_offset_result, gz_lseek_succeeded, gz_open_needs_open, gz_open_offset_plan,
-        gz_open_path_buffer_len, gz_open_recorded_offset, gz_open_should_set_close_on_exec,
-        gz_open_should_set_nonblocking, gz_parse_open_mode, gz_position_after_skip,
-        gz_post_open_metadata, gz_prepare_open, gz_request_len, gz_reset_core,
-        gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
+        gz_legacy_offset_result, gz_lseek_succeeded, gz_open_fd_plan, gz_open_offset_plan,
+        gz_open_path_buffer_len, gz_open_recorded_offset, gz_parse_open_mode,
+        gz_position_after_skip, gz_post_open_metadata, gz_prepare_open, gz_request_len,
+        gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
         gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result, gzerror_core,
         gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
         gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
@@ -1162,8 +1175,8 @@ mod tests {
         gzseek_plan_remaining_offset, gzseek_read_buffer_consumed,
         gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
         gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
-        GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan,
-        GzSeekReadBufferPlan,
+        GzErrorMessage, GzErrorPlan, GzOpenFdPlan, GzOpenOffsetPlan, GzResetFields,
+        GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -2038,31 +2051,43 @@ mod tests {
     }
 
     #[test]
-    fn gz_open_should_set_nonblocking_detects_only_the_nonblocking_flag() {
-        assert!(gz_open_should_set_nonblocking(crate::stdlib::O_NONBLOCK));
-        assert!(gz_open_should_set_nonblocking(
-            crate::stdlib::O_NONBLOCK | crate::stdlib::O_CLOEXEC
-        ));
-        assert!(!gz_open_should_set_nonblocking(crate::stdlib::O_CLOEXEC));
-        assert!(!gz_open_should_set_nonblocking(0));
+    fn gz_open_fd_plan_opens_a_path_only_for_the_missing_descriptor_sentinel() {
+        assert_eq!(gz_open_fd_plan(-1, 0), GzOpenFdPlan::OpenPath);
+        assert_ne!(gz_open_fd_plan(-2, 0), GzOpenFdPlan::OpenPath);
+        assert_ne!(gz_open_fd_plan(0, 0), GzOpenFdPlan::OpenPath);
+        assert_ne!(gz_open_fd_plan(17, 0), GzOpenFdPlan::OpenPath);
     }
 
     #[test]
-    fn gz_open_should_set_close_on_exec_detects_only_the_close_on_exec_flag() {
-        assert!(gz_open_should_set_close_on_exec(crate::stdlib::O_CLOEXEC));
-        assert!(gz_open_should_set_close_on_exec(
-            crate::stdlib::O_CLOEXEC | crate::stdlib::O_NONBLOCK
-        ));
-        assert!(!gz_open_should_set_close_on_exec(crate::stdlib::O_NONBLOCK));
-        assert!(!gz_open_should_set_close_on_exec(0));
-    }
-
-    #[test]
-    fn gz_open_needs_open_only_for_the_missing_descriptor_sentinel() {
-        assert!(gz_open_needs_open(-1));
-        assert!(!gz_open_needs_open(-2));
-        assert!(!gz_open_needs_open(0));
-        assert!(!gz_open_needs_open(17));
+    fn gz_open_fd_plan_applies_requested_flags_only_to_adopted_descriptors() {
+        assert_eq!(
+            gz_open_fd_plan(17, crate::stdlib::O_NONBLOCK | crate::stdlib::O_CLOEXEC),
+            GzOpenFdPlan::AdoptFd {
+                set_nonblocking: true,
+                set_close_on_exec: true,
+            }
+        );
+        assert_eq!(
+            gz_open_fd_plan(17, crate::stdlib::O_NONBLOCK),
+            GzOpenFdPlan::AdoptFd {
+                set_nonblocking: true,
+                set_close_on_exec: false,
+            }
+        );
+        assert_eq!(
+            gz_open_fd_plan(17, crate::stdlib::O_CLOEXEC),
+            GzOpenFdPlan::AdoptFd {
+                set_nonblocking: false,
+                set_close_on_exec: true,
+            }
+        );
+        assert_eq!(
+            gz_open_fd_plan(17, 0),
+            GzOpenFdPlan::AdoptFd {
+                set_nonblocking: false,
+                set_close_on_exec: false,
+            }
+        );
     }
 
     #[test]

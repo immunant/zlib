@@ -771,7 +771,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     }
 }
 
-fn inflate_can_use_fast_path(
+pub(crate) fn inflate_can_use_fast_path(
     available_input: ::core::ffi::c_uint,
     available_output: ::core::ffi::c_uint,
 ) -> bool {
