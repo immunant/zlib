@@ -15,9 +15,9 @@ pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflate_dispatch_from_abi_stream as deflate;
 pub use crate::src::deflate::deflate_params_from_stream as deflateParams;
-use crate::src::deflate::deflate_reset_keep_from_stream;
 pub use crate::src::deflate::internal_state;
 use crate::src::deflate::DeflateResetKind;
+use crate::src::deflate::{deflateTune, DeflateScalarAction};
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpc;
@@ -862,7 +862,10 @@ unsafe fn gz_comp(
             {
                 return finish_close(state, 0 as ::core::ffi::c_int);
             }
-            deflate_reset_keep_from_stream(&mut state.strm, DeflateResetKind::Full);
+            deflateTune(
+                &mut state.strm,
+                DeflateScalarAction::Reset(DeflateResetKind::Full),
+            );
             state.reset = 0 as ::core::ffi::c_int;
         }
         ret = crate::zlib_h::Z_OK;

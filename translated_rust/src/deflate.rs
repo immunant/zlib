@@ -2293,72 +2293,6 @@ pub(crate) enum DeflateResetKind {
     Full,
 }
 
-// The FFI wrapper validates and borrows the stream handle.  This adapter owns
-// the opaque-state projection and stream publication, leaving both reset
-// cores free of raw-pointer-carrying types.
-pub(crate) unsafe fn deflate_reset_keep_from_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    kind: DeflateResetKind,
-) -> ::core::ffi::c_int {
-    let projection = match kind {
-        DeflateResetKind::Keep => DeflateStorageProjection::None,
-        DeflateResetKind::Full => DeflateStorageProjection::Hash,
-    };
-    let Some((strm, state, mut storage)) = deflate_stream_and_state(strm, projection) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let adler = deflateResetKeep(DeflateResetKeepOwner {
-        data_type: &mut state.data_type,
-        pending: &mut state.pending,
-        pending_out: &mut state.pending_out,
-        wrap: &mut state.wrap,
-        status: &mut state.status,
-        last_flush: &mut state.last_flush,
-        dyn_ltree: &mut state.dyn_ltree,
-        dyn_dtree: &mut state.dyn_dtree,
-        bl_tree: &mut state.bl_tree,
-        l_desc: &mut state.l_desc,
-        d_desc: &mut state.d_desc,
-        bl_desc: &mut state.bl_desc,
-        static_len: &mut state.static_len,
-        opt_len: &mut state.opt_len,
-        matches: &mut state.matches,
-        sym_next: &mut state.sym_next,
-        bi_buf: &mut state.bi_buf,
-        bi_valid: &mut state.bi_valid,
-        bi_used: &mut state.bi_used,
-    });
-    strm.total_out = 0;
-    strm.total_in = 0;
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    strm.data_type = crate::zlib_h::Z_UNKNOWN;
-    strm.adler = adler;
-    if matches!(kind, DeflateResetKind::Full) {
-        // The shared projection validates the callback-backed table's exact
-        // `hash_size` extent before this pointer-free reset core receives it.
-        let head = storage.head.take().expect("full-reset hash projection");
-        let w_size = state.w_size;
-        let config = &configuration_table[state.level as usize];
-        DeflateResetCore {
-            window_size: &mut state.window_size,
-            slid: &mut state.slid,
-            max_lazy_match: &mut state.max_lazy_match,
-            good_match: &mut state.good_match,
-            nice_match: &mut state.nice_match,
-            max_chain_length: &mut state.max_chain_length,
-            strstart: &mut state.strstart,
-            block_start: &mut state.block_start,
-            lookahead: &mut state.lookahead,
-            insert: &mut state.insert,
-            prev_length: &mut state.prev_length,
-            match_length: &mut state.match_length,
-            match_available: &mut state.match_available,
-            ins_h: &mut state.ins_h,
-        }
-        .reset_after_keep(head, w_size, config);
-    }
-    crate::zlib_h::Z_OK
-}
 #[export_name = "deflateResetKeep"]
 
 pub unsafe extern "C" fn deflateResetKeep_ffi(
@@ -2367,7 +2301,7 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_reset_keep_from_stream(strm, DeflateResetKind::Keep)
+    deflateTune(strm, DeflateScalarAction::Reset(DeflateResetKind::Keep))
 }
 #[export_name = "deflateReset"]
 
@@ -2377,7 +2311,7 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_reset_keep_from_stream(strm, DeflateResetKind::Full)
+    deflateTune(strm, DeflateScalarAction::Reset(DeflateResetKind::Full))
 }
 // Header registration is ordinary owned-state policy once the ABI header has
 // been copied.  Keeping the mode check and replacement here lets the boundary
@@ -2821,7 +2755,11 @@ fn deflate_tune_values(
 // validated opaque state. Each action carries only scalar inputs or an
 // optional scalar output borrow, so it cannot retain the ABI stream or any
 // callback-backed storage.
-enum DeflateScalarAction<'a> {
+pub(crate) enum DeflateScalarAction<'a> {
+    // Reset shares the established opaque-state association used by the
+    // scalar controls. Its full variant additionally selects the bounded
+    // hash-table view before entering the pointer-free reset cores.
+    Reset(DeflateResetKind),
     Prime {
         bits: ::core::ffi::c_int,
         value: ::core::ffi::c_int,
@@ -2845,20 +2783,75 @@ enum DeflateScalarAction<'a> {
 // mutates scalar state, so this shared implementation retains the one
 // opaque-state projection and keeps each action's policy over ordinary
 // values.
-unsafe fn deflateTune(
+pub(crate) unsafe fn deflateTune(
     strm: &mut crate::zlib_h::z_stream_s,
     action: DeflateScalarAction<'_>,
 ) -> ::core::ffi::c_int {
     let projection = match action {
+        DeflateScalarAction::Reset(DeflateResetKind::Keep) => DeflateStorageProjection::None,
+        DeflateScalarAction::Reset(DeflateResetKind::Full) => DeflateStorageProjection::Hash,
         DeflateScalarAction::Prime { .. } => DeflateStorageProjection::Pending,
         DeflateScalarAction::Pending { .. }
         | DeflateScalarAction::Used { .. }
         | DeflateScalarAction::Tune { .. } => DeflateStorageProjection::None,
     };
-    let Some((_strm, s, storage)) = deflate_stream_and_state(strm, projection) else {
+    let Some((strm, s, mut storage)) = deflate_stream_and_state(strm, projection) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     match action {
+        DeflateScalarAction::Reset(kind) => {
+            let adler = deflateResetKeep(DeflateResetKeepOwner {
+                data_type: &mut s.data_type,
+                pending: &mut s.pending,
+                pending_out: &mut s.pending_out,
+                wrap: &mut s.wrap,
+                status: &mut s.status,
+                last_flush: &mut s.last_flush,
+                dyn_ltree: &mut s.dyn_ltree,
+                dyn_dtree: &mut s.dyn_dtree,
+                bl_tree: &mut s.bl_tree,
+                l_desc: &mut s.l_desc,
+                d_desc: &mut s.d_desc,
+                bl_desc: &mut s.bl_desc,
+                static_len: &mut s.static_len,
+                opt_len: &mut s.opt_len,
+                matches: &mut s.matches,
+                sym_next: &mut s.sym_next,
+                bi_buf: &mut s.bi_buf,
+                bi_valid: &mut s.bi_valid,
+                bi_used: &mut s.bi_used,
+            });
+            strm.total_out = 0;
+            strm.total_in = 0;
+            strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+            strm.data_type = crate::zlib_h::Z_UNKNOWN;
+            strm.adler = adler;
+            if matches!(kind, DeflateResetKind::Full) {
+                // The shared projection validates this callback-backed table
+                // before the pointer-free full-reset core receives it.
+                let head = storage.head.take().expect("full-reset hash projection");
+                let w_size = s.w_size;
+                let config = &configuration_table[s.level as usize];
+                DeflateResetCore {
+                    window_size: &mut s.window_size,
+                    slid: &mut s.slid,
+                    max_lazy_match: &mut s.max_lazy_match,
+                    good_match: &mut s.good_match,
+                    nice_match: &mut s.nice_match,
+                    max_chain_length: &mut s.max_chain_length,
+                    strstart: &mut s.strstart,
+                    block_start: &mut s.block_start,
+                    lookahead: &mut s.lookahead,
+                    insert: &mut s.insert,
+                    prev_length: &mut s.prev_length,
+                    match_length: &mut s.match_length,
+                    match_available: &mut s.match_available,
+                    ins_h: &mut s.ins_h,
+                }
+                .reset_after_keep(head, w_size, config);
+            }
+            crate::zlib_h::Z_OK
+        }
         DeflateScalarAction::Prime { bits, value } => {
             let pending_buf = storage.pending.expect("initialized pending buffer");
             deflate_prime_bits(
