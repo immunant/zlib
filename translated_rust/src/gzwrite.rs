@@ -150,12 +150,15 @@ unsafe extern "C" fn gz_comp(
         }
         return 0 as ::core::ffi::c_int;
     }
-    if (*state).reset != 0 {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
+    match gz_comp_reset_action((*state).reset, (*strm).avail_in, flush) {
+        GzCompResetAction::None => {}
+        GzCompResetAction::ReturnOk => {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset_ffi(strm as *mut crate::zlib_h::z_stream_s);
-        (*state).reset = 0 as ::core::ffi::c_int;
+        GzCompResetAction::ResetStream => {
+            crate::src::deflate::deflateReset_ffi(strm as *mut crate::zlib_h::z_stream_s);
+            (*state).reset = 0 as ::core::ffi::c_int;
+        }
     }
     ret = crate::zlib_h::Z_OK;
     loop {
@@ -334,6 +337,26 @@ fn gz_comp_should_write_pending(
     avail_out == 0 as crate::stdlib::uInt
         || flush != crate::zlib_h::Z_NO_FLUSH
             && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
+}
+
+enum GzCompResetAction {
+    None,
+    ReturnOk,
+    ResetStream,
+}
+
+fn gz_comp_reset_action(
+    reset: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> GzCompResetAction {
+    if reset == 0 {
+        GzCompResetAction::None
+    } else if avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
+        GzCompResetAction::ReturnOk
+    } else {
+        GzCompResetAction::ResetStream
+    }
 }
 
 fn gz_note_buffered_input(state: &mut crate::gzguts_h::gz_state, count: ::core::ffi::c_uint) {

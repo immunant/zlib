@@ -641,6 +641,17 @@ fn gzclose_read_status(err: ::core::ffi::c_int) -> ::core::ffi::c_int {
     }
 }
 
+fn gzclose_r_final_status(
+    close_ret: ::core::ffi::c_int,
+    read_status: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if close_ret != 0 {
+        crate::zlib_h::Z_ERRNO
+    } else {
+        read_status
+    }
+}
+
 #[export_name = "gzread"]
 
 pub unsafe extern "C" fn gzread_ffi(
@@ -943,9 +954,5 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
     ret = crate::stdlib::close((*state).fd);
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
-    return if ret != 0 {
-        crate::zlib_h::Z_ERRNO
-    } else {
-        err
-    };
+    return gzclose_r_final_status(ret, err);
 }
