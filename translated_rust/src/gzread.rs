@@ -102,6 +102,18 @@ enum GzLoad {
     },
 }
 
+// The load result touches only scalar status and owned error storage. Keeping
+// those fields in a separate view lets applying it stay independent of the
+// ABI-shaped gzip state.
+struct GzLoadTarget<'a> {
+    again: &'a mut ::core::ffi::c_int,
+    eof: &'a mut ::core::ffi::c_int,
+    message: &'a mut Option<Box<[u8]>>,
+    error: &'a mut ::core::ffi::c_int,
+    buffered: &'a mut ::core::ffi::c_uint,
+    path: Option<&'a [u8]>,
+}
+
 // Reading an owned gzip buffer does not require the ABI-shaped state.  Keep
 // the I/O loop pointer-free and return every state transition for the caller
 // to apply at its existing boundary.
@@ -157,15 +169,23 @@ fn gz_load(fd: &rustix::fd::OwnedFd, buf: &mut [u8]) -> GzLoad {
     }
 }
 
-unsafe fn apply_gz_load(
-    state: &mut crate::gzguts_h::gz_state,
+fn apply_gz_load(
+    target: GzLoadTarget<'_>,
     result: GzLoad,
 ) -> Result<::core::ffi::c_uint, ::core::ffi::c_uint> {
+    let GzLoadTarget {
+        again: state_again,
+        eof: state_eof,
+        message: stored_message,
+        error,
+        buffered,
+        path,
+    } = target;
     match result {
         GzLoad::Loaded { have, eof, again } => {
-            state.again = again as ::core::ffi::c_int;
+            *state_again = again as ::core::ffi::c_int;
             if eof {
-                state.eof = 1;
+                *state_eof = 1;
             }
             Ok(have)
         }
@@ -175,14 +195,14 @@ unsafe fn apply_gz_load(
             again,
         } => {
             errno::set_errno(errno::Errno(errno_value));
-            state.again = again as ::core::ffi::c_int;
+            *state_again = again as ::core::ffi::c_int;
             let message = errno::Errno(errno_value).to_string();
             crate::src::gzlib::gz_set_error(
-                &mut state.msg,
-                &mut state.err,
-                &mut state.x.have,
-                state.again,
-                state.path.as_deref(),
+                stored_message,
+                error,
+                buffered,
+                *state_again,
+                path,
                 crate::zlib_h::Z_ERRNO,
                 Some(message.as_bytes()),
             );
@@ -229,7 +249,17 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
         };
         errno::set_errno(errno::Errno(0));
         let ret = if let Some(output) = buffer.get_mut(avail_in as usize..size) {
-            match apply_gz_load(state, gz_load(state.fd.as_ref().unwrap(), output)) {
+            match apply_gz_load(
+                GzLoadTarget {
+                    again: &mut state.again,
+                    eof: &mut state.eof,
+                    message: &mut state.msg,
+                    error: &mut state.err,
+                    buffered: &mut state.x.have,
+                    path: state.path.as_deref(),
+                },
+                gz_load(state.fd.as_ref().unwrap(), output),
+            ) {
                 Ok(have) => {
                     got = have;
                     0
@@ -455,7 +485,14 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 };
                 errno::set_errno(errno::Errno(0));
                 let (ret, have) = match apply_gz_load(
-                    state,
+                    GzLoadTarget {
+                        again: &mut state.again,
+                        eof: &mut state.eof,
+                        message: &mut state.msg,
+                        error: &mut state.err,
+                        buffered: &mut state.x.have,
+                        path: state.path.as_deref(),
+                    },
                     gz_load(state.fd.as_ref().unwrap(), output.as_mut()),
                 ) {
                     Ok(have) => (0, have),
@@ -594,7 +631,17 @@ unsafe fn gz_read(
                         return got;
                     };
                     errno::set_errno(errno::Errno(0));
-                    match apply_gz_load(state, gz_load(state.fd.as_ref().unwrap(), destination)) {
+                    match apply_gz_load(
+                        GzLoadTarget {
+                            again: &mut state.again,
+                            eof: &mut state.eof,
+                            message: &mut state.msg,
+                            error: &mut state.err,
+                            buffered: &mut state.x.have,
+                            path: state.path.as_deref(),
+                        },
+                        gz_load(state.fd.as_ref().unwrap(), destination),
+                    ) {
                         Ok(have) => n = have,
                         Err(have) => {
                             n = have;
