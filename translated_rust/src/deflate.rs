@@ -762,12 +762,15 @@ fn read_buf(
             strm.avail_in,
             strm.total_in,
         );
+        let Some(input_tail) = input.get(len as usize..) else {
+            return ReadBufProgress {
+                copied: 0,
+                avail_in: strm.avail_in,
+            };
+        };
         strm.avail_in = avail_in;
         strm.adler = adler;
-        // `len` is bounded by the validated input slice above. Preserve the
-        // translated cursor arithmetic without performing an unsafe raw-pointer
-        // offset in this private adapter.
-        strm.next_in = strm.next_in.wrapping_add(len as usize);
+        strm.next_in = input_tail.as_ptr() as *mut crate::stdlib::Bytef;
         strm.total_in = total_in;
         ReadBufProgress {
             copied: len,
