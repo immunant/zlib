@@ -565,16 +565,19 @@ fn inflate_reset2_params(
 }
 
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
-    if !inflate_stream_has_allocator_callbacks((*strm).zalloc.is_some(), (*strm).zfree.is_some()) {
+    let stream = &*strm;
+    if !inflate_stream_has_allocator_callbacks(stream.zalloc.is_some(), stream.zfree.is_some()) {
         return 1 as ::core::ffi::c_int;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() || !inflate_state_metadata_is_valid((*state).strm == strm, (*state).mode) {
+    let state = stream.state as *mut crate::src::inflate::inflate_state;
+    if state.is_null() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let state = &*state;
+    if !inflate_state_metadata_is_valid(state.strm == strm, state.mode) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;

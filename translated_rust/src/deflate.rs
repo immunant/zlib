@@ -2796,7 +2796,11 @@ unsafe extern "C" fn deflate_stored(
         have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
-        read_buf((*s).strm, (*s).window.offset((*s).strstart as isize), have);
+        read_buf(
+            (*s).strm,
+            (*s).window.wrapping_add((*s).strstart as usize),
+            have,
+        );
         (*s).strstart = (*s).strstart.wrapping_add(have);
         (*s).insert = stored_insert_after_input((*s).insert, (*s).w_size, have);
     }
