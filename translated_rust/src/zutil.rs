@@ -7,6 +7,8 @@ pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
 
+use ::core::sync::atomic::AtomicPtr;
+
 const fn c_chars<const N: usize>(bytes: [u8; N]) -> [::core::ffi::c_char; N] {
     let mut chars = [0; N];
     let mut index = 0;
@@ -28,17 +30,17 @@ static BUFFER_ERROR: [::core::ffi::c_char; 13] = c_chars(*b"buffer error\0");
 static INCOMPATIBLE_VERSION: [::core::ffi::c_char; 21] = c_chars(*b"incompatible version\0");
 
 #[no_mangle]
-pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    NEED_DICTIONARY.as_ptr() as *mut ::core::ffi::c_char,
-    STREAM_END.as_ptr() as *mut ::core::ffi::c_char,
-    EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char,
-    FILE_ERROR.as_ptr() as *mut ::core::ffi::c_char,
-    STREAM_ERROR.as_ptr() as *mut ::core::ffi::c_char,
-    DATA_ERROR.as_ptr() as *mut ::core::ffi::c_char,
-    INSUFFICIENT_MEMORY.as_ptr() as *mut ::core::ffi::c_char,
-    BUFFER_ERROR.as_ptr() as *mut ::core::ffi::c_char,
-    INCOMPATIBLE_VERSION.as_ptr() as *mut ::core::ffi::c_char,
-    EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char,
+pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; 10] = [
+    AtomicPtr::new(NEED_DICTIONARY.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(STREAM_END.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(FILE_ERROR.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(STREAM_ERROR.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(DATA_ERROR.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(INSUFFICIENT_MEMORY.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(BUFFER_ERROR.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(INCOMPATIBLE_VERSION.as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char),
 ];
 
 fn zlib_version() -> &'static [::core::ffi::c_char; 15] {
@@ -116,6 +118,10 @@ fn error_message(err: ::core::ffi::c_int) -> &'static [::core::ffi::c_char] {
     }
 }
 
+pub(crate) fn z_errmsg_index(err: ::core::ffi::c_int) -> usize {
+    error_message_index(err)
+}
+
 #[export_name = "zError"]
 pub unsafe extern "C" fn zError_ffi(err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     error_message(err).as_ptr()
@@ -175,8 +181,8 @@ mod tests {
     use super::{
         allocation_byte_count, allocation_request, allocation_request_for_uint_size,
         allocation_uses_malloc, compile_flags_for_sizes, error_message, error_message_index,
-        has_error_message_index, size_class, size_flag, size_t, zlib_compile_flags, zlib_version,
-        AllocationRequest, EMPTY_ERROR,
+        has_error_message_index, size_class, size_flag, size_t, z_errmsg, z_errmsg_index,
+        zlib_compile_flags, zlib_version, AllocationRequest, EMPTY_ERROR,
     };
 
     #[test]
@@ -201,6 +207,26 @@ mod tests {
         assert_eq!(error_message(2).last(), Some(&0));
         assert_eq!(error_message(-6).last(), Some(&0));
         assert_eq!(error_message(-7).as_ptr(), EMPTY_ERROR.as_ptr());
+    }
+
+    #[test]
+    fn error_message_table_preserves_pointer_layout_and_indexing() {
+        assert_eq!(
+            ::core::mem::size_of_val(&z_errmsg),
+            10 * ::core::mem::size_of::<*mut ::core::ffi::c_char>()
+        );
+        assert_eq!(
+            ::core::mem::align_of_val(&z_errmsg),
+            ::core::mem::align_of::<*mut ::core::ffi::c_char>()
+        );
+
+        for error in [-7, -6, -1, 0, 1, 2, 3] {
+            assert_eq!(
+                z_errmsg[z_errmsg_index(error)].load(::core::sync::atomic::Ordering::Relaxed)
+                    as *const ::core::ffi::c_char,
+                error_message(error).as_ptr()
+            );
+        }
     }
 
     #[test]
