@@ -1231,7 +1231,7 @@ fn gz_fetch_from_state(owner: &mut GzFetchOwner<'_>) -> ::core::ffi::c_int {
 // The byte-copy/skip state machine works entirely over the pointer-free read
 // owner.  The ABI state is projected only by its callers when they must drive
 // the embedded codec.
-fn gz_read(
+fn gzread(
     state: &mut GzReadState,
     output: &mut [u8],
     mut dispatch: impl FnMut(GzReadAction, &mut GzReadState, &mut [u8]) -> GzReadStep,
@@ -1383,7 +1383,13 @@ fn gz_read(
     return got;
 }
 
-unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::core::ffi::c_int {
+// The ABI-shaped state is projected exactly once for a byte-read request.
+// Keep that projection under this adapter; `gzread()` itself is the
+// pointer-free owner loop used after the projection has completed.
+unsafe fn gzread_from_state(
+    state: &mut crate::gzguts_h::gz_state,
+    output: &mut [u8],
+) -> ::core::ffi::c_int {
     let request = GzReadRequest::new(state.mode, state.err, state.again);
     let mut error = crate::src::gzlib::GzErrorState {
         message: &mut state.msg,
@@ -1436,7 +1442,7 @@ unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::
             total_in: &mut state.strm.total_in,
             total_out: &mut state.strm.total_out,
         };
-        let len = gz_read(&mut read, output, |action, read, destination| {
+        let len = gzread(&mut read, output, |action, read, destination| {
             dispatch.dispatch(action, read, destination)
         });
         dispatch.project_from_read(&mut read);
@@ -1495,7 +1501,7 @@ pub unsafe extern "C" fn gzread_ffi(
     let Some(mut state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
         return -1 as ::core::ffi::c_int;
     };
-    gzread(state.as_mut(), output)
+    gzread_from_state(state.as_mut(), output)
 }
 unsafe fn gzfread(
     state: &mut crate::gzguts_h::gz_state,
@@ -1525,7 +1531,7 @@ unsafe fn gzfread(
     }
     drop(error);
     return if len != 0 {
-        gzread(state, output).max(0) as crate::stdlib::z_size_t / size
+        gzread_from_state(state, output).max(0) as crate::stdlib::z_size_t / size
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -1579,7 +1585,7 @@ unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.buffers.set_output_cursor(next_cursor);
         return byte as ::core::ffi::c_int;
     }
-    return if gzread(state, &mut buf) < 1 as ::core::ffi::c_int {
+    return if gzread_from_state(state, &mut buf) < 1 as ::core::ffi::c_int {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as usize] as ::core::ffi::c_int
