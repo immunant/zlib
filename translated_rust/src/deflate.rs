@@ -1256,17 +1256,9 @@ pub unsafe extern "C" fn deflateResetKeep(
         crate::src::deflate::INIT_STATE
     };
     (*strm).adler = if state.wrap == 2 as ::core::ffi::c_int {
-        crate::src::crc32::crc32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        )
+        crate::src::crc32::crc32_slice(0, &[])
     } else {
-        crate::src::adler32::adler32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        )
+        crate::src::adler32::ADLER32_INITIAL
     };
     state.last_flush = -2 as ::core::ffi::c_int;
     crate::src::trees::tr_init_state(state);
@@ -2286,11 +2278,7 @@ pub unsafe extern "C" fn deflate(
         if !header_written {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        (*strm).adler = crate::src::adler32::adler32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        );
+        (*strm).adler = crate::src::adler32::ADLER32_INITIAL;
         state.status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -2299,11 +2287,7 @@ pub unsafe extern "C" fn deflate(
         }
     }
     if (*s).status == crate::src::deflate::GZIP_STATE {
-        (*strm).adler = crate::src::crc32::crc32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        );
+        (*strm).adler = crate::src::crc32::crc32_slice(0, &[]);
         let header = if (*s).gzhead.is_null() {
             None
         } else {
@@ -2507,11 +2491,7 @@ pub unsafe extern "C" fn deflate(
             if !append_gzip_hcrc_state(pending_buf, &mut state.pending, hcrc) {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
-            (*strm).adler = crate::src::crc32::crc32(
-                0 as crate::stdlib::uLong,
-                ::core::ptr::null::<crate::stdlib::Bytef>(),
-                0 as crate::stdlib::uInt,
-            );
+            (*strm).adler = crate::src::crc32::crc32_slice(0, &[]);
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);

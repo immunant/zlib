@@ -14,6 +14,10 @@ pub use crate::zlib_h::Z_NULL;
 pub const BASE: ::core::ffi::c_uint = 65521 as ::core::ffi::c_uint;
 
 pub const NMAX: ::core::ffi::c_int = 5552 as ::core::ffi::c_int;
+
+/// Adler-32's documented value for an empty input stream.
+pub(crate) const ADLER32_INITIAL: crate::stdlib::uLong = 1;
+
 pub(crate) fn adler32_slice(
     mut adler: crate::stdlib::uLong,
     buf: &[crate::stdlib::Bytef],
