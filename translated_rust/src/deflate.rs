@@ -621,24 +621,63 @@ impl DeflateCallbackStorageOwner {
 // callback storage itself.
 pub(crate) unsafe fn deflate_tree_bit_output(
     state: &mut crate::src::deflate::deflate_state,
-    action: crate::src::trees::BitOutputAction,
-) {
+    action: crate::src::trees::BitOutputAction<'_>,
+) -> ::core::ffi::c_int {
     let pending_len = state.callback_storage.pending_len();
     let pending_ptr = state
         .pending_buf
         .expect("initialized pending buffer")
         .as_ptr();
     let pending_buf = unsafe { ::core::slice::from_raw_parts_mut(pending_ptr, pending_len) };
-    crate::src::trees::bi_flush_or_windup(
-        crate::src::trees::BitOutputState {
-            pending_buf,
-            pending: &mut state.pending,
-            bi_buf: &mut state.bi_buf,
-            bi_valid: &mut state.bi_valid,
-            bi_used: &mut state.bi_used,
-        },
-        action,
-    );
+    match action {
+        action @ (crate::src::trees::BitOutputAction::Flush
+        | crate::src::trees::BitOutputAction::Windup
+        | crate::src::trees::BitOutputAction::Align) => {
+            crate::src::trees::bi_flush_or_windup(
+                crate::src::trees::BitOutputState {
+                    pending_buf,
+                    pending: &mut state.pending,
+                    bi_buf: &mut state.bi_buf,
+                    bi_valid: &mut state.bi_valid,
+                    bi_used: &mut state.bi_used,
+                },
+                action,
+            );
+            0
+        }
+        crate::src::trees::BitOutputAction::Stored {
+            input,
+            stored_len,
+            last,
+        } => {
+            crate::src::trees::stored_block_bytes(
+                pending_buf,
+                &mut state.pending,
+                &mut state.bi_buf,
+                &mut state.bi_valid,
+                &mut state.bi_used,
+                input,
+                stored_len,
+                last,
+            );
+            0
+        }
+        crate::src::trees::BitOutputAction::Tally { dist, lc } => {
+            let sym_buf_start = state.sym_buf_start;
+            crate::src::trees::_tr_tally(
+                crate::src::trees::TallyState {
+                    sym_buf: &mut pending_buf[sym_buf_start..],
+                    sym_next: &mut state.sym_next,
+                    sym_end: state.sym_end,
+                    dyn_ltree: &mut state.dyn_ltree,
+                    dyn_dtree: &mut state.dyn_dtree,
+                    matches: &mut state.matches,
+                },
+                dist,
+                lc,
+            )
+        }
+    }
 }
 
 // This complete decision is pointer-free. The one callback boundary pairs
