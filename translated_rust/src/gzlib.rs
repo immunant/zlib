@@ -756,6 +756,14 @@ pub(crate) fn gz_read_mark_past(state: &mut crate::gzguts_h::gz_state, remaining
     }
 }
 
+// A deferred seek needs another fetch only after its buffered output is
+// exhausted and the input has not reached EOF.  Keep this state-only decision
+// separate from `gz_fetch()`, which owns the descriptor and buffer work.
+pub(crate) fn gz_skip_needs_fetch(state: &crate::gzguts_h::gz_state) -> bool {
+    state.x.have == 0
+        && !(state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt)
+}
+
 // `gzgets()` owns the caller string and its raw buffer copies.  Keep only the
 // bounded line-read selection and integer bookkeeping here, where neither
 // operation needs those pointers.

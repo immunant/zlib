@@ -413,7 +413,7 @@ fn gz_finish_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         if gz_skip_buffered(state) {
             continue;
         }
-        if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
+        if !crate::src::gzlib::gz_skip_needs_fetch(state) {
             break;
         }
         if gz_fetch(state) == -1 as ::core::ffi::c_int {
