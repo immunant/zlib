@@ -2490,19 +2490,6 @@ fn init_block_fields(
     *sym_next = *matches;
 }
 
-unsafe fn init_block(s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    init_block_fields(
-        &mut state.dyn_ltree,
-        &mut state.dyn_dtree,
-        &mut state.bl_tree,
-        &mut state.static_len,
-        &mut state.opt_len,
-        &mut state.matches,
-        &mut state.sym_next,
-    );
-}
-
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
     tr_static_init();
     let state = &mut *s;
@@ -2512,7 +2499,15 @@ pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state
     state.bi_buf = 0 as crate::zutil_h::ush;
     state.bi_valid = 0 as ::core::ffi::c_int;
     state.bi_used = 0 as ::core::ffi::c_int;
-    init_block(s);
+    init_block_fields(
+        &mut state.dyn_ltree,
+        &mut state.dyn_dtree,
+        &mut state.bl_tree,
+        &mut state.static_len,
+        &mut state.opt_len,
+        &mut state.matches,
+        &mut state.sym_next,
+    );
 }
 #[export_name = "_tr_init"]
 
@@ -3792,7 +3787,16 @@ pub unsafe extern "C" fn _tr_flush_block(
                 as *const crate::src::deflate::ct_data,
         );
     }
-    init_block(s);
+    let state = &mut *s;
+    init_block_fields(
+        &mut state.dyn_ltree,
+        &mut state.dyn_dtree,
+        &mut state.bl_tree,
+        &mut state.static_len,
+        &mut state.opt_len,
+        &mut state.matches,
+        &mut state.sym_next,
+    );
     if last != 0 {
         bi_windup(s);
     }
