@@ -4432,6 +4432,118 @@ fn stored_block_copy_lengths(
     (window_len, payload_len.wrapping_sub(window_len))
 }
 
+/// Copy the already-buffered portion of a stored block to its direct output.
+///
+/// The strategy adapter establishes the callback-owned window and caller
+/// output views.  Keeping the range validation and copy here means that the
+/// actual block transfer cannot derive an interior pointer or call C memcpy.
+fn stored_block_copy_buffered_output(
+    window: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    block_start: ::core::ffi::c_long,
+    len: ::core::ffi::c_uint,
+) -> bool {
+    let Ok(start) = usize::try_from(block_start) else {
+        return false;
+    };
+    let Ok(len) = usize::try_from(len) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(len) else {
+        return false;
+    };
+    let Some(source) = window.get(start..end) else {
+        return false;
+    };
+    let Some(destination) = output.get_mut(..len) else {
+        return false;
+    };
+    destination.copy_from_slice(source);
+    true
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct StoredHistoryState {
+    matches: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    insert: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+}
+
+/// Commit direct-output input to the stored-block history window.
+///
+/// `deflate_stored()` historically did this with three raw `memcpy` calls.
+/// The source slice is the exact consumed suffix of the caller input, while
+/// the destination is the callback-owned window.  This core validates all
+/// ranges before changing the window, including the overlapping slide.
+fn stored_block_update_history(
+    window: &mut [crate::stdlib::Bytef],
+    input: &[crate::stdlib::Bytef],
+    used: ::core::ffi::c_uint,
+    w_size: crate::stdlib::uInt,
+    window_size: crate::zutil_h::ulg,
+    state: StoredHistoryState,
+) -> Option<StoredHistoryState> {
+    let used = usize::try_from(used).ok()?;
+    let w_size = usize::try_from(w_size).ok()?;
+    let window_size = usize::try_from(window_size).ok()?;
+    let strstart = usize::try_from(state.strstart).ok()?;
+    let insert = usize::try_from(state.insert).ok()?;
+    if input.len() != used || window.len() < window_size {
+        return None;
+    }
+
+    if used >= w_size {
+        let source = input.get(used.checked_sub(w_size)?..used)?;
+        let destination = window.get_mut(..w_size)?;
+        destination.copy_from_slice(source);
+        return Some(StoredHistoryState {
+            matches: 2,
+            strstart: w_size as crate::stdlib::uInt,
+            insert: w_size as crate::stdlib::uInt,
+            block_start: w_size as ::core::ffi::c_long,
+        });
+    }
+
+    let slide = window_size.checked_sub(strstart)? <= used;
+    let (next_strstart, next_matches, next_insert) = if slide {
+        let next_strstart = strstart.checked_sub(w_size)?;
+        let source_end = w_size.checked_add(strstart)?;
+        window.get(w_size..source_end)?;
+        window.get(..strstart)?;
+        (
+            next_strstart,
+            if state.matches < 2 {
+                state.matches.wrapping_add(1)
+            } else {
+                state.matches
+            },
+            insert.min(next_strstart),
+        )
+    } else {
+        (strstart, state.matches, insert)
+    };
+    let input_end = next_strstart.checked_add(used)?;
+    window.get(next_strstart..input_end)?;
+
+    if slide {
+        let source_end = w_size + strstart;
+        window.copy_within(w_size..source_end, 0);
+    }
+    window[next_strstart..input_end].copy_from_slice(input);
+    let final_strstart = next_strstart.checked_add(used)?;
+    Some(StoredHistoryState {
+        matches: next_matches,
+        strstart: final_strstart as crate::stdlib::uInt,
+        insert: stored_insert_after_input(
+            next_insert as crate::stdlib::uInt,
+            w_size as crate::stdlib::uInt,
+            used as ::core::ffi::c_uint,
+        ),
+        block_start: final_strstart as ::core::ffi::c_long,
+    })
+}
+
 fn stored_block_should_wait(
     len: ::core::ffi::c_uint,
     min_block: ::core::ffi::c_uint,
@@ -4542,11 +4654,12 @@ unsafe extern "C" fn deflate_stored(
         flush_pending((*s).strm);
         let (window_len, input_len) = stored_block_copy_lengths(left, len);
         if window_len != 0 {
-            crate::stdlib::memcpy(
-                (*(*s).strm).next_out as *mut ::core::ffi::c_void,
-                (*s).window.offset((*s).block_start as isize) as *const ::core::ffi::c_void,
-                window_len as crate::__stddef_size_t_h::size_t,
-            );
+            let window = core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
+            let output =
+                core::slice::from_raw_parts_mut((*(*s).strm).next_out, window_len as usize);
+            if !stored_block_copy_buffered_output(window, output, (*s).block_start, window_len) {
+                return need_more;
+            }
             (*(*s).strm).next_out = (*(*s).strm).next_out.offset(window_len as isize);
             (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(window_len);
             (*(*s).strm).total_out = (*(*s).strm)
@@ -4568,43 +4681,30 @@ unsafe extern "C" fn deflate_stored(
     }
     used = used.wrapping_sub((*(*s).strm).avail_in as ::core::ffi::c_uint);
     if used != 0 {
-        if used >= (*s).w_size {
-            (*s).matches = 2 as crate::stdlib::uInt;
-            crate::stdlib::memcpy(
-                (*s).window as *mut ::core::ffi::c_void,
-                (*(*s).strm).next_in.offset(-((*s).w_size as isize)) as *const ::core::ffi::c_void,
-                (*s).w_size as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).strstart = (*s).w_size;
-            (*s).insert = (*s).strstart;
-        } else {
-            if (*s)
-                .window_size
-                .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
-                <= used as crate::zutil_h::ulg
-            {
-                (*s).strstart = (*s).strstart.wrapping_sub((*s).w_size);
-                crate::stdlib::memcpy(
-                    (*s).window as *mut ::core::ffi::c_void,
-                    (*s).window.offset((*s).w_size as isize) as *const ::core::ffi::c_void,
-                    (*s).strstart as crate::__stddef_size_t_h::size_t,
-                );
-                if (*s).matches < 2 as crate::stdlib::uInt {
-                    (*s).matches = (*s).matches.wrapping_add(1);
-                }
-                if (*s).insert > (*s).strstart {
-                    (*s).insert = (*s).strstart;
-                }
-            }
-            crate::stdlib::memcpy(
-                (*s).window.offset((*s).strstart as isize) as *mut ::core::ffi::c_void,
-                (*(*s).strm).next_in.offset(-(used as isize)) as *const ::core::ffi::c_void,
-                used as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).strstart = (*s).strstart.wrapping_add(used);
-            (*s).insert = stored_insert_after_input((*s).insert, (*s).w_size, used);
-        }
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
+        let window = core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
+        let input = core::slice::from_raw_parts(
+            (*(*s).strm).next_in.offset(-(used as isize)),
+            used as usize,
+        );
+        let Some(history) = stored_block_update_history(
+            window,
+            input,
+            used,
+            (*s).w_size,
+            (*s).window_size,
+            StoredHistoryState {
+                matches: (*s).matches,
+                strstart: (*s).strstart,
+                insert: (*s).insert,
+                block_start: (*s).block_start,
+            },
+        ) else {
+            return need_more;
+        };
+        (*s).matches = history.matches;
+        (*s).strstart = history.strstart;
+        (*s).insert = history.insert;
+        (*s).block_start = history.block_start;
     }
     if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
         (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
@@ -5480,16 +5580,16 @@ mod tests {
         pending_storage_layout_from_metadata, put_short_msb_core, read_buf_checksum, read_buf_core,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
-        stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
-        stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
-        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
-        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors,
-        take_pending_header_len_override, with_pending_storage, zlib_header,
-        DeflateBoundGzipHeader, DeflateBoundState, DeflateFastMatchProgress,
-        DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
-        DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, LongestMatchResult,
-        PendingDrainState, PendingStorageReadView, PendingStorageView, ReadBufChecksum,
-        ReadBufResult,
+        stored_block_buffered_len, stored_block_can_emit, stored_block_copy_buffered_output,
+        stored_block_copy_lengths, stored_block_header_bytes, stored_block_is_last,
+        stored_block_length_bytes, stored_block_min_size, stored_block_payload_len,
+        stored_block_should_wait, stored_block_update_history, stored_insert_after_input,
+        symbol_buffer_is_full, symbol_triplet_cursors, take_pending_header_len_override,
+        with_pending_storage, zlib_header, DeflateBoundGzipHeader, DeflateBoundState,
+        DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult,
+        LongestMatchResult, PendingDrainState, PendingStorageReadView, PendingStorageView,
+        ReadBufChecksum, ReadBufResult, StoredHistoryState,
     };
 
     #[test]
@@ -7791,6 +7891,91 @@ mod tests {
         assert_eq!(stored_block_copy_lengths(3, 8), (3, 5));
         assert_eq!(stored_block_copy_lengths(8, 8), (8, 0));
         assert_eq!(stored_block_copy_lengths(12, 8), (8, 0));
+    }
+
+    #[test]
+    fn stored_block_copy_buffered_output_uses_checked_window_range() {
+        let window = [10, 11, 12, 13, 14, 15];
+        let mut output = [0; 3];
+        assert!(stored_block_copy_buffered_output(
+            &window,
+            &mut output,
+            2,
+            3
+        ));
+        assert_eq!(output, [12, 13, 14]);
+
+        let before = output;
+        assert!(!stored_block_copy_buffered_output(
+            &window,
+            &mut output,
+            -1,
+            3
+        ));
+        assert!(!stored_block_copy_buffered_output(
+            &window,
+            &mut output,
+            4,
+            3
+        ));
+        assert_eq!(output, before);
+    }
+
+    #[test]
+    fn stored_block_history_copies_consumed_input_and_slides_safely() {
+        let state = StoredHistoryState {
+            matches: 0,
+            strstart: 2,
+            insert: 2,
+            block_start: 0,
+        };
+        let mut window = [0, 1, 2, 3, 4, 5, 6, 7];
+        let result = stored_block_update_history(&mut window, &[9, 10], 2, 4, 8, state)
+            .expect("valid no-slide history update");
+        assert_eq!(&window[..4], &[0, 1, 9, 10]);
+        assert_eq!(result.strstart, 4);
+        assert_eq!(result.insert, 4);
+        assert_eq!(result.matches, 0);
+        assert_eq!(result.block_start, 4);
+
+        let state = StoredHistoryState {
+            matches: 1,
+            strstart: 4,
+            insert: 4,
+            block_start: 2,
+        };
+        let result = stored_block_update_history(&mut window, &[20, 21, 22, 23], 4, 4, 8, state)
+            .expect("valid sliding history update");
+        assert_eq!(&window[..4], &[20, 21, 22, 23]);
+        assert_eq!(result.strstart, 4);
+        assert_eq!(result.insert, 4);
+        assert_eq!(result.matches, 2);
+        assert_eq!(result.block_start, 4);
+
+        let result =
+            stored_block_update_history(&mut window, &[30, 31, 32, 33, 34], 5, 4, 8, state)
+                .expect("valid large-input history update");
+        assert_eq!(&window[..4], &[31, 32, 33, 34]);
+        assert_eq!(result.strstart, 4);
+        assert_eq!(result.insert, 4);
+        assert_eq!(result.matches, 2);
+    }
+
+    #[test]
+    fn stored_block_history_rejects_short_window_without_mutation() {
+        let state = StoredHistoryState {
+            matches: 0,
+            strstart: 4,
+            insert: 4,
+            block_start: 0,
+        };
+        let mut window = [0, 1, 2, 3];
+        let before = window;
+        assert_eq!(
+            stored_block_update_history(&mut window, &[9, 10, 11, 12], 4, 4, 8, state),
+            None
+        );
+        assert_eq!(window, before);
     }
 
     #[test]
