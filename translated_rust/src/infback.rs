@@ -196,51 +196,21 @@ fn inflate_back_block_header(
     }
 }
 
-pub unsafe fn inflateBackInit_(
-    mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
-    mut window: *mut ::core::ffi::c_uchar,
-    version_first_byte: Option<::core::ffi::c_int>,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if !inflate_back_init_metadata_is_valid(version_first_byte, stream_size) {
-        return crate::zlib_h::Z_VERSION_ERROR;
-    }
-    if strm.is_null() || window.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let window_size = match inflate_back_window_size(windowBits) {
-        Some(window_size) => window_size,
-        None => return crate::zlib_h::Z_STREAM_ERROR,
-    };
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(crate::src::zutil::zcalloc_ffi);
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(crate::src::zutil::zcfree_ffi);
-    }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = window_size;
-    (*state).window = window;
-    (*state).wnext = 0 as ::core::ffi::c_uint;
-    (*state).whave = 0 as ::core::ffi::c_uint;
-    (*state).sane = 1 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_OK;
+fn inflate_back_initialize_state(
+    stream: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
+    window: &mut [::core::ffi::c_uchar],
+    window_bits: ::core::ffi::c_int,
+) {
+    stream.state = state as *mut crate::src::inflate::inflate_state
+        as *mut crate::src::deflate::internal_state;
+    state.dmax = 32768;
+    state.wbits = window_bits as crate::stdlib::uInt as ::core::ffi::c_uint;
+    state.wsize = window.len() as ::core::ffi::c_uint;
+    state.window = window.as_mut_ptr();
+    state.wnext = 0;
+    state.whave = 0;
+    state.sane = 1;
 }
 #[export_name = "inflateBackInit_"]
 
@@ -256,7 +226,38 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     } else {
         Some(*version as ::core::ffi::c_int)
     };
-    inflateBackInit_(strm, windowBits, window, version_first_byte, stream_size)
+    if !inflate_back_init_metadata_is_valid(version_first_byte, stream_size) {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    }
+    if strm.is_null() || window.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let window_size = match inflate_back_window_size(windowBits) {
+        Some(window_size) => window_size,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
+
+    let stream = &mut *strm;
+    stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if stream.zalloc.is_none() {
+        stream.zalloc = Some(crate::src::zutil::zcalloc_ffi);
+        stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if stream.zfree.is_none() {
+        stream.zfree = Some(crate::src::zutil::zcfree_ffi);
+    }
+    let state = Some(stream.zalloc.expect("non-null function pointer"))
+        .expect("non-null function pointer")(
+        stream.opaque,
+        1,
+        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+    ) as *mut crate::src::inflate::inflate_state;
+    let Some(state) = state.as_mut() else {
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let window = core::slice::from_raw_parts_mut(window, window_size as usize);
+    inflate_back_initialize_state(stream, state, window, windowBits);
+    crate::zlib_h::Z_OK
 }
 pub unsafe extern "C" fn inflateBack(
     mut strm: crate::zlib_h::z_streamp,
