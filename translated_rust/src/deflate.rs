@@ -144,7 +144,7 @@ pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits_ffi;
 pub use crate::src::trees::_tr_flush_block;
-pub use crate::src::trees::_tr_init;
+pub use crate::src::trees::_tr_init_ffi;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::stdlib::charf;
 
@@ -757,7 +757,7 @@ pub unsafe extern "C" fn deflateInit2_(
     (*s).level = config.level;
     (*s).strategy = config.strategy;
     (*s).method = config.method as crate::stdlib::Byte;
-    return deflateReset(strm);
+    return deflateReset_ffi(strm);
 }
 #[export_name = "deflateInit2_"]
 
@@ -947,7 +947,9 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     }
     return crate::zlib_h::Z_OK;
 }
-pub unsafe extern "C" fn deflateResetKeep(
+#[export_name = "deflateResetKeep"]
+
+pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
@@ -976,15 +978,8 @@ pub unsafe extern "C" fn deflateResetKeep(
         crate::src::adler32::adler32_initial()
     };
     (*s).last_flush = -2 as ::core::ffi::c_int;
-    crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
+    crate::src::trees::_tr_init_ffi(s as *mut crate::src::deflate::internal_state);
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "deflateResetKeep"]
-
-pub unsafe extern "C" fn deflateResetKeep_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    deflateResetKeep(strm)
 }
 unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
@@ -1015,20 +1010,17 @@ unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).match_available = 0 as ::core::ffi::c_int;
     (*s).ins_h = 0 as crate::stdlib::uInt;
 }
-pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    ret = deflateResetKeep(strm);
-    if ret == crate::zlib_h::Z_OK {
-        lm_init((*strm).state as *mut crate::src::deflate::deflate_state);
-    }
-    return ret;
-}
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateReset(strm)
+    let mut ret: ::core::ffi::c_int = 0;
+    ret = deflateResetKeep_ffi(strm);
+    if ret == crate::zlib_h::Z_OK {
+        lm_init((*strm).state as *mut crate::src::deflate::deflate_state);
+    }
+    return ret;
 }
 fn deflate_set_header_allowed(state: &crate::src::deflate::deflate_state) -> bool {
     state.wrap == 2 as ::core::ffi::c_int
@@ -1096,7 +1088,9 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     }
     return crate::zlib_h::Z_OK;
 }
-pub unsafe extern "C" fn deflatePrime(
+#[export_name = "deflatePrime"]
+
+pub unsafe extern "C" fn deflatePrime_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
@@ -1136,15 +1130,6 @@ pub unsafe extern "C" fn deflatePrime(
         }
     }
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "deflatePrime"]
-
-pub unsafe extern "C" fn deflatePrime_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    deflatePrime(strm, bits, value)
 }
 fn deflate_params_level(level: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {

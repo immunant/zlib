@@ -23,7 +23,7 @@ pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd_ffi;
 pub use crate::src::inflate::inflateInit2_;
-pub use crate::src::inflate::inflateReset;
+pub use crate::src::inflate::inflateReset_ffi;
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -145,6 +145,12 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
     return 0 as ::core::ffi::c_int;
 }
 
+fn gz_set_gzip_mode(state: &mut crate::gzguts_h::gz_state, junk: ::core::ffi::c_int) {
+    state.how = crate::gzguts_h::GZIP;
+    state.junk = junk;
+    state.direct = 0 as ::core::ffi::c_int;
+}
+
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
@@ -188,10 +194,9 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         }
     }
     if (*state).direct == -1 as ::core::ffi::c_int || (*state).junk == 0 as ::core::ffi::c_int {
-        crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
-        (*state).how = crate::gzguts_h::GZIP;
-        (*state).junk = ((*state).junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
-        (*state).direct = 0 as ::core::ffi::c_int;
+        crate::src::inflate::inflateReset_ffi(strm as *mut crate::zlib_h::z_stream_s);
+        let junk = ((*state).junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
+        gz_set_gzip_mode(&mut *state, junk);
         return 0 as ::core::ffi::c_int;
     }
     if gz_avail(state) == -1 as ::core::ffi::c_int {
@@ -212,10 +217,8 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         && (*(*strm).next_in.offset(3 as ::core::ffi::c_int as isize) as ::core::ffi::c_int)
             < 32 as ::core::ffi::c_int
     {
-        crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
-        (*state).how = crate::gzguts_h::GZIP;
-        (*state).junk = 1 as ::core::ffi::c_int;
-        (*state).direct = 0 as ::core::ffi::c_int;
+        crate::src::inflate::inflateReset_ffi(strm as *mut crate::zlib_h::z_stream_s);
+        gz_set_gzip_mode(&mut *state, 1 as ::core::ffi::c_int);
         return 0 as ::core::ffi::c_int;
     }
     (*state).x.next = (*state).out;

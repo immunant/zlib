@@ -166,7 +166,9 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     return 0 as ::core::ffi::c_int;
 }
-pub unsafe extern "C" fn inflateResetKeep(
+#[export_name = "inflateResetKeep"]
+
+pub unsafe extern "C" fn inflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
@@ -198,14 +200,11 @@ pub unsafe extern "C" fn inflateResetKeep(
     (*state).back = -1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
-#[export_name = "inflateResetKeep"]
+#[export_name = "inflateReset"]
 
-pub unsafe extern "C" fn inflateResetKeep_ffi(
+pub unsafe extern "C" fn inflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateResetKeep(strm)
-}
-pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
@@ -215,14 +214,7 @@ pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
     (*state).wsize = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
     (*state).wnext = 0 as ::core::ffi::c_uint;
-    return inflateResetKeep(strm);
-}
-#[export_name = "inflateReset"]
-
-pub unsafe extern "C" fn inflateReset_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    inflateReset(strm)
+    return inflateResetKeep_ffi(strm);
 }
 
 #[derive(Copy, Clone)]
@@ -253,7 +245,9 @@ fn inflate_reset2_config(mut window_bits: ::core::ffi::c_int) -> Option<InflateR
     Some(InflateReset2Config { wrap, window_bits })
 }
 
-pub unsafe extern "C" fn inflateReset2(
+#[export_name = "inflateReset2"]
+
+pub unsafe extern "C" fn inflateReset2_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -277,15 +271,7 @@ pub unsafe extern "C" fn inflateReset2(
     }
     (*state).wrap = config.wrap;
     (*state).wbits = config.window_bits as ::core::ffi::c_uint;
-    return inflateReset(strm);
-}
-#[export_name = "inflateReset2"]
-
-pub unsafe extern "C" fn inflateReset2_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateReset2(strm, windowBits)
+    return inflateReset_ffi(strm);
 }
 pub unsafe extern "C" fn inflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
@@ -343,7 +329,7 @@ pub unsafe extern "C" fn inflateInit2_(
     (*state).strm = strm;
     (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     (*state).mode = crate::src::inflate::HEAD;
-    ret = inflateReset2(strm, windowBits);
+    ret = inflateReset2_ffi(strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
@@ -2055,7 +2041,9 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     }
     return crate::zlib_h::Z_OK;
 }
-pub unsafe extern "C" fn inflateSetDictionary(
+#[export_name = "inflateSetDictionary"]
+
+pub unsafe extern "C" fn inflateSetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
@@ -2096,15 +2084,6 @@ pub unsafe extern "C" fn inflateSetDictionary(
     }
     (*state).havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateSetDictionary"]
-
-pub unsafe extern "C" fn inflateSetDictionary_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    inflateSetDictionary(strm, dictionary, dictLength)
 }
 fn inflate_get_header_allowed(state: &crate::src::inflate::inflate_state) -> bool {
     state.wrap & 2 as ::core::ffi::c_int != 0 as ::core::ffi::c_int
@@ -2217,7 +2196,7 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
         in_0 = strm_ref.total_in as ::core::ffi::c_ulong;
         out = strm_ref.total_out as ::core::ffi::c_ulong;
     }
-    inflateReset(strm);
+    inflateReset_ffi(strm);
     {
         let strm_ref = &mut *strm;
         let state_ref = &mut *state;

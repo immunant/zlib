@@ -19,7 +19,7 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd_ffi;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateReset;
+pub use crate::src::deflate::deflateReset_ffi;
 pub use crate::src::deflate::internal_state;
 
 pub use crate::stdlib::uInt;
@@ -158,7 +158,7 @@ unsafe extern "C" fn gz_comp(
         if (*strm).avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
+        crate::src::deflate::deflateReset_ffi(strm as *mut crate::zlib_h::z_stream_s);
         (*state).reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;

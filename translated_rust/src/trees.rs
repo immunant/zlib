@@ -2451,7 +2451,9 @@ fn init_block(s: &mut crate::src::deflate::deflate_state) {
     s.matches = 0 as crate::stdlib::uInt;
     s.sym_next = s.matches;
 }
-pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
+#[export_name = "_tr_init"]
+
+pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
     state.l_desc.dyn_tree = &raw mut state.dyn_ltree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
@@ -2466,11 +2468,6 @@ pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state
     state.bi_valid = 0 as ::core::ffi::c_int;
     state.bi_used = 0 as ::core::ffi::c_int;
     init_block(state);
-}
-#[export_name = "_tr_init"]
-
-pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_init(s)
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 
