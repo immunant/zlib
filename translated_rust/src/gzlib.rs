@@ -454,6 +454,20 @@ fn gzseek_copy_plan(
     ))
 }
 
+/// Commit the scalar reset after a transparent-copy seek has succeeded.  The
+/// descriptor operation and error-message ownership remain at the boundary.
+fn gzseek_copy_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    next_pos: crate::stdlib::off64_t,
+) {
+    state.x.have = 0;
+    state.eof = 0;
+    state.past = 0;
+    state.skip = 0;
+    state.strm.avail_in = 0;
+    state.x.pos = next_pos;
+}
+
 /// Determine how much already-buffered read data a seek can consume.  A
 /// negative offset has already been handled by rewind before this step.
 fn gzseek_read_buffer_plan(
@@ -522,17 +536,12 @@ pub unsafe extern "C" fn gzseek64(
         if ret == -1 as crate::stdlib::off64_t {
             return -1 as crate::stdlib::off64_t;
         }
-        (*state).x.have = 0 as ::core::ffi::c_uint;
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
-        (*state).skip = 0 as crate::stdlib::off64_t;
+        gzseek_copy_commit_state(state_ref, next_pos);
         gz_error(
             state,
             crate::zlib_h::Z_OK,
             ::core::ptr::null::<::core::ffi::c_char>(),
         );
-        (*state).strm.avail_in = 0 as crate::stdlib::uInt;
-        (*state).x.pos = next_pos;
         return next_pos;
     }
     if offset < 0 as crate::stdlib::off64_t {
