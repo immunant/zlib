@@ -293,7 +293,7 @@ pub struct inflate_state {
     // The opaque state exposes a pointer-sized nullable handle, while Rust
     // implementation code keeps the raw allocation access at explicit
     // borrowing boundaries.
-    pub window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>>,
+    pub window: ::std::sync::Arc<::core::sync::atomic::AtomicPtr<::core::ffi::c_uchar>>,
     // The storage tag makes the ownership decision explicit without putting
     // a callback pointer in the safe owner.  Custom and mixed callback pairs
     // continue to use `window`'s allocation exactly as before.
@@ -468,8 +468,8 @@ impl InflateOwnedWindow {
         if !self.matches_state(state) {
             return false;
         }
-        state.window = ::core::ptr::NonNull::new(self.bytes.as_mut_ptr());
-        state.window.is_some()
+        state.window.store(self.bytes.as_mut_ptr(), ::core::sync::atomic::Ordering::Relaxed);
+        !state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null()
     }
 
     /// Deep-copy exactly the initialized history retained by `inflateCopy`.
@@ -513,7 +513,7 @@ fn inflate_window_layout_valid(state: &inflate_state) -> bool {
     layout.matches_state_window(state)
         && state.whave <= layout.allocation_items
         && state.wnext <= layout.allocation_items
-        && state.window_storage.matches_handle(state.window.is_some())
+        && state.window_storage.matches_handle(!state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null())
 }
 
 /// Retain the caller's `inflateBack` window as an explicitly borrowed ABI
@@ -523,7 +523,7 @@ pub(crate) fn bind_inflate_back_window(
     state: &mut inflate_state,
     window: &mut [crate::stdlib::Bytef],
 ) {
-    state.window = ::core::ptr::NonNull::new(window.as_mut_ptr());
+    state.window.store(window.as_mut_ptr(), ::core::sync::atomic::Ordering::Relaxed);
     state.window_storage.install_caller_borrowed();
 }
 
@@ -548,7 +548,7 @@ pub(crate) fn empty_inflate_state() -> inflate_state {
         wsize: 0,
         whave: 0,
         wnext: 0,
-        window: None,
+        window: Default::default(),
         window_storage: InflateWindowStorage::Absent,
         hold: 0,
         bits: 0,
@@ -597,7 +597,7 @@ fn copy_inflate_state(source: &inflate_state) -> inflate_state {
         // `initialize_inflate_copy` installs either an independent
         // callback-owned allocation or an independent owned-window clone.
         // Never temporarily retain the source's window handle here.
-        window: None,
+        window: Default::default(),
         window_storage: InflateWindowStorage::Absent,
         hold: source.hold,
         bits: source.bits,
@@ -855,8 +855,9 @@ fn prepare_inflate_reset2(
     Ok(InflateReset2Plan {
         wrap,
         window_bits: windowBits,
-        release_window: state.window.is_some() && state.wbits != windowBits as ::core::ffi::c_uint,
-        release_callback_window: state.window.is_some()
+        release_window: !state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+            && state.wbits != windowBits as ::core::ffi::c_uint,
+        release_callback_window: !state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null()
             && !state.window_storage.is_owned()
             && state.wbits != windowBits as ::core::ffi::c_uint,
     })
@@ -870,7 +871,7 @@ fn apply_inflate_reset2(
     plan: InflateReset2Plan,
 ) -> ::core::ffi::c_int {
     if plan.release_window {
-        state.window = None;
+        state.window.store(::core::ptr::null_mut(), ::core::sync::atomic::Ordering::Relaxed);
         state.window_storage = InflateWindowStorage::Absent;
     }
     state.wrap = plan.wrap;
@@ -897,10 +898,10 @@ pub unsafe extern "C" fn inflateReset2_ffi(
         Err(error) => return error,
     };
     if plan.release_callback_window {
-        let window = state.window.expect("plan requires an installed window");
+        let window = state.window.load(::core::sync::atomic::Ordering::Relaxed);
         // This is the existing custom-allocator boundary.  It deliberately
         // precedes the safe reset mutation, matching zlib's callback order.
-        strm.zfree.expect("checked allocator")(strm.opaque, window.as_ptr().cast());
+        strm.zfree.expect("checked allocator")(strm.opaque, window.cast());
     }
     apply_inflate_reset2(strm, state, plan)
 }
@@ -912,7 +913,7 @@ fn initialize_inflate_state_base(
 ) {
     state.strm = stream_identity(strm);
     state.allocator_provenance = allocator_provenance;
-    state.window = None;
+    state.window.store(::core::ptr::null_mut(), ::core::sync::atomic::Ordering::Relaxed);
     state.window_storage = InflateWindowStorage::Absent;
     state.mode = crate::src::inflate::HEAD;
 }
@@ -1158,7 +1159,7 @@ fn updatewindow(
     if !inflate_window_layout_valid(state) {
         return 1 as ::core::ffi::c_int;
     }
-    if state.window.is_none() {
+    if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() {
         if crate::src::zutil::allocator_pair_is_fully_default(&state.allocator_provenance) {
             let Some(owned_window) = layout.try_owned() else {
                 return 1 as ::core::ffi::c_int;
@@ -1168,21 +1169,19 @@ fn updatewindow(
             let Some(zalloc) = strm.zalloc else {
                 return 1 as ::core::ffi::c_int;
             };
-            let window = ::core::ptr::NonNull::new(
-                zalloc(
+            let window = zalloc(
                     strm.opaque,
                     layout.allocation_items,
                     ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-                ) as *mut ::core::ffi::c_uchar,
-            );
-            let Some(window) = window else {
+                ) as *mut ::core::ffi::c_uchar;
+            if window.is_null() {
                 return 1 as ::core::ffi::c_int;
-            };
+            }
             let Some(working_window) = layout.try_owned() else {
-                strm.zfree.expect("checked allocator")(strm.opaque, window.as_ptr().cast());
+                strm.zfree.expect("checked allocator")(strm.opaque, window.cast());
                 return 1 as ::core::ffi::c_int;
             };
-            state.window = Some(window);
+            state.window.store(window, ::core::sync::atomic::Ordering::Relaxed);
             state.window_storage.install_callback_allocation(working_window);
         }
     }
@@ -1212,8 +1211,8 @@ fn install_owned_inflate_window(
     mut owned_window: InflateOwnedWindow,
 ) {
     debug_assert!(owned_window.matches_state(state));
-    state.window = ::core::ptr::NonNull::new(owned_window.bytes.as_mut_ptr());
-    debug_assert!(state.window.is_some());
+    state.window.store(owned_window.bytes.as_mut_ptr(), ::core::sync::atomic::Ordering::Relaxed);
+    debug_assert!(!state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null());
     state.window_storage.install_owned(owned_window);
 }
 
@@ -2648,7 +2647,7 @@ pub fn inflate(
                                                         fast_input,
                                                         output,
                                                     );
-                                                } else if state.window.is_none() || state.wsize == 0 {
+                                                } else if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() || state.wsize == 0 {
                                                     crate::src::inffast::inflate_fast(
                                                         strm,
                                                         state,
@@ -3146,7 +3145,7 @@ pub fn inflate(
                         continue;
                     }
                 }
-                if state.window.is_none() {
+                if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() {
                     strm.msg = INFLATE_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     state.mode = crate::src::inflate::BAD;
@@ -3334,13 +3333,10 @@ fn release_inflate_allocations(
     state: &mut crate::src::inflate::inflate_state,
 ) {
     let window = if state.window_storage.take_owned().is_some() {
-        state.window = None;
+        state.window.store(::core::ptr::null_mut(), ::core::sync::atomic::Ordering::Relaxed);
         ::core::ptr::null_mut()
     } else {
-        match state.window {
-            Some(window) => window.as_ptr().cast(),
-            None => ::core::ptr::null_mut(),
-        }
+        state.window.load(::core::sync::atomic::Ordering::Relaxed).cast()
     };
     state.window_storage = InflateWindowStorage::Absent;
     let allocations = [window, strm.state as crate::stdlib::voidpf];
@@ -3444,11 +3440,11 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     let Some(state) = (strm.state as *const crate::src::inflate::inflate_state).as_ref() else {
         return inflate_get_dictionary(Some(strm), None, None, None, dictLength.as_mut());
     };
-    let window = if state.window.is_none() {
+    let window = if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() {
         None
     } else {
         Some(::core::slice::from_raw_parts(
-            state.window.expect("checked non-null window").as_ptr(),
+            state.window.load(::core::sync::atomic::Ordering::Relaxed),
             state.wsize as usize,
         ))
     };
@@ -3831,7 +3827,7 @@ fn initialize_inflate_copy(
             let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
             let layout = InflateWindowLayout::from_state(source_state)
                 .expect("inflateCopy validated the source window layout");
-            if source_state.window.is_some() && owned_window.is_none() && !owned_window_failed {
+            if !source_state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() && owned_window.is_none() && !owned_window_failed {
                 window = Some(allocation_stream.zalloc.expect("validated allocator"))
                     .expect("validated allocator")(
                     allocation_stream.opaque,
@@ -3840,7 +3836,7 @@ fn initialize_inflate_copy(
                 ) as *mut ::core::ffi::c_uchar;
             }
             if owned_window_failed
-                || (source_state.window.is_some() && window.is_null() && owned_window.is_none())
+                || (!source_state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() && window.is_null() && owned_window.is_none())
             {
                 Some(allocation_stream.zfree.expect("validated allocator"))
                     .expect("validated allocator")(
@@ -3859,7 +3855,7 @@ fn initialize_inflate_copy(
                     zfree(allocation_stream.opaque, allocation_stream.state.cast());
                     return crate::zlib_h::Z_MEM_ERROR;
                 };
-                copy_ref.window = ::core::ptr::NonNull::new(window);
+                copy_ref.window.store(window, ::core::sync::atomic::Ordering::Relaxed);
                 copy_ref
                     .window_storage
                     .install_callback_allocation(working_window);

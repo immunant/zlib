@@ -1282,9 +1282,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
     if usize::try_from(state.wsize).ok() != Some(window_len) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(window) = state.window else {
+    let window = state.window.load(::core::sync::atomic::Ordering::Relaxed);
+    if window.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    }
     if strm.avail_in != 0 && strm.next_in.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1319,7 +1320,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
     };
     // The buffer was checked and retained by inflateBackInit_; it is the
     // decoder's single history/output span for this call.
-    let window = ::core::slice::from_raw_parts_mut(window.as_ptr(), window_len);
+    let window = ::core::slice::from_raw_parts_mut(window, window_len);
     let emit_window = |bytes: &mut [u8], length: ::core::ffi::c_uint| {
         out.expect("non-null function pointer")(out_desc, bytes.as_mut_ptr(), length) == 0
     };

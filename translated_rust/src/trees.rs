@@ -4343,8 +4343,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     let pending_buf = ::core::slice::from_raw_parts_mut(
         state
             .pending_buf
-            .expect("tree bridge requires pending buffer")
-            .as_ptr(),
+            .load(::core::sync::atomic::Ordering::Relaxed),
         state.pending_buf_size as usize,
     );
     let source = if stored_len == 0 {
@@ -4371,8 +4370,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
         ::core::slice::from_raw_parts_mut(
             state
                 .pending_buf
-                .expect("tree bridge requires pending buffer")
-                .as_ptr(),
+                .load(::core::sync::atomic::Ordering::Relaxed),
             state.pending_buf_size as usize,
         )
     };
@@ -4400,8 +4398,7 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
         ::core::slice::from_raw_parts_mut(
             state
                 .pending_buf
-                .expect("tree bridge requires pending buffer")
-                .as_ptr(),
+                .load(::core::sync::atomic::Ordering::Relaxed),
             state.pending_buf_size as usize,
         )
     };
@@ -4573,8 +4570,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     let pending_buf = ::core::slice::from_raw_parts_mut(
         state
             .pending_buf
-            .expect("tree bridge requires pending buffer")
-            .as_ptr(),
+            .load(::core::sync::atomic::Ordering::Relaxed),
         state.pending_buf_size as usize,
     );
     let source = if buf.is_null() {
@@ -4636,8 +4632,7 @@ pub unsafe extern "C" fn _tr_tally_ffi(
         ::core::slice::from_raw_parts_mut(
             state
                 .pending_buf
-                .expect("tree bridge requires pending buffer")
-                .as_ptr(),
+                .load(::core::sync::atomic::Ordering::Relaxed),
             state.pending_buf_size as usize,
         )
     };

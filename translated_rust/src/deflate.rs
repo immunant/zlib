@@ -101,7 +101,7 @@ pub struct internal_state {
     pub status: ::core::ffi::c_int,
     // Callback-owned workspaces retain nullable typed handles.  Only the
     // callback-storage adapter materializes borrowed slices from them.
-    pub pending_buf: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
+    pub pending_buf: ::std::sync::Arc<::core::sync::atomic::AtomicPtr<crate::stdlib::Bytef>>,
     pub pending_buf_size: crate::zutil_h::ulg,
     // These are offsets into `pending_buf`, not independently owned pointers.
     // Keeping interior cursors as indexes is the first step toward owned
@@ -128,13 +128,13 @@ pub struct internal_state {
     pub w_size: crate::stdlib::uInt,
     pub w_bits: crate::stdlib::uInt,
     pub w_mask: crate::stdlib::uInt,
-    pub window: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
+    pub window: ::std::sync::Arc<::core::sync::atomic::AtomicPtr<crate::stdlib::Bytef>>,
     pub window_size: crate::zutil_h::ulg,
-    pub prev: Option<::core::ptr::NonNull<crate::src::deflate::Posf>>,
+    pub prev: ::std::sync::Arc<::core::sync::atomic::AtomicPtr<crate::src::deflate::Posf>>,
     // Nullable opaque allocation handle.  Only the callback-storage adapter
     // turns it into a borrowed slice; implementation state never stores a
     // raw pointer for this workspace.
-    pub head: Option<::core::ptr::NonNull<crate::src::deflate::Posf>>,
+    pub head: ::std::sync::Arc<::core::sync::atomic::AtomicPtr<crate::src::deflate::Posf>>,
     pub ins_h: crate::stdlib::uInt,
     pub hash_size: crate::stdlib::uInt,
     pub hash_bits: crate::stdlib::uInt,
@@ -277,10 +277,10 @@ impl DeflateOwnedStorage {
         if !self.matches_state(state) {
             return false;
         }
-        state.window = ::core::ptr::NonNull::new(self.window.as_mut_ptr());
-        state.prev = ::core::ptr::NonNull::new(self.prev.as_mut_ptr());
-        state.head = ::core::ptr::NonNull::new(self.head.as_mut_ptr());
-        state.pending_buf = ::core::ptr::NonNull::new(self.pending_buf.as_mut_ptr());
+        state.window = ::std::sync::Arc::new(::core::sync::atomic::AtomicPtr::new(self.window.as_mut_ptr()));
+        state.prev = ::std::sync::Arc::new(::core::sync::atomic::AtomicPtr::new(self.prev.as_mut_ptr()));
+        state.head = ::std::sync::Arc::new(::core::sync::atomic::AtomicPtr::new(self.head.as_mut_ptr()));
+        state.pending_buf = ::std::sync::Arc::new(::core::sync::atomic::AtomicPtr::new(self.pending_buf.as_mut_ptr()));
         true
     }
 
@@ -406,23 +406,25 @@ impl CallbackDeflateStoragePlan {
         state: &mut crate::src::deflate::deflate_state,
     ) {
         let zalloc = strm.zalloc.expect("checked allocator");
-        state.window = ::core::ptr::NonNull::new(zalloc(
+        state.window = ::std::sync::Arc::new(::core::sync::atomic::AtomicPtr::new(zalloc(
             strm.opaque,
             self.window.items,
             self.window.item_size,
-        ) as *mut crate::stdlib::Bytef);
-        state.prev =
-            ::core::ptr::NonNull::new(zalloc(strm.opaque, self.prev.items, self.prev.item_size)
-                as *mut crate::src::deflate::Posf);
-        state.head =
-            ::core::ptr::NonNull::new(zalloc(strm.opaque, self.head.items, self.head.item_size)
-                as *mut crate::src::deflate::Posf);
-        state.pending_buf = ::core::ptr::NonNull::new(zalloc(
+        ) as *mut crate::stdlib::Bytef));
+        state.prev = ::std::sync::Arc::new(::core::sync::atomic::AtomicPtr::new(
+            zalloc(strm.opaque, self.prev.items, self.prev.item_size)
+                as *mut crate::src::deflate::Posf,
+        ));
+        state.head = ::std::sync::Arc::new(::core::sync::atomic::AtomicPtr::new(
+            zalloc(strm.opaque, self.head.items, self.head.item_size)
+                as *mut crate::src::deflate::Posf,
+        ));
+        state.pending_buf = ::std::sync::Arc::new(::core::sync::atomic::AtomicPtr::new(zalloc(
             strm.opaque,
             self.pending.items,
             self.pending.item_size,
         ) as *mut crate::zutil_h::uchf
-            as *mut crate::stdlib::Bytef);
+            as *mut crate::stdlib::Bytef));
     }
 }
 
@@ -431,10 +433,10 @@ impl DeflateCopyLayout {
         let storage = DeflateStorageLayout::from_state(state);
         let window_capacity = usize::try_from(storage.window_items).ok()?.checked_mul(2)?;
         let pending_capacity = usize::try_from(storage.pending_bytes()).ok()?;
-        if state.window.is_none()
-            || state.prev.is_none()
-            || state.head.is_none()
-            || state.pending_buf.is_none()
+        if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+            || state.prev.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+            || state.head.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+            || state.pending_buf.load(::core::sync::atomic::Ordering::Relaxed).is_null()
             || usize::try_from(state.window_size).ok()? != window_capacity
             || usize::try_from(state.pending_buf_size).ok()? != pending_capacity
         {
@@ -1096,7 +1098,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
         owned_storage: None,
         callback_storage_plan: None,
         status: 0,
-        pending_buf: None,
+        pending_buf: Default::default(),
         pending_buf_size: 0,
         pending_out: 0,
         pending: 0,
@@ -1114,10 +1116,10 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
         w_size: 0,
         w_bits: 0,
         w_mask: 0,
-        window: None,
+        window: Default::default(),
         window_size: 0,
-        prev: None,
-        head: None,
+        prev: Default::default(),
+        head: Default::default(),
         ins_h: 0,
         hash_size: 0,
         hash_bits: 0,
@@ -1219,10 +1221,10 @@ fn configure_allocated_deflate_state(
         };
         state.owned_storage = Some(owned);
     }
-    if state.window.is_none()
-        || state.prev.is_none()
-        || state.head.is_none()
-        || state.pending_buf.is_none()
+    if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+        || state.prev.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+        || state.head.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+        || state.pending_buf.load(::core::sync::atomic::Ordering::Relaxed).is_null()
     {
         return Err(crate::zlib_h::Z_MEM_ERROR);
     }
@@ -1668,13 +1670,14 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
         Err(error) => return error,
     };
     let window = match state {
-        Some(state) if state.window.is_none() && state.window_size != 0 => None,
+        Some(state)
+            if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+                && state.window_size != 0 => None,
         Some(state) if state.window_size == 0 => Some(&[][..]),
         Some(state) => Some(::core::slice::from_raw_parts(
             state
                 .window
-                .expect("non-zero window requires storage")
-                .as_ptr(),
+                .load(::core::sync::atomic::Ordering::Relaxed),
             state.window_size as usize,
         )),
         None => None,
@@ -1828,7 +1831,9 @@ pub(crate) fn deflate_reset_state(
     let Some(state) = state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !deflate_stream_state_valid(Some(stream), Some(state)) || state.head.is_none() {
+    if !deflate_stream_state_valid(Some(stream), Some(state))
+        || state.head.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // The compressor's workspace is owned even when the ABI allocator has
@@ -3610,22 +3615,10 @@ fn deflate_end(
         ]
     } else {
         [
-            match state.pending_buf {
-                Some(pending_buf) => pending_buf.as_ptr().cast(),
-                None => ::core::ptr::null_mut(),
-            },
-            match state.head {
-                Some(head) => head.cast().as_ptr(),
-                None => ::core::ptr::null_mut(),
-            },
-            match state.prev {
-                Some(prev) => prev.as_ptr().cast(),
-                None => ::core::ptr::null_mut(),
-            },
-            match state.window {
-                Some(window) => window.as_ptr().cast(),
-                None => ::core::ptr::null_mut(),
-            },
+            state.pending_buf.load(::core::sync::atomic::Ordering::Relaxed).cast(),
+            state.head.load(::core::sync::atomic::Ordering::Relaxed).cast(),
+            state.prev.load(::core::sync::atomic::Ordering::Relaxed).cast(),
+            state.window.load(::core::sync::atomic::Ordering::Relaxed).cast(),
             stream.state as crate::stdlib::voidpf,
         ]
     };
@@ -3744,10 +3737,10 @@ pub fn deflateCopy(
             if let Some(mut storage) = owned_copy {
                 if let Some(callback_storage) = dest_state.callback_storage_plan.clone() {
                     callback_storage.allocate_into(dest_stream, dest_state);
-                    if dest_state.window.is_none()
-                        || dest_state.prev.is_none()
-                        || dest_state.head.is_none()
-                        || dest_state.pending_buf.is_none()
+                    if dest_state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+                        || dest_state.prev.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+                        || dest_state.head.load(::core::sync::atomic::Ordering::Relaxed).is_null()
+                        || dest_state.pending_buf.load(::core::sync::atomic::Ordering::Relaxed).is_null()
                     {
                         deflateEnd(dest_stream);
                         return crate::zlib_h::Z_MEM_ERROR;
@@ -3756,10 +3749,10 @@ pub fn deflateCopy(
                     // The destination is still a fresh callback allocation. Clear
                     // copied source handles before teardown so a corrupt layout
                     // cannot make its failure path free source-owned storage.
-                    dest_state.window = None;
-                    dest_state.prev = None;
-                    dest_state.head = None;
-                    dest_state.pending_buf = None;
+                    dest_state.window = Default::default();
+                    dest_state.prev = Default::default();
+                    dest_state.head = Default::default();
+                    dest_state.pending_buf = Default::default();
                     deflateEnd(dest_stream);
                     return crate::zlib_h::Z_MEM_ERROR;
                 }

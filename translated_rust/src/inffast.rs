@@ -714,12 +714,12 @@ pub unsafe extern "C" fn inflate_fast_ffi(
         unsafe { ::core::slice::from_raw_parts(strm.next_in, available_input) }
     };
     let output = unsafe { ::core::slice::from_raw_parts_mut(output_start, start_len) };
-    let history = if state.window.is_none() || state.wsize == 0 {
+    let history = if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() || state.wsize == 0 {
         None
     } else {
         Some(unsafe {
             ::core::slice::from_raw_parts(
-                state.window.expect("checked non-null window").as_ptr(),
+                state.window.load(::core::sync::atomic::Ordering::Relaxed),
                 state.wsize as usize,
             )
         })
