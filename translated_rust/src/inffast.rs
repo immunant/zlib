@@ -513,18 +513,19 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
         }
         here = lcode.wrapping_add((hold & lmask as ::core::ffi::c_ulong) as usize);
         's_92: loop {
-            op = (*here).bits as ::core::ffi::c_uint;
+            let here_code = &*here;
+            op = here_code.bits as ::core::ffi::c_uint;
             hold >>= op;
             bits = bits.wrapping_sub(op);
-            op = (*here).op as ::core::ffi::c_uint;
+            op = here_code.op as ::core::ffi::c_uint;
             if op == 0 as ::core::ffi::c_uint {
                 let c2rust_fresh2 = out;
                 out = out.wrapping_add(1);
                 output_remaining = output_remaining.wrapping_sub(1);
-                *c2rust_fresh2 = (*here).val as ::core::ffi::c_uchar;
+                *c2rust_fresh2 = here_code.val as ::core::ffi::c_uchar;
                 break;
             } else if op & 16 as ::core::ffi::c_uint != 0 {
-                len = (*here).val as ::core::ffi::c_uint;
+                len = here_code.val as ::core::ffi::c_uint;
                 op &= 15 as ::core::ffi::c_uint;
                 if op != 0 {
                     if bits < op {
@@ -556,12 +557,13 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
                 }
                 here = dcode.wrapping_add((hold & dmask as ::core::ffi::c_ulong) as usize);
                 loop {
-                    op = (*here).bits as ::core::ffi::c_uint;
+                    let here_code = &*here;
+                    op = here_code.bits as ::core::ffi::c_uint;
                     hold >>= op;
                     bits = bits.wrapping_sub(op);
-                    op = (*here).op as ::core::ffi::c_uint;
+                    op = here_code.op as ::core::ffi::c_uint;
                     if op & 16 as ::core::ffi::c_uint != 0 {
-                        dist = (*here).val as ::core::ffi::c_uint;
+                        dist = here_code.val as ::core::ffi::c_uint;
                         op &= 15 as ::core::ffi::c_uint;
                         if bits < op {
                             let c2rust_fresh6 = in_0;
@@ -758,7 +760,7 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
                         here = dcode
-                            .wrapping_add((*here).val as usize)
+                            .wrapping_add(here_code.val as usize)
                             .wrapping_add(
                                 (hold
                                     & ((1 as ::core::ffi::c_uint) << op)
@@ -776,7 +778,7 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
                 }
             } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
                 here = lcode
-                    .wrapping_add((*here).val as usize)
+                    .wrapping_add(here_code.val as usize)
                     .wrapping_add(
                         (hold
                             & ((1 as ::core::ffi::c_uint) << op)
