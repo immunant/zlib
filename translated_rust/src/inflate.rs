@@ -632,6 +632,24 @@ struct WindowHistory {
     have: ::core::ffi::c_uint,
 }
 
+/// The initialized window bytes in oldest-to-newest order.
+///
+/// This deliberately records ranges instead of pointers.  The eventual
+/// callback-owned/borrowed window representation can use the same plan
+/// without recreating the partial-versus-wrapped cursor rules.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum WindowDictionarySegments {
+    Empty,
+    Prefix {
+        len: usize,
+    },
+    Wrapped {
+        first_start: usize,
+        first_len: usize,
+        second_len: usize,
+    },
+}
+
 impl WindowHistory {
     fn new(
         size: ::core::ffi::c_uint,
@@ -701,27 +719,44 @@ impl WindowHistory {
         if window.len() != self.size as usize || dictionary.len() != self.have as usize {
             return None;
         }
-        if dictionary.is_empty() {
-            return Some(());
-        }
-
-        if self.have < self.size {
-            if self.next != self.have {
-                return None;
+        match self.dictionary_segments()? {
+            WindowDictionarySegments::Empty => {}
+            WindowDictionarySegments::Prefix { len } => {
+                dictionary.copy_from_slice(window.get(..len)?);
             }
-            dictionary.copy_from_slice(window.get(..self.have as usize)?);
-            return Some(());
+            WindowDictionarySegments::Wrapped {
+                first_start,
+                first_len,
+                second_len,
+            } => {
+                dictionary
+                    .get_mut(..first_len)?
+                    .copy_from_slice(window.get(first_start..)?);
+                dictionary
+                    .get_mut(first_len..)?
+                    .copy_from_slice(window.get(..second_len)?);
+            }
+        }
+        Some(())
+    }
+
+    fn dictionary_segments(&self) -> Option<WindowDictionarySegments> {
+        if self.have == 0 {
+            return Some(WindowDictionarySegments::Empty);
+        }
+        if self.have < self.size {
+            return (self.next == self.have).then_some(WindowDictionarySegments::Prefix {
+                len: self.have as usize,
+            });
         }
 
-        let next = self.next as usize;
-        let first = (self.size as usize).checked_sub(next)?;
-        dictionary
-            .get_mut(..first)?
-            .copy_from_slice(window.get(next..)?);
-        dictionary
-            .get_mut(first..)?
-            .copy_from_slice(window.get(..next)?);
-        Some(())
+        let first_start = self.next as usize;
+        let first_len = (self.size as usize).checked_sub(first_start)?;
+        Some(WindowDictionarySegments::Wrapped {
+            first_start,
+            first_len,
+            second_len: first_start,
+        })
     }
 }
 
@@ -5165,6 +5200,42 @@ mod tests {
         assert_eq!(super::WindowHistory::new(8, 3, 9), None);
         assert!(super::WindowHistory::new(0, 0, 0).is_some());
         assert_eq!(super::WindowHistory::new(0, 1, 0), None);
+    }
+
+    #[test]
+    fn window_history_dictionary_segments_distinguish_empty_prefix_and_wrap() {
+        assert_eq!(
+            super::WindowHistory::new(8, 0, 0)
+                .unwrap()
+                .dictionary_segments(),
+            Some(super::WindowDictionarySegments::Empty)
+        );
+        assert_eq!(
+            super::WindowHistory::new(8, 3, 3)
+                .unwrap()
+                .dictionary_segments(),
+            Some(super::WindowDictionarySegments::Prefix { len: 3 })
+        );
+        assert_eq!(
+            super::WindowHistory::new(8, 3, 8)
+                .unwrap()
+                .dictionary_segments(),
+            Some(super::WindowDictionarySegments::Wrapped {
+                first_start: 3,
+                first_len: 5,
+                second_len: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn window_history_rejects_non_wrapped_partial_dictionary_cursor() {
+        let history = super::WindowHistory::new(8, 3, 5).unwrap();
+        let mut dictionary = *b"unchanged";
+
+        assert_eq!(history.dictionary_segments(), None);
+        assert_eq!(history.copy_dictionary_to(b"abcdefgh", &mut dictionary[..5]), None);
+        assert_eq!(dictionary, *b"unchanged");
     }
 
     #[test]
