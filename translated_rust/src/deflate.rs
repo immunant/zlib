@@ -1364,18 +1364,15 @@ pub unsafe extern "C" fn deflateBound_ffi(
         bound as crate::stdlib::uLong
     };
 }
-unsafe extern "C" fn putShortMSB(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut b: crate::stdlib::uInt,
+fn put_short_msb(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    b: crate::stdlib::uInt,
 ) {
-    let c2rust_fresh33 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh33 as isize) =
-        (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
-    let c2rust_fresh34 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh34 as isize) =
-        (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+    let offset = *pending as usize;
+    pending_buf[offset] = (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
+    pending_buf[offset + 1] = (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+    *pending = (*pending).wrapping_add(2 as crate::zutil_h::ulg);
 }
 
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
@@ -1493,16 +1490,34 @@ pub unsafe extern "C" fn deflate_ffi(
             (31 as crate::stdlib::uInt)
                 .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
         );
-        putShortMSB(s, header);
+        {
+            let pending_buf =
+                ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+            put_short_msb(pending_buf, &mut (*s).pending, header);
+        }
         if (*s).strstart != 0 as crate::stdlib::uInt {
-            putShortMSB(
-                s,
-                ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-            );
-            putShortMSB(
-                s,
-                ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-            );
+            {
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    (*s).pending_buf,
+                    (*s).pending_buf_size as usize,
+                );
+                put_short_msb(
+                    pending_buf,
+                    &mut (*s).pending,
+                    ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+                );
+            }
+            {
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    (*s).pending_buf,
+                    (*s).pending_buf_size as usize,
+                );
+                put_short_msb(
+                    pending_buf,
+                    &mut (*s).pending,
+                    ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+                );
+            }
         }
         (*strm).adler = crate::src::adler32::adler32_initial();
         (*s).status = crate::src::deflate::BUSY_STATE;
@@ -1933,14 +1948,24 @@ pub unsafe extern "C" fn deflate_ffi(
             ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                 as crate::stdlib::Byte;
     } else {
-        putShortMSB(
-            s,
-            ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        );
-        putShortMSB(
-            s,
-            ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-        );
+        {
+            let pending_buf =
+                ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+            put_short_msb(
+                pending_buf,
+                &mut (*s).pending,
+                ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+            );
+        }
+        {
+            let pending_buf =
+                ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+            put_short_msb(
+                pending_buf,
+                &mut (*s).pending,
+                ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+            );
+        }
     }
     flush_pending(strm);
     if (*s).wrap > 0 as ::core::ffi::c_int {

@@ -285,8 +285,7 @@ unsafe extern "C" fn gz_write(
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
-            (*state).strm.avail_in = (*state).strm.avail_in.wrapping_add(copy);
-            (*state).x.pos += copy as crate::stdlib::off64_t;
+            gz_note_buffered_input(&mut *state, copy);
             buf =
                 (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
             len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
@@ -336,6 +335,14 @@ fn gz_write_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
 
 fn gz_write_params_ready(state: &crate::gzguts_h::gz_state) -> bool {
     gz_write_state_ready(state) && state.direct == 0
+}
+
+fn gz_note_buffered_input(
+    state: &mut crate::gzguts_h::gz_state,
+    count: ::core::ffi::c_uint,
+) {
+    state.strm.avail_in = state.strm.avail_in.wrapping_add(count);
+    state.x.pos += count as crate::stdlib::off64_t;
 }
 
 fn gz_buffered_input_used(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_uint {
@@ -476,8 +483,7 @@ pub unsafe extern "C" fn gzputc_ffi(
         have = gz_buffered_input_used(&*state);
         if have < (*state).size {
             *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
-            (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
-            (*state).x.pos += 1;
+            gz_note_buffered_input(&mut *state, 1 as ::core::ffi::c_uint);
             return c & 0xff as ::core::ffi::c_int;
         }
     }
