@@ -2697,31 +2697,33 @@ pub unsafe fn inflate(
                                             copy = have;
                                         }
                                         if copy != 0 {
-                                            if !state_ref.head.is_null()
-                                                && !(*state_ref.head).extra.is_null()
-                                                && {
-                                                    len = ((*state_ref.head).extra_len
-                                                        as ::core::ffi::c_uint)
+                                            if !state_ref.head.is_null() {
+                                                // The retained header is an ABI destination, but
+                                                // this transition only needs one temporary borrow
+                                                // to bound and copy its extra bytes.
+                                                let head = &mut *state_ref.head;
+                                                if !head.extra.is_null() {
+                                                    len = (head.extra_len as ::core::ffi::c_uint)
                                                         .wrapping_sub(state_ref.length);
-                                                    len < (*state_ref.head).extra_max
-                                                }
-                                            {
-                                                let header_copy = if len.wrapping_add(copy)
-                                                    > (*state_ref.head).extra_max
-                                                {
-                                                    ((*state_ref.head).extra_max
-                                                        as ::core::ffi::c_uint)
-                                                        .wrapping_sub(len)
-                                                } else {
-                                                    copy
-                                                };
-                                                let mut copied = 0usize;
-                                                while copied < header_copy as usize {
-                                                    *(*state_ref.head)
-                                                        .extra
-                                                        .wrapping_add(len as usize + copied) =
-                                                        *next.wrapping_add(copied);
-                                                    copied += 1;
+                                                    if len < head.extra_max {
+                                                        let header_copy = if len.wrapping_add(copy)
+                                                            > head.extra_max
+                                                        {
+                                                            (head.extra_max
+                                                                as ::core::ffi::c_uint)
+                                                                .wrapping_sub(len)
+                                                        } else {
+                                                            copy
+                                                        };
+                                                        let mut copied = 0usize;
+                                                        while copied < header_copy as usize {
+                                                            *head
+                                                                .extra
+                                                                .wrapping_add(len as usize + copied) =
+                                                                *next.wrapping_add(copied);
+                                                            copied += 1;
+                                                        }
+                                                    }
                                                 }
                                             }
                                             if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
