@@ -3475,12 +3475,15 @@ unsafe extern "C" fn deflate_fast(
                 break;
             }
         }
+        // `fill_window()` is the only operation in this iteration that can
+        // change the window.  Keep one bounded read view for the remainder
+        // of the match/flush work, then drop it before the next refill.
+        let window = ::core::slice::from_raw_parts(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
         hash_head = NIL as crate::src::deflate::IPos;
         if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let window = ::core::slice::from_raw_parts(
-                state.window.expect("initialized window").as_ptr(),
-                state.window_size as usize,
-            );
             let head = ::core::slice::from_raw_parts_mut(
                 state.head.expect("initialized head table").as_ptr(),
                 state.hash_size as usize,
@@ -3530,10 +3533,6 @@ unsafe extern "C" fn deflate_fast(
                 state.match_length = state.match_length.wrapping_sub(1);
                 loop {
                     state.strstart = state.strstart.wrapping_add(1);
-                    let window = ::core::slice::from_raw_parts(
-                        state.window.expect("initialized window").as_ptr(),
-                        state.window_size as usize,
-                    );
                     let head = ::core::slice::from_raw_parts_mut(
                         state.head.expect("initialized head table").as_ptr(),
                         state.hash_size as usize,
@@ -3561,19 +3560,10 @@ unsafe extern "C" fn deflate_fast(
             } else {
                 state.strstart = state.strstart.wrapping_add(state.match_length);
                 state.match_length = 0 as crate::stdlib::uInt;
-                let window = ::core::slice::from_raw_parts(
-                    state.window.expect("initialized window").as_ptr(),
-                    state.window_size as usize,
-                );
                 state.ins_h = initial_hash(window, state.strstart, state.hash_shift, state.hash_mask);
             }
         } else {
-            let mut cc: crate::zutil_h::uch = *state
-                .window
-                .expect("initialized window")
-                .as_ptr()
-                .wrapping_add(state.strstart as usize)
-                as crate::zutil_h::uch;
+            let cc: crate::zutil_h::uch = window[state.strstart as usize] as crate::zutil_h::uch;
             bflush = crate::src::trees::tally_symbol(
                 &mut pending_buf[sym_buf_start..],
                 &mut state.sym_next,
@@ -3590,10 +3580,6 @@ unsafe extern "C" fn deflate_fast(
         if bflush != 0 {
             let stored_len =
                 (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-            let window = ::core::slice::from_raw_parts(
-                state.window.expect("initialized window").as_ptr(),
-                state.window_size as usize,
-            );
             let input = if state.block_start >= 0 {
                 let start = state.block_start as usize;
                 Some(&window[start..start + stored_len as usize])
