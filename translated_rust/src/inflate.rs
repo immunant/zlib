@@ -1232,6 +1232,8 @@ pub unsafe extern "C" fn inflate(
                                                                                             &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
                                                                                             &raw mut (*state).lenbits,
                                                                                             &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                                                                                            crate::src::inftrees::ENOUGH as usize,
+                                                                                            288,
                                                                                         );
                                                                                         if ret != 0
                                                                                         {
@@ -1511,6 +1513,8 @@ pub unsafe extern "C" fn inflate(
                                                                                 &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
                                                                                 &raw mut (*state).lenbits,
                                                                                 &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                                                                                crate::src::inftrees::ENOUGH_LENS as usize,
+                                                                                288,
                                                                             );
                                                                             if ret != 0 {
                                                                                 (*strm).msg = INFLATE_ERROR_MESSAGES[11].as_ptr()
@@ -1529,6 +1533,8 @@ pub unsafe extern "C" fn inflate(
                                                                                     &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
                                                                                     &raw mut (*state).distbits,
                                                                                     &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                                                                                    crate::src::inftrees::ENOUGH_DISTS as usize,
+                                                                                    288,
                                                                                 );
                                                                                 if ret != 0 {
                                                                                     (*strm).msg = INFLATE_ERROR_MESSAGES[12].as_ptr()

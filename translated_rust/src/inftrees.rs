@@ -3297,6 +3297,8 @@ pub unsafe extern "C" fn inflate_table(
     table: *mut *mut crate::src::inftrees::code,
     bits: *mut ::core::ffi::c_uint,
     work: *mut ::core::ffi::c_ushort,
+    table_capacity: usize,
+    work_capacity: usize,
 ) -> ::core::ffi::c_int {
     if lens.is_null() || table.is_null() || bits.is_null() || work.is_null() || codes as usize > 320
     {
@@ -3312,7 +3314,10 @@ pub unsafe extern "C" fn inflate_table(
         Err(status) => return status,
     };
     let table_start = *table;
-    if table_start.is_null() {
+    if table_start.is_null()
+        || build.entries.len() > table_capacity
+        || build.work.len() > work_capacity
+    {
         return 1;
     }
     for (index, symbol) in build.work.iter().enumerate() {
@@ -3335,7 +3340,19 @@ pub unsafe extern "C" fn inflate_table_ffi(
     mut bits: *mut ::core::ffi::c_uint,
     mut work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
-    inflate_table(type_0, lens, codes, table, bits, work)
+    // The C ABI does not carry output capacities.  Internal callers use the
+    // capacity-aware adapter above; retain this legacy entry point's contract
+    // for external callers that provide the documented ENOUGH-sized storage.
+    inflate_table(
+        type_0,
+        lens,
+        codes,
+        table,
+        bits,
+        work,
+        usize::MAX,
+        usize::MAX,
+    )
 }
 fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
     state.lencode = &raw const lenfix as *const crate::src::inftrees::code;
