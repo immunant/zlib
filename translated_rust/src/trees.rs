@@ -3812,20 +3812,6 @@ struct TreeBuildWorkspace<'a> {
     static_len: &'a mut crate::zutil_h::ulg,
 }
 
-fn tree_build_workspace(
-    state: &mut crate::src::deflate::deflate_state,
-) -> TreeBuildWorkspace<'_> {
-    TreeBuildWorkspace {
-        heap: &mut state.heap,
-        heap_len: &mut state.heap_len,
-        heap_max: &mut state.heap_max,
-        depth: &mut state.depth,
-        bl_count: &mut state.bl_count,
-        opt_len: &mut state.opt_len,
-        static_len: &mut state.static_len,
-    }
-}
-
 fn pqdownheap(
     heap: &mut [::core::ffi::c_int],
     heap_len: ::core::ffi::c_int,
