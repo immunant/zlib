@@ -379,23 +379,37 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
     return 0 as ::core::ffi::c_int;
 }
 
+fn gz_skip_core(
+    have: &mut ::core::ffi::c_uint,
+    pos: &mut crate::stdlib::off64_t,
+    skip: &mut crate::stdlib::off64_t,
+    intmax: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let n = if ::core::mem::size_of::<::core::ffi::c_int>() as usize
+        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
+        && *have > intmax
+        || *have as crate::stdlib::off64_t > *skip
+    {
+        *skip as ::core::ffi::c_uint
+    } else {
+        *have
+    };
+    *have = have.wrapping_sub(n);
+    *pos += n as crate::stdlib::off64_t;
+    *skip -= n as crate::stdlib::off64_t;
+    n
+}
+
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let mut n: ::core::ffi::c_uint = 0;
     loop {
         if (*state).x.have != 0 {
-            n = if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-                == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-                && (*state).x.have > crate::src::gzlib::gz_intmax()
-                || (*state).x.have as crate::stdlib::off64_t > (*state).skip
-            {
-                (*state).skip as ::core::ffi::c_uint
-            } else {
-                (*state).x.have
-            };
-            (*state).x.have = (*state).x.have.wrapping_sub(n);
+            let n = gz_skip_core(
+                &mut (*state).x.have,
+                &mut (*state).x.pos,
+                &mut (*state).skip,
+                crate::src::gzlib::gz_intmax(),
+            );
             (*state).x.next = (*state).x.next.offset(n as isize);
-            (*state).x.pos += n as crate::stdlib::off64_t;
-            (*state).skip -= n as crate::stdlib::off64_t;
         } else {
             if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
@@ -409,6 +423,41 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         }
     }
     return 0 as ::core::ffi::c_int;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gz_skip_core_consumes_only_remaining_skip() {
+        let mut have = 10;
+        let mut pos = 42;
+        let mut skip = 3;
+
+        let consumed =
+            gz_skip_core(&mut have, &mut pos, &mut skip, crate::src::gzlib::gz_intmax());
+
+        assert_eq!(consumed, 3);
+        assert_eq!(have, 7);
+        assert_eq!(pos, 45);
+        assert_eq!(skip, 0);
+    }
+
+    #[test]
+    fn gz_skip_core_consumes_available_buffer() {
+        let mut have = 10;
+        let mut pos = 42;
+        let mut skip = 15;
+
+        let consumed =
+            gz_skip_core(&mut have, &mut pos, &mut skip, crate::src::gzlib::gz_intmax());
+
+        assert_eq!(consumed, 10);
+        assert_eq!(have, 0);
+        assert_eq!(pos, 52);
+        assert_eq!(skip, 5);
+    }
 }
 
 unsafe extern "C" fn gz_read(
