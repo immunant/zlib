@@ -3053,6 +3053,49 @@ fn stored_block_plan(
     })
 }
 
+/// Plan the stored block that may be emitted after refilling the history
+/// window.  This is deliberately value-only: the mode adapter retains the
+/// callback-owned pending and window buffers used to carry out the plan.
+fn stored_tail_block_plan(
+    pending_buf_size: crate::zutil_h::ulg,
+    bi_valid: ::core::ffi::c_int,
+    wsize: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> Option<StoredBlockPlan> {
+    let bit_bytes = (bi_valid as ::core::ffi::c_uint).wrapping_add(42) >> 3;
+    let have = (if pending_buf_size.wrapping_sub(bit_bytes as crate::zutil_h::ulg)
+        > 65535 as crate::zutil_h::ulg
+    {
+        65535 as crate::zutil_h::ulg
+    } else {
+        pending_buf_size.wrapping_sub(bit_bytes as crate::zutil_h::ulg)
+    }) as ::core::ffi::c_uint;
+    let min_block = if have > wsize {
+        wsize as ::core::ffi::c_uint
+    } else {
+        have
+    };
+    let left = (strstart as ::core::ffi::c_long - block_start) as ::core::ffi::c_uint;
+    if left < min_block
+        && !((left != 0 || flush == crate::zlib_h::Z_FINISH)
+            && flush != crate::zlib_h::Z_NO_FLUSH
+            && avail_in == 0
+            && left <= have)
+    {
+        return None;
+    }
+    let len = left.min(have);
+    Some(StoredBlockPlan {
+        len,
+        left,
+        last: (flush == crate::zlib_h::Z_FINISH && avail_in == 0 && len == left)
+            as ::core::ffi::c_int,
+    })
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3198,39 +3241,17 @@ unsafe extern "C" fn deflate_stored(
     if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
         (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
     }
-    have = ((*s).bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
-        >> 3 as ::core::ffi::c_int;
-    have = (if (*s)
-        .pending_buf_size
-        .wrapping_sub(have as crate::zutil_h::ulg)
-        > 65535 as crate::zutil_h::ulg
-    {
-        65535 as crate::zutil_h::ulg
-    } else {
-        (*s).pending_buf_size
-            .wrapping_sub(have as crate::zutil_h::ulg)
-    }) as ::core::ffi::c_uint;
-    min_block = if have > (*s).w_size {
-        (*s).w_size as ::core::ffi::c_uint
-    } else {
-        have
-    };
-    left = ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as ::core::ffi::c_uint;
-    if left >= min_block
-        || (left != 0 || flush == crate::zlib_h::Z_FINISH)
-            && flush != crate::zlib_h::Z_NO_FLUSH
-            && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
-            && left <= have
-    {
-        len = if left > have { have } else { left };
-        last = if flush == crate::zlib_h::Z_FINISH
-            && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
-            && len == left
-        {
-            1 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        };
+    if let Some(plan) = stored_tail_block_plan(
+        (*s).pending_buf_size,
+        (*s).bi_valid,
+        (*s).w_size,
+        (*s).strstart,
+        (*s).block_start,
+        (*(*s).strm).avail_in,
+        flush,
+    ) {
+        len = plan.len;
+        last = plan.last;
         crate::src::trees::_tr_stored_block(
             s as *mut crate::src::deflate::internal_state,
             ((*s).window as *mut crate::stdlib::charf).offset((*s).block_start as isize),
