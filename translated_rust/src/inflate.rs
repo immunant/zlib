@@ -4007,23 +4007,19 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
 // destination remains a non-borrowing handle until the source projection has
 // ended, since zlib permits source and destination to alias.
 pub unsafe fn inflateCopy(
-    mut dest: crate::zlib_h::z_streamp,
     source: &mut crate::zlib_h::z_stream_s,
-) -> ::core::ffi::c_int {
-    if dest.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let dest_identity = dest.addr();
+    destination_identity: usize,
+) -> Result<crate::zlib_h::z_stream_s, ::core::ffi::c_int> {
     // Build the replacement before borrowing the destination.  This retains
     // C's behavior even for a source/destination alias while all state
     // access remains scoped to the checked source stream.
     let destination_stream = {
         if source.zalloc.is_none() || source.zfree.is_none() {
-            return crate::zlib_h::Z_STREAM_ERROR;
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
         }
         let source_identity = ::core::ptr::from_mut(source).addr();
         let Some(state_handle) = source.state else {
-            return crate::zlib_h::Z_STREAM_ERROR;
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
         };
         let state = state_handle
             .cast::<crate::src::inflate::inflate_state>()
@@ -4034,18 +4030,18 @@ pub unsafe fn inflateCopy(
             || state.decoder.normal.mode as ::core::ffi::c_uint
                 > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
         {
-            return crate::zlib_h::Z_STREAM_ERROR;
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
         }
         let mut copied_state = None;
         let status = inflate_publish_callback_owner(
             source,
             None,
             Some(state),
-            dest_identity,
+            destination_identity,
             &mut copied_state,
         );
         if status != crate::zlib_h::Z_OK {
-            return status;
+            return Err(status);
         }
         let copy = copied_state.expect("successful copy publication returns state");
         let destination_stream = crate::zlib_h::z_stream_s {
@@ -4066,11 +4062,11 @@ pub unsafe fn inflateCopy(
         };
         destination_stream
     };
-    // zalloc() returns uninitialized storage.  Publish a fully initialized
-    // state in one write, then mirror the source stream exactly with only its
-    // opaque state handle changed.
-    *dest = destination_stream;
-    return crate::zlib_h::Z_OK;
+    // The ABI wrapper publishes this fully initialized stream only after the
+    // source projection above has ended. This keeps source/destination
+    // aliasing valid while leaving this implementation with no destination
+    // raw-pointer write.
+    Ok(destination_stream)
 }
 #[export_name = "inflateCopy"]
 
@@ -4084,7 +4080,12 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     let Some(source) = source.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateCopy(dest, source)
+    let destination_stream = match inflateCopy(source, dest.addr()) {
+        Ok(destination_stream) => destination_stream,
+        Err(status) => return status,
+    };
+    *dest = destination_stream;
+    crate::zlib_h::Z_OK
 }
 
 fn inflate_undermine_sane(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
