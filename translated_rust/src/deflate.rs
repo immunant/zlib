@@ -814,6 +814,50 @@ struct DeflateInitOptions {
     wrap: ::core::ffi::c_int,
 }
 
+// Keep the allocation sizes and the state fields derived from them together.
+// This is deliberately scalar-only: allocation still goes through the
+// stream's published callback below, retaining custom allocator identity and
+// callback order.  Having one layout calculation also makes the bounds used
+// by the safe slice-based deflater explicit before any allocation is exposed
+// through the C-layout state.
+struct DeflateAllocationLayout {
+    w_bits: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+    hash_bits: crate::stdlib::uInt,
+    hash_size: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    lit_bufsize: crate::stdlib::uInt,
+    pending_buf_size: crate::zutil_h::ulg,
+    sym_end: crate::stdlib::uInt,
+}
+
+fn deflate_allocation_layout(options: &DeflateInitOptions) -> DeflateAllocationLayout {
+    let w_bits = options.window_bits as crate::stdlib::uInt;
+    let w_size = ((1 as ::core::ffi::c_int) << w_bits) as crate::stdlib::uInt;
+    let hash_bits = (options.mem_level as crate::stdlib::uInt)
+        .wrapping_add(7 as crate::stdlib::uInt);
+    let hash_size = ((1 as ::core::ffi::c_int) << hash_bits) as crate::stdlib::uInt;
+    let lit_bufsize =
+        ((1 as ::core::ffi::c_int) << options.mem_level + 6 as ::core::ffi::c_int)
+            as crate::stdlib::uInt;
+    DeflateAllocationLayout {
+        w_bits,
+        w_size,
+        hash_bits,
+        hash_size,
+        hash_shift: hash_bits
+            .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
+            .wrapping_sub(1 as crate::stdlib::uInt)
+            .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt),
+        lit_bufsize,
+        pending_buf_size: (lit_bufsize as crate::zutil_h::ulg)
+            .wrapping_mul(4 as crate::zutil_h::ulg),
+        sym_end: lit_bufsize
+            .wrapping_sub(1 as crate::stdlib::uInt)
+            .wrapping_mul(3 as crate::stdlib::uInt),
+    }
+}
+
 fn deflate_init_options(
     level: ::core::ffi::c_int,
     method: ::core::ffi::c_int,
@@ -914,6 +958,7 @@ pub fn deflateInit2_(
         Ok(options) => options,
         Err(error) => return error,
     };
+    let layout = deflate_allocation_layout(&options);
     // Preparation above chose either zlib's default allocator or the
     // caller's callback. Keep all requests below on that published stream
     // callback path.
@@ -937,18 +982,13 @@ pub fn deflateInit2_(
     state.status = crate::src::deflate::INIT_STATE;
     state.wrap = options.wrap;
     state.gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
-    state.w_bits = options.window_bits as crate::stdlib::uInt;
-    state.w_size = ((1 as ::core::ffi::c_int) << state.w_bits) as crate::stdlib::uInt;
+    state.w_bits = layout.w_bits;
+    state.w_size = layout.w_size;
     state.w_mask = state.w_size.wrapping_sub(1 as crate::stdlib::uInt);
-    state.hash_bits =
-        (options.mem_level as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
-    state.hash_size = ((1 as ::core::ffi::c_int) << state.hash_bits) as crate::stdlib::uInt;
+    state.hash_bits = layout.hash_bits;
+    state.hash_size = layout.hash_size;
     state.hash_mask = state.hash_size.wrapping_sub(1 as crate::stdlib::uInt);
-    state.hash_shift = state
-        .hash_bits
-        .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
-        .wrapping_sub(1 as crate::stdlib::uInt)
-        .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+    state.hash_shift = layout.hash_shift;
     state.window = deflate_allocate!(
         stream,
         state.w_size,
@@ -966,15 +1006,13 @@ pub fn deflateInit2_(
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
     state.high_water = 0 as crate::zutil_h::ulg;
-    state.lit_bufsize = ((1 as ::core::ffi::c_int) << options.mem_level + 6 as ::core::ffi::c_int)
-        as crate::stdlib::uInt;
+    state.lit_bufsize = layout.lit_bufsize;
     state.pending_buf = deflate_allocate!(
         stream,
         state.lit_bufsize,
         4 as crate::stdlib::uInt,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    state.pending_buf_size =
-        (state.lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
+    state.pending_buf_size = layout.pending_buf_size;
     if state.window.is_null()
         || state.prev.is_null()
         || state.head.is_null()
@@ -999,10 +1037,7 @@ pub fn deflateInit2_(
     // in-bounds contract here.
     state.sym_buf =
         state.pending_buf.wrapping_add(state.lit_bufsize as usize) as *mut crate::zutil_h::uchf;
-    state.sym_end = state
-        .lit_bufsize
-        .wrapping_sub(1 as crate::stdlib::uInt)
-        .wrapping_mul(3 as crate::stdlib::uInt);
+    state.sym_end = layout.sym_end;
     state.level = options.level;
     state.strategy = options.strategy;
     state.method = options.method as crate::stdlib::Byte;
