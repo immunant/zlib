@@ -3317,11 +3317,11 @@ pub unsafe extern "C" fn _tr_flush_block(
     let mut opt_lenb: crate::zutil_h::ulg = 0;
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    if (*s).level > 0 as ::core::ffi::c_int {
-        if (*(*s).strm).data_type == crate::zlib_h::Z_UNKNOWN {
-            (*(*s).strm).data_type = detect_data_type_impl(&(*s).dyn_ltree);
+    let state = &mut *s;
+    if state.level > 0 as ::core::ffi::c_int {
+        if (*state.strm).data_type == crate::zlib_h::Z_UNKNOWN {
+            (*state.strm).data_type = detect_data_type_impl(&state.dyn_ltree);
         }
-        let state = &mut *s;
         build_tree(
             &mut state.dyn_ltree,
             &mut state.l_desc,
@@ -3380,7 +3380,6 @@ pub unsafe extern "C" fn _tr_flush_block(
         _tr_stored_block(s, buf, stored_len, last);
     } else if static_lenb == opt_lenb {
         {
-            let state = &mut *s;
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
@@ -3406,7 +3405,6 @@ pub unsafe extern "C" fn _tr_flush_block(
         }
     } else {
         let (l_max_code, d_max_code) = {
-            let state = &mut *s;
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
@@ -3422,7 +3420,6 @@ pub unsafe extern "C" fn _tr_flush_block(
             (state.l_desc.max_code, state.d_desc.max_code)
         };
         {
-            let state = &mut *s;
             // The pending allocation is exactly `pending_buf_size` bytes.
             // Keep this ABI projection local; the dynamic-header writer only
             // receives bounded storage and pointer-free tree views.
@@ -3444,7 +3441,6 @@ pub unsafe extern "C" fn _tr_flush_block(
             );
         }
         {
-            let state = &mut *s;
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
@@ -3461,7 +3457,6 @@ pub unsafe extern "C" fn _tr_flush_block(
             );
         }
     }
-    let state = &mut *s;
     init_block_fields(
         &mut state.dyn_ltree,
         &mut state.dyn_dtree,
