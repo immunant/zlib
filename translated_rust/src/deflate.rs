@@ -144,6 +144,13 @@ pub struct internal_state {
     // remains the callback allocation that zlib publishes and releases, so
     // custom allocator callbacks and pointer identity stay observable.
     pending_storage: ::std::vec::Vec<crate::stdlib::Bytef>,
+    // As with pending bytes, retain the custom-allocator pointers for the C
+    // ABI and matching `zfree` calls, but keep the compressor's working
+    // allocations in Rust-owned storage.  These fields are appended so the
+    // translated C-layout prefix keeps every existing offset.
+    window_storage: ::std::vec::Vec<crate::stdlib::Bytef>,
+    prev_storage: ::std::vec::Vec<crate::src::deflate::Posf>,
+    head_storage: ::std::vec::Vec<crate::src::deflate::Posf>,
 }
 
 // `deflateSetHeader()` receives caller-owned header storage, but the header
@@ -321,6 +328,9 @@ fn deflate_state_zero_value() -> internal_state {
         high_water: 0,
         slid: 0,
         pending_storage: ::std::vec::Vec::new(),
+        window_storage: ::std::vec::Vec::new(),
+        prev_storage: ::std::vec::Vec::new(),
+        head_storage: ::std::vec::Vec::new(),
     }
 }
 
@@ -617,29 +627,38 @@ fn fill_window<T>(
         &[crate::stdlib::Bytef],
     ) -> T,
 ) -> T {
-    // SAFETY: state validation establishes the three owned allocation
-    // lengths. The caller input was bound before entering `deflate()` and is
-    // available below through its short-lived owned snapshot.
-    let (window, head, prev, input) = unsafe {
-        let window = if state.window_size == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize)
-        };
-        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-        let input = &[];
-        (window, head, prev, input)
+    // The callback allocations above remain published in the translated
+    // fields, but all compressor reads and writes use these owned buffers.
+    // Taking them temporarily lets the operation also borrow its state,
+    // without reopening a raw callback allocation as a Rust slice.
+    // `deflate_reset()` calls this binder before `lm_init_state()` records
+    // `window_size`; the allocation is nevertheless already its final
+    // two-window extent at that point.
+    let expected_window_len = if state.window_size == 0 {
+        (state.w_size as usize) * 2
+    } else {
+        state.window_size as usize
     };
-    if !bind_input || stream.avail_in == 0 {
-        return operation(state, stream, window, head, prev, input);
-    }
-    let Some((initial_avail, snapshot)) = deflate_input_snapshot(stream) else {
-        return operation(state, stream, window, head, prev, input);
+    debug_assert_eq!(state.window_storage.len(), expected_window_len);
+    debug_assert_eq!(state.prev_storage.len(), state.w_size as usize);
+    debug_assert_eq!(state.head_storage.len(), state.hash_size as usize);
+    let mut window = ::core::mem::take(&mut state.window_storage);
+    let mut head = ::core::mem::take(&mut state.head_storage);
+    let mut prev = ::core::mem::take(&mut state.prev_storage);
+    let input = &[];
+    let result = if !bind_input || stream.avail_in == 0 {
+        operation(state, stream, &mut window, &mut head, &mut prev, input)
+    } else if let Some((initial_avail, snapshot)) = deflate_input_snapshot(stream) {
+        let consumed = initial_avail.wrapping_sub(stream.avail_in) as usize;
+        let input = snapshot.get(consumed..).unwrap_or(&[]);
+        operation(state, stream, &mut window, &mut head, &mut prev, input)
+    } else {
+        operation(state, stream, &mut window, &mut head, &mut prev, input)
     };
-    let consumed = initial_avail.wrapping_sub(stream.avail_in) as usize;
-    let input = snapshot.get(consumed..).unwrap_or(&[]);
-    operation(state, stream, window, head, prev, input)
+    state.window_storage = window;
+    state.head_storage = head;
+    state.prev_storage = prev;
+    result
 }
 
 fn fill_window_bytes(
@@ -1045,6 +1064,11 @@ pub fn deflateInit2_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     state.pending_storage = vec![0; layout.pending_buf_size as usize];
+    // `window_size` is established by the subsequent reset, so derive this
+    // allocation directly from the just-configured `w_size` here.
+    state.window_storage = vec![0; (state.w_size as usize) * 2];
+    state.prev_storage = vec![0; state.w_size as usize];
+    state.head_storage = vec![0; state.hash_size as usize];
     // The allocation above reserves four bytes for every literal entry, so
     // this cursor remains within that allocation.  Wrapping arithmetic keeps
     // the pointer calculation explicit without requiring `offset`'s unsafe
@@ -2929,7 +2953,20 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     // `deflateStateCheck()` has established both links. Snapshot the release
     // plan before invoking user-supplied deallocators, so no Rust reference
     // spans one of those callbacks.
-    let (zfree, opaque, status, pending_buf, head, prev, window, state_ptr, pending_storage) = {
+    let (
+        zfree,
+        opaque,
+        status,
+        pending_buf,
+        head,
+        prev,
+        window,
+        state_ptr,
+        pending_storage,
+        window_storage,
+        prev_storage,
+        head_storage,
+    ) = {
         (
             stream.zfree.expect("non-null function pointer"),
             stream.opaque,
@@ -2940,9 +2977,15 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
             state.window,
             stream.state,
             ::core::mem::take(&mut state.pending_storage),
+            ::core::mem::take(&mut state.window_storage),
+            ::core::mem::take(&mut state.prev_storage),
+            ::core::mem::take(&mut state.head_storage),
         )
     };
     drop(pending_storage);
+    drop(window_storage);
+    drop(prev_storage);
+    drop(head_storage);
     if !pending_buf.is_null() {
         zfree(opaque, pending_buf as crate::stdlib::voidpf);
     }
@@ -2970,7 +3013,18 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
 pub(crate) fn deflate_end_default_bound(
     stream: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
-    let (status, pending_buf, head, prev, window, state_ptr, pending_storage) = {
+    let (
+        status,
+        pending_buf,
+        head,
+        prev,
+        window,
+        state_ptr,
+        pending_storage,
+        window_storage,
+        prev_storage,
+        head_storage,
+    ) = {
         let Some((bound_stream, state)) = deflateStateCheck(stream, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -2982,9 +3036,15 @@ pub(crate) fn deflate_end_default_bound(
             state.window,
             bound_stream.state,
             ::core::mem::take(&mut state.pending_storage),
+            ::core::mem::take(&mut state.window_storage),
+            ::core::mem::take(&mut state.prev_storage),
+            ::core::mem::take(&mut state.head_storage),
         )
     };
     drop(pending_storage);
+    drop(window_storage);
+    drop(prev_storage);
+    drop(head_storage);
     if !pending_buf.is_null() {
         crate::src::zutil::zcfree(
             ::core::ptr::null_mut(),
@@ -3160,6 +3220,13 @@ fn deflateCopy(
     destination_state.prev = prev;
     destination_state.head = head;
     destination_state.pending_buf = pending_buf;
+    // The cloned state above carries Rust-owned working bytes from the
+    // source. Replace them only after all destination allocator callbacks
+    // have succeeded, matching the point where zlib publishes the new raw
+    // allocation pointers below.
+    destination_state.window_storage = vec![0; destination_state.window_size as usize];
+    destination_state.prev_storage = vec![0; destination_state.w_size as usize];
+    destination_state.head_storage = vec![0; destination_state.hash_size as usize];
     destination_state.pending_out = pending_buf.wrapping_add(pending_offset);
     destination_state.sym_buf = pending_buf.wrapping_add(destination_state.lit_bufsize as usize)
         as *mut crate::zutil_h::uchf;
