@@ -70,6 +70,10 @@ fn gz_zero_chunk_len(
     }
 }
 
+fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
+    (len as ::core::ffi::c_int) >= 0 && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     state.in_0 = crate::stdlib::malloc(
@@ -543,9 +547,7 @@ pub unsafe extern "C" fn gzputs(
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
-        || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
-    {
+    if !gzputs_len_fits_int(len) {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -702,7 +704,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 
 #[cfg(test)]
 mod tests {
-    use super::gz_zero_chunk_len;
+    use super::{gz_zero_chunk_len, gzputs_len_fits_int};
 
     #[test]
     fn gz_zero_chunk_len_limits_to_remaining_skip() {
@@ -723,5 +725,21 @@ mod tests {
     #[test]
     fn gz_zero_chunk_len_ignores_int_limit_on_different_widths() {
         assert_eq!(gz_zero_chunk_len(1024, 4096, false, 1023), 1024);
+    }
+
+    #[test]
+    fn gzputs_len_fits_int_accepts_c_int_range() {
+        assert!(gzputs_len_fits_int(0));
+        assert!(gzputs_len_fits_int(1));
+        assert!(gzputs_len_fits_int(
+            ::core::ffi::c_int::MAX as crate::stdlib::z_size_t
+        ));
+    }
+
+    #[test]
+    fn gzputs_len_fits_int_rejects_values_outside_c_int_range() {
+        assert!(!gzputs_len_fits_int(
+            (::core::ffi::c_int::MAX as crate::stdlib::z_size_t) + 1
+        ));
     }
 }

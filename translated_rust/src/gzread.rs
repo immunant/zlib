@@ -76,6 +76,13 @@ fn gz_load_core(
     }
 }
 
+fn gz_fread_request_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<crate::stdlib::z_size_t> {
+    size.checked_mul(nitems)
+}
+
 unsafe extern "C" fn gz_load(
     state: crate::gzguts_h::gz_statep,
     buf: *mut ::core::ffi::c_uchar,
@@ -437,6 +444,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gz_fread_request_len_handles_zero_operands() {
+        assert_eq!(gz_fread_request_len(0, 5), Some(0));
+        assert_eq!(gz_fread_request_len(5, 0), Some(0));
+    }
+
+    #[test]
+    fn gz_fread_request_len_accepts_representable_products() {
+        assert_eq!(
+            gz_fread_request_len(crate::stdlib::z_size_t::MAX, 1),
+            Some(crate::stdlib::z_size_t::MAX)
+        );
+        assert_eq!(gz_fread_request_len(4, 7), Some(28));
+    }
+
+    #[test]
+    fn gz_fread_request_len_rejects_overflow() {
+        assert_eq!(gz_fread_request_len(crate::stdlib::z_size_t::MAX, 2), None);
+    }
+
+    #[test]
     fn gz_is_gzip_header_accepts_valid_header() {
         assert!(gz_is_gzip_header(31, 139, 8, 31));
     }
@@ -652,15 +679,15 @@ pub unsafe extern "C" fn gzfread(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
+    let Some(request_len) = gz_fread_request_len(size, nitems) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
         );
         return 0 as crate::stdlib::z_size_t;
-    }
+    };
+    len = request_len;
     return if len != 0 {
         gz_read(state, buf, len).wrapping_div(size)
     } else {

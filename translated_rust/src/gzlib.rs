@@ -108,6 +108,21 @@ fn gz_open_defaults(state: &mut crate::gzguts_h::gz_state) {
     state.direct = 0;
 }
 
+fn gzseek_read_buffer_consumed(
+    avail_in: crate::stdlib::uInt,
+    offset: crate::stdlib::off64_t,
+    int_and_off64_same_width: bool,
+    int_max: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    if (int_and_off64_same_width && avail_in > int_max)
+        || avail_in as crate::stdlib::off64_t > offset
+    {
+        offset as crate::stdlib::uInt
+    } else {
+        avail_in
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GzOpenOptions {
     mode: ::core::ffi::c_int,
@@ -546,15 +561,13 @@ pub unsafe extern "C" fn gzseek64(
         }
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-            == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-            && (*state).x.have > gz_intmax()
-            || (*state).x.have as crate::stdlib::off64_t > offset
-        {
-            offset as ::core::ffi::c_uint
-        } else {
-            (*state).x.have
-        };
+        n = gzseek_read_buffer_consumed(
+            (*state).x.have,
+            offset,
+            ::core::mem::size_of::<::core::ffi::c_int>()
+                == ::core::mem::size_of::<crate::stdlib::off64_t>(),
+            gz_intmax(),
+        );
         (*state).x.have = (*state).x.have.wrapping_sub(n);
         (*state).x.next = (*state).x.next.offset(n as isize);
         (*state).x.pos += n as crate::stdlib::off64_t;
@@ -843,7 +856,8 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open,
-        gzerror_core, gzoffset64_adjust_for_buffered_read, gztell64_core, GzErrorMessage,
+        gzerror_core, gzoffset64_adjust_for_buffered_read, gzseek_read_buffer_consumed,
+        gztell64_core, GzErrorMessage,
     };
 
     #[test]
@@ -903,6 +917,24 @@ mod tests {
             gzoffset64_adjust_for_buffered_read(42, crate::gzguts_h::GZ_WRITE, 7),
             42
         );
+    }
+
+    #[test]
+    fn gzseek_consumes_all_buffered_input_with_sufficient_offset() {
+        assert_eq!(gzseek_read_buffer_consumed(7, 7, false, 0), 7);
+        assert_eq!(gzseek_read_buffer_consumed(7, 9, false, 0), 7);
+    }
+
+    #[test]
+    fn gzseek_consumes_only_requested_buffered_input() {
+        assert_eq!(gzseek_read_buffer_consumed(7, 3, false, 0), 3);
+        assert_eq!(gzseek_read_buffer_consumed(7, 0, false, 0), 0);
+    }
+
+    #[test]
+    fn gzseek_preserves_matching_width_large_buffer_rule() {
+        assert_eq!(gzseek_read_buffer_consumed(9, 20, true, 8), 20);
+        assert_eq!(gzseek_read_buffer_consumed(8, 20, true, 8), 8);
     }
 
     #[test]
