@@ -95,6 +95,99 @@ pub(crate) fn gz_request_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     gz_len_fits_int(len as crate::stdlib::z_size_t)
 }
 
+/// The scalar portion of gzip open-mode parsing.  The C-string traversal,
+/// allocations, and descriptor setup remain at the ABI boundary.
+#[derive(Clone, Copy)]
+struct GzOpenOptions {
+    mode: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    direct: ::core::ffi::c_int,
+    oflag: ::core::ffi::c_int,
+    exclusive: ::core::ffi::c_int,
+}
+
+impl GzOpenOptions {
+    fn new() -> Self {
+        Self {
+            mode: crate::gzguts_h::GZ_NONE,
+            level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
+            strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
+            direct: 0,
+            oflag: 0,
+            exclusive: 0,
+        }
+    }
+}
+
+/// Apply one non-NUL gzip mode byte.  `None` is the legacy rejection of
+/// update mode (`+`); all other unrecognized bytes are ignored.
+fn gz_open_option_byte(mut options: GzOpenOptions, byte: u8) -> Option<GzOpenOptions> {
+    if byte.is_ascii_digit() {
+        options.level = (byte - b'0') as ::core::ffi::c_int;
+        return Some(options);
+    }
+    match byte {
+        b'r' => options.mode = crate::gzguts_h::GZ_READ,
+        b'w' => options.mode = crate::gzguts_h::GZ_WRITE,
+        b'a' => options.mode = crate::gzguts_h::GZ_APPEND,
+        b'+' => return None,
+        b'e' => options.oflag |= crate::stdlib::O_CLOEXEC,
+        b'x' => options.exclusive = 1,
+        b'f' => options.strategy = crate::zlib_h::Z_FILTERED,
+        b'h' => options.strategy = crate::zlib_h::Z_HUFFMAN_ONLY,
+        b'R' => options.strategy = crate::zlib_h::Z_RLE,
+        b'F' => options.strategy = crate::zlib_h::Z_FIXED,
+        b'G' => options.direct = -1,
+        b'N' => options.oflag |= crate::stdlib::O_NONBLOCK,
+        b'T' => options.direct = 1,
+        _ => {}
+    }
+    Some(options)
+}
+
+/// Reject impossible mode/direct combinations and normalize the default
+/// read mode to transparent-operation probing, matching zlib's open path.
+fn gz_open_options_finalize(mut options: GzOpenOptions) -> Option<GzOpenOptions> {
+    if options.mode == crate::gzguts_h::GZ_NONE {
+        return None;
+    }
+    if options.mode == crate::gzguts_h::GZ_READ {
+        if options.direct == 1 {
+            return None;
+        }
+        if options.direct == 0 {
+            options.direct = 1;
+        }
+    } else if options.direct == -1 {
+        return None;
+    }
+    Some(options)
+}
+
+/// Add the access/create flags after mode parsing without touching a file
+/// descriptor or opaque gzip state.
+fn gz_open_descriptor_flags(options: GzOpenOptions) -> ::core::ffi::c_int {
+    options.oflag
+        | crate::stdlib::O_LARGEFILE
+        | if options.mode == crate::gzguts_h::GZ_READ {
+            crate::stdlib::O_RDONLY
+        } else {
+            crate::stdlib::O_WRONLY
+                | crate::stdlib::O_CREAT
+                | if options.exclusive != 0 {
+                    crate::stdlib::O_EXCL
+                } else {
+                    0
+                }
+                | if options.mode == crate::gzguts_h::GZ_WRITE {
+                    crate::stdlib::O_TRUNC
+                } else {
+                    crate::stdlib::O_APPEND
+                }
+        }
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -103,8 +196,7 @@ unsafe extern "C" fn gz_open(
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut oflag: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut exclusive: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+    let mut options = GzOpenOptions::new();
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -117,78 +209,27 @@ unsafe extern "C" fn gz_open(
     (*state).want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
     (*state).err = crate::zlib_h::Z_OK;
     (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*state).mode = crate::gzguts_h::GZ_NONE;
-    (*state).level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
-    (*state).strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
-    (*state).direct = 0 as ::core::ffi::c_int;
     while *mode != 0 {
-        if *mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
-            && *mode as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
-        {
-            (*state).level = *mode as ::core::ffi::c_int - '0' as ::core::ffi::c_int;
-        } else {
-            match *mode as ::core::ffi::c_int {
-                114 => {
-                    (*state).mode = crate::gzguts_h::GZ_READ;
-                }
-                119 => {
-                    (*state).mode = crate::gzguts_h::GZ_WRITE;
-                }
-                97 => {
-                    (*state).mode = crate::gzguts_h::GZ_APPEND;
-                }
-                43 => {
-                    crate::stdlib::free(state as *mut ::core::ffi::c_void);
-                    return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-                }
-                101 => {
-                    oflag |= crate::stdlib::O_CLOEXEC;
-                }
-                120 => {
-                    exclusive = 1 as ::core::ffi::c_int;
-                }
-                102 => {
-                    (*state).strategy = crate::zlib_h::Z_FILTERED;
-                }
-                104 => {
-                    (*state).strategy = crate::zlib_h::Z_HUFFMAN_ONLY;
-                }
-                82 => {
-                    (*state).strategy = crate::zlib_h::Z_RLE;
-                }
-                70 => {
-                    (*state).strategy = crate::zlib_h::Z_FIXED;
-                }
-                71 => {
-                    (*state).direct = -1 as ::core::ffi::c_int;
-                }
-                78 => {
-                    oflag |= crate::stdlib::O_NONBLOCK;
-                }
-                84 => {
-                    (*state).direct = 1 as ::core::ffi::c_int;
-                }
-                98 | _ => {}
+        options = match gz_open_option_byte(options, *mode as u8) {
+            Some(options) => options,
+            None => {
+                crate::stdlib::free(state as *mut ::core::ffi::c_void);
+                return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
             }
-        }
+        };
         mode = mode.offset(1);
     }
-    if (*state).mode == crate::gzguts_h::GZ_NONE {
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        if (*state).direct == 1 as ::core::ffi::c_int {
+    options = match gz_open_options_finalize(options) {
+        Some(options) => options,
+        None => {
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
-        if (*state).direct == 0 as ::core::ffi::c_int {
-            (*state).direct = 1 as ::core::ffi::c_int;
-        }
-    } else if (*state).direct == -1 as ::core::ffi::c_int {
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
+    };
+    (*state).mode = options.mode;
+    (*state).level = options.level;
+    (*state).strategy = options.strategy;
+    (*state).direct = options.direct;
     len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
     (*state).path = crate::stdlib::malloc(
         (len as crate::__stddef_size_t_h::size_t)
@@ -205,23 +246,7 @@ unsafe extern "C" fn gz_open(
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
         path as *const ::core::ffi::c_char,
     );
-    oflag |= crate::stdlib::O_LARGEFILE
-        | (if (*state).mode == crate::gzguts_h::GZ_READ {
-            crate::stdlib::O_RDONLY
-        } else {
-            crate::stdlib::O_WRONLY
-                | crate::stdlib::O_CREAT
-                | (if exclusive != 0 {
-                    crate::stdlib::O_EXCL
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-                | (if (*state).mode == crate::gzguts_h::GZ_WRITE {
-                    crate::stdlib::O_TRUNC
-                } else {
-                    crate::stdlib::O_APPEND
-                })
-        });
+    let oflag = gz_open_descriptor_flags(options);
     if fd == -1 as ::core::ffi::c_int {
         (*state).fd = crate::stdlib::open(
             path as *const ::core::ffi::c_char,
