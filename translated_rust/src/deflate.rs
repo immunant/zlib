@@ -610,32 +610,38 @@ unsafe extern "C" fn read_buf(
     return len;
 }
 
+fn fill_window_space_state(
+    window_size: crate::zutil_h::ulg,
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    wsize: crate::stdlib::uInt,
+) -> (::core::ffi::c_uint, bool) {
+    let mut more = window_size
+        .wrapping_sub(lookahead as crate::zutil_h::ulg)
+        .wrapping_sub(strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
+    if ::core::mem::size_of::<::core::ffi::c_int>() <= 2 {
+        if more == 0 && strstart == 0 && lookahead == 0 {
+            more = wsize;
+        } else if more == -1i32 as ::core::ffi::c_uint {
+            more = more.wrapping_sub(1);
+        }
+    }
+    let slide = strstart
+        >= wsize.wrapping_add(
+            wsize.wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
+        );
+    (more, slide)
+}
+
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
+    let wsize: crate::stdlib::uInt = (*s).w_size;
     loop {
-        more = (*s)
-            .window_size
-            .wrapping_sub((*s).lookahead as crate::zutil_h::ulg)
-            .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
-            as ::core::ffi::c_uint;
-        if ::core::mem::size_of::<::core::ffi::c_int>() <= 2 as usize {
-            if more == 0 as ::core::ffi::c_uint
-                && (*s).strstart == 0 as crate::stdlib::uInt
-                && (*s).lookahead == 0 as crate::stdlib::uInt
-            {
-                more = wsize as ::core::ffi::c_uint;
-            } else if more == -1 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                more = more.wrapping_sub(1);
-            }
-        }
-        if (*s).strstart
-            >= wsize.wrapping_add(
-                (*s).w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
-            )
-        {
+        let (space, should_slide) =
+            fill_window_space_state((*s).window_size, (*s).lookahead, (*s).strstart, wsize);
+        more = space;
+        if should_slide {
             let Ok(window_len) = usize::try_from((*s).window_size) else {
                 return;
             };
