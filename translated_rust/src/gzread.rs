@@ -528,13 +528,20 @@ macro_rules! gz_decomp_at_boundary {
                         &mut state.strm,
                         &mut *inflate_state,
                     ) {
-                        Some(buffers) => crate::src::inflate::inflate(
+                        Some(buffers) => match crate::src::inflate::inflate(
                             &mut state.strm,
                             &mut *inflate_state,
                             gzip_header,
                             buffers,
                             crate::zlib_h::Z_NO_FLUSH,
-                        ),
+                        ) {
+                            Ok(pending) => crate::src::inflate::inflate_finish_at_boundary!(
+                                &mut state.strm,
+                                &mut *inflate_state,
+                                pending,
+                            ),
+                            Err(status) => status,
+                        },
                         None => crate::zlib_h::Z_STREAM_ERROR,
                     }
                 };

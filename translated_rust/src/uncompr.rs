@@ -169,13 +169,20 @@ macro_rules! uncompress2_z_at_boundary {
                     err = crate::zlib_h::Z_STREAM_ERROR;
                     break;
                 };
-                err = crate::src::inflate::inflate(
+                err = match crate::src::inflate::inflate(
                     &mut stream,
                     &mut *state,
                     gzip_header,
                     buffers,
                     crate::zlib_h::Z_NO_FLUSH,
-                );
+                ) {
+                    Ok(pending) => crate::src::inflate::inflate_finish_at_boundary!(
+                        &mut stream,
+                        &mut *state,
+                        pending,
+                    ),
+                    Err(status) => status,
+                };
                 if err != crate::zlib_h::Z_OK {
                     break;
                 }

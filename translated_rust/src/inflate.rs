@@ -1505,13 +1505,13 @@ struct InflateWindowUpdate {
 /// the raw callback/slice bridge prevents a malformed state from allocating
 /// one span and then lending a differently sized prefix of it.
 #[derive(Copy, Clone)]
-struct InflateWindowBoundaryPlan {
-    window_len: usize,
+pub struct InflateWindowBoundaryPlan {
+    pub(crate) window_len: usize,
     copy_len: usize,
-    allocate: bool,
+    pub(crate) allocate: bool,
 }
 
-fn inflate_window_boundary_plan(
+pub(crate) fn inflate_window_boundary_plan(
     window_is_null: bool,
     wbits: ::core::ffi::c_uint,
     wsize: ::core::ffi::c_uint,
@@ -1760,18 +1760,33 @@ fn inflate_fast_commit(
 /// records makes the exit boundary responsible only for cursor lending,
 /// checksum input, and field commits.
 #[derive(Copy, Clone)]
-struct InflateExitProgress {
-    input_used: ::core::ffi::c_uint,
-    output_used: ::core::ffi::c_uint,
-    update_window: bool,
+pub struct InflateExitProgress {
+    pub(crate) input_used: ::core::ffi::c_uint,
+    pub(crate) output_used: ::core::ffi::c_uint,
+    pub(crate) update_window: bool,
     data_type: ::core::ffi::c_int,
+}
+
+/// The pointer-free result of ordinary inflate's cursor loop.  The decoder
+/// returns this after its invocation-local views end; an approved caller
+/// boundary then publishes cursors, performs a possible allocation callback,
+/// and lends only the output/window spans needed for history retention.
+#[derive(Copy, Clone)]
+pub struct InflateDecodeExit {
+    pub(crate) initial_input: ::core::ffi::c_uint,
+    pub(crate) initial_output: ::core::ffi::c_uint,
+    pub(crate) remaining_input: ::core::ffi::c_uint,
+    pub(crate) remaining_output: ::core::ffi::c_uint,
+    pub(crate) flush: ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+    deferred_checksum: Option<::core::ffi::c_ulong>,
 }
 
 /// Preserve ordinary inflate's exit accounting without looking through the
 /// compatibility stream or state records.  The decoder only decrements the
 /// two availability counters, so wrapping subtraction retains the translated
 /// ABI behavior even if a malformed caller supplied unusual scalar values.
-fn inflate_exit_progress(
+pub(crate) fn inflate_exit_progress(
     initial_input: ::core::ffi::c_uint,
     remaining_input: ::core::ffi::c_uint,
     initial_output: ::core::ffi::c_uint,
@@ -1937,7 +1952,7 @@ pub fn inflate(
     mut gzip_header: Option<&mut crate::zlib_h::gz_header>,
     buffers: InflateBuffers<'_>,
     mut flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+) -> Result<InflateDecodeExit, ::core::ffi::c_int> {
     // Rust callers pass both already-adopted compatibility records directly.
     // The raw state pointer remains at the ABI/caller boundary, leaving this
     // dispatcher to operate on ordinary Rust references and slice views.
@@ -1997,17 +2012,16 @@ pub fn inflate(
     // contract while the safe owned/slice core is still being extracted.
     // Keep the scalar compatibility checks here, shared with the smaller
     // inflate boundaries. The state reference was adopted by the caller.
-    unsafe {
-        let Some(entry_mode) = inflate_entry_mode(
+    let Some(entry_mode) = inflate_entry_mode(
             strm_ref.zalloc.is_some(),
             strm_ref.zfree.is_some(),
             state_ref.stream_token == strm_ref as *mut crate::zlib_h::z_stream as usize,
             state_ref.mode,
             !strm_ref.next_out.is_null(),
             !strm_ref.next_in.is_null() || strm_ref.avail_in == 0 as crate::stdlib::uInt,
-        ) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
+    ) else {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    };
         state_ref.mode = entry_mode;
         put = 0;
         left = strm_ref.avail_out as ::core::ffi::c_uint;
@@ -2022,8 +2036,7 @@ pub fn inflate(
         // view. The loop publishes `next_out` before an allocator callback can
         // run, so deriving that view from the final ABI cursor would need raw
         // pointer subtraction after the callback boundary.
-        let output_base = strm_ref.next_out;
-        {
+    {
             // Lend the immutable input, mutable output, and separate history
             // allocation once for this decoder invocation.  The loop neither
             // invokes callbacks nor reallocates the history window.  This
@@ -2041,9 +2054,9 @@ pub fn inflate(
                 output,
                 window,
             } = buffers;
-            if input.len() != have as usize || output.len() != left as usize {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
+        if input.len() != have as usize || output.len() != left as usize {
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
+        }
             '_inf_leave: loop {
                 'c_2425: {
                     'c_2327: {
@@ -2465,8 +2478,8 @@ pub fn inflate(
                                                                                                     ret = crate::zlib_h::Z_DATA_ERROR;
                                                                                                     break '_inf_leave;
                                                                                                 }
-                                                                                                16210 => return crate::zlib_h::Z_MEM_ERROR,
-                                                                                                16211 | _ => return crate::zlib_h::Z_STREAM_ERROR,
+                                                                                                16210 => return Err(crate::zlib_h::Z_MEM_ERROR),
+                                                                                                16211 | _ => return Err(crate::zlib_h::Z_STREAM_ERROR),
                                                                                             }
                                                                                                     // This gzip-length and code-length-table
                                                                                                     // transition only updates decoder scalars
@@ -2588,13 +2601,13 @@ pub fn inflate(
                                                                                         .is_none()
                                                                                         {
                                                                                             state_ref.mode = crate::src::inflate::BAD;
-                                                                                            return crate::zlib_h::Z_STREAM_ERROR;
+                                                                                            return Err(crate::zlib_h::Z_STREAM_ERROR);
                                                                                         }
                                                                                         strm_ref.avail_out = left as crate::stdlib::uInt;
                                                                                         strm_ref.avail_in = have as crate::stdlib::uInt;
                                                                                         state_ref.hold = hold;
                                                                                         state_ref.bits = bits;
-                                                                                        return crate::zlib_h::Z_NEED_DICT;
+                                                                                        return Err(crate::zlib_h::Z_NEED_DICT);
                                                                                     }
                                                                                             state_ref.check = crate::src::adler32::ADLER32_INITIAL
                                                                                         as ::core::ffi::c_ulong;
@@ -3464,11 +3477,13 @@ pub fn inflate(
                                                             ) {
                                                                 let mut copied = 0usize;
                                                                 while copied < header_copy {
-                                                                    *head.extra.wrapping_add(
-                                                                        header_offset + copied,
-                                                                    ) = inflate_input_from_cursor(
-                                                                        input, in_0, have, copied,
-                                                                    );
+                                                                    unsafe {
+                                                                        *head.extra.wrapping_add(
+                                                                            header_offset + copied,
+                                                                        ) = inflate_input_from_cursor(
+                                                                            input, in_0, have, copied,
+                                                                        );
+                                                                    }
                                                                     copied += 1;
                                                                 }
                                                             }
@@ -3591,10 +3606,12 @@ pub fn inflate(
                                                     let c2rust_fresh6 = state_ref.length;
                                                     state_ref.length =
                                                         state_ref.length.wrapping_add(1);
-                                                    *head
-                                                        .name
-                                                        .wrapping_add(c2rust_fresh6 as usize) =
-                                                        len as crate::stdlib::Bytef;
+                                                    unsafe {
+                                                        *head
+                                                            .name
+                                                            .wrapping_add(c2rust_fresh6 as usize) =
+                                                            len as crate::stdlib::Bytef;
+                                                    }
                                                 }
                                             }
                                             if !(len != 0 && copy < have) {
@@ -3759,8 +3776,10 @@ pub fn inflate(
                                         {
                                             let c2rust_fresh8 = state_ref.length;
                                             state_ref.length = state_ref.length.wrapping_add(1);
-                                            *head.comment.wrapping_add(c2rust_fresh8 as usize) =
-                                                len as crate::stdlib::Bytef;
+                                            unsafe {
+                                                *head.comment.wrapping_add(c2rust_fresh8 as usize) =
+                                                    len as crate::stdlib::Bytef;
+                                            }
                                         }
                                     }
                                     if !(len != 0 && copy < have) {
@@ -3917,12 +3936,6 @@ pub fn inflate(
                     state_ref.mode = crate::src::inflate::LEN;
                 }
             }
-            // Publish the final checked offsets as ABI cursors while their
-            // bounded views still make the resulting positions explicit.
-            if inflate_publish_cursors(strm_ref, input, output, next, put).is_none() {
-                state_ref.mode = crate::src::inflate::BAD;
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
             // A checksum-only exit needs no history allocation or update.
             // Calculate it while the boundary-supplied output view is still
             // alive, so the later scalar exit commit does not need to lend
@@ -3944,7 +3957,7 @@ pub fn inflate(
             {
                 let Some(produced) = output.get(..exit.output_used as usize) else {
                     state_ref.mode = crate::src::inflate::BAD;
-                    return crate::zlib_h::Z_STREAM_ERROR;
+                    return Err(crate::zlib_h::Z_STREAM_ERROR);
                 };
                 deferred_exit_checksum = inflate_exit_checksum(
                     state_ref.wrap,
@@ -3954,128 +3967,160 @@ pub fn inflate(
                 );
             }
         }
-        // The invocation-local ABI views above have ended before this exit
-        // boundary can invoke an allocator callback.
-        // Keep the decoder loop's raw cursors local to that loop.  The exit
-        // commit adopts each ABI record once, so cursor publication, history
-        // planning, totals, and checksum state use ordinary field access.
-        // Compute one checked exit plan before history maintenance.  Updating the
-        // circular window may change history cursors, but it does not change the
-        // decoded input/output progress, mode, or bit state this call publishes.
-        // Reusing this plan keeps the history decision and final ABI accounting
-        // tied to the same scalar snapshot.
-        {
-            let state_ref = &mut *state_ref;
-            strm_ref.avail_out = left as crate::stdlib::uInt;
-            strm_ref.avail_in = have as crate::stdlib::uInt;
-            state_ref.hold = hold;
-            state_ref.bits = bits;
-            let exit = inflate_exit_progress(
-                in_0,
-                strm_ref.avail_in as ::core::ffi::c_uint,
-                out,
-                strm_ref.avail_out as ::core::ffi::c_uint,
-                state_ref.wsize,
-                state_ref.mode,
-                flush,
-                state_ref.bits,
-                state_ref.last,
-            );
-            let (window_error, window_exit_checksum): (bool, Option<::core::ffi::c_ulong>) = 'window: {
-                // Invoke a possible allocator callback before lending the caller's
-                // completed-output span. History retention, and any checksum
-                // not already computed from the invocation-local view, then
-                // consume that one exact bounded view.
-                let window = if exit.update_window {
-                    // The decoder boundary owns callback invocation and the one
-                    // temporary ABI-window lend.  The plan and the subsequent
-                    // history update remain slice/scalar-only, so no private
-                    // unsafe window adapter is needed.
-                    let Some(plan) = inflate_window_boundary_plan(
-                        state_ref.window.is_none(),
-                        state_ref.wbits,
-                        state_ref.wsize,
-                        exit.output_used,
-                    ) else {
-                        break 'window (true, None);
-                    };
-                    if plan.allocate {
-                        let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len)
-                        else {
-                            break 'window (true, None);
-                        };
-                        // `inflate()` normally reaches this boundary only after
-                        // init has installed zalloc. Treat malformed callback
-                        // state as allocation failure instead of panicking.
-                        let Some(zalloc) = strm_ref.zalloc else {
-                            break 'window (true, None);
-                        };
-                        state_ref.window = ::core::ptr::NonNull::new(zalloc(
-                            strm_ref.opaque,
-                            requested_wsize,
-                            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-                        )
-                            as *mut ::core::ffi::c_uchar);
-                        if state_ref.window.is_none() {
-                            break 'window (true, None);
-                        }
-                    }
-                    Some(::core::slice::from_raw_parts_mut(
-                        state_ref.window.expect("allocated history window").as_ptr(),
-                        plan.window_len,
-                    ))
-                } else {
-                    None
-                };
-                if exit.update_window && window.is_none() {
-                    break 'window (true, None);
-                }
-                let produced = if exit.update_window && exit.output_used != 0 {
-                    ::core::slice::from_raw_parts(output_base, exit.output_used as usize)
-                } else {
-                    &[]
-                };
-                if let Some(window) = window {
-                    if inflate_window_update_state(state_ref, window, produced).is_none() {
-                        break 'window (true, None);
-                    }
-                }
-                // Keep the post-callback output view inside this history
-                // transition.  The final accounting commit needs only the
-                // scalar checksum, not another borrow of caller output.
-                let check = inflate_exit_checksum(
-                    state_ref.wrap,
-                    state_ref.check as crate::stdlib::uLong,
-                    state_ref.flags,
-                    produced,
-                );
-                (false, check)
-            };
-            if window_error {
-                state_ref.mode = crate::src::inflate::MEM;
-                return crate::zlib_h::Z_MEM_ERROR;
-            }
-            in_0 = exit.input_used;
-            out = exit.output_used;
-            strm_ref.total_in = strm_ref
-                .total_in
-                .wrapping_add(exit.input_used as crate::stdlib::uLong);
-            strm_ref.total_out = strm_ref
-                .total_out
-                .wrapping_add(exit.output_used as crate::stdlib::uLong);
-            state_ref.total = state_ref
-                .total
-                .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
-            let check = deferred_exit_checksum.or(window_exit_checksum);
-            if let Some(check) = check {
-                state_ref.check = check;
-                strm_ref.adler = state_ref.check as crate::stdlib::uLong;
-            }
-            strm_ref.data_type = exit.data_type;
-        }
-        inflate_exit_status(in_0, out, flush, ret)
-    }
+    // The invocation-local ABI views have now ended.  The caller boundary
+    // publishes cursors before any allocation callback, then lends the small
+    // post-callback history/output spans needed by the safe finalizer.
+    state_ref.hold = hold;
+    state_ref.bits = bits;
+    Ok(InflateDecodeExit {
+        initial_input: in_0,
+        initial_output: out,
+        remaining_input: have,
+        remaining_output: left,
+        flush,
+        ret,
+        deferred_checksum: deferred_exit_checksum,
+    })
 }
+
+/// Commit the scalar and slice-only portion of an ordinary inflate exit.
+/// The caller boundary has already published the decoder cursors, run any
+/// allocator callback, and lent the exact history/output spans required here.
+pub(crate) fn inflate_finish(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut inflate_state,
+    pending: InflateDecodeExit,
+    exit: InflateExitProgress,
+    window: Option<&mut [crate::stdlib::Bytef]>,
+    produced: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    if exit.update_window {
+        if produced.len() != exit.output_used as usize {
+            state.mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+        let Some(window) = window else {
+            state.mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        if inflate_window_update_state(state, window, produced).is_none() {
+            state.mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+    }
+    strm.total_in = strm
+        .total_in
+        .wrapping_add(exit.input_used as crate::stdlib::uLong);
+    strm.total_out = strm
+        .total_out
+        .wrapping_add(exit.output_used as crate::stdlib::uLong);
+    state.total = state
+        .total
+        .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
+    let checksum = pending.deferred_checksum.or_else(|| {
+        inflate_exit_checksum(
+            state.wrap,
+            state.check as crate::stdlib::uLong,
+            state.flags,
+            produced,
+        )
+    });
+    if let Some(checksum) = checksum {
+        state.check = checksum;
+        strm.adler = checksum as crate::stdlib::uLong;
+    }
+    strm.data_type = exit.data_type;
+    inflate_exit_status(exit.input_used, exit.output_used, pending.flush, pending.ret)
+}
+
+// This expands only at the three established ordinary-inflate boundaries.
+// It keeps the allocation callback before the post-callback output lend: a
+// custom allocator is allowed to alias caller memory.  Once those short-lived
+// views exist, all history, checksum, and accounting work returns to the safe
+// `inflate_finish()` core above.
+macro_rules! inflate_finish_at_boundary {
+    ($strm:expr, $state:expr, $pending:expr $(,)?) => {{
+        let strm_ref = $strm;
+        let state_ref = $state;
+        let pending = $pending;
+        let exit = crate::src::inflate::inflate_exit_progress(
+            pending.initial_input,
+            pending.remaining_input,
+            pending.initial_output,
+            pending.remaining_output,
+            state_ref.wsize,
+            state_ref.mode,
+            pending.flush,
+            state_ref.bits,
+            state_ref.last,
+        );
+        if exit.input_used > pending.initial_input || exit.output_used > pending.initial_output {
+            state_ref.mode = crate::src::inflate::BAD;
+            crate::zlib_h::Z_STREAM_ERROR
+        } else {
+            'inflate_finish: {
+            // Preserve the original bases for the post-callback lends, while
+            // publishing zlib's final cursors before invoking zalloc.
+            let input_base = strm_ref.next_in;
+            let output_base = strm_ref.next_out;
+            if exit.input_used != 0 {
+                strm_ref.next_in = input_base.wrapping_add(exit.input_used as usize);
+            }
+            strm_ref.next_out = output_base.wrapping_add(exit.output_used as usize);
+            strm_ref.avail_in = pending.remaining_input as crate::stdlib::uInt;
+            strm_ref.avail_out = pending.remaining_output as crate::stdlib::uInt;
+
+            let window_len = if exit.update_window {
+                let Some(plan) = crate::src::inflate::inflate_window_boundary_plan(
+                    state_ref.window.is_none(),
+                    state_ref.wbits,
+                    state_ref.wsize,
+                    exit.output_used,
+                ) else {
+                    state_ref.mode = crate::src::inflate::MEM;
+                    break 'inflate_finish crate::zlib_h::Z_MEM_ERROR;
+                };
+                if plan.allocate {
+                    let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len) else {
+                        state_ref.mode = crate::src::inflate::MEM;
+                        break 'inflate_finish crate::zlib_h::Z_MEM_ERROR;
+                    };
+                    let Some(zalloc) = strm_ref.zalloc else {
+                        state_ref.mode = crate::src::inflate::MEM;
+                        break 'inflate_finish crate::zlib_h::Z_MEM_ERROR;
+                    };
+                    state_ref.window = ::core::ptr::NonNull::new(zalloc(
+                        strm_ref.opaque,
+                        requested_wsize,
+                        ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+                    ) as *mut ::core::ffi::c_uchar);
+                    if state_ref.window.is_none() {
+                        state_ref.mode = crate::src::inflate::MEM;
+                        break 'inflate_finish crate::zlib_h::Z_MEM_ERROR;
+                    }
+                }
+                Some(plan.window_len)
+            } else {
+                None
+            };
+            let window = match window_len {
+                Some(window_len) => match state_ref.window {
+                    Some(window) => Some(::core::slice::from_raw_parts_mut(window.as_ptr(), window_len)),
+                    None => None,
+                },
+                None => None,
+            };
+            let produced = if exit.update_window && exit.output_used != 0 {
+                ::core::slice::from_raw_parts(output_base, exit.output_used as usize)
+            } else {
+                &[]
+            };
+            crate::src::inflate::inflate_finish(strm_ref, state_ref, pending, exit, window, produced)
+            }
+        }
+    }};
+}
+pub(crate) use inflate_finish_at_boundary;
 #[export_name = "inflate"]
 
 pub unsafe extern "C" fn inflate_ffi(
@@ -4097,7 +4142,10 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(buffers) = inflate_buffers_at_boundary!(strm_ref, state_ref) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate(strm_ref, state_ref, gzip_header, buffers, flush)
+    match inflate(strm_ref, state_ref, gzip_header, buffers, flush) {
+        Ok(pending) => inflate_finish_at_boundary!(strm_ref, state_ref, pending),
+        Err(status) => status,
+    }
 }
 // This expands only in export-attributed ABI functions (including the
 // boundary macros used by gzip and one-shot decompression).  Destruction
