@@ -524,18 +524,15 @@ impl DeflateCallbackStorageOwner {
     }
 
     // A deflate copy crosses two independently callback-paired allocation
-    // lifecycles.  Keep the handoff at those lifecycles: callers lend the
-    // already-bounded views produced by their respective boundaries, and this
-    // owner verifies that both four-region sets still match the immutable
-    // callback request geometry before forming the one copy facade.  In
-    // particular, this method neither receives allocation handles nor builds
-    // raw views itself.
-    fn copy_storage<'source, 'destination>(
+    // lifecycles.  Verify their immutable request geometry before the ABI
+    // boundary performs its bounded raw copies.  The pointer-free copy facade
+    // is reserved for owner-backed storage: constructing eight temporary raw
+    // slice views here would duplicate the callback boundary's unsafe work.
+    fn copy_geometry(
         &self,
-        source: DeflateCallbackStorage<'source>,
         destination_owner: &DeflateCallbackStorageOwner,
-        destination: DeflateCallbackStorage<'destination>,
-    ) -> Option<DeflateCopyStorage<'source, 'destination>> {
+        layout: &DeflateCopyLayout,
+    ) -> bool {
         if !(self.window
             && self.prev
             && self.head
@@ -544,57 +541,12 @@ impl DeflateCallbackStorageOwner {
             && destination_owner.prev
             && destination_owner.head
             && destination_owner.pending
-            && self.storage.same_geometry(&destination_owner.storage))
+            && self.storage.same_geometry(&destination_owner.storage)
+            && layout.fits_storage(&self.storage))
         {
-            return None;
+            return false;
         }
-
-        let DeflateCallbackStorage {
-            window: Some(source_window),
-            prev: Some(source_prev),
-            head: Some(source_head),
-            pending: Some(source_pending),
-        } = source
-        else {
-            return None;
-        };
-        let DeflateCallbackStorage {
-            window: Some(destination_window),
-            prev: Some(destination_prev),
-            head: Some(destination_head),
-            pending: Some(destination_pending),
-        } = destination
-        else {
-            return None;
-        };
-
-        let storage = self.storage;
-        if source_window.len() != storage.window.byte_len()?
-            || source_prev.len() != storage.prev.element_len::<crate::src::deflate::Posf>()?
-            || source_head.len() != storage.head.element_len::<crate::src::deflate::Posf>()?
-            || source_pending.len() != storage.pending.byte_len()?
-            || destination_window.len() != storage.window.byte_len()?
-            || destination_prev.len() != storage.prev.element_len::<crate::src::deflate::Posf>()?
-            || destination_head.len() != storage.head.element_len::<crate::src::deflate::Posf>()?
-            || destination_pending.len() != storage.pending.byte_len()?
-        {
-            return None;
-        }
-
-        Some(DeflateCopyStorage::new(
-            DeflateCopySourceViews {
-                window: source_window,
-                prev: source_prev,
-                head: source_head,
-                pending: source_pending,
-            },
-            DeflateCopyDestinationViews {
-                window: destination_window,
-                prev: destination_prev,
-                head: destination_head,
-                pending: destination_pending,
-            },
-        ))
+        true
     }
 }
 
@@ -3604,11 +3556,7 @@ impl<'source, 'destination> DeflateCopyStorage<'source, 'destination> {
     }
 
     fn copy(self, preparation: &DeflateCopyPreparation) -> bool {
-        self.copy_layout(&preparation.plan.layout)
-    }
-
-    fn copy_layout(self, layout: &DeflateCopyLayout) -> bool {
-        deflateCopy(self.source, self.destination, layout)
+        deflateCopy(self.source, self.destination, &preparation.plan.layout)
     }
 }
 
@@ -5409,81 +5357,52 @@ unsafe fn deflate_copy_from_abi_boundary(
         deflateEnd(::core::ptr::NonNull::from(dest));
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    // The two callback lifecycles now own all allocations.  Project the four
-    // source and destination regions together, then give the paired facade
-    // the only safe copy commit.  In particular, use the immutable callback
-    // descriptors for every extent: the copied scalar cursors are not an
-    // allocation contract.  Keep the source views ahead of the destination
-    // projection; `deflateCopy` permits the two ABI streams to alias, and the
-    // original source state remains the copy source after destination state
-    // publication.
-    let source_storage_layout = ss.callback_storage.storage();
-    let destination_storage_layout = ds.callback_storage.storage();
-    let source_storage = DeflateCallbackStorage {
-        window: Some(::core::slice::from_raw_parts_mut(
-            ss.window.expect("initialized window").as_ptr(),
-            source_storage_layout
-                .window
-                .byte_len()
-                .expect("validated window allocation geometry"),
-        )),
-        prev: Some(::core::slice::from_raw_parts_mut(
-            ss.prev.expect("initialized prev table").as_ptr(),
-            source_storage_layout
-                .prev
-                .element_len::<crate::src::deflate::Posf>()
-                .expect("validated prev allocation geometry"),
-        )),
-        head: Some(::core::slice::from_raw_parts_mut(
-            ss.head.expect("initialized head table").as_ptr(),
-            source_storage_layout
-                .head
-                .element_len::<crate::src::deflate::Posf>()
-                .expect("validated head allocation geometry"),
-        )),
-        pending: Some(::core::slice::from_raw_parts_mut(
-            ss.pending_buf.expect("initialized pending buffer").as_ptr(),
-            source_storage_layout
-                .pending
-                .byte_len()
-                .expect("validated pending allocation geometry"),
-        )),
-    };
-    let destination_storage = DeflateCallbackStorage {
-        window: Some(::core::slice::from_raw_parts_mut(
-            ds.window.expect("initialized window").as_ptr(),
-            destination_storage_layout
-                .window
-                .byte_len()
-                .expect("validated window allocation geometry"),
-        )),
-        prev: Some(::core::slice::from_raw_parts_mut(
-            ds.prev.expect("initialized prev table").as_ptr(),
-            destination_storage_layout
-                .prev
-                .element_len::<crate::src::deflate::Posf>()
-                .expect("validated prev allocation geometry"),
-        )),
-        head: Some(::core::slice::from_raw_parts_mut(
-            ds.head.expect("initialized head table").as_ptr(),
-            destination_storage_layout
-                .head
-                .element_len::<crate::src::deflate::Posf>()
-                .expect("validated head allocation geometry"),
-        )),
-        pending: Some(::core::slice::from_raw_parts_mut(
-            ds.pending_buf.expect("initialized pending buffer").as_ptr(),
-            destination_storage_layout
-                .pending
-                .byte_len()
-                .expect("validated pending allocation geometry"),
-        )),
-    };
-    let copy_storage = ss
+    // The two callback lifecycles now own all allocations.  Validate their
+    // immutable descriptors once, then keep raw storage access at this one
+    // boundary.  The five copies are the original logical deflate-copy
+    // regions; the pointer-free plan supplies every bounded extent and range.
+    assert!(ss
         .callback_storage
-        .copy_storage(source_storage, &ds.callback_storage, destination_storage)
-        .expect("initialized callback storage matches the copied allocation plan");
-    assert!(copy_storage.copy_layout(&copy_layout));
+        .copy_geometry(&ds.callback_storage, &copy_layout));
+    ::core::ptr::copy_nonoverlapping(
+        ss.window.expect("initialized window").as_ptr(),
+        ds.window.expect("initialized window").as_ptr(),
+        copy_layout.window_bytes,
+    );
+    ::core::ptr::copy_nonoverlapping(
+        ss.prev.expect("initialized prev table").as_ptr(),
+        ds.prev.expect("initialized prev table").as_ptr(),
+        copy_layout.prev_entries,
+    );
+    ::core::ptr::copy_nonoverlapping(
+        ss.head.expect("initialized head table").as_ptr(),
+        ds.head.expect("initialized head table").as_ptr(),
+        copy_layout.head_entries,
+    );
+    if let Some(regions) = copy_layout.pending.as_ref() {
+        ::core::ptr::copy_nonoverlapping(
+            ss.pending_buf
+                .expect("initialized pending buffer")
+                .as_ptr()
+                .wrapping_add(regions.queued.start),
+            ds.pending_buf
+                .expect("initialized pending buffer")
+                .as_ptr()
+                .wrapping_add(regions.queued.start),
+            regions.queued.len(),
+        );
+        ::core::ptr::copy_nonoverlapping(
+            ss.pending_buf
+                .expect("initialized pending buffer")
+                .as_ptr()
+                .wrapping_add(regions.symbols.start),
+            ds.pending_buf
+                .expect("initialized pending buffer")
+                .as_ptr()
+                .wrapping_add(regions.symbols.start),
+            regions.symbols.len(),
+        );
+    }
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
