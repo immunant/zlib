@@ -2447,6 +2447,9 @@ pub unsafe extern "C" fn inflateSetDictionary(
     let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    if !inflate_dictionary_input_is_valid(dictionary.is_null(), dictLength) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let dictionary = if dictLength == 0 {
         &[]
     } else {
@@ -2472,6 +2475,16 @@ pub unsafe extern "C" fn inflateSetDictionary(
         ((1 as ::core::ffi::c_uint) << state.wbits) as usize,
     );
     inflate_set_dictionary(state, window, dictionary)
+}
+
+// zlib accepts an empty dictionary with a null pointer, but a non-empty
+// dictionary must be backed by caller storage before the implementation binds
+// it as a slice.
+fn inflate_dictionary_input_is_valid(
+    dictionary_is_null: bool,
+    dictionary_len: crate::stdlib::uInt,
+) -> bool {
+    dictionary_len == 0 || !dictionary_is_null
 }
 
 fn inflate_dictionary_check(
