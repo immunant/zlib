@@ -906,6 +906,35 @@ fn inflate_back_stored_copy_count(
     length.min(have).min(left)
 }
 
+// Stored bytes occupy the same checked output window as literals and
+// matches.  Copy through that bounded view instead of the raw `put` cursor;
+// the decoder keeps ownership of the callback-facing cursor updates below.
+fn inflate_back_copy_stored_window(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    left: ::core::ffi::c_uint,
+    source: &[crate::stdlib::Bytef],
+) {
+    let write_index = state
+        .wsize
+        .checked_sub(left)
+        .expect("active inflateBack output space fits its window") as usize;
+    let write_end = write_index
+        .checked_add(source.len())
+        .expect("stored copy fits active inflateBack output window");
+    crate::src::inflate::updatewindow(
+        strm,
+        state,
+        crate::src::inflate::InflateWindowAccess::Existing,
+        |_, window| {
+            let window = window.expect("inflateBack has a configured output window");
+            assert!(write_end <= window.len());
+            window[write_index..write_end].copy_from_slice(source);
+        },
+    )
+    .expect("inflateBack existing window access cannot fail");
+}
+
 // Both stored and match copies consume decoded bytes from the same output
 // window.  The actual pointer advances remain in the caller; this transition
 // keeps their length/window accounting reference-based.
@@ -1265,11 +1294,12 @@ pub unsafe extern "C" fn inflateBack(
                             }
                         }
                         copy = inflate_back_stored_copy_count(copy, have, left);
-                        crate::stdlib::memcpy(
-                            put as *mut ::core::ffi::c_void,
-                            next as *const ::core::ffi::c_void,
-                            copy as crate::__stddef_size_t_h::size_t,
-                        );
+                        // `have` and `copy` bound the callback-provided input
+                        // range, while `left` bounds the configured output
+                        // window.  Bind the input once; the transfer itself is
+                        // checked slice work in `inflate_back_copy_stored_window`.
+                        let source = ::core::slice::from_raw_parts(next, copy as usize);
+                        inflate_back_copy_stored_window(strm, state_ref, left, source);
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
                         put = put.wrapping_add(copy as usize);
