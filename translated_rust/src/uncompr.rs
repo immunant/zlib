@@ -407,7 +407,22 @@ pub unsafe extern "C" fn uncompress2_z(
             };
             len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
         }
-        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH);
+        if stream.next_out.is_null() || (stream.next_in.is_null() && stream.avail_in != 0) {
+            err = crate::zlib_h::Z_STREAM_ERROR;
+            break;
+        }
+        let input = if stream.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        };
+        let output = ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize);
+        err = crate::src::inflate::inflate(
+            &mut stream,
+            crate::zlib_h::Z_NO_FLUSH,
+            input,
+            output,
+        );
         if err != crate::zlib_h::Z_OK {
             break;
         }

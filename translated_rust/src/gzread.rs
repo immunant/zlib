@@ -275,7 +275,20 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
             break;
         } else {
-            ret = crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH);
+            let input = ::core::slice::from_raw_parts(
+                state.strm.next_in,
+                state.strm.avail_in as usize,
+            );
+            let output = ::core::slice::from_raw_parts_mut(
+                state.strm.next_out,
+                state.strm.avail_out as usize,
+            );
+            ret = crate::src::inflate::inflate(
+                &mut state.strm,
+                crate::zlib_h::Z_NO_FLUSH,
+                input,
+                output,
+            );
             if state.strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
             }

@@ -673,6 +673,8 @@ fn inflate_consumed_input(
 pub unsafe fn inflate(
     strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
     let mut strm = InflateStream(strm);
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -719,30 +721,22 @@ pub unsafe fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if inflateStateCheck(strm.0) != 0
-        || (*strm).next_out.is_null()
-        || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
-    {
+    if inflateStateCheck(strm.0) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let input = if (*strm).avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(
-            (*strm).next_in as *const crate::stdlib::Bytef,
-            (*strm).avail_in as usize,
-        )
-    };
+    if input.len() != (*strm).avail_in as usize || output.len() != (*strm).avail_out as usize {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let mut state = InflateState(&mut *((*strm).state as *mut crate::src::inflate::inflate_state));
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         (*state).mode = crate::src::inflate::TYPEDO;
     }
-    put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    left = (*strm).avail_out as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    have = (*strm).avail_in as ::core::ffi::c_uint;
+    put = output.as_mut_ptr();
+    left = output.len() as ::core::ffi::c_uint;
+    next = input.as_ptr() as *mut ::core::ffi::c_uchar;
+    have = input.len() as ::core::ffi::c_uint;
     hold = (*state).hold;
     bits = (*state).bits;
     in_0 = have;
@@ -1153,22 +1147,16 @@ pub unsafe fn inflate(
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
                                                                                                         if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0
                                                                                                         {
-                                                                                                            (*state).check = (if (*state).flags != 0 {
-                                                                                                                crate::src::crc32::crc32(
-                                                                                                                    (*state).check as crate::stdlib::uLong,
-                                                                                                                    unsafe {
-                                                                                                                        ::core::slice::from_raw_parts(
-                                                                                                                            put.wrapping_offset(-(out as isize)),
-                                                                                                                            out as usize,
-                                                                                                                        )
-                                                                                                                    },
-                                                                                                                )
-                                                                                                            } else {
-                                                                                                                crate::src::adler32::adler32(
-                                                                                                                    (*state).check as crate::stdlib::uLong,
-                                                                                                                    put.wrapping_offset(-(out as isize)),
-                                                                                                                    out as crate::stdlib::uInt,
-                                                                                                                )
+                                                                                                           (*state).check = (if (*state).flags != 0 {
+                                                                                                               crate::src::crc32::crc32(
+                                                                                                                   (*state).check as crate::stdlib::uLong,
+                                                                                                                    &output[..out as usize],
+                                                                                                               )
+                                                                                                           } else {
+                                                                                                                crate::src::adler32::adler32_z(
+                                                                                                                   (*state).check as crate::stdlib::uLong,
+                                                                                                                    &output[..out as usize],
+                                                                                                               )
                                                                                                             }) as ::core::ffi::c_ulong;
                                                                                                             (*strm).adler = (*state).check as crate::stdlib::uLong;
                                                                                                         }
@@ -1625,11 +1613,10 @@ pub unsafe fn inflate(
                                                                         {
                                                                             break '_inf_leave;
                                                                         }
-                                                                        crate::stdlib::memcpy(
-                                                                            put as *mut ::core::ffi::c_void,
-                                                                            next as *const ::core::ffi::c_void,
-                                                                            copy as crate::__stddef_size_t_h::size_t,
-                                                                        );
+                                                                        let input_start = input.len() - have as usize;
+                                                                        let output_start = output.len() - left as usize;
+                                                                        output[output_start..output_start + copy as usize]
+                                                                            .copy_from_slice(&input[input_start..input_start + copy as usize]);
                                                                         have =
                                                                             have.wrapping_sub(copy);
                                                                         next = next
@@ -2000,33 +1987,29 @@ pub unsafe fn inflate(
                                                     len < (*(*state).head).extra_max
                                                 }
                                             {
-                                                crate::stdlib::memcpy(
-                                                    (*(*state).head).extra.wrapping_offset(len as isize)
-                                                        as *mut ::core::ffi::c_void,
-                                                    next as *const ::core::ffi::c_void,
-                                                    (if len.wrapping_add(copy)
-                                                        > (*(*state).head).extra_max
-                                                    {
-                                                        ((*(*state).head).extra_max
-                                                            as ::core::ffi::c_uint)
-                                                            .wrapping_sub(len)
-                                                    } else {
-                                                        copy
-                                                    })
-                                                        as crate::__stddef_size_t_h::size_t,
-                                                );
+                                                let extra_copy = if len.wrapping_add(copy)
+                                                    > (*(*state).head).extra_max
+                                                {
+                                                    ((*(*state).head).extra_max
+                                                        as ::core::ffi::c_uint)
+                                                        .wrapping_sub(len)
+                                                } else {
+                                                    copy
+                                                } as usize;
+                                                let input_start = input.len() - have as usize;
+                                                ::core::slice::from_raw_parts_mut(
+                                                    (*(*state).head).extra.wrapping_add(len as usize),
+                                                    extra_copy,
+                                                )
+                                                .copy_from_slice(&input[input_start..input_start + extra_copy]);
                                             }
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                                                 && (*state).wrap & 4 as ::core::ffi::c_int != 0
                                             {
                                                 (*state).check = crate::src::crc32::crc32(
                                                     (*state).check as crate::stdlib::uLong,
-                                                    unsafe {
-                                                        ::core::slice::from_raw_parts(
-                                                            next,
-                                                            copy as usize,
-                                                        )
-                                                    },
+                                                    &input[input.len() - have as usize
+                                                        ..input.len() - have as usize + copy as usize],
                                                 )
                                                     as ::core::ffi::c_ulong;
                                             }
@@ -2374,17 +2357,11 @@ pub unsafe fn inflate(
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
         (*state).check = (if (*state).flags != 0 {
-            crate::src::crc32::crc32((*state).check as crate::stdlib::uLong, unsafe {
-                ::core::slice::from_raw_parts(
-                    (*strm).next_out.wrapping_offset(-(out as isize)),
-                    out as usize,
-                )
-            })
+            crate::src::crc32::crc32((*state).check as crate::stdlib::uLong, &output[..out as usize])
         } else {
-            crate::src::adler32::adler32(
+            crate::src::adler32::adler32_z(
                 (*state).check as crate::stdlib::uLong,
-                (*strm).next_out.wrapping_offset(-(out as isize)),
-                out as crate::stdlib::uInt,
+                &output[..out as usize],
             )
         }) as ::core::ffi::c_ulong;
         (*strm).adler = (*state).check as crate::stdlib::uLong;
@@ -2428,7 +2405,17 @@ pub unsafe extern "C" fn inflate_ffi(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    inflate(&mut *strm, flush)
+    let strm = &mut *strm;
+    if strm.next_out.is_null() || (strm.next_in.is_null() && strm.avail_in != 0) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+    };
+    let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+    inflate(strm, flush, input, output)
 }
 pub unsafe fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     let state = strm.state as *mut crate::src::inflate::inflate_state;
