@@ -2822,6 +2822,29 @@ fn inflate_dictionary_copy(
     Some(())
 }
 
+/// Check the non-overlap precondition before lending an ABI history window
+/// and caller dictionary as Rust slices.  zlib's original copies have
+/// `memcpy` semantics, so an overlapping caller destination was never a
+/// supported operation; rejecting it here prevents simultaneous aliased
+/// shared and mutable slice views at the boundary.
+fn inflate_spans_are_disjoint(
+    left_address: usize,
+    left_len: usize,
+    right_address: usize,
+    right_len: usize,
+) -> bool {
+    if left_len == 0 || right_len == 0 {
+        return true;
+    }
+    let Some(left_end) = left_address.checked_add(left_len) else {
+        return false;
+    };
+    let Some(right_end) = right_address.checked_add(right_len) else {
+        return false;
+    };
+    left_end <= right_address || right_end <= left_address
+}
+
 #[export_name = "inflateGetDictionary"]
 pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -2844,6 +2867,14 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         if state.window.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        if !inflate_spans_are_disjoint(
+            state.window as usize,
+            window_len,
+            dictionary as usize,
+            whave,
+        ) {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         let window = ::core::slice::from_raw_parts(state.window, window_len);
@@ -2950,6 +2981,9 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     if state.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if head.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state.head = head;
