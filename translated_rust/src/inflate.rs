@@ -820,26 +820,24 @@ fn inflate_fast_normal(
     lenbits: ::core::ffi::c_uint,
     distbits: ::core::ffi::c_uint,
     start: ::core::ffi::c_uint,
-) -> Option<crate::src::inffast::InflateFastProgress> {
-    Some(crate::src::inffast::inflate_fast_core(
-        crate::src::inffast::InflateFastViews {
-            input,
-            output,
-            output_start,
-            history: crate::src::inffast::InflateFastHistory::Separate(window),
-            lcode,
-            dcode,
-            wsize,
-            whave,
-            wnext,
-            sane,
-            hold,
-            bits,
-            lenbits,
-            distbits,
-            start,
-        },
-    ))
+) -> crate::src::inffast::InflateFastProgress {
+    crate::src::inffast::inflate_fast_core(crate::src::inffast::InflateFastViews {
+        input,
+        output,
+        output_start,
+        history: crate::src::inffast::InflateFastHistory::Separate(window),
+        lcode,
+        dcode,
+        wsize,
+        whave,
+        wnext,
+        sane,
+        hold,
+        bits,
+        lenbits,
+        distbits,
+        start,
+    })
 }
 
 /// The scalar shape of ordinary inflate's fast-decoder lends.  The legacy
@@ -2331,7 +2329,7 @@ pub unsafe fn inflate(
                                                     state_ref.lencode as usize,
                                                     state_ref.distcode as usize,
                                                 )
-                                                .and_then(|(lcode, dcode)| {
+                                                .map(|(lcode, dcode)| {
                                                     inflate_fast_normal(
                                                         input,
                                                         output,
