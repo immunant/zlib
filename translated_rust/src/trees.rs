@@ -5084,16 +5084,15 @@ fn tally_symbols(
     state.sym_next == state.sym_end
 }
 
-pub unsafe extern "C" fn _tr_tally(
-    mut s: *mut crate::src::deflate::deflate_state,
+// Once the deflater state and its three-byte symbol records are bound, tally
+// bookkeeping is ordinary indexed state manipulation. Keep it reference- and
+// slice-based so the raw allocation boundary stays in the small adapter below.
+fn tally(
+    state: &mut crate::src::deflate::deflate_state,
+    sym_buf: &mut [crate::zutil_h::uchf],
     mut dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let state = &mut *s;
-    let sym_buf = ::core::slice::from_raw_parts_mut(
-        state.sym_buf,
-        state.lit_bufsize.wrapping_mul(3) as usize,
-    );
     let full = tally_symbols(state, sym_buf, dist, lc);
     if dist == 0 as ::core::ffi::c_uint {
         state.dyn_ltree[lc as usize].fc.freq = state.dyn_ltree[lc as usize].fc.freq.wrapping_add(1);
@@ -5131,6 +5130,22 @@ pub unsafe extern "C" fn _tr_tally(
             .wrapping_add(1);
     }
     full as ::core::ffi::c_int
+}
+
+// This adapter is the sole raw binding boundary for the tree tally path. The
+// implementation above receives only the validated deflater state and the
+// allocation-sized symbol slice.
+pub unsafe extern "C" fn _tr_tally(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    let state = &mut *s;
+    let sym_buf = ::core::slice::from_raw_parts_mut(
+        state.sym_buf,
+        state.lit_bufsize.wrapping_mul(3) as usize,
+    );
+    tally(state, sym_buf, dist, lc)
 }
 #[export_name = "_tr_tally"]
 
