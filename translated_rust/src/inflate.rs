@@ -2504,8 +2504,8 @@ pub unsafe extern "C" fn inflate_ffi(
 ) -> ::core::ffi::c_int {
     inflate(strm, flush)
 }
-pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm) else {
+pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    let Some((strm, state)) = inflateStateCheck(strm as *mut _) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // Snapshot the release plan before invoking a user-supplied deallocator,
@@ -2516,10 +2516,15 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         state.window,
         strm.state,
     );
-    if !window.is_null() {
-        zfree(opaque, window as crate::stdlib::voidpf);
+    // SAFETY: `inflateStateCheck()` validated the matching allocator and
+    // state. Both captured allocations belong to this stream and are not
+    // observed through Rust references while the callback is active.
+    unsafe {
+        if !window.is_null() {
+            zfree(opaque, window as crate::stdlib::voidpf);
+        }
+        zfree(opaque, state_ptr as crate::stdlib::voidpf);
     }
-    zfree(opaque, state_ptr as crate::stdlib::voidpf);
     inflate_end_complete(strm)
 }
 
@@ -2557,6 +2562,9 @@ fn inflate_end_complete(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_in
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateEnd(strm)
 }
 fn inflate_get_dictionary(
