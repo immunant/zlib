@@ -1780,29 +1780,46 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     }
     crate::zlib_h::Z_OK
 }
+/// A validated, borrowed deflate state.  The ABI stream owns the raw state
+/// link; codec operations receive this facade after that link has been
+/// checked and converted at the stream boundary.
+struct DeflateState<'a> {
+    state: &'a mut crate::src::deflate::deflate_state,
+}
+
+impl<'a> DeflateState<'a> {
+    fn validated(state: &'a mut crate::src::deflate::deflate_state) -> Option<Self> {
+        deflate_params_state_is_valid(state).then_some(Self { state })
+    }
+}
+
 pub unsafe fn deflatePrime(
     strm: &mut crate::zlib_h::z_stream_s,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflate_prime_impl(strm, bits, value)
+    // Check the ABI carrier before following its raw state link.  The safe
+    // codec routine below receives only the validated state facade.
+    if !deflate_params_stream_is_valid(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(state) = DeflateState::validated(state) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflate_prime_impl(state, bits, value)
 }
 
-/// Apply pending bits after validating the stream and borrowing its installed
-/// deflate state exactly once.
+/// Apply pending bits to an already-validated state facade.
 fn deflate_prime_impl(
-    strm: &mut crate::zlib_h::z_stream_s,
+    state: DeflateState<'_>,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut put: ::core::ffi::c_int = 0;
-    if !deflate_params_stream_is_valid(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let s = unsafe { &mut *strm.state };
-    if !deflate_params_state_is_valid(s) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    let s = state.state;
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
         || s.sym_buf
