@@ -43,6 +43,69 @@ pub(crate) struct InflateFastState<'a> {
     pub(crate) sane: bool,
 }
 
+// Keep one fast-decoder invocation as a pointer-free transaction.  The ABI
+// adapter is still responsible for making the initial bounded views, but it
+// must not reopen cursor arithmetic once the decoder has consumed them.  This
+// is also the hand-off seam for the normal-inflate owner: it needs only the
+// request borrows, the output position, and the resumable decoder view.
+pub(crate) struct InflateFastRequest<'input, 'output, 'state> {
+    input: &'input [u8],
+    output: &'output mut [u8],
+    output_pos: usize,
+    state: InflateFastState<'state>,
+}
+
+impl<'input, 'output, 'state> InflateFastRequest<'input, 'output, 'state> {
+    pub(crate) fn new(
+        input: &'input [u8],
+        output: &'output mut [u8],
+        output_pos: usize,
+        state: InflateFastState<'state>,
+    ) -> Option<Self> {
+        output.get(output_pos..)?;
+        Some(Self {
+            input,
+            output,
+            output_pos,
+            state,
+        })
+    }
+
+    pub(crate) fn run(mut self) -> (FastResult, u64, u32, usize, usize) {
+        let input_len = self.input.len();
+        let output_len = self.output.len();
+        let result = inflate_fast_core(
+            self.input,
+            self.output,
+            self.output_pos,
+            match self.state.history {
+                FastHistory::External(window) => FastHistory::External(window),
+                FastHistory::Output => FastHistory::Output,
+            },
+            self.state.wsize,
+            self.state.whave,
+            self.state.wnext,
+            self.state.hold,
+            self.state.bits,
+            self.state.lcode,
+            self.state.dcode,
+            self.state.lmask,
+            self.state.dmask,
+            self.state.codes,
+            self.state.sane,
+        );
+        self.state.hold = result.hold;
+        self.state.bits = result.bits;
+        (
+            result,
+            self.state.hold,
+            self.state.bits,
+            input_len,
+            output_len,
+        )
+    }
+}
+
 #[inline]
 fn table_entry(table: CodeTableRef, codes: &[code], index: usize) -> code {
     code::copied_from(table.get(codes, index as isize))
@@ -228,28 +291,40 @@ pub(crate) fn inflate_fast_from_views(
     output_pos: usize,
     state: &mut InflateFastState<'_>,
 ) -> FastResult {
-    let result = inflate_fast_core(
+    let request = InflateFastRequest::new(
         input,
         output,
         output_pos,
-        match state.history {
-            FastHistory::External(window) => FastHistory::External(window),
-            FastHistory::Output => FastHistory::Output,
+        InflateFastState {
+            history: match state.history {
+                FastHistory::External(window) => FastHistory::External(window),
+                FastHistory::Output => FastHistory::Output,
+            },
+            wsize: state.wsize,
+            whave: state.whave,
+            wnext: state.wnext,
+            hold: state.hold,
+            bits: state.bits,
+            lcode: state.lcode,
+            dcode: state.dcode,
+            lmask: state.lmask,
+            dmask: state.dmask,
+            codes: state.codes,
+            sane: state.sane,
         },
-        state.wsize,
-        state.whave,
-        state.wnext,
-        state.hold,
-        state.bits,
-        state.lcode,
-        state.dcode,
-        state.lmask,
-        state.dmask,
-        state.codes,
-        state.sane,
     );
-    state.hold = result.hold;
-    state.bits = result.bits;
+    let Some(request) = request else {
+        return FastResult {
+            input_used: 0,
+            output_used: output_pos,
+            hold: state.hold,
+            bits: state.bits,
+            exit: FastExit::Continue,
+        };
+    };
+    let (result, hold, bits, _, _) = request.run();
+    state.hold = hold;
+    state.bits = bits;
     result
 }
 
@@ -263,7 +338,7 @@ pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::c
     let output_start = strm.next_out.wrapping_sub(written);
     let output = core::slice::from_raw_parts_mut(output_start, start as usize);
     let window = state.owned_window.as_deref();
-    let mut fast_state = InflateFastState {
+    let fast_state = InflateFastState {
         history: FastHistory::External(window),
         wsize: state.wsize as usize,
         whave: state.whave as usize,
@@ -277,13 +352,17 @@ pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::c
         codes: &state.codes,
         sane: state.sane != 0,
     };
-    let result = inflate_fast_from_views(input, output, written, &mut fast_state);
+    let request = InflateFastRequest::new(input, output, written, fast_state);
+    let Some(request) = request else {
+        return;
+    };
+    let (result, hold, bits, input_len, output_len) = request.run();
     strm.next_in = strm.next_in.wrapping_add(result.input_used);
-    strm.avail_in = input.len().wrapping_sub(result.input_used) as crate::stdlib::uInt;
+    strm.avail_in = input_len.wrapping_sub(result.input_used) as crate::stdlib::uInt;
     strm.next_out = output_start.wrapping_add(result.output_used);
-    strm.avail_out = output.len().wrapping_sub(result.output_used) as crate::stdlib::uInt;
-    state.hold = fast_state.hold;
-    state.bits = fast_state.bits;
+    strm.avail_out = output_len.wrapping_sub(result.output_used) as crate::stdlib::uInt;
+    state.hold = hold;
+    state.bits = bits;
     match result.exit {
         FastExit::Continue => {}
         FastExit::Type => state.mode = TYPE,
