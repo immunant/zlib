@@ -798,7 +798,7 @@ pub unsafe extern "C" fn inflate(
                         }
                         have = have.wrapping_sub(1);
                         let c2rust_fresh0 = next;
-                        next = next.offset(1);
+                        next = next.wrapping_add(1);
                         hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
