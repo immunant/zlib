@@ -269,6 +269,7 @@ fn gz_open(
         }
         {
             let state_ref = &mut *state;
+            state_ref.path_len = len as crate::__stddef_size_t_h::size_t;
             if state_ref.fd == -1 as ::core::ffi::c_int {
                 crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
                 crate::stdlib::free(state as *mut ::core::ffi::c_void);
@@ -922,12 +923,8 @@ pub fn gz_error(
     if msg.is_null() {
         return;
     }
-    let msg_capacity = unsafe {
-        gz_error_message_capacity(
-            crate::stdlib::strlen(state.path),
-            crate::stdlib::strlen(msg),
-        )
-    };
+    let msg_capacity =
+        unsafe { gz_error_message_capacity(state.path_len, crate::stdlib::strlen(msg)) };
     state.msg = unsafe { crate::stdlib::malloc(msg_capacity) as *mut ::core::ffi::c_char };
     if state.msg.is_null() {
         state.err = crate::zlib_h::Z_MEM_ERROR;
