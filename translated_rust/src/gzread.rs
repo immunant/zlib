@@ -973,14 +973,17 @@ unsafe fn gzgets(
                     state.x.have as usize
                 };
                 // `x.next` is a cursor in the owned output buffer whenever
-                // `x.have` is nonzero.  Rebuild that view with a checked
-                // range, so a corrupt cursor cannot extend a raw slice past
+                // `x.have` is nonzero. Validate the complete advertised
+                // unread range before borrowing its requested prefix, so a
+                // corrupt cursor or `x.have` cannot extend a raw slice past
                 // the allocation's remaining capacity.
-                let cursor = state.x.next;
-                let Some(input) = state.out.as_deref().and_then(|buffer| {
-                    let start = cursor.addr().checked_sub(buffer.as_ptr().addr())?;
-                    let end = start.checked_add(n)?;
-                    buffer.get(start..end)
+                let Some((input, _)) = state.out.as_deref().and_then(|buffer| {
+                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                        buffer,
+                        state.x.next.addr(),
+                        state.x.have,
+                    )
+                    .and_then(|cursor| cursor.consume(n))
                 }) else {
                     return ::core::ptr::null_mut::<::core::ffi::c_char>();
                 };
