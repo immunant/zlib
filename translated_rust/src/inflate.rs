@@ -2811,16 +2811,21 @@ pub unsafe fn inflate(
                                             &[len as crate::stdlib::Bytef],
                                         );
                                     }
-                                    if !state_ref.head.is_null()
-                                        && !(*state_ref.head).name.is_null()
-                                        && state_ref.length < (*state_ref.head).name_max
-                                    {
-                                        let c2rust_fresh6 = state_ref.length;
-                                        state_ref.length = state_ref.length.wrapping_add(1);
-                                        *(*state_ref.head)
-                                            .name
-                                            .wrapping_add(c2rust_fresh6 as usize) =
-                                            len as crate::stdlib::Bytef;
+                                    if !state_ref.head.is_null() {
+                                        // `head` remains an ABI-owned retained destination, but
+                                        // this transition has already established that it is
+                                        // non-null. Adopt it once rather than re-dereferencing
+                                        // the compatibility pointer for its bounds and byte
+                                        // commit.
+                                        let head = &mut *state_ref.head;
+                                        if !head.name.is_null()
+                                            && state_ref.length < head.name_max
+                                        {
+                                            let c2rust_fresh6 = state_ref.length;
+                                            state_ref.length = state_ref.length.wrapping_add(1);
+                                            *head.name.wrapping_add(c2rust_fresh6 as usize) =
+                                                len as crate::stdlib::Bytef;
+                                        }
                                     }
                                     if !(len != 0 && copy < have) {
                                         break;
@@ -2832,8 +2837,8 @@ pub unsafe fn inflate(
                                     break '_inf_leave;
                                 }
                             } else if !state_ref.head.is_null() {
-                                (*state_ref.head).name =
-                                    ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                                let head = &mut *state_ref.head;
+                                head.name = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                             }
                             state_ref.length = 0 as ::core::ffi::c_uint;
                             state_ref.mode = crate::src::inflate::COMMENT;
@@ -2967,16 +2972,18 @@ pub unsafe fn inflate(
                                     &[len as crate::stdlib::Bytef],
                                 );
                             }
-                            if !state_ref.head.is_null()
-                                && !(*state_ref.head).comment.is_null()
-                                && state_ref.length < (*state_ref.head).comm_max
-                            {
-                                let c2rust_fresh8 = state_ref.length;
-                                state_ref.length = state_ref.length.wrapping_add(1);
-                                *(*state_ref.head)
-                                    .comment
-                                    .wrapping_add(c2rust_fresh8 as usize) =
-                                    len as crate::stdlib::Bytef;
+                            if !state_ref.head.is_null() {
+                                // As in NAME, use one transition-local borrow of the retained
+                                // ABI header destination for the bounds check and byte commit.
+                                let head = &mut *state_ref.head;
+                                if !head.comment.is_null()
+                                    && state_ref.length < head.comm_max
+                                {
+                                    let c2rust_fresh8 = state_ref.length;
+                                    state_ref.length = state_ref.length.wrapping_add(1);
+                                    *head.comment.wrapping_add(c2rust_fresh8 as usize) =
+                                        len as crate::stdlib::Bytef;
+                                }
                             }
                             if !(len != 0 && copy < have) {
                                 break;
@@ -2988,7 +2995,8 @@ pub unsafe fn inflate(
                             break '_inf_leave;
                         }
                     } else if !state_ref.head.is_null() {
-                        (*state_ref.head).comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                        let head = &mut *state_ref.head;
+                        head.comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                     }
                     state_ref.mode = crate::src::inflate::HCRC;
                     break 'c_2327;
