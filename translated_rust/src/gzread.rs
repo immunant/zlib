@@ -138,6 +138,48 @@ macro_rules! gz_read_init {
     }};
 }
 
+macro_rules! gz_inflate_reset_for_look {
+    ($state:expr, $junk:expr) => {{
+        let state: &mut crate::gzguts_h::gz_state = &mut *$state;
+        unsafe {
+            crate::src::inflate::inflateReset_ffi(
+                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+            );
+        }
+        gz_set_gzip_mode(state, $junk);
+    }};
+}
+
+macro_rules! gz_read_with_boundary_resets {
+    ($state:expr, $output:expr) => {{
+        let state: &mut crate::gzguts_h::gz_state = &mut *$state;
+        let output: &mut [crate::stdlib::Bytef] = $output;
+        let mut total = 0usize;
+        let mut status = GzReadStatus::Ok;
+        while total < output.len() {
+            let outcome = gz_read(state, &mut output[total..]);
+            total = total.wrapping_add(outcome.got as usize);
+            match outcome.status {
+                GzReadStatus::Ok => {
+                    status = GzReadStatus::Ok;
+                    break;
+                }
+                GzReadStatus::Error => {
+                    status = GzReadStatus::Error;
+                    break;
+                }
+                GzReadStatus::NeedInflateReset { junk } => {
+                    gz_inflate_reset_for_look!(state, junk);
+                }
+            }
+        }
+        GzReadOutcome {
+            got: total as crate::stdlib::z_size_t,
+            status,
+        }
+    }};
+}
+
 fn gz_last_os_errno() -> ::core::ffi::c_int {
     ::std::io::Error::last_os_error()
         .raw_os_error()
@@ -281,6 +323,18 @@ fn gz_is_gzip_header(header: [crate::stdlib::Bytef; 4]) -> bool {
         && (header[3] as ::core::ffi::c_int) < 32 as ::core::ffi::c_int
 }
 
+#[derive(Copy, Clone)]
+enum GzReadStatus {
+    Ok,
+    Error,
+    NeedInflateReset { junk: ::core::ffi::c_int },
+}
+
+struct GzReadOutcome {
+    got: crate::stdlib::z_size_t,
+    status: GzReadStatus,
+}
+
 fn gz_prepare_fetch_output(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_out = (state.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
     state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
@@ -293,16 +347,16 @@ fn gz_look_needs_more_header_input(
     avail_in == 0 as crate::stdlib::uInt || again != 0 && avail_in < 4 as crate::stdlib::uInt
 }
 
-fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_look(state: &mut crate::gzguts_h::gz_state) -> GzReadStatus {
     let reset_junk =
         if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
             Some((state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int)
         } else {
             if gz_avail(state) == -1 as ::core::ffi::c_int {
-                return -1 as ::core::ffi::c_int;
+                return GzReadStatus::Error;
             }
             if gz_look_needs_more_header_input(state.strm.avail_in, state.again) {
-                return 0 as ::core::ffi::c_int;
+                return GzReadStatus::Ok;
             }
             let gzip_header = gz_with_buffers_mut(state, |state, input_buf, output_buf| {
                 let input_offset =
@@ -325,17 +379,11 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             if gzip_header {
                 Some(1 as ::core::ffi::c_int)
             } else {
-                return 0 as ::core::ffi::c_int;
+                return GzReadStatus::Ok;
             }
         };
     if let Some(junk) = reset_junk {
-        unsafe {
-            crate::src::inflate::inflateReset_ffi(
-                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
-        }
-        gz_set_gzip_mode(state, junk);
-        return 0 as ::core::ffi::c_int;
+        return GzReadStatus::NeedInflateReset { junk };
     }
     unreachable!()
 }
@@ -429,15 +477,16 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     };
 }
 
-fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> GzReadStatus {
     loop {
         match state.how {
             crate::gzguts_h::LOOK => {
-                if gz_look(state) == -1 as ::core::ffi::c_int {
-                    return -1 as ::core::ffi::c_int;
+                match gz_look(state) {
+                    GzReadStatus::Ok => {}
+                    status => return status,
                 }
                 if state.how == crate::gzguts_h::LOOK {
-                    return 0 as ::core::ffi::c_int;
+                    return GzReadStatus::Ok;
                 }
             }
             crate::gzguts_h::COPY => {
@@ -449,15 +498,15 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 let ret = gz_apply_load_outcome(state, outcome, &mut loaded);
                 state.x.have = loaded;
                 if ret == -1 as ::core::ffi::c_int {
-                    return -1 as ::core::ffi::c_int;
+                    return GzReadStatus::Error;
                 }
                 state.x.next = state.out;
-                return 0 as ::core::ffi::c_int;
+                return GzReadStatus::Ok;
             }
             crate::gzguts_h::GZIP => {
                 gz_prepare_fetch_output(state);
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
-                    return -1 as ::core::ffi::c_int;
+                    return GzReadStatus::Error;
                 }
             }
             _ => {
@@ -466,17 +515,17 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                     crate::zlib_h::Z_STREAM_ERROR,
                     b"state corrupt\0",
                 );
-                return -1 as ::core::ffi::c_int;
+                return GzReadStatus::Error;
             }
         }
         if !gz_fetch_needs_more_output(state.x.have, state.eof, state.strm.avail_in) {
             break;
         }
     }
-    return 0 as ::core::ffi::c_int;
+    return GzReadStatus::Ok;
 }
 
-fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> GzReadStatus {
     loop {
         if state.x.have != 0 {
             gz_consume_skip_buffer(state);
@@ -484,15 +533,16 @@ fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
-            if gz_fetch(state) == -1 as ::core::ffi::c_int {
-                return -1 as ::core::ffi::c_int;
+            match gz_fetch(state) {
+                GzReadStatus::Ok => {}
+                status => return status,
             }
         }
         if !(state.skip != 0) {
             break;
         }
     }
-    return 0 as ::core::ffi::c_int;
+    return GzReadStatus::Ok;
 }
 
 enum GzReadStep {
@@ -503,17 +553,28 @@ enum GzReadStep {
 fn gz_read(
     state: &mut crate::gzguts_h::gz_state,
     output: &mut [crate::stdlib::Bytef],
-) -> crate::stdlib::z_size_t {
+) -> GzReadOutcome {
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut err: ::core::ffi::c_int = 0;
     let mut len = output.len() as crate::stdlib::z_size_t;
     let mut output_pos = 0usize;
     if len == 0 as crate::stdlib::z_size_t {
-        return 0 as crate::stdlib::z_size_t;
+        return GzReadOutcome {
+            got: 0 as crate::stdlib::z_size_t,
+            status: GzReadStatus::Ok,
+        };
     }
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
+    if state.skip != 0 {
+        match gz_skip(state) {
+            GzReadStatus::Ok => {}
+            status => {
+                return GzReadOutcome {
+                    got: 0 as crate::stdlib::z_size_t,
+                    status,
+                };
+            }
+        }
     }
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
@@ -538,10 +599,16 @@ fn gz_read(
                 break;
             }
             if gz_read_should_fetch(state.how, n, state.size) {
-                if gz_fetch(state) == -1 as ::core::ffi::c_int
-                    && state.x.have == 0 as ::core::ffi::c_uint
-                {
-                    err = -1 as ::core::ffi::c_int;
+                match gz_fetch(state) {
+                    GzReadStatus::Ok => {}
+                    GzReadStatus::Error => {
+                        if state.x.have == 0 as ::core::ffi::c_uint {
+                            err = -1 as ::core::ffi::c_int;
+                        }
+                    }
+                    status @ GzReadStatus::NeedInflateReset { .. } => {
+                        return GzReadOutcome { got, status };
+                    }
                 }
                 step = GzReadStep::NeedMoreInput;
             } else {
@@ -574,7 +641,14 @@ fn gz_read(
     if len != 0 && state.eof != 0 {
         state.past = 1 as ::core::ffi::c_int;
     }
-    return got;
+    return GzReadOutcome {
+        got,
+        status: if err == 0 {
+            GzReadStatus::Ok
+        } else {
+            GzReadStatus::Error
+        },
+    };
 }
 
 fn gzread_len_fits_int(len: ::core::ffi::c_uint) -> bool {
@@ -804,14 +878,15 @@ fn gzclose_r_final_status(
 fn gzgetc_impl(
     state: &mut crate::gzguts_h::gz_state,
     buffered: Option<crate::stdlib::Bytef>,
-    buf: &mut [crate::stdlib::Bytef; 1],
+    read: GzReadOutcome,
+    buf: &[crate::stdlib::Bytef; 1],
 ) -> ::core::ffi::c_int {
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     if let Some(c) = buffered {
         gz_note_buffered_read(state, 1 as ::core::ffi::c_uint);
         return c as ::core::ffi::c_int;
     }
-    if gz_read(state, buf) < 1 as crate::stdlib::z_size_t {
+    if read.got < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
@@ -839,7 +914,15 @@ macro_rules! gzgetc_body {
         } else {
             None
         };
-        gzgetc_impl(state, buffered, &mut buf)
+        let read = if buffered.is_none() {
+            gz_read_with_boundary_resets!(state, &mut buf[..])
+        } else {
+            GzReadOutcome {
+                got: 0 as crate::stdlib::z_size_t,
+                status: GzReadStatus::Ok,
+            }
+        };
+        gzgetc_impl(state, buffered, read, &buf)
     }};
 }
 
@@ -877,7 +960,8 @@ pub unsafe extern "C" fn gzread_ffi(
     } else {
         ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len as usize)
     };
-    len = gz_read(state, output) as ::core::ffi::c_uint;
+    let read = gz_read_with_boundary_resets!(state, output);
+    len = read.got as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
         match gzread_zero_result(state.err, state.again) {
             GzReadZeroResult::Ok => {}
@@ -924,7 +1008,7 @@ pub unsafe extern "C" fn gzfread_ffi(
             return 0 as crate::stdlib::z_size_t;
         }
         let output = ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len);
-        gz_read(state, output)
+        gz_read_with_boundary_resets!(state, output).got
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -957,14 +1041,29 @@ pub unsafe extern "C" fn gzungetc_ffi(
         {
             return -1 as ::core::ffi::c_int;
         }
-        gz_look(state);
+        loop {
+            match gz_look(state) {
+                GzReadStatus::Ok => break,
+                GzReadStatus::Error => return -1 as ::core::ffi::c_int,
+                GzReadStatus::NeedInflateReset { junk } => {
+                    gz_inflate_reset_for_look!(state, junk);
+                    break;
+                }
+            }
+        }
     }
     if !gz_read_state_ready(state) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
+    while state.skip != 0 {
+        match gz_skip(state) {
+            GzReadStatus::Ok => break,
+            GzReadStatus::Error => return -1 as ::core::ffi::c_int,
+            GzReadStatus::NeedInflateReset { junk } => {
+                gz_inflate_reset_for_look!(state, junk);
+            }
+        }
     }
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
@@ -1002,17 +1101,31 @@ pub unsafe extern "C" fn gzgets_ffi(
     {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    while state.skip != 0 {
+        match gz_skip(state) {
+            GzReadStatus::Ok => break,
+            GzReadStatus::Error => return ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            GzReadStatus::NeedInflateReset { junk } => {
+                gz_inflate_reset_for_look!(state, junk);
+            }
+        }
     }
     let str = buf;
     let output = ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len as usize);
     let mut written = 0usize;
     left = (len as ::core::ffi::c_uint).wrapping_sub(1 as ::core::ffi::c_uint);
     if left != 0 {
-        while !(state.x.have == 0 as ::core::ffi::c_uint
-            && gz_fetch(state) == -1 as ::core::ffi::c_int)
-        {
+        loop {
+            if state.x.have == 0 as ::core::ffi::c_uint {
+                match gz_fetch(state) {
+                    GzReadStatus::Ok => {}
+                    GzReadStatus::Error => break,
+                    GzReadStatus::NeedInflateReset { junk } => {
+                        gz_inflate_reset_for_look!(state, junk);
+                        continue;
+                    }
+                }
+            }
             if state.x.have == 0 as ::core::ffi::c_uint {
                 state.past = 1 as ::core::ffi::c_int;
                 break;
@@ -1062,7 +1175,13 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
         {
             return 0 as ::core::ffi::c_int;
         }
-        gz_look(state);
+        match gz_look(state) {
+            GzReadStatus::Ok => {}
+            GzReadStatus::Error => return 0 as ::core::ffi::c_int,
+            GzReadStatus::NeedInflateReset { junk } => {
+                gz_inflate_reset_for_look!(state, junk);
+            }
+        }
     }
     gzdirect(state)
 }
