@@ -2685,21 +2685,20 @@ fn deflate_stored(
     s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let s = s as *mut crate::src::deflate::deflate_state;
     unsafe {
-        let min_block = deflate_stored_min_block((*s).pending_buf_size, (*s).w_size);
+        let min_block = deflate_stored_min_block(s.pending_buf_size, s.w_size);
         let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
         let mut len: ::core::ffi::c_uint = 0;
         let mut left: ::core::ffi::c_uint = 0;
         let mut have: ::core::ffi::c_uint = 0;
-        let mut used: ::core::ffi::c_uint = (*(*s).strm).avail_in as ::core::ffi::c_uint;
+        let mut used: ::core::ffi::c_uint = (*s.strm).avail_in as ::core::ffi::c_uint;
         loop {
             let Some(plan) = deflate_stored_loop_emit_plan(
-                (*s).bi_valid,
-                (*(*s).strm).avail_out,
-                (*s).strstart,
-                (*s).block_start,
-                (*(*s).strm).avail_in,
+                s.bi_valid,
+                (*s.strm).avail_out,
+                s.strstart,
+                s.block_start,
+                (*s.strm).avail_in,
                 flush,
                 min_block,
             ) else {
@@ -2718,21 +2717,11 @@ fn deflate_stored(
                     state,
                     pending_buf,
                     &[],
-                    0 as crate::zutil_h::ulg,
+                    len as crate::zutil_h::ulg,
                     last,
                 );
             }
-            let len_bytes = crate::src::trees::stored_block_len_bytes(len as crate::zutil_h::ulg);
-            {
-                let state = &mut *s;
-                let pending_buf = ::core::slice::from_raw_parts_mut(
-                    state.pending_buf,
-                    state.pending_buf_size as usize,
-                );
-                let len_start = state.pending.wrapping_sub(4 as crate::zutil_h::ulg) as usize;
-                pending_buf[len_start..len_start + len_bytes.len()].copy_from_slice(&len_bytes);
-            }
-            flush_pending(&mut *s);
+            flush_pending(s);
             if left != 0 {
                 if left > len {
                     left = len;
@@ -2757,20 +2746,18 @@ fn deflate_stored(
                 let strm = &mut *state.strm;
                 let out = ::core::slice::from_raw_parts_mut(strm.next_out, len as usize);
                 read_buf(strm, state.wrap, out);
-                (*(*s).strm).next_out = (*(*s).strm).next_out.wrapping_add(len as usize);
-                (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
-                (*(*s).strm).total_out = (*(*s).strm)
-                    .total_out
-                    .wrapping_add(len as crate::stdlib::uLong);
+                strm.next_out = strm.next_out.wrapping_add(len as usize);
+                strm.avail_out = strm.avail_out.wrapping_sub(len);
+                strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
             }
             if !(last == 0 as ::core::ffi::c_int) {
                 break;
             }
         }
-        used = used.wrapping_sub((*(*s).strm).avail_in as ::core::ffi::c_uint);
+        used = used.wrapping_sub((*s.strm).avail_in as ::core::ffi::c_uint);
         if used != 0 {
-            if used >= (*s).w_size {
-                (*s).matches = 2 as crate::stdlib::uInt;
+            if used >= s.w_size {
+                s.matches = 2 as crate::stdlib::uInt;
                 let state = &mut *s;
                 let strm = &mut *state.strm;
                 let copy_len = state.w_size as usize;
@@ -2778,77 +2765,75 @@ fn deflate_stored(
                 let input =
                     ::core::slice::from_raw_parts(strm.next_in.wrapping_sub(copy_len), copy_len);
                 copy_deflate_bytes(window, input);
-                (*s).strstart = (*s).w_size;
-                (*s).insert = (*s).strstart;
+                state.strstart = state.w_size;
+                state.insert = state.strstart;
             } else {
-                if (*s)
-                    .window_size
-                    .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
+                if s.window_size
+                    .wrapping_sub(s.strstart as crate::zutil_h::ulg)
                     <= used as crate::zutil_h::ulg
                 {
-                    (*s).strstart = (*s).strstart.wrapping_sub((*s).w_size);
+                    s.strstart = s.strstart.wrapping_sub(s.w_size);
                     let window =
-                        ::core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
-                    let source_start = (*s).w_size as usize;
-                    let source_end = source_start + (*s).strstart as usize;
+                        ::core::slice::from_raw_parts_mut(s.window, s.window_size as usize);
+                    let source_start = s.w_size as usize;
+                    let source_end = source_start + s.strstart as usize;
                     window.copy_within(source_start..source_end, 0);
-                    if (*s).matches < 2 as crate::stdlib::uInt {
-                        (*s).matches = (*s).matches.wrapping_add(1);
+                    if s.matches < 2 as crate::stdlib::uInt {
+                        s.matches = s.matches.wrapping_add(1);
                     }
-                    if (*s).insert > (*s).strstart {
-                        (*s).insert = (*s).strstart;
+                    if s.insert > s.strstart {
+                        s.insert = s.strstart;
                     }
                 }
                 let copy_len = used as usize;
                 let output = ::core::slice::from_raw_parts_mut(
-                    (*s).window.wrapping_add((*s).strstart as usize),
+                    s.window.wrapping_add(s.strstart as usize),
                     copy_len,
                 );
                 let input = ::core::slice::from_raw_parts(
-                    (*(*s).strm).next_in.wrapping_sub(copy_len),
+                    (*s.strm).next_in.wrapping_sub(copy_len),
                     copy_len,
                 );
                 copy_deflate_bytes(output, input);
-                (*s).strstart = (*s).strstart.wrapping_add(used);
-                (*s).insert = deflate_stored_advance_insert((*s).insert, (*s).w_size, used);
+                s.strstart = s.strstart.wrapping_add(used);
+                s.insert = deflate_stored_advance_insert(s.insert, s.w_size, used);
             }
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
+            s.block_start = s.strstart as ::core::ffi::c_long;
         }
-        if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
-            (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
+        if s.high_water < s.strstart as crate::zutil_h::ulg {
+            s.high_water = s.strstart as crate::zutil_h::ulg;
         }
         if last != 0 {
-            (*s).bi_used = 8 as ::core::ffi::c_int;
+            s.bi_used = 8 as ::core::ffi::c_int;
             return finish_done;
         }
         if flush != crate::zlib_h::Z_NO_FLUSH
             && flush != crate::zlib_h::Z_FINISH
-            && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
-            && (*s).strstart as ::core::ffi::c_long == (*s).block_start
+            && (*s.strm).avail_in == 0 as crate::stdlib::uInt
+            && s.strstart as ::core::ffi::c_long == s.block_start
         {
             return block_done;
         }
-        have = (*s)
+        have = s
             .window_size
-            .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
-            as ::core::ffi::c_uint;
-        if (*(*s).strm).avail_in > have && (*s).block_start >= (*s).w_size as ::core::ffi::c_long {
-            (*s).block_start -= (*s).w_size as ::core::ffi::c_long;
-            (*s).strstart = (*s).strstart.wrapping_sub((*s).w_size);
-            let window = ::core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
-            let source_start = (*s).w_size as usize;
-            let source_end = source_start + (*s).strstart as usize;
+            .wrapping_sub(s.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
+        if (*s.strm).avail_in > have && s.block_start >= s.w_size as ::core::ffi::c_long {
+            s.block_start -= s.w_size as ::core::ffi::c_long;
+            s.strstart = s.strstart.wrapping_sub(s.w_size);
+            let window = ::core::slice::from_raw_parts_mut(s.window, s.window_size as usize);
+            let source_start = s.w_size as usize;
+            let source_end = source_start + s.strstart as usize;
             window.copy_within(source_start..source_end, 0);
-            if (*s).matches < 2 as crate::stdlib::uInt {
-                (*s).matches = (*s).matches.wrapping_add(1);
+            if s.matches < 2 as crate::stdlib::uInt {
+                s.matches = s.matches.wrapping_add(1);
             }
-            have = have.wrapping_add((*s).w_size as ::core::ffi::c_uint);
-            if (*s).insert > (*s).strstart {
-                (*s).insert = (*s).strstart;
+            have = have.wrapping_add(s.w_size as ::core::ffi::c_uint);
+            if s.insert > s.strstart {
+                s.insert = s.strstart;
             }
         }
-        if have > (*(*s).strm).avail_in {
-            have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
+        if have > (*s.strm).avail_in {
+            have = (*s.strm).avail_in as ::core::ffi::c_uint;
         }
         if have != 0 {
             let state = &mut *s;
@@ -2858,19 +2843,19 @@ fn deflate_stored(
                 have as usize,
             );
             read_buf(strm, state.wrap, out);
-            (*s).strstart = (*s).strstart.wrapping_add(have);
-            (*s).insert = deflate_stored_advance_insert((*s).insert, (*s).w_size, have);
+            state.strstart = state.strstart.wrapping_add(have);
+            state.insert = deflate_stored_advance_insert(state.insert, state.w_size, have);
         }
-        if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
-            (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
+        if s.high_water < s.strstart as crate::zutil_h::ulg {
+            s.high_water = s.strstart as crate::zutil_h::ulg;
         }
         if let Some(plan) = deflate_stored_final_emit_plan(
-            (*s).bi_valid,
-            (*s).pending_buf_size,
-            (*s).w_size,
-            (*s).strstart,
-            (*s).block_start,
-            (*(*s).strm).avail_in,
+            s.bi_valid,
+            s.pending_buf_size,
+            s.w_size,
+            s.strstart,
+            s.block_start,
+            (*s.strm).avail_in,
             flush,
         ) {
             len = plan.len;
@@ -2894,11 +2879,11 @@ fn deflate_stored(
                     last,
                 );
             }
-            (*s).block_start += len as ::core::ffi::c_long;
-            flush_pending(&mut *s);
+            s.block_start += len as ::core::ffi::c_long;
+            flush_pending(s);
         }
         if last != 0 {
-            (*s).bi_used = 8 as ::core::ffi::c_int;
+            s.bi_used = 8 as ::core::ffi::c_int;
         }
         return (if last != 0 {
             finish_started as ::core::ffi::c_int
