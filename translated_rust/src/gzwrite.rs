@@ -48,9 +48,8 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_init(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    let state_ref = &mut *state;
     let mut strm: crate::zlib_h::z_streamp = &raw mut state_ref.strm;
     let input_len = match (state_ref.want as usize).checked_mul(2) {
         Some(len) => len,
@@ -114,60 +113,26 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     return 0 as ::core::ffi::c_int;
 }
 
-pub(crate) unsafe extern "C" fn gz_comp(
-    mut state: crate::gzguts_h::gz_statep,
+pub(crate) unsafe fn gz_comp(
+    state_ref: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    let mut writ: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    let mut put: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*state).size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    let mut strm: crate::zlib_h::z_streamp = &raw mut state_ref.strm;
+    if state_ref.size == 0 as ::core::ffi::c_uint && gz_init(state_ref) == -1 as ::core::ffi::c_int
+    {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).direct != 0 {
-        let state_ref = &mut *state;
-        while (*strm).avail_in != 0 {
-            *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-            state_ref.again = 0 as ::core::ffi::c_int;
-            put = if (*strm).avail_in > max {
-                max
-            } else {
-                (*strm).avail_in as ::core::ffi::c_uint
-            };
-            writ = crate::stdlib::write(
-                state_ref.fd,
-                (*strm).next_in as *const ::core::ffi::c_void,
-                put as crate::__stddef_size_t_h::size_t,
-            ) as ::core::ffi::c_int;
-            if writ < 0 as ::core::ffi::c_int {
-                if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                    || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                {
-                    state_ref.again = 1 as ::core::ffi::c_int;
-                }
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(*crate::stdlib::__errno_location()),
-                );
-                return -1 as ::core::ffi::c_int;
-            }
-            (*strm).avail_in = (*strm).avail_in.wrapping_sub(writ as ::core::ffi::c_uint);
-            (*strm).next_in = (*strm).next_in.offset(writ as isize);
-        }
+    if state_ref.direct != 0 {
         return 0 as ::core::ffi::c_int;
     }
-    if (*state).reset != 0 {
+    if state_ref.reset != 0 {
         if (*strm).avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
         crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
-        (*state).reset = 0 as ::core::ffi::c_int;
+        state_ref.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
     loop {
@@ -175,54 +140,57 @@ pub(crate) unsafe extern "C" fn gz_comp(
             || flush != crate::zlib_h::Z_NO_FLUSH
                 && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
         {
-            while (*strm).next_out > (*state).x.next {
+            while (*strm).next_out > state_ref.x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                (*state).again = 0 as ::core::ffi::c_int;
-                put = if (*strm).next_out.offset_from((*state).x.next)
+                state_ref.again = 0 as ::core::ffi::c_int;
+                let max = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
+                    >> 2 as ::core::ffi::c_int)
+                    .wrapping_add(1 as ::core::ffi::c_uint);
+                let put = if (*strm).next_out.offset_from(state_ref.x.next)
                     > max as ::core::ffi::c_int as isize
                 {
                     max
                 } else {
-                    (*strm).next_out.offset_from((*state).x.next) as ::core::ffi::c_uint
+                    (*strm).next_out.offset_from(state_ref.x.next) as ::core::ffi::c_uint
                 };
-                writ = crate::stdlib::write(
-                    (*state).fd,
-                    (*state).x.next as *const ::core::ffi::c_void,
+                let writ = crate::stdlib::write(
+                    state_ref.fd,
+                    state_ref.x.next as *const ::core::ffi::c_void,
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 if writ < 0 as ::core::ffi::c_int {
                     if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
                         || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
                     {
-                        (*state).again = 1 as ::core::ffi::c_int;
+                        state_ref.again = 1 as ::core::ffi::c_int;
                     }
                     crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
+                        state_ref,
                         crate::zlib_h::Z_ERRNO,
                         crate::stdlib::strerror(*crate::stdlib::__errno_location()),
                     );
                     return -1 as ::core::ffi::c_int;
                 }
-                (*state).x.next = (*state).x.next.offset(writ as isize);
+                state_ref.x.next = state_ref.x.next.offset(writ as isize);
             }
             if (*strm).avail_out == 0 as crate::stdlib::uInt {
-                let Some(output) = (*state)
+                let Some(output) = state_ref
                     .buffers
                     .as_mut()
                     .and_then(|buffers| buffers.output.as_mut())
                 else {
                     return -1;
                 };
-                (*strm).avail_out = (*state).size as crate::stdlib::uInt;
+                (*strm).avail_out = state_ref.size as crate::stdlib::uInt;
                 (*strm).next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
-                (*state).x.next = output.as_mut_ptr();
+                state_ref.x.next = output.as_mut_ptr();
             }
         }
         have = (*strm).avail_out as ::core::ffi::c_uint;
         ret = crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+                state_ref,
                 crate::zlib_h::Z_STREAM_ERROR,
                 b"internal error: deflate stream corrupt\0".as_ptr() as *const ::core::ffi::c_char,
             );
@@ -234,7 +202,7 @@ pub(crate) unsafe extern "C" fn gz_comp(
         }
     }
     if flush == crate::zlib_h::Z_FINISH {
-        (*state).reset = 1 as ::core::ffi::c_int;
+        state_ref.reset = 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -262,6 +230,13 @@ fn gz_zero_chunk_plan(
 /// the C-style logical-position and pending-seek arithmetic together.
 fn gz_zero_commit_state(state: &mut crate::gzguts_h::gz_state, consumed: ::core::ffi::c_uint) {
     state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
+    state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
+}
+
+/// Commit a transparent sparse-write prefix. `gz_direct_write_commit()` has
+/// already advanced the logical position, so this path only consumes seek
+/// debt and must not apply the compressed-path position update a second time.
+fn gz_zero_commit_direct(state: &mut crate::gzguts_h::gz_state, consumed: ::core::ffi::c_uint) {
     state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
 }
 
@@ -517,13 +492,10 @@ fn gzputc_buffered_insert(
     Some((next_index, avail_in.wrapping_add(1), pos.wrapping_add(1)))
 }
 
-pub(crate) unsafe extern "C" fn gz_zero(
-    mut state: crate::gzguts_h::gz_statep,
-) -> ::core::ffi::c_int {
+pub(crate) unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
-    let state = &mut *state;
     if state.strm.avail_in != 0
         && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
@@ -545,6 +517,31 @@ pub(crate) unsafe extern "C" fn gz_zero(
             bytes.fill(0);
             first = 0 as ::core::ffi::c_int;
         }
+        if state.direct != 0 {
+            let result = {
+                let (Some(file), Some(buffers)) = (state.file.as_mut(), state.buffers.as_ref())
+                else {
+                    return -1;
+                };
+                let Some(bytes) = buffers.input.get(..n as usize) else {
+                    return -1;
+                };
+                gz_direct_write_file(file, bytes)
+            };
+            let written = match gz_direct_write_commit(state, result) {
+                Ok(written) => written,
+                Err(written) => {
+                    gz_zero_commit_direct(state, written as ::core::ffi::c_uint);
+                    return -1;
+                }
+            };
+            n = written as ::core::ffi::c_uint;
+            gz_zero_commit_direct(state, n);
+            if state.skip == 0 {
+                break;
+            }
+            continue;
+        }
         state.strm.avail_in = n as crate::stdlib::uInt;
         let Some(input) = state.buffers.as_mut().map(|buffers| buffers.input.as_mut()) else {
             return -1;
@@ -564,7 +561,7 @@ pub(crate) unsafe extern "C" fn gz_zero(
 }
 
 unsafe fn gz_write(
-    mut state: crate::gzguts_h::gz_statep,
+    state: &mut crate::gzguts_h::gz_state,
     mut source: &[u8],
 ) -> crate::stdlib::z_size_t {
     let mut len = source.len();
@@ -573,7 +570,6 @@ unsafe fn gz_write(
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    let state = &mut *state;
     if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -830,10 +826,10 @@ pub unsafe extern "C" fn gzflush_ffi(
     if !gzflush_is_valid(flush) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.skip != 0 && gz_zero(state as *mut _) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    gz_comp(state as *mut _, flush);
+    gz_comp(state, flush);
     state.err
 }
 #[export_name = "gzsetparams"]
