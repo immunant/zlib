@@ -518,13 +518,18 @@ fn gz_read(
     crate::src::gzlib::gz_read_mark_past(state, len);
     return got;
 }
-// The exported wrapper binds the caller buffer. This coordinator owns all
-// read-state validation, request/error handling, and result mapping.
-pub fn gzread(
+// Read request validation must precede binding an FFI caller range: an
+// unusable state, or a request that Rust cannot represent, is not allowed to
+// inspect that range.  Both the Rust-facing and ABI-facing adapters share
+// this coordinator.
+pub fn gzread<'a, F>(
     state: &mut crate::gzguts_h::gz_state,
-    buf: Option<&mut [::core::ffi::c_uchar]>,
-    mut len: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
+    len: ::core::ffi::c_uint,
+    bind: F,
+) -> ::core::ffi::c_int
+where
+    F: FnOnce(usize) -> Option<&'a mut [::core::ffi::c_uchar]>,
+{
     if !gz_begin_read_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
@@ -536,6 +541,15 @@ pub fn gzread(
         );
         return -1 as ::core::ffi::c_int;
     }
+    let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) else {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"request does not fit in a Rust slice\0"),
+        );
+        return -1 as ::core::ffi::c_int;
+    };
+    let buf = bind(slice_len);
     let Some(buf) = buf else {
         crate::src::gzlib::gz_error(
             state,
@@ -544,7 +558,7 @@ pub fn gzread(
         );
         return -1 as ::core::ffi::c_int;
     };
-    if buf.len() != len as usize {
+    if buf.len() != slice_len {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -552,8 +566,8 @@ pub fn gzread(
         );
         return -1 as ::core::ffi::c_int;
     }
-    len = gz_read(state, buf) as ::core::ffi::c_uint;
-    match crate::src::gzlib::gz_read_result(len, state.err, state.again) {
+    let read = gz_read(state, buf) as ::core::ffi::c_uint;
+    match crate::src::gzlib::gz_read_result(read, state.err, state.again) {
         crate::src::gzlib::GzReadResult::Count => {}
         crate::src::gzlib::GzReadResult::Error => return -1 as ::core::ffi::c_int,
         crate::src::gzlib::GzReadResult::WouldBlock => {
@@ -569,7 +583,50 @@ pub fn gzread(
             return -1 as ::core::ffi::c_int;
         }
     }
-    return len as ::core::ffi::c_int;
+    read as ::core::ffi::c_int
+}
+
+// The FFI wrapper asks this safe adapter whether it may bind caller memory.
+// It owns state validation and all rejected-request error recording; the
+// wrapper merely forwards that result before converting a raw range.
+fn gzread_preflight(
+    state: &mut crate::gzguts_h::gz_state,
+    len: ::core::ffi::c_uint,
+) -> Result<usize, ::core::ffi::c_int> {
+    if !gz_begin_read_operation(state) {
+        return Err(-1);
+    }
+    if !crate::src::gzlib::gz_uint_request_fits_int(len) {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"request does not fit in an int\0"),
+        );
+        return Err(-1);
+    }
+    let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) else {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"request does not fit in a Rust slice\0"),
+        );
+        return Err(-1);
+    };
+    Ok(slice_len)
+}
+
+// Keep the public result mapping in safe code as well. The FFI entry point
+// only converts the prepared byte count to a slice and dispatches here.
+fn gzread_ffi_dispatch(
+    state: &mut crate::gzguts_h::gz_state,
+    len: ::core::ffi::c_uint,
+    prepared: Result<usize, ::core::ffi::c_int>,
+    buffer: Option<&mut [::core::ffi::c_uchar]>,
+) -> ::core::ffi::c_int {
+    match prepared {
+        Ok(_) => gzread(state, len, |_| buffer),
+        Err(result) => result,
+    }
 }
 #[export_name = "gzread"]
 
@@ -581,22 +638,31 @@ pub unsafe extern "C" fn gzread_ffi(
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    let buffer = match crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) {
-        Some(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
-        Some(len) if !buf.is_null() => Some(::core::slice::from_raw_parts_mut(
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    let prepared = gzread_preflight(state, len);
+    let buffer = match prepared {
+        Ok(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
+        Ok(len) if !buf.is_null() => Some(::core::slice::from_raw_parts_mut(
             buf as *mut ::core::ffi::c_uchar,
             len,
         )),
         _ => None,
     };
-    gzread(&mut *(file as crate::gzguts_h::gz_statep), buffer, len)
+    gzread_ffi_dispatch(state, len, prepared, buffer)
 }
-pub fn gzfread(
-    buf: Option<&mut [::core::ffi::c_uchar]>,
-    mut size: crate::stdlib::z_size_t,
-    mut nitems: crate::stdlib::z_size_t,
+
+// As with `gzread`, decide whether an item request is usable
+// before asking an FFI caller to provide a slice. This keeps all state and
+// request semantics out of `gzfread_ffi`.
+pub fn gzfread<'a, F>(
     state: &mut crate::gzguts_h::gz_state,
-) -> crate::stdlib::z_size_t {
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+    bind: F,
+) -> crate::stdlib::z_size_t
+where
+    F: FnOnce(usize) -> Option<&'a mut [::core::ffi::c_uchar]>,
+{
     if !gz_begin_read_operation(state) {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -610,20 +676,75 @@ pub fn gzfread(
             );
             0 as crate::stdlib::z_size_t
         }
-        crate::src::gzlib::GzItemRequest::Bytes(len) => match (
-            crate::src::gzlib::gz_rust_slice_len(len),
-            buf,
-        ) {
-            (Some(len), Some(buf)) if buf.len() == len => gz_read(state, buf).wrapping_div(size),
-            _ => {
+        crate::src::gzlib::GzItemRequest::Bytes(len) => {
+            let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len) else {
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_STREAM_ERROR,
                     Some(b"request does not fit in a Rust slice\0"),
                 );
-                0 as crate::stdlib::z_size_t
+                return 0 as crate::stdlib::z_size_t;
+            };
+            match bind(slice_len) {
+                Some(buf) if buf.len() == slice_len => gz_read(state, buf).wrapping_div(size),
+                _ => {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(b"request does not fit in a Rust slice\0"),
+                    );
+                    0 as crate::stdlib::z_size_t
+                }
             }
-        },
+        }
+    }
+}
+
+// Like `gzread_preflight`, this adapter owns the state and request decision
+// that must happen before an ABI caller range is bound.
+fn gzfread_preflight(
+    state: &mut crate::gzguts_h::gz_state,
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Result<usize, ()> {
+    if !gz_begin_read_operation(state) {
+        return Err(());
+    }
+    match crate::src::gzlib::gz_item_request(size, nitems) {
+        crate::src::gzlib::GzItemRequest::Empty => Ok(0),
+        crate::src::gzlib::GzItemRequest::TooLarge => {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(b"request does not fit in a size_t\0"),
+            );
+            Err(())
+        }
+        crate::src::gzlib::GzItemRequest::Bytes(len) => {
+            if crate::src::gzlib::gz_rust_slice_len(len).is_none() {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(b"request does not fit in a Rust slice\0"),
+                );
+                Err(())
+            } else {
+                Ok(len as usize)
+            }
+        }
+    }
+}
+
+fn gzfread_ffi_dispatch(
+    state: &mut crate::gzguts_h::gz_state,
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+    prepared: Result<usize, ()>,
+    buffer: Option<&mut [::core::ffi::c_uchar]>,
+) -> crate::stdlib::z_size_t {
+    match prepared {
+        Ok(_) => gzfread(state, size, nitems, |_| buffer),
+        Err(()) => 0,
     }
 }
 #[export_name = "gzfread"]
@@ -637,15 +758,17 @@ pub unsafe extern "C" fn gzfread_ffi(
     if file.is_null() {
         return 0 as crate::stdlib::z_size_t;
     }
-    let buffer = match crate::src::gzlib::gz_item_slice_len(size, nitems) {
-        Some(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
-        Some(len) if !buf.is_null() => Some(::core::slice::from_raw_parts_mut(
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    let prepared = gzfread_preflight(state, size, nitems);
+    let buffer = match prepared {
+        Ok(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
+        Ok(len) if !buf.is_null() => Some(::core::slice::from_raw_parts_mut(
             buf as *mut ::core::ffi::c_uchar,
             len,
         )),
         _ => None,
     };
-    gzfread(buffer, size, nitems, &mut *(file as crate::gzguts_h::gz_statep))
+    gzfread_ffi_dispatch(state, size, nitems, prepared, buffer)
 }
 // Reading one byte through `gz_read` preserves the buffered and unbuffered
 // paths' cursor and EOF bookkeeping while keeping the internal buffer access
