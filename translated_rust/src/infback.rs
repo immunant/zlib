@@ -443,8 +443,8 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     }
                     ret = {
                         let state = &mut *state;
-                        state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
-                        state.lencode = state.next as *const crate::src::inftrees::code;
+                        state.next = 0;
+                        state.lencode = state.codes.as_ptr();
                         state.lenbits = 7 as ::core::ffi::c_uint;
                         match crate::src::inftrees::inflate_table_into(
                             crate::src::inftrees::CODES,
@@ -454,7 +454,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                             state.lenbits,
                         ) {
                             Ok((used, root)) => {
-                                state.next = state.next.wrapping_add(used);
+                                state.next = used;
                                 state.lenbits = root;
                                 0
                             }
@@ -676,9 +676,8 @@ pub unsafe extern "C" fn inflateBack_ffi(
                             ret = {
                                 let state = &mut *state;
                                 let nlen = state.nlen as usize;
-                                state.next =
-                                    &raw mut state.codes as *mut crate::src::inftrees::code;
-                                state.lencode = state.next as *const crate::src::inftrees::code;
+                                state.next = 0;
+                                state.lencode = state.codes.as_ptr();
                                 state.lenbits = 9 as ::core::ffi::c_uint;
                                 match state.lens.get(..nlen) {
                                     Some(lens) => match crate::src::inftrees::inflate_table_into(
@@ -691,7 +690,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                     ) {
                                         Ok((used, root)) => {
                                             table_used = used;
-                                            state.next = state.next.wrapping_add(used);
+                                            state.next = used;
                                             state.lenbits = root;
                                             0
                                         }
@@ -711,8 +710,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                     let state = &mut *state;
                                     let nlen = state.nlen as usize;
                                     let ndist = state.ndist as usize;
-                                    state.distcode =
-                                        state.next as *const crate::src::inftrees::code;
+                                    state.distcode = match state.codes.get(table_used..) {
+                                        Some(table) => table.as_ptr(),
+                                        None => ::core::ptr::null(),
+                                    };
                                     state.distbits = 6 as ::core::ffi::c_uint;
                                     let end = match table_used
                                         .checked_add(crate::src::inftrees::ENOUGH_DISTS as usize)
@@ -733,7 +734,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                                 state.distbits,
                                             ) {
                                                 Ok((used, root)) => {
-                                                    state.next = state.next.wrapping_add(used);
+                                                    state.next = table_used.saturating_add(used);
                                                     state.distbits = root;
                                                     0
                                                 }

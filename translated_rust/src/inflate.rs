@@ -96,7 +96,10 @@ pub struct inflate_state {
     pub nlen: ::core::ffi::c_uint,
     pub ndist: ::core::ffi::c_uint,
     pub have: ::core::ffi::c_uint,
-    pub next: *mut crate::src::inftrees::code,
+    /// Number of table entries populated in `codes`.  This used to be an
+    /// interior pointer into the owned table, but no decoder operation needs
+    /// an address to describe that progress.
+    pub next: usize,
     pub lens: [::core::ffi::c_ushort; 320],
     pub work: [::core::ffi::c_ushort; 288],
     pub codes: [crate::src::inftrees::code; 1444],
@@ -145,7 +148,7 @@ pub(crate) fn inflate_initial_state() -> inflate_state {
         nlen: 0,
         ndist: 0,
         have: 0,
-        next: ::core::ptr::null_mut(),
+        next: 0,
         lens: [0; 320],
         work: [0; 288],
         codes: [empty_code; 1444],
@@ -542,8 +545,8 @@ macro_rules! inflate_reset_keep_at_boundary {
             state_ref.head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
             state_ref.hold = 0 as ::core::ffi::c_ulong;
             state_ref.bits = 0 as ::core::ffi::c_uint;
-            state_ref.next = &raw mut state_ref.codes as *mut crate::src::inftrees::code;
-            state_ref.distcode = state_ref.next;
+            state_ref.next = 0;
+            state_ref.distcode = state_ref.codes.as_ptr();
             state_ref.lencode = state_ref.distcode;
             state_ref.sane = 1 as ::core::ffi::c_int;
             state_ref.back = -1 as ::core::ffi::c_int;
@@ -1038,9 +1041,9 @@ fn inflate_copy_code_cursors(
         // when both indices passed the existing boundary validation.
         lencode: distcode.and(lencode),
         distcode,
-        // The translated implementation reset an invalid `next` cursor to
-        // the start of `codes`; retain that compatibility behavior.
-        next: inflate_code_index(source_code_start, code_len, next).unwrap_or(0),
+        // `next` is an owned table index.  Retain the translated
+        // implementation's invalid-cursor fallback to the start of `codes`.
+        next: (next <= code_len).then_some(next).unwrap_or(0),
     }
 }
 
@@ -1945,8 +1948,8 @@ pub fn inflate(
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
                                                                                             ret = {
-                                                                                                state_ref.next = &raw mut state_ref.codes as *mut crate::src::inftrees::code;
-                                                                                                state_ref.distcode = state_ref.next as *const crate::src::inftrees::code;
+                                                                                                state_ref.next = 0;
+                                                                                                state_ref.distcode = state_ref.codes.as_ptr();
                                                                                                 state_ref.lencode = state_ref.distcode;
                                                                                                 state_ref.lenbits = 7 as ::core::ffi::c_uint;
                                                                                                 match crate::src::inftrees::inflate_table_into(
@@ -1957,7 +1960,7 @@ pub fn inflate(
                                                                                                 state_ref.lenbits,
                                                                                             ) {
                                                                                                 Ok((used, root)) => {
-                                                                                                    state_ref.next = state_ref.next.wrapping_add(used);
+                                                                                                    state_ref.next = used;
                                                                                                     state_ref.lenbits = root;
                                                                                                     0
                                                                                                 }
@@ -2280,8 +2283,8 @@ pub fn inflate(
                                                                         } else {
                                                                             ret = {
                                                                                 let nlen = state_ref.nlen as usize;
-                                                                                state_ref.next = &raw mut state_ref.codes as *mut crate::src::inftrees::code;
-                                                                                state_ref.lencode = state_ref.next as *const crate::src::inftrees::code;
+                                                                                state_ref.next = 0;
+                                                                                state_ref.lencode = state_ref.codes.as_ptr();
                                                                                 state_ref.lenbits = 9 as ::core::ffi::c_uint;
                                                                                 match state_ref.lens.get(..nlen) {
                                                                                     Some(lens) => match crate::src::inftrees::inflate_table_into(
@@ -2293,7 +2296,7 @@ pub fn inflate(
                                                                                     ) {
                                                                                         Ok((used, root)) => {
                                                                                             table_used = used;
-                                                                                            state_ref.next = state_ref.next.wrapping_add(used);
+                                                                                            state_ref.next = used;
                                                                                             state_ref.lenbits = root;
                                                                                             0
                                                                                         }
@@ -2311,7 +2314,10 @@ pub fn inflate(
                                                                                 ret = {
                                                                                     let nlen = state_ref.nlen as usize;
                                                                                     let ndist = state_ref.ndist as usize;
-                                                                                    state_ref.distcode = state_ref.next as *const crate::src::inftrees::code;
+                                                                                    state_ref.distcode = match state_ref.codes.get(table_used..) {
+                                                                                        Some(table) => table.as_ptr(),
+                                                                                        None => ::core::ptr::null(),
+                                                                                    };
                                                                                     state_ref.distbits = 6 as ::core::ffi::c_uint;
                                                                                     let end = match table_used.checked_add(
                                                                                         crate::src::inftrees::ENOUGH_DISTS as usize,
@@ -2331,7 +2337,7 @@ pub fn inflate(
                                                                                             state_ref.distbits,
                                                                                         ) {
                                                                                             Ok((used, root)) => {
-                                                                                                state_ref.next = state_ref.next.wrapping_add(used);
+                                                                                                state_ref.next = table_used.saturating_add(used);
                                                                                                 state_ref.distbits = root;
                                                                                                 0
                                                                                             }
@@ -3886,22 +3892,10 @@ fn inflate_mark(
 /// count.  The ABI wrapper supplies addresses after validating the stream;
 /// keeping the subtraction here scalar avoids deriving a raw-pointer offset
 /// from a possibly incoherent internal cursor.
-fn inflate_codes_used(
-    codes_start: usize,
-    codes_len: usize,
-    next: usize,
-) -> Option<::core::ffi::c_ulong> {
-    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-    let bytes = codes_len.checked_mul(code_size)?;
-    let codes_end = codes_start.checked_add(bytes)?;
-    if next < codes_start || next > codes_end {
-        return None;
-    }
-    let offset = next.checked_sub(codes_start)?;
-    if offset % code_size != 0 {
-        return None;
-    }
-    ::core::ffi::c_ulong::try_from(offset / code_size).ok()
+fn inflate_codes_used(codes_len: usize, next: usize) -> Option<::core::ffi::c_ulong> {
+    (next <= codes_len)
+        .then_some(next)
+        .and_then(|next| ::core::ffi::c_ulong::try_from(next).ok())
 }
 
 #[export_name = "inflateSync"]
@@ -4052,13 +4046,13 @@ pub unsafe extern "C" fn inflateCopy_ffi(
         crate::src::inftrees::ENOUGH as usize,
         state_ref.lencode as usize,
         state_ref.distcode as usize,
-        state_ref.next as usize,
+        state_ref.next,
     );
     if let (Some(lencode), Some(distcode)) = (cursors.lencode, cursors.distcode) {
         copy_ref.lencode = copy_codes.wrapping_add(lencode);
         copy_ref.distcode = copy_codes.wrapping_add(distcode);
     }
-    copy_ref.next = copy_codes.wrapping_add(cursors.next);
+    copy_ref.next = cursors.next;
     if !window.is_null() {
         let length = state_ref.whave as usize;
         let source_window = ::core::slice::from_raw_parts(state_ref.window, length);
@@ -4115,11 +4109,6 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     }
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
-    let codes_start = state.codes.as_mut_ptr() as usize;
-    inflate_codes_used(
-        codes_start,
-        crate::src::inftrees::ENOUGH as usize,
-        state.next as usize,
-    )
-    .unwrap_or(-1 as ::core::ffi::c_int as ::core::ffi::c_ulong)
+    inflate_codes_used(crate::src::inftrees::ENOUGH as usize, state.next)
+        .unwrap_or(-1 as ::core::ffi::c_int as ::core::ffi::c_ulong)
 }
