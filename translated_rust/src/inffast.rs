@@ -97,11 +97,11 @@ pub unsafe extern "C" fn inflate_fast(
     's_627: loop {
         if bits < 15 as ::core::ffi::c_uint {
             let c2rust_fresh0 = in_0;
-            in_0 = in_0.offset(1);
+            in_0 = in_0.wrapping_add(1);
             hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
             let c2rust_fresh1 = in_0;
-            in_0 = in_0.offset(1);
+            in_0 = in_0.wrapping_add(1);
             hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
         }
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn inflate_fast(
             op = (*here).op as ::core::ffi::c_uint;
             if op == 0 as ::core::ffi::c_uint {
                 let c2rust_fresh2 = out;
-                out = out.offset(1);
+                out = out.wrapping_add(1);
                 *c2rust_fresh2 = (*here).val as ::core::ffi::c_uchar;
                 break;
             } else if op & 16 as ::core::ffi::c_uint != 0 {
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn inflate_fast(
                 if op != 0 {
                     if bits < op {
                         let c2rust_fresh3 = in_0;
-                        in_0 = in_0.offset(1);
+                        in_0 = in_0.wrapping_add(1);
                         hold = hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
@@ -136,11 +136,11 @@ pub unsafe extern "C" fn inflate_fast(
                 }
                 if bits < 15 as ::core::ffi::c_uint {
                     let c2rust_fresh4 = in_0;
-                    in_0 = in_0.offset(1);
+                    in_0 = in_0.wrapping_add(1);
                     hold = hold.wrapping_add((*c2rust_fresh4 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     let c2rust_fresh5 = in_0;
-                    in_0 = in_0.offset(1);
+                    in_0 = in_0.wrapping_add(1);
                     hold = hold.wrapping_add((*c2rust_fresh5 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
@@ -155,13 +155,13 @@ pub unsafe extern "C" fn inflate_fast(
                         op &= 15 as ::core::ffi::c_uint;
                         if bits < op {
                             let c2rust_fresh6 = in_0;
-                            in_0 = in_0.offset(1);
+                            in_0 = in_0.wrapping_add(1);
                             hold =
                                 hold.wrapping_add((*c2rust_fresh6 as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             if bits < op {
                                 let c2rust_fresh7 = in_0;
-                                in_0 = in_0.offset(1);
+                                in_0 = in_0.wrapping_add(1);
                                 hold = hold
                                     .wrapping_add((*c2rust_fresh7 as ::core::ffi::c_ulong) << bits);
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
@@ -193,9 +193,9 @@ pub unsafe extern "C" fn inflate_fast(
                                     len = len.wrapping_sub(op);
                                     loop {
                                         let c2rust_fresh8 = from;
-                                        from = from.offset(1);
+                                        from = from.wrapping_add(1);
                                         let c2rust_fresh9 = out;
-                                        out = out.offset(1);
+                                        out = out.wrapping_add(1);
                                         *c2rust_fresh9 = *c2rust_fresh8;
                                         op = op.wrapping_sub(1);
                                         if op == 0 {
@@ -212,9 +212,9 @@ pub unsafe extern "C" fn inflate_fast(
                                     len = len.wrapping_sub(op);
                                     loop {
                                         let c2rust_fresh10 = from;
-                                        from = from.offset(1);
+                                        from = from.wrapping_add(1);
                                         let c2rust_fresh11 = out;
-                                        out = out.offset(1);
+                                        out = out.wrapping_add(1);
                                         *c2rust_fresh11 = *c2rust_fresh10;
                                         op = op.wrapping_sub(1);
                                         if op == 0 {
@@ -227,9 +227,9 @@ pub unsafe extern "C" fn inflate_fast(
                                         len = len.wrapping_sub(op);
                                         loop {
                                             let c2rust_fresh12 = from;
-                                            from = from.offset(1);
+                                            from = from.wrapping_add(1);
                                             let c2rust_fresh13 = out;
-                                            out = out.offset(1);
+                                            out = out.wrapping_add(1);
                                             *c2rust_fresh13 = *c2rust_fresh12;
                                             op = op.wrapping_sub(1);
                                             if op == 0 {
@@ -245,9 +245,9 @@ pub unsafe extern "C" fn inflate_fast(
                                     len = len.wrapping_sub(op);
                                     loop {
                                         let c2rust_fresh14 = from;
-                                        from = from.offset(1);
+                                        from = from.wrapping_add(1);
                                         let c2rust_fresh15 = out;
-                                        out = out.offset(1);
+                                        out = out.wrapping_add(1);
                                         *c2rust_fresh15 = *c2rust_fresh14;
                                         op = op.wrapping_sub(1);
                                         if op == 0 {
@@ -259,33 +259,33 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                             while len > 2 as ::core::ffi::c_uint {
                                 let c2rust_fresh16 = from;
-                                from = from.offset(1);
+                                from = from.wrapping_add(1);
                                 let c2rust_fresh17 = out;
-                                out = out.offset(1);
+                                out = out.wrapping_add(1);
                                 *c2rust_fresh17 = *c2rust_fresh16;
                                 let c2rust_fresh18 = from;
-                                from = from.offset(1);
+                                from = from.wrapping_add(1);
                                 let c2rust_fresh19 = out;
-                                out = out.offset(1);
+                                out = out.wrapping_add(1);
                                 *c2rust_fresh19 = *c2rust_fresh18;
                                 let c2rust_fresh20 = from;
-                                from = from.offset(1);
+                                from = from.wrapping_add(1);
                                 let c2rust_fresh21 = out;
-                                out = out.offset(1);
+                                out = out.wrapping_add(1);
                                 *c2rust_fresh21 = *c2rust_fresh20;
                                 len = len.wrapping_sub(3 as ::core::ffi::c_uint);
                             }
                             if len != 0 {
                                 let c2rust_fresh22 = from;
-                                from = from.offset(1);
+                                from = from.wrapping_add(1);
                                 let c2rust_fresh23 = out;
-                                out = out.offset(1);
+                                out = out.wrapping_add(1);
                                 *c2rust_fresh23 = *c2rust_fresh22;
                                 if len > 1 as ::core::ffi::c_uint {
                                     let c2rust_fresh24 = from;
-                                    from = from.offset(1);
+                                    from = from.wrapping_add(1);
                                     let c2rust_fresh25 = out;
-                                    out = out.offset(1);
+                                    out = out.wrapping_add(1);
                                     *c2rust_fresh25 = *c2rust_fresh24;
                                 }
                             }
@@ -294,19 +294,19 @@ pub unsafe extern "C" fn inflate_fast(
                             from = out.offset(-(dist as isize));
                             loop {
                                 let c2rust_fresh26 = from;
-                                from = from.offset(1);
+                                from = from.wrapping_add(1);
                                 let c2rust_fresh27 = out;
-                                out = out.offset(1);
+                                out = out.wrapping_add(1);
                                 *c2rust_fresh27 = *c2rust_fresh26;
                                 let c2rust_fresh28 = from;
-                                from = from.offset(1);
+                                from = from.wrapping_add(1);
                                 let c2rust_fresh29 = out;
-                                out = out.offset(1);
+                                out = out.wrapping_add(1);
                                 *c2rust_fresh29 = *c2rust_fresh28;
                                 let c2rust_fresh30 = from;
-                                from = from.offset(1);
+                                from = from.wrapping_add(1);
                                 let c2rust_fresh31 = out;
-                                out = out.offset(1);
+                                out = out.wrapping_add(1);
                                 *c2rust_fresh31 = *c2rust_fresh30;
                                 len = len.wrapping_sub(3 as ::core::ffi::c_uint);
                                 if len <= 2 as ::core::ffi::c_uint {
@@ -315,15 +315,15 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                             if len != 0 {
                                 let c2rust_fresh32 = from;
-                                from = from.offset(1);
+                                from = from.wrapping_add(1);
                                 let c2rust_fresh33 = out;
-                                out = out.offset(1);
+                                out = out.wrapping_add(1);
                                 *c2rust_fresh33 = *c2rust_fresh32;
                                 if len > 1 as ::core::ffi::c_uint {
                                     let c2rust_fresh34 = from;
-                                    from = from.offset(1);
+                                    from = from.wrapping_add(1);
                                     let c2rust_fresh35 = out;
-                                    out = out.offset(1);
+                                    out = out.wrapping_add(1);
                                     *c2rust_fresh35 = *c2rust_fresh34;
                                 }
                             }
