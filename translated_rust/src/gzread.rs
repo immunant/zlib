@@ -83,7 +83,7 @@ struct GzLoadResult {
 // the partial-read error case that gzip must still account for.
 fn gz_load(
     state: &mut crate::gzguts_h::gz_state,
-    mut buf: *mut ::core::ffi::c_uchar,
+    buf: ::core::ptr::NonNull<::core::ffi::c_uchar>,
     mut len: ::core::ffi::c_uint,
 ) -> GzLoadResult {
     let mut ret: ::core::ffi::c_int = 0;
@@ -101,7 +101,7 @@ fn gz_load(
             get = crate::src::gzlib::gz_load_request(len, loaded);
             ret = crate::stdlib::read(
                 state.fd,
-                buf.wrapping_add(loaded as usize) as *mut ::core::ffi::c_void,
+                buf.as_ptr().wrapping_add(loaded as usize) as *mut ::core::ffi::c_void,
                 get as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             if ret <= 0 {
@@ -144,7 +144,12 @@ fn gz_load_slice(
     state: &mut crate::gzguts_h::gz_state,
     buf: &mut [::core::ffi::c_uchar],
 ) -> GzLoadResult {
-    gz_load(state, buf.as_mut_ptr(), buf.len() as ::core::ffi::c_uint)
+    // Slice pointers, including the dangling pointer for an empty slice, are
+    // non-null. Preserve that invariant at the descriptor boundary instead
+    // of widening this internal helper back to a raw pointer argument.
+    let len = buf.len() as ::core::ffi::c_uint;
+    let buf = ::core::ptr::NonNull::new(buf.as_mut_ptr()).expect("slice pointers are non-null");
+    gz_load(state, buf, len)
 }
 
 // This helper is internal and all of its callers have already bound the
@@ -176,7 +181,15 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 buffer.copy_within(input_start..input_end, 0);
             }
         }
-        let result = gz_load(state, state.in_0.wrapping_add(buffered as usize), requested);
+        // `gz_look()` created this input allocation before `gz_avail()` can
+        // request more bytes. Keep that non-null allocation contract in the
+        // typed descriptor-read boundary.
+        let input = ::core::ptr::NonNull::new(state.in_0)
+            .expect("gzip input buffer initialized")
+            .as_ptr()
+            .wrapping_add(buffered as usize);
+        let input = ::core::ptr::NonNull::new(input).expect("offset from non-null buffer");
+        let result = gz_load(state, input, requested);
         got = result.received;
         if result.status == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
@@ -391,7 +404,11 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 }
             }
             crate::src::gzlib::GzFetchPlan::Copy { requested } => {
-                let result = gz_load(state, state.out, requested);
+                // COPY mode is reached after `gz_look()` has allocated the
+                // gzip output buffer.
+                let output = ::core::ptr::NonNull::new(state.out)
+                    .expect("gzip output buffer initialized");
+                let result = gz_load(state, output, requested);
                 crate::src::gzlib::gz_fetch_copy_loaded(state, result.received);
                 if result.status == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
