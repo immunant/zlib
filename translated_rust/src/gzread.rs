@@ -1087,6 +1087,10 @@ fn gz_decomp_needs_input_load(avail_in: crate::stdlib::uInt) -> bool {
     avail_in == 0
 }
 
+fn gz_decomp_input_load_failed(result: ::core::ffi::c_int) -> bool {
+    result == -1 as ::core::ffi::c_int
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct GzDecompStreamState {
     avail_in: crate::stdlib::uInt,
@@ -1228,7 +1232,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     loop {
         let needs_input_load =
             gz_decomp_needs_input_load(gz_decomp_stream_state(&state.strm).avail_in);
-        let load_failed = needs_input_load && gz_avail(state) == -1 as ::core::ffi::c_int;
+        let load_failed = needs_input_load && gz_decomp_input_load_failed(gz_avail(state));
         let stream_state = gz_decomp_stream_state(&state.strm);
         match gz_decomp_input_action(load_failed, stream_state.avail_in) {
             GzDecompInputAction::InputError => {
@@ -1935,6 +1939,14 @@ mod tests {
         assert!(gz_decomp_needs_input_load(0));
         assert!(!gz_decomp_needs_input_load(1));
         assert!(!gz_decomp_needs_input_load(crate::stdlib::uInt::MAX));
+    }
+
+    #[test]
+    fn gz_decomp_input_load_failed_matches_only_gz_avail_failure() {
+        assert!(gz_decomp_input_load_failed(-1));
+        assert!(!gz_decomp_input_load_failed(0));
+        assert!(!gz_decomp_input_load_failed(1));
+        assert!(!gz_decomp_input_load_failed(::core::ffi::c_int::MIN));
     }
 
     #[test]

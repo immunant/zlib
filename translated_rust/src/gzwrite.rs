@@ -69,6 +69,10 @@ fn gz_init_deflate_failed(result: ::core::ffi::c_int) -> bool {
     result != crate::zlib_h::Z_OK
 }
 
+fn gz_init_failed(result: ::core::ffi::c_int) -> bool {
+    result == -1 as ::core::ffi::c_int
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum GzInitMode {
     Direct,
@@ -1023,8 +1027,10 @@ unsafe fn gz_comp(
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
     let mut max: ::core::ffi::c_uint = gz_comp_max_write_chunk();
-    if !gz_buffer_is_initialized(state.size) && gz_init(state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
+    if !gz_buffer_is_initialized(state.size) {
+        if gz_init_failed(gz_init(state)) {
+            return -1 as ::core::ffi::c_int;
+        }
     }
     if gz_comp_is_direct(state.direct) {
         while state.strm.avail_in != 0 {
@@ -1223,7 +1229,7 @@ unsafe fn gz_write(
     match gz_write_preparation(len, state.size, state.skip) {
         GzWritePreparation::Empty => return 0 as crate::stdlib::z_size_t,
         GzWritePreparation::Initialize => {
-            if gz_init(state) == -1 as ::core::ffi::c_int {
+            if gz_init_failed(gz_init(state)) {
                 return 0 as crate::stdlib::z_size_t;
             }
         }
@@ -1686,28 +1692,29 @@ mod tests {
         gz_comp_reset_value, gz_comp_skips_empty_flush, gz_comp_write_again,
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
         gz_comp_write_progress, gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip,
-        gz_init_allocation_plan, gz_init_deflate_failed, gz_init_mode, gz_init_stream_defaults,
-        gz_write_advanced_pos, gz_write_apply_buffered_progress, gz_write_apply_chunk_progress,
-        gz_write_apply_direct_progress, gz_write_buffered_comp_result, gz_write_buffered_copy_len,
-        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
-        gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
-        gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
-        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
-        gz_zero_apply_comp_progress, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_chunk_limits, gz_zero_chunk_plan, gz_zero_chunk_step, gz_zero_initial_step,
-        gz_zero_initialize_buffer, gz_zero_initialize_chunk_buffer, gz_zero_needs_initialization,
-        gz_zero_pending_step, gz_zero_progress, gzclose_buffer_action, gzclose_mode_is_writable,
-        gzclose_operation_error, gzclose_w_result, gzflush_action, gzflush_mode_is_valid,
-        gzfwrite_result, gzputc_result, gzputc_write_action, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_action, gzsetparams_buffer_action, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
-        GzCompDirectWriteProgress, GzCompDirectWriteResult, GzCompOutputBufferAction,
-        GzCompOutputBufferProgress, GzCompOutputWriteProgress, GzCompOutputWriteResult,
-        GzCompResetAction, GzCompWriteFailure, GzCompWriteResult, GzFlushAction,
-        GzInitAllocationPlan, GzInitMode, GzPutcWriteAction, GzSetParamsAction,
-        GzSetParamsBufferAction, GzWriteBufferedInputAction, GzWriteDirectAction,
-        GzWritePreparation, GzZeroAction, GzZeroChunkLimits, GzZeroPreparedChunk, GzZeroStep,
+        gz_init_allocation_plan, gz_init_deflate_failed, gz_init_failed, gz_init_mode,
+        gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_buffered_progress,
+        gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
+        gz_write_buffered_comp_result, gz_write_buffered_copy_len, gz_write_buffered_input_action,
+        gz_write_buffered_progress, gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed,
+        gz_write_direct_action, gz_write_errno_is_retryable, gz_write_error_result,
+        gz_write_is_empty, gz_write_preparation, gz_write_progress,
+        gz_write_remaining_after_consumption, gz_write_state_is_usable,
+        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_comp_progress,
+        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_limits, gz_zero_chunk_plan,
+        gz_zero_chunk_step, gz_zero_initial_step, gz_zero_initialize_buffer,
+        gz_zero_initialize_chunk_buffer, gz_zero_needs_initialization, gz_zero_pending_step,
+        gz_zero_progress, gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error,
+        gzclose_w_result, gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result,
+        gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_action,
+        gzsetparams_buffer_action, gzsetparams_settings_match, gzsetparams_state_is_usable,
+        gzwrite_request, GzCloseBufferAction, GzCompDeflateAction, GzCompDirectWriteProgress,
+        GzCompDirectWriteResult, GzCompOutputBufferAction, GzCompOutputBufferProgress,
+        GzCompOutputWriteProgress, GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure,
+        GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
+        GzSetParamsAction, GzSetParamsBufferAction, GzWriteBufferedInputAction,
+        GzWriteDirectAction, GzWritePreparation, GzZeroAction, GzZeroChunkLimits,
+        GzZeroPreparedChunk, GzZeroStep,
     };
 
     #[test]
@@ -2018,6 +2025,13 @@ mod tests {
         assert!(!gz_init_deflate_failed(crate::zlib_h::Z_OK));
         assert!(gz_init_deflate_failed(crate::zlib_h::Z_STREAM_ERROR));
         assert!(gz_init_deflate_failed(crate::zlib_h::Z_MEM_ERROR));
+    }
+
+    #[test]
+    fn gz_init_failed_accepts_only_the_failure_sentinel() {
+        assert!(gz_init_failed(-1));
+        assert!(!gz_init_failed(0));
+        assert!(!gz_init_failed(crate::zlib_h::Z_MEM_ERROR));
     }
 
     #[test]
