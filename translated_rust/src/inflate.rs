@@ -1974,11 +1974,18 @@ pub fn inflate(
                                                 strm.avail_in = have as crate::stdlib::uInt;
                                                 state.hold = hold;
                                                 state.bits = bits;
+                                                let history = if state.window.is_null()
+                                                    || state.wsize == 0
+                                                {
+                                                    None
+                                                } else {
+                                                    Some(::core::slice::from_raw_parts(
+                                                        state.window,
+                                                        state.wsize as usize,
+                                                    ))
+                                                };
                                                 crate::src::inffast::inflate_fast(
-                                                    strm,
-                                                    state,
-                                                    out,
-                                                    false,
+                                                    strm, state, out, history, false,
                                                 );
                                                 put = strm.next_out as *mut ::core::ffi::c_uchar;
                                                 left = strm.avail_out as ::core::ffi::c_uint;

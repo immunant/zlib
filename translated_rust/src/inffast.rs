@@ -281,6 +281,7 @@ pub fn inflate_fast(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
     mut start: ::core::ffi::c_uint,
+    history: Option<&[crate::stdlib::Bytef]>,
     history_may_alias_output: bool,
 ) {
     let mut in_index: usize = 0;
@@ -290,7 +291,6 @@ pub fn inflate_fast(
     let mut wsize: ::core::ffi::c_uint = 0;
     let mut whave: ::core::ffi::c_uint = 0;
     let mut wnext: ::core::ffi::c_uint = 0;
-    let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut lmask: ::core::ffi::c_uint = 0;
@@ -323,7 +323,6 @@ pub fn inflate_fast(
     wsize = state.wsize;
     whave = state.whave;
     wnext = state.wnext;
-    window = state.window;
     hold = state.hold;
     bits = state.bits;
     let Some(lcode) = decode_table(state, DecodeTable::LiteralLength) else {
@@ -459,11 +458,7 @@ pub fn inflate_fast(
                                 }
                                 out_index = output.index();
                             } else {
-                                let history = if window.is_null() || wsize == 0 {
-                                    &[]
-                                } else {
-                                    unsafe { ::core::slice::from_raw_parts(window, wsize as usize) }
-                                };
+                                let history = history.unwrap_or(&[]);
                                 let mut remaining = len as usize;
                                 if wnext == 0 as ::core::ffi::c_uint {
                                     let count = remaining.min(op as usize);
@@ -614,5 +609,13 @@ pub unsafe extern "C" fn inflate_fast_ffi(
         return;
     };
     let state = unsafe { &mut *(strm.state as *mut crate::src::inflate::inflate_state) };
-    inflate_fast(strm, state, start, false)
+    let history = if state.window.is_null() || state.wsize == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(
+            state.window,
+            state.wsize as usize,
+        ))
+    };
+    inflate_fast(strm, state, start, history, false)
 }
