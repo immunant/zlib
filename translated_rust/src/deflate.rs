@@ -2163,6 +2163,36 @@ fn append_gzip_cstring_bytes(
     count != 0 && remaining[count - 1] == 0
 }
 
+// Emit as much of the owned gzip extra field as fits in the current pending
+// slice. The dispatcher retains the ABI-backed allocation and flushes between
+// calls; this helper owns only bounded byte, cursor, and checksum accounting.
+fn append_gzip_extra_chunk(
+    source: &[crate::stdlib::Bytef],
+    source_index: &mut usize,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    hcrc: bool,
+    checksum: &mut crate::stdlib::uLong,
+) -> bool {
+    let Some(remaining) = source.get(*source_index..) else {
+        return true;
+    };
+    let available = pending_buf.len().saturating_sub(*pending as usize);
+    let copy_len = remaining.len().min(available);
+    if copy_len == 0 {
+        return remaining.is_empty();
+    }
+    let start = *pending as usize;
+    let copied = &remaining[..copy_len];
+    pending_buf[start..start + copy_len].copy_from_slice(copied);
+    *pending = pending.wrapping_add(copy_len as crate::zutil_h::ulg);
+    *source_index = source_index.wrapping_add(copy_len);
+    if hcrc {
+        *checksum = crate::src::crc32::crc32_z(*checksum, Some(copied));
+    }
+    copy_len == remaining.len()
+}
+
 fn flush_pending_bytes(
     output: &mut [crate::stdlib::Bytef],
     pending_buf: &[crate::stdlib::Bytef],
@@ -2542,66 +2572,32 @@ pub unsafe extern "C" fn deflate(
             .as_ref()
             .is_some_and(|header| header.extra.is_some())
         {
-            let hcrc = s.gzhead.as_ref().expect("gzip header was checked").hcrc;
-            let mut left = s
-                .gzhead
-                .as_ref()
-                .expect("gzip header was checked")
-                .extra
-                .as_deref()
-                .expect("gzip extra was checked")
-                .len()
-                .wrapping_sub(s.gzindex);
-            while s.pending.wrapping_add(left as crate::zutil_h::ulg) > s.pending_buf_size {
-                let mut copy: crate::zutil_h::ulg =
-                    s.pending_buf_size.wrapping_sub(s.pending);
-                {
-                    let extra = s
-                        .gzhead
-                        .as_ref()
-                        .expect("gzip header was checked")
-                        .extra
-                        .as_deref()
-                        .expect("gzip extra was checked");
+            loop {
+                let complete = {
+                    let header = s.gzhead.as_ref().expect("gzip header was checked");
+                    let extra = header.extra.as_deref().expect("gzip extra was checked");
                     let pending_buf = ::core::slice::from_raw_parts_mut(
                         s.pending_buf
                             .expect("initialized pending buffer")
                             .as_ptr(),
                         s.pending_buf_size as usize,
                     );
-                    append_pending_bytes(pending_buf, &mut s.pending, &extra[..copy as usize]);
-                    if hcrc {
-                        strm.adler = crate::src::crc32::crc32_z(
-                            strm.adler,
-                            Some(&extra[..copy as usize]),
-                        );
-                    }
+                    append_gzip_extra_chunk(
+                        extra,
+                        &mut s.gzindex,
+                        pending_buf,
+                        &mut s.pending,
+                        header.hcrc,
+                        &mut strm.adler,
+                    )
+                };
+                if complete {
+                    break;
                 }
-                s.gzindex = s.gzindex.wrapping_add(copy as usize);
                 flush_pending(strm, s);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
-                }
-                left = left.wrapping_sub(copy as usize);
-            }
-            if left != 0 {
-                let extra = s
-                    .gzhead
-                    .as_ref()
-                    .expect("gzip header was checked")
-                    .extra
-                    .as_deref()
-                    .expect("gzip extra was checked");
-                let pending_buf = ::core::slice::from_raw_parts_mut(
-                    s.pending_buf
-                        .expect("initialized pending buffer")
-                        .as_ptr(),
-                    s.pending_buf_size as usize,
-                );
-                append_pending_bytes(pending_buf, &mut s.pending, &extra[..left]);
-                if hcrc {
-                    strm.adler = crate::src::crc32::crc32_z(strm.adler, Some(&extra[..left]));
                 }
             }
             s.gzindex = 0;
