@@ -24,6 +24,19 @@ pub use crate::zlib_h::Z_NO_FLUSH;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+// The one-shot compressor replenishes `avail_out` from `left` whenever a
+// chunk is exhausted. Together they describe the unused portion of the
+// caller's original destination range, without deriving a length from raw
+// cursor addresses.
+fn compress_output_len(
+    capacity: crate::stdlib::z_size_t,
+    left: crate::stdlib::z_size_t,
+    avail_out: crate::stdlib::uInt,
+) -> crate::stdlib::z_size_t {
+    capacity.wrapping_sub(left.wrapping_add(avail_out as crate::stdlib::z_size_t))
+}
+
 pub unsafe extern "C" fn compress2_z(
     mut dest: *mut crate::stdlib::Bytef,
     destLen: &mut crate::stdlib::z_size_t,
@@ -50,12 +63,14 @@ pub unsafe extern "C" fn compress2_z(
     let mut err: ::core::ffi::c_int = 0;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;
+    let mut capacity: crate::stdlib::z_size_t = 0;
     if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
         || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    left = *destLen;
+    capacity = *destLen;
+    left = capacity;
     *destLen = 0 as crate::stdlib::z_size_t;
     stream.zalloc = None;
     stream.zfree = None;
@@ -102,11 +117,7 @@ pub unsafe extern "C" fn compress2_z(
             break;
         }
     }
-    // `next_out` advances only through the caller's byte output range. Using
-    // addresses expresses that byte count without requiring unsafe pointer
-    // provenance arithmetic (and also handles the permitted zero-capacity
-    // null buffer case).
-    *destLen = (stream.next_out as usize).wrapping_sub(dest as usize) as crate::stdlib::z_size_t;
+    *destLen = compress_output_len(capacity, left, stream.avail_out);
     crate::src::deflate::deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
