@@ -746,6 +746,28 @@ impl<'a> GzEmbeddedDeflateSetup<'a> {
             output,
         })
     }
+
+    // The gzip compressor owner retains output progress as an index.  Keep
+    // conversion to an ABI cursor at its adapter, while the staged request
+    // itself stays entirely pointer-free.
+    pub(crate) fn call_at_output_index<'input>(
+        mut self,
+        input: &'input [u8],
+        input_available: crate::stdlib::uInt,
+        output_start: usize,
+        output_available: crate::stdlib::uInt,
+    ) -> Option<GzEmbeddedDeflateCall<'input, 'a>> {
+        let input_len = usize::try_from(input_available).ok()?;
+        let output_end = output_start.checked_add(usize::try_from(output_available).ok()?)?;
+        let output = GzCodecOutputView {
+            bytes: self.output.bytes.get_mut(output_start..output_end)?,
+        };
+        Some(GzEmbeddedDeflateCall {
+            input: input.get(..input_len)?,
+            input_available,
+            output,
+        })
+    }
 }
 
 impl<'input, 'output> GzEmbeddedDeflateCall<'input, 'output> {

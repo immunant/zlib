@@ -692,6 +692,83 @@ struct GzCompRequest<'a> {
     close: Option<GzWriteCloseCodec<'a>>,
 }
 
+// A compressor pass retains only owned buffers, checked cursor offsets, and
+// scalar gzip state.  `gz_comp()` is the sole ABI adapter that imports and
+// publishes the `z_stream` cursors around this owner.
+struct GzCompOwner<'a> {
+    buffers: &'a mut crate::gzguts_h::GzBuffers,
+    fd: &'a rustix::fd::OwnedFd,
+    path: Option<&'a [u8]>,
+    message: &'a mut Option<Box<[u8]>>,
+    error: &'a mut ::core::ffi::c_int,
+    buffered: &'a mut crate::stdlib::uInt,
+    direct: ::core::ffi::c_int,
+    again: &'a mut ::core::ffi::c_int,
+    reset: &'a mut ::core::ffi::c_int,
+    input_available: crate::stdlib::uInt,
+    input_cursor: Option<usize>,
+    output_available: crate::stdlib::uInt,
+    output_cursor: Option<usize>,
+    output_next: Option<usize>,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+}
+
+impl GzCompOwner<'_> {
+    fn set_error(&mut self, error: ::core::ffi::c_int, message: &[u8]) {
+        crate::src::gzlib::GzErrorState {
+            message: self.message,
+            error: self.error,
+            buffered: self.buffered,
+            again: *self.again,
+            path: self.path,
+        }
+        .set(error, Some(message));
+    }
+
+    fn direct_input(&self) -> Option<&[u8]> {
+        let cursor = self.input_cursor?;
+        let buffer = self.buffers.input.as_deref()?;
+        crate::src::gzlib::GzCodecInput::from_index(buffer, cursor, self.input_available)
+            .and_then(|input| input.bytes(buffer))
+    }
+
+    fn pending_output(&self) -> Option<&[u8]> {
+        let start = self.output_next?;
+        let end = self.output_cursor?;
+        self.buffers.output.as_deref()?.get(start..end)
+    }
+
+    fn reset_output_cursor(&mut self) -> Option<()> {
+        let size = usize::try_from(self.buffers.size).ok()?;
+        self.output_available = self.buffers.size;
+        self.output_cursor = Some(0);
+        self.output_next = Some(0);
+        self.buffers.output.as_deref()?.get(..size)?;
+        Some(())
+    }
+}
+
+enum GzCompCodecAction<'input, 'output> {
+    End,
+    Reset,
+    Dispatch {
+        flush: ::core::ffi::c_int,
+        dispatch: crate::src::gzlib::GzEmbeddedDeflateDispatch<'input, 'output>,
+    },
+    Retune(GzDeflateRetune),
+}
+
+enum GzCompCodecResult {
+    Complete,
+    Dispatch(
+        Option<(
+            crate::src::gzlib::GzEmbeddedDeflateState,
+            crate::src::gzlib::GzEmbeddedDeflateProgress,
+        )>,
+    ),
+}
+
 // Keep deferred-zero materialization in the compressor boundary, but schedule
 // its individual no-flush requests iteratively.  This avoids recursively
 // re-entering the ABI-shaped adapter while preserving the old ordering: drain
@@ -826,7 +903,7 @@ unsafe fn gz_comp(
 // This request executes one already-staged compressor pass.  Its caller owns
 // the deferred-zero state machine above, so this body never needs to recurse
 // through the ABI-shaped gzip state.
-fn gz_comp_request<'request, Initialize, EndDeflater, ResetDeflater, DispatchDeflater, RetuneDeflater>(
+unsafe fn gz_comp_request<'request, Initialize, EndDeflater, ResetDeflater, DispatchDeflater, RetuneDeflater>(
     state: &mut crate::gzguts_h::gz_state,
     request: GzCompRequest<'request>,
     mut initialize: Initialize,
