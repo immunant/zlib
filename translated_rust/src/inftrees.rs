@@ -3295,6 +3295,25 @@ fn inflate_table_build(
     })
 }
 
+/// Commit a completed canonical table into caller-owned Rust storage.  The
+/// internal inflate decoders use this instead of passing their owned arrays
+/// back through the legacy raw cursor adapter.
+pub(crate) fn inflate_table_into(
+    type_0: crate::src::inftrees::codetype,
+    lens: &[::core::ffi::c_ushort],
+    table: &mut [crate::src::inftrees::code],
+    work: &mut [::core::ffi::c_ushort],
+    root: ::core::ffi::c_uint,
+) -> Result<(usize, ::core::ffi::c_uint), ::core::ffi::c_int> {
+    let build = inflate_table_build(type_0, lens, root)?;
+    if build.entries.len() > table.len() || build.work.len() > work.len() {
+        return Err(1);
+    }
+    table[..build.entries.len()].copy_from_slice(&build.entries);
+    work[..build.work.len()].copy_from_slice(&build.work);
+    Ok((build.entries.len(), build.root))
+}
+
 /// Legacy raw cursor adapter. All table construction occurs in
 /// `inflate_table_build`; this layer only copies bounded C arrays in and
 /// commits the resulting entries and cursors back out.
