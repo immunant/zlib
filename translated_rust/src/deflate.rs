@@ -757,8 +757,8 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         n = read_buf(
             (*s).strm,
             (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize),
+                .wrapping_add((*s).strstart as usize)
+                .wrapping_add((*s).lookahead as usize),
             more,
         );
         (*s).lookahead = (*s).lookahead.wrapping_add(n);
