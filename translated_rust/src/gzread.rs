@@ -805,6 +805,21 @@ fn gz_look_apply_gzip_state(
     *direct = gzip_state.direct;
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct GzLookTransparentCopyPlan {
+    have: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    how: ::core::ffi::c_int,
+}
+
+fn gz_look_transparent_copy_plan(avail_in: crate::stdlib::uInt) -> GzLookTransparentCopyPlan {
+    GzLookTransparentCopyPlan {
+        have: avail_in as ::core::ffi::c_uint,
+        avail_in: 0,
+        how: crate::gzguts_h::COPY,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GzLookAction {
     NeedMoreInput,
@@ -921,9 +936,10 @@ unsafe fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         (*strm).next_in as *const ::core::ffi::c_void,
         (*strm).avail_in as crate::__stddef_size_t_h::size_t,
     );
-    (*state).x.have = (*strm).avail_in as ::core::ffi::c_uint;
-    (*strm).avail_in = 0 as crate::stdlib::uInt;
-    (*state).how = crate::gzguts_h::COPY;
+    let plan = gz_look_transparent_copy_plan((*strm).avail_in);
+    (*state).x.have = plan.have;
+    (*strm).avail_in = plan.avail_in;
+    (*state).how = plan.how;
     return 0 as ::core::ffi::c_int;
 }
 
@@ -1727,6 +1743,20 @@ mod tests {
         assert!(gz_look_allocations_failed(false, true));
         assert!(gz_look_allocations_failed(true, false));
         assert!(gz_look_allocations_failed(false, false));
+    }
+
+    #[test]
+    fn gz_look_transparent_copy_plan_preserves_input_count_and_copy_mode() {
+        for avail_in in [0, 4, crate::stdlib::uInt::MAX] {
+            assert_eq!(
+                gz_look_transparent_copy_plan(avail_in),
+                GzLookTransparentCopyPlan {
+                    have: avail_in as ::core::ffi::c_uint,
+                    avail_in: 0,
+                    how: crate::gzguts_h::COPY,
+                }
+            );
+        }
     }
 
     #[test]

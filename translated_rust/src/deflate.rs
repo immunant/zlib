@@ -596,6 +596,17 @@ fn read_buf_total_in_after_copy(
     total_in.wrapping_add(copied as crate::stdlib::uLong)
 }
 
+fn read_buf_input_progress_after_copy(
+    avail_in: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    copied: ::core::ffi::c_uint,
+) -> (crate::stdlib::uInt, crate::stdlib::uLong) {
+    (
+        avail_in.wrapping_sub(copied),
+        read_buf_total_in_after_copy(total_in, copied),
+    )
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum ReadBufChecksum {
     Adler32,
@@ -619,7 +630,9 @@ unsafe fn read_buf(
     if len == 0 as ::core::ffi::c_uint {
         return 0 as ::core::ffi::c_uint;
     }
-    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
+    let (avail_in, total_in) =
+        read_buf_input_progress_after_copy((*strm).avail_in, (*strm).total_in, len);
+    (*strm).avail_in = avail_in;
     crate::stdlib::memcpy(
         buf as *mut ::core::ffi::c_void,
         (*strm).next_in as *const ::core::ffi::c_void,
@@ -637,7 +650,7 @@ unsafe fn read_buf(
         None => {}
     }
     (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
-    (*strm).total_in = read_buf_total_in_after_copy((*strm).total_in, len);
+    (*strm).total_in = total_in;
     return len;
 }
 
@@ -4151,13 +4164,13 @@ mod tests {
         lm_initial_state, lm_match_parameters, longest_match_candidate_update,
         longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
         longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_checksum, read_buf_len,
-        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
-        stored_block_available_output, stored_block_can_emit, stored_block_is_last,
-        stored_block_header_bytes, stored_block_min_size, stored_block_payload_len,
-        stored_block_should_wait,
-        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction, ReadBufChecksum,
+        pending_output_len, pending_short_cursors, read_buf_checksum,
+        read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
+        stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
+        symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction, DeflatePreflight,
+        DeflateRleRefillAction, ReadBufChecksum,
     };
 
     #[test]
@@ -4751,6 +4764,15 @@ mod tests {
         assert_eq!(
             read_buf_total_in_after_copy(crate::stdlib::uLong::MAX, 1),
             0,
+        );
+    }
+
+    #[test]
+    fn read_buf_input_progress_after_copy_preserves_input_and_total_wrapping() {
+        assert_eq!(read_buf_input_progress_after_copy(12, 100, 5), (7, 105));
+        assert_eq!(
+            read_buf_input_progress_after_copy(0, crate::stdlib::uLong::MAX, 1),
+            (crate::stdlib::uInt::MAX, 0)
         );
     }
 

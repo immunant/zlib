@@ -1052,6 +1052,10 @@ fn update_window_core(
     *whave = plan.whave;
 }
 
+fn update_window_buffer_len(wsize: ::core::ffi::c_uint) -> usize {
+    wsize as usize
+}
+
 fn update_window_produced_len(copy: ::core::ffi::c_uint) -> Option<usize> {
     if copy == 0 {
         None
@@ -1089,7 +1093,8 @@ unsafe fn updatewindow(
         &mut state.wnext,
         &mut state.whave,
     );
-    let window = core::slice::from_raw_parts_mut(state.window, state.wsize as usize);
+    let window =
+        core::slice::from_raw_parts_mut(state.window, update_window_buffer_len(state.wsize));
     let produced = match update_window_produced_len(copy) {
         Some(produced_len) => Some(core::slice::from_raw_parts(produced_start, produced_len)),
         None => None,
@@ -3149,14 +3154,15 @@ mod tests {
         inflate_undermine_core, inflate_validate_core, inflate_validate_wrap,
         inflate_zlib_header_error, inflate_zlib_header_transition, inflate_zlib_window_params,
         initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
-        update_window_core, update_window_produced_len, window_allocation_failed,
-        window_allocation_plan, window_allocation_request, window_allocation_request_for_plan,
-        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
-        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
-        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
-        InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        update_window_buffer_len, update_window_core, update_window_produced_len,
+        window_allocation_failed, window_allocation_plan, window_allocation_request,
+        window_allocation_request_for_plan, window_needs_allocation, window_update_plan,
+        DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress, InflateGzipExtraProgress,
+        InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource,
+        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
+        InflateZlibHeaderTransition, InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        TYPEDO,
     };
 
     #[test]
@@ -4395,6 +4401,16 @@ mod tests {
 
         assert_eq!((wsize, wnext, whave), (8, 3, 5));
         assert_eq!(window, *b"abcdefgh");
+    }
+
+    #[test]
+    fn update_window_buffer_len_preserves_c_uint_widths() {
+        assert_eq!(update_window_buffer_len(0), 0);
+        assert_eq!(update_window_buffer_len(32_768), 32_768);
+        assert_eq!(
+            update_window_buffer_len(::core::ffi::c_uint::MAX),
+            ::core::ffi::c_uint::MAX as usize
+        );
     }
 
     #[test]
