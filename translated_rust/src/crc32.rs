@@ -4727,6 +4727,14 @@ fn byte_swap(mut word: z_word_t) -> z_word_t {
 
 pub const POLY: ::core::ffi::c_uint = 0xedb88320 as ::core::ffi::c_uint;
 
+fn next_poly_term(value: crate::stdlib::uLong) -> crate::stdlib::uLong {
+    if value & 1 != 0 {
+        (value >> 1) ^ POLY as crate::stdlib::uLong
+    } else {
+        value >> 1
+    }
+}
+
 fn multmodp(mut a: crate::stdlib::uLong, mut b: crate::stdlib::uLong) -> crate::stdlib::uLong {
     let mut m: crate::stdlib::uLong = 0;
     let mut p: crate::stdlib::uLong = 0;
@@ -4740,11 +4748,7 @@ fn multmodp(mut a: crate::stdlib::uLong, mut b: crate::stdlib::uLong) -> crate::
             }
         }
         m >>= 1 as ::core::ffi::c_int;
-        b = if b & 1 as crate::stdlib::uLong != 0 {
-            b >> 1 as ::core::ffi::c_int ^ POLY as crate::stdlib::uLong
-        } else {
-            b >> 1 as ::core::ffi::c_int
-        };
+        b = next_poly_term(b);
     }
     return p;
 }
@@ -4796,13 +4800,15 @@ fn crc_word_big(mut data: z_word_t) -> z_word_t {
 }
 const CRC32_MASK: crate::stdlib::uLong = 0xffff_ffff;
 
+fn crc32_update_byte(crc: crate::stdlib::uLong, byte: u8) -> crate::stdlib::uLong {
+    let table_index = ((crc ^ byte as crate::stdlib::uLong) & 0xff) as usize;
+    ((crc >> 8) ^ crc_table[table_index] as crate::stdlib::uLong) & CRC32_MASK
+}
+
 pub fn crc32_z(mut crc: crate::stdlib::uLong, buf: &[u8]) -> crate::stdlib::uLong {
     crc = !crc & CRC32_MASK;
     for &byte in buf {
-        crc = (crc >> 8)
-            ^ crc_table[((crc ^ byte as crate::stdlib::uLong) & 0xff) as usize]
-                as crate::stdlib::uLong;
-        crc &= CRC32_MASK;
+        crc = crc32_update_byte(crc, byte);
     }
     (crc ^ CRC32_MASK) & CRC32_MASK
 }
@@ -4916,7 +4922,8 @@ pub unsafe extern "C" fn crc32_combine_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_z, crc_table_ref,
+        crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_update_byte, crc32_z,
+        crc_table_ref, next_poly_term, CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -4939,6 +4946,24 @@ mod tests {
             let incremental = crc32_z(crc32_z(0, &input[..split]), &input[split..]);
             assert_eq!(incremental, expected, "split at byte {split}");
         }
+    }
+
+    #[test]
+    fn scalar_crc_update_matches_the_public_checksum() {
+        let input = b"123456789";
+        let mut state = CRC32_MASK;
+
+        for &byte in input {
+            state = crc32_update_byte(state, byte);
+        }
+
+        assert_eq!((state ^ CRC32_MASK) & CRC32_MASK, crc32_z(0, input));
+    }
+
+    #[test]
+    fn polynomial_step_handles_set_and_clear_low_bits() {
+        assert_eq!(next_poly_term(0x12), 0x09);
+        assert_eq!(next_poly_term(0x13), 0x09 ^ POLY as crate::stdlib::uLong);
     }
 
     #[test]

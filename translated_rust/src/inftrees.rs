@@ -2849,6 +2849,18 @@ fn table_capacity_for_type(type_0: crate::src::inftrees::codetype) -> Option<usi
     }
 }
 
+fn table_usage_fits(type_0: CodeType, used: u32, table_start: usize, table_len: usize) -> bool {
+    let within_type_capacity = match type_0 {
+        CodeType::Codes => true,
+        CodeType::Lens => used <= ENOUGH_LENS as u32,
+        CodeType::Dists => used <= ENOUGH_DISTS as u32,
+    };
+    within_type_capacity
+        && table_start
+            .checked_add(used as usize)
+            .map_or(false, |end| end <= table_len)
+}
+
 fn table_entry_for_symbol(
     type_0: CodeType,
     symbol: u16,
@@ -2986,12 +2998,7 @@ pub fn inflate_table_safe(
     let mut low = u32::MAX;
     let mut used = 1u32 << root;
     let mask = used - 1;
-    if (type_0 == CodeType::Lens && used > ENOUGH_LENS as u32)
-        || (type_0 == CodeType::Dists && used > ENOUGH_DISTS as u32)
-        || table_start
-            .checked_add(used as usize)
-            .map_or(true, |end| end > table.len())
-    {
+    if !table_usage_fits(type_0, used, table_start, table.len()) {
         return 1;
     }
 
@@ -3061,12 +3068,7 @@ pub fn inflate_table_safe(
                 left <<= 1;
             }
             used += 1u32 << curr;
-            if (type_0 == CodeType::Lens && used > ENOUGH_LENS as u32)
-                || (type_0 == CodeType::Dists && used > ENOUGH_DISTS as u32)
-                || table_start
-                    .checked_add(used as usize)
-                    .map_or(true, |end| end > table.len())
-            {
+            if !table_usage_fits(type_0, used, table_start, table.len()) {
                 return 1;
             }
             low = huff & mask;
@@ -3176,6 +3178,40 @@ mod tests {
     #[test]
     fn table_capacity_for_type_rejects_unknown_table_kinds() {
         assert_eq!(table_capacity_for_type(3), None);
+    }
+
+    #[test]
+    fn table_usage_fits_enforces_type_and_slice_boundaries() {
+        assert!(table_usage_fits(CodeType::Codes, 129, 2, 131));
+        assert!(table_usage_fits(
+            CodeType::Lens,
+            ENOUGH_LENS as u32,
+            0,
+            ENOUGH_LENS as usize,
+        ));
+        assert!(!table_usage_fits(
+            CodeType::Lens,
+            ENOUGH_LENS as u32 + 1,
+            0,
+            ENOUGH_LENS as usize + 1,
+        ));
+        assert!(table_usage_fits(
+            CodeType::Dists,
+            ENOUGH_DISTS as u32,
+            4,
+            ENOUGH_DISTS as usize + 4,
+        ));
+        assert!(!table_usage_fits(CodeType::Dists, 1, 4, 4));
+    }
+
+    #[test]
+    fn table_usage_fits_rejects_cursor_overflow() {
+        assert!(!table_usage_fits(
+            CodeType::Codes,
+            1,
+            usize::MAX,
+            usize::MAX
+        ));
     }
 
     #[test]

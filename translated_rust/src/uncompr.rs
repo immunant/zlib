@@ -89,6 +89,32 @@ fn has_invalid_uncompress_buffers(
     source_len > 0 && source_is_null || dest_len > 0 && dest_is_null
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct LegacyUncompressLengths {
+    dest: crate::stdlib::z_size_t,
+    source: crate::stdlib::z_size_t,
+}
+
+impl LegacyUncompressLengths {
+    fn from_legacy(dest: crate::stdlib::uLongf, source: crate::stdlib::uLong) -> Self {
+        Self {
+            dest: dest as crate::stdlib::z_size_t,
+            source: source as crate::stdlib::z_size_t,
+        }
+    }
+
+    fn from_z(dest: crate::stdlib::z_size_t, source: crate::stdlib::z_size_t) -> Self {
+        Self { dest, source }
+    }
+
+    fn into_legacy(self) -> (crate::stdlib::uLongf, crate::stdlib::uLong) {
+        (
+            self.dest as crate::stdlib::uLong as crate::stdlib::uLongf,
+            self.source as crate::stdlib::uLong,
+        )
+    }
+}
+
 #[export_name = "uncompress2_z"]
 pub unsafe extern "C" fn uncompress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -168,11 +194,13 @@ pub unsafe extern "C" fn uncompress2_ffi(
     if destLen.is_null() || sourceLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let mut got = *destLen as crate::stdlib::z_size_t;
-    let mut used = *sourceLen as crate::stdlib::z_size_t;
+    let lengths = LegacyUncompressLengths::from_legacy(*destLen, *sourceLen);
+    let mut got = lengths.dest;
+    let mut used = lengths.source;
     let ret = uncompress2_z_ffi(dest, &raw mut got, source, &raw mut used);
-    *sourceLen = used as crate::stdlib::uLong;
-    *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
+    let (dest_len, source_len) = LegacyUncompressLengths::from_z(got, used).into_legacy();
+    *sourceLen = source_len;
+    *destLen = dest_len;
     ret
 }
 
@@ -200,7 +228,7 @@ pub unsafe extern "C" fn uncompress_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{has_invalid_uncompress_buffers, ChunkedProgress};
+    use super::{has_invalid_uncompress_buffers, ChunkedProgress, LegacyUncompressLengths};
 
     #[test]
     fn buffer_validation_allows_null_pointers_for_empty_buffers() {
@@ -216,6 +244,24 @@ mod tests {
     #[test]
     fn buffer_validation_accepts_present_nonempty_buffers() {
         assert!(!has_invalid_uncompress_buffers(false, 1, false, 1));
+    }
+
+    #[test]
+    fn legacy_lengths_preserve_the_wrapper_cast_sequence() {
+        let lengths = LegacyUncompressLengths::from_legacy(7, 11);
+        assert_eq!(lengths.dest, 7);
+        assert_eq!(lengths.source, 11);
+        assert_eq!(
+            LegacyUncompressLengths::from_z(
+                crate::stdlib::z_size_t::MAX,
+                crate::stdlib::z_size_t::MAX,
+            )
+            .into_legacy(),
+            (
+                crate::stdlib::z_size_t::MAX as crate::stdlib::uLong as crate::stdlib::uLongf,
+                crate::stdlib::z_size_t::MAX as crate::stdlib::uLong,
+            )
+        );
     }
 
     #[test]

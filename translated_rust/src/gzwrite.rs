@@ -108,6 +108,15 @@ fn gz_write_state_is_usable(
     mode == crate::gzguts_h::GZ_WRITE && (err == crate::zlib_h::Z_OK || again != 0)
 }
 
+fn gzsetparams_state_is_usable(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    direct: ::core::ffi::c_int,
+) -> bool {
+    gz_write_state_is_usable(mode, err, again) && direct == 0
+}
+
 fn gzflush_mode_is_valid(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 && flush <= crate::zlib_h::Z_FINISH
 }
@@ -117,6 +126,18 @@ fn gzfwrite_len(
     nitems: crate::stdlib::z_size_t,
 ) -> Option<crate::stdlib::z_size_t> {
     size.checked_mul(nitems)
+}
+
+fn gzfwrite_result(
+    size: crate::stdlib::z_size_t,
+    len: crate::stdlib::z_size_t,
+    written: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    if len == 0 {
+        0
+    } else {
+        written.wrapping_div(size)
+    }
 }
 
 fn gz_write_error_result(
@@ -682,11 +703,7 @@ pub unsafe extern "C" fn gzfwrite(
         );
         return 0 as crate::stdlib::z_size_t;
     };
-    return if len != 0 {
-        gz_write(state, buf, len).wrapping_div(size)
-    } else {
-        0 as crate::stdlib::z_size_t
-    };
+    return gzfwrite_result(size, len, gz_write(state, buf, len));
 }
 #[export_name = "gzfwrite"]
 
@@ -846,9 +863,7 @@ pub unsafe extern "C" fn gzsetparams(
     }
     state = file as crate::gzguts_h::gz_statep;
     strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again)
-        || (*state).direct != 0
-    {
+    if !gzsetparams_state_is_usable((*state).mode, (*state).err, (*state).again, (*state).direct) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_error(
@@ -940,8 +955,8 @@ mod tests {
         gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
         gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
         gz_zero_needs_pending_flush, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len,
-        gzputc_can_buffer, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzwrite_len_fits_int,
+        gzfwrite_result, gzputc_can_buffer, gzputc_result, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1290,6 +1305,39 @@ mod tests {
     #[test]
     fn gzfwrite_len_rejects_overflow() {
         assert_eq!(gzfwrite_len(crate::stdlib::z_size_t::MAX, 2), None);
+    }
+
+    #[test]
+    fn gzfwrite_result_converts_written_bytes_to_items() {
+        assert_eq!(gzfwrite_result(4, 12, 12), 3);
+        assert_eq!(gzfwrite_result(4, 12, 11), 2);
+    }
+
+    #[test]
+    fn gzfwrite_result_handles_zero_size_requests_without_division() {
+        assert_eq!(gzfwrite_result(0, 0, 0), 0);
+    }
+
+    #[test]
+    fn gzsetparams_state_is_usable_rejects_direct_and_invalid_write_states() {
+        assert!(gzsetparams_state_is_usable(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_OK,
+            0,
+            0
+        ));
+        assert!(!gzsetparams_state_is_usable(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_OK,
+            0,
+            1
+        ));
+        assert!(!gzsetparams_state_is_usable(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_ERRNO,
+            0,
+            0
+        ));
     }
 
     #[test]
