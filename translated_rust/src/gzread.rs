@@ -864,10 +864,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             strm.avail_in = dispatch.input_available();
             strm.avail_out = dispatch.output_available();
             strm.next_out = dispatch.output_mut().as_mut_ptr();
-            let result = crate::src::inflate::inflate(
-                strm as *mut crate::zlib_h::z_stream_s,
-                crate::zlib_h::Z_NO_FLUSH,
-            );
+            let result = crate::src::inflate::inflate(strm, crate::zlib_h::Z_NO_FLUSH);
             // Snapshot the ABI projection immediately.  The gzip state
             // machine handles the resulting checked cursors and diagnostics
             // through the pointer-free embedded-codec result facade.

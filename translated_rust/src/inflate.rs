@@ -193,12 +193,7 @@ pub(crate) fn inflate_one_shot(
         if stream.avail_in == 0 {
             stream.avail_in = owner.next_input_chunk(max);
         }
-        status = unsafe {
-            inflate(
-                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-                crate::zlib_h::Z_NO_FLUSH,
-            )
-        };
+        status = unsafe { inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH) };
         if status != crate::zlib_h::Z_OK {
             break;
         }
@@ -965,8 +960,8 @@ fn inflate_pull_byte(
     true
 }
 
-pub unsafe extern "C" fn inflate(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn inflate(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -1012,9 +1007,6 @@ pub unsafe extern "C" fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2843,6 +2835,9 @@ pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflate(strm, flush)
 }
 pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
