@@ -3691,16 +3691,13 @@ impl<'state> InflateEndOwner<'state> {
     }
 }
 
-pub unsafe fn inflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    inflate_from_stream(stream, InflateStreamRequest::End, None).status()
-}
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let Some(stream) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateEnd(stream)
+    inflate_from_stream(stream, InflateStreamRequest::End, None).status()
 }
 #[export_name = "inflateGetDictionary"]
 

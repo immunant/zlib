@@ -1381,5 +1381,10 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    crate::src::inflate::inflateEnd(strm)
+    crate::src::inflate::inflate_from_stream(
+        strm,
+        crate::src::inflate::InflateStreamRequest::End,
+        None,
+    )
+    .status()
 }
