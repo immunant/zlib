@@ -122,6 +122,14 @@ fn inflate_back_consume_input_byte(
     )
 }
 
+fn inflate_back_align_to_byte_boundary(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+) -> (::core::ffi::c_ulong, ::core::ffi::c_uint) {
+    let discarded_bits = bits & 7 as ::core::ffi::c_uint;
+    (hold >> discarded_bits, bits.wrapping_sub(discarded_bits))
+}
+
 fn inflate_back_distance_exceeds_window(
     offset: ::core::ffi::c_uint,
     window_size: ::core::ffi::c_uint,
@@ -331,8 +339,7 @@ pub unsafe extern "C" fn inflateBack(
         match (*state).mode as ::core::ffi::c_uint {
             16191 => {
                 if (*state).last != 0 {
-                    hold >>= bits & 7 as ::core::ffi::c_uint;
-                    bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
+                    (hold, bits) = inflate_back_align_to_byte_boundary(hold, bits);
                     (*state).mode = crate::src::inflate::DONE;
                     continue;
                 } else {
@@ -376,8 +383,7 @@ pub unsafe extern "C" fn inflateBack(
                 }
             }
             16193 => {
-                hold >>= bits & 7 as ::core::ffi::c_uint;
-                bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
+                (hold, bits) = inflate_back_align_to_byte_boundary(hold, bits);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
                     if have == 0 as ::core::ffi::c_uint {
                         have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
@@ -1115,7 +1121,8 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        inflate_back_block_header, inflate_back_consume_input_byte, inflate_back_copy_count,
+        inflate_back_align_to_byte_boundary, inflate_back_block_header,
+        inflate_back_consume_input_byte, inflate_back_copy_count,
         inflate_back_distance_exceeds_window, inflate_back_init_metadata_is_valid,
         inflate_back_match_copy_plan, inflate_back_stored_block_length,
         inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
@@ -1132,6 +1139,17 @@ mod tests {
             inflate_back_consume_input_byte(0, 0, 60, 0xff),
             (::core::ffi::c_uint::MAX, 0xf000_0000_0000_0000, 68),
         );
+    }
+
+    #[test]
+    fn inflate_back_byte_alignment_discards_only_partial_bytes() {
+        assert_eq!(inflate_back_align_to_byte_boundary(0x1234, 8), (0x1234, 8));
+        assert_eq!(inflate_back_align_to_byte_boundary(0, 0), (0, 0));
+        assert_eq!(
+            inflate_back_align_to_byte_boundary(0b101_101, 11),
+            (0b101, 8)
+        );
+        assert_eq!(inflate_back_align_to_byte_boundary(0xfe, 7), (1, 0));
     }
 
     #[test]

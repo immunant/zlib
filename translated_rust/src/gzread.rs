@@ -1192,6 +1192,30 @@ fn gzgets_should_continue(left: ::core::ffi::c_uint, found_eol: bool) -> bool {
     left != 0 && !found_eol
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct GzgetsCopyProgress {
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    should_continue: bool,
+}
+
+fn gzgets_copy_progress(
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    copied: ::core::ffi::c_uint,
+    found_eol: bool,
+) -> GzgetsCopyProgress {
+    let (have, left, pos) = gzgets_progress(have, left, pos, copied);
+    GzgetsCopyProgress {
+        have,
+        left,
+        pos,
+        should_continue: gzgets_should_continue(left, found_eol),
+    }
+}
+
 fn gzclose_r_result(
     stream_err: ::core::ffi::c_int,
     close_ret: ::core::ffi::c_int,
@@ -2257,6 +2281,42 @@ mod tests {
     }
 
     #[test]
+    fn gzgets_copy_progress_updates_state_and_loop_decision() {
+        assert_eq!(
+            gzgets_copy_progress(10, 8, 42, 3, false),
+            GzgetsCopyProgress {
+                have: 7,
+                left: 5,
+                pos: 45,
+                should_continue: true,
+            }
+        );
+        assert_eq!(
+            gzgets_copy_progress(10, 8, 42, 3, true),
+            GzgetsCopyProgress {
+                have: 7,
+                left: 5,
+                pos: 45,
+                should_continue: false,
+            }
+        );
+        assert!(!gzgets_copy_progress(3, 3, 42, 3, false).should_continue);
+    }
+
+    #[test]
+    fn gzgets_copy_progress_preserves_wrapping_counts() {
+        assert_eq!(
+            gzgets_copy_progress(0, 0, 42, 1, false),
+            GzgetsCopyProgress {
+                have: ::core::ffi::c_uint::MAX,
+                left: ::core::ffi::c_uint::MAX,
+                pos: 43,
+                should_continue: true,
+            }
+        );
+    }
+
+    #[test]
     fn gz_read_needs_look_only_for_empty_read_look_state() {
         assert!(gz_read_needs_look(
             crate::gzguts_h::GZ_READ,
@@ -2768,11 +2828,14 @@ pub unsafe extern "C" fn gzgets(
                 (*state).x.next as *const ::core::ffi::c_void,
                 n as crate::__stddef_size_t_h::size_t,
             );
-            ((*state).x.have, left, (*state).x.pos) =
-                gzgets_progress((*state).x.have, left, (*state).x.pos, n);
+            let progress =
+                gzgets_copy_progress((*state).x.have, left, (*state).x.pos, n, !eol.is_null());
+            (*state).x.have = progress.have;
+            left = progress.left;
+            (*state).x.pos = progress.pos;
             (*state).x.next = (*state).x.next.wrapping_add(n as usize);
             buf = buf.wrapping_add(n as usize);
-            if !gzgets_should_continue(left, !eol.is_null()) {
+            if !progress.should_continue {
                 break;
             }
         }

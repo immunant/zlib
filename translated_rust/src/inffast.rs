@@ -217,6 +217,41 @@ fn fast_match_uses_window(
     distance > output_produced
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum FastDistanceSource {
+    Output,
+    Window,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FastDistance {
+    distance: ::core::ffi::c_uint,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+    source: FastDistanceSource,
+}
+
+fn finish_fast_distance(
+    base_distance: ::core::ffi::c_uint,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+    extra_bits: ::core::ffi::c_uint,
+    output_produced: crate::stdlib::uInt,
+) -> FastDistance {
+    let (distance, hold, bits) = add_and_consume_extra_bits(base_distance, hold, bits, extra_bits);
+    let source = if fast_match_uses_window(distance, output_produced) {
+        FastDistanceSource::Window
+    } else {
+        FastDistanceSource::Output
+    };
+    FastDistance {
+        distance,
+        hold,
+        bits,
+        source,
+    }
+}
+
 pub unsafe extern "C" fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -342,9 +377,12 @@ pub unsafe extern "C" fn inflate_fast(
                                 input_remaining = input_remaining_after_read(input_remaining);
                                 (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh6);
                             }
-                            (dist, hold, bits) =
-                                add_and_consume_extra_bits(dist, hold, bits, extra_bits);
-                            if fast_match_uses_window(dist, output_produced) {
+                            let distance =
+                                finish_fast_distance(dist, hold, bits, extra_bits, output_produced);
+                            dist = distance.distance;
+                            hold = distance.hold;
+                            bits = distance.bits;
+                            if distance.source == FastDistanceSource::Window {
                                 c2rust_current_block_141 = 5235537862154438448;
                                 break;
                             } else {
@@ -590,9 +628,10 @@ mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_dist_action, fast_litlen_action, fast_match_uses_window,
-        fast_window_distance_is_invalid, input_bytes_needed, input_remaining_after_read, low_bits,
-        output_cursor_after_write, subtable_index, table_index, unread_input_state,
-        window_match_start, FastDistAction, FastLitLenAction,
+        fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
+        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
+        table_index, unread_input_state, window_match_start, FastDistAction, FastDistance,
+        FastDistanceSource, FastLitLenAction,
     };
 
     #[test]
@@ -616,6 +655,49 @@ mod tests {
         assert!(!fast_match_uses_window(4, 4));
         assert!(!fast_match_uses_window(3, 4));
         assert!(fast_match_uses_window(5, 4));
+    }
+
+    #[test]
+    fn fast_distance_finalization_consumes_bits_and_selects_copy_source() {
+        assert_eq!(
+            finish_fast_distance(4, 0x12, 8, 0, 4),
+            FastDistance {
+                distance: 4,
+                hold: 0x12,
+                bits: 8,
+                source: FastDistanceSource::Output,
+            }
+        );
+        assert_eq!(
+            finish_fast_distance(7, 0b1011_0101, 8, 3, 11),
+            FastDistance {
+                distance: 12,
+                hold: 0b1_0110,
+                bits: 5,
+                source: FastDistanceSource::Window,
+            }
+        );
+    }
+
+    #[test]
+    fn fast_distance_finalization_preserves_strict_boundary_and_wrapping() {
+        assert_eq!(
+            finish_fast_distance(5, 0, 0, 0, 5).source,
+            FastDistanceSource::Output
+        );
+        assert_eq!(
+            finish_fast_distance(6, 0, 0, 0, 5).source,
+            FastDistanceSource::Window
+        );
+        assert_eq!(
+            finish_fast_distance(::core::ffi::c_uint::MAX, 1, 0, 1, 0),
+            FastDistance {
+                distance: 0,
+                hold: 0,
+                bits: ::core::ffi::c_uint::MAX,
+                source: FastDistanceSource::Output,
+            }
+        );
     }
 
     #[test]
