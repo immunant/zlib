@@ -1115,7 +1115,7 @@ pub unsafe extern "C" fn inflate(
                     break;
                 }
                 let c2rust_fresh32 = put;
-                put = put.offset(1);
+                put = put.wrapping_add(1);
                 *c2rust_fresh32 = (*state).length as ::core::ffi::c_uchar;
                 left = left.wrapping_sub(1);
                 (*state).mode = crate::src::inflate::LEN;

@@ -519,6 +519,33 @@ fn fill_window_cursor(
     (strstart as crate::zutil_h::ulg).wrapping_add(lookahead as crate::zutil_h::ulg)
 }
 
+fn fill_window_zero_range(
+    high_water: crate::zutil_h::ulg,
+    window_size: crate::zutil_h::ulg,
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> Option<(crate::zutil_h::ulg, crate::zutil_h::ulg)> {
+    if high_water >= window_size {
+        return None;
+    }
+
+    let cursor = fill_window_cursor(strstart, lookahead);
+    let win_init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
+    if high_water < cursor {
+        Some((cursor, window_size.wrapping_sub(cursor).min(win_init)))
+    } else if high_water < cursor.wrapping_add(win_init) {
+        Some((
+            high_water,
+            cursor
+                .wrapping_add(win_init)
+                .wrapping_sub(high_water)
+                .min(window_size.wrapping_sub(high_water)),
+        ))
+    } else {
+        None
+    }
+}
+
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
@@ -593,36 +620,18 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             break;
         }
     }
-    if (*s).high_water < (*s).window_size {
-        let curr = fill_window_cursor((*s).strstart, (*s).lookahead);
-        let mut init: crate::zutil_h::ulg = 0;
-        if (*s).high_water < curr {
-            init = (*s).window_size.wrapping_sub(curr);
-            if init > crate::src::deflate::WIN_INIT as crate::zutil_h::ulg {
-                init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
-            }
-            crate::stdlib::memset(
-                (*s).window.offset(curr as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).high_water = curr.wrapping_add(init);
-        } else if (*s).high_water
-            < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-        {
-            init = curr
-                .wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-                .wrapping_sub((*s).high_water);
-            if init > (*s).window_size.wrapping_sub((*s).high_water) {
-                init = (*s).window_size.wrapping_sub((*s).high_water);
-            }
-            crate::stdlib::memset(
-                (*s).window.offset((*s).high_water as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).high_water = (*s).high_water.wrapping_add(init);
-        }
+    if let Some((start, len)) = fill_window_zero_range(
+        (*s).high_water,
+        (*s).window_size,
+        (*s).strstart,
+        (*s).lookahead,
+    ) {
+        crate::stdlib::memset(
+            (*s).window.offset(start as isize) as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            len as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
+        );
+        (*s).high_water = start.wrapping_add(len);
     }
 }
 pub unsafe extern "C" fn deflateInit_(
@@ -3647,11 +3656,11 @@ mod tests {
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_pending_value, deflate_prime_bits_valid, deflate_should_return_buf_error,
         deflate_state_status_valid, deflate_version_matches, fill_window_available_space,
-        fill_window_cursor, fill_window_insert_after_slide, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
-        pending_output_len, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_min_size, stored_insert_after_input, symbol_triplet_cursors,
-        zlib_header,
+        fill_window_cursor, fill_window_insert_after_slide, fill_window_zero_range,
+        gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        normalize_deflate_params, pending_output_len, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_min_size, stored_insert_after_input,
+        symbol_triplet_cursors, zlib_header,
     };
 
     #[test]
@@ -3882,6 +3891,17 @@ mod tests {
             fill_window_cursor(crate::stdlib::uInt::MAX, 1),
             (crate::stdlib::uInt::MAX as crate::zutil_h::ulg) + 1,
         );
+    }
+
+    #[test]
+    fn fill_window_zero_range_preserves_high_water_initialization_bounds() {
+        assert_eq!(fill_window_zero_range(64, 64, 0, 0), None);
+        assert_eq!(fill_window_zero_range(20, 1024, 100, 0), Some((100, 258)));
+        assert_eq!(
+            fill_window_zero_range(1000, 1024, 1000, 0),
+            Some((1000, 24))
+        );
+        assert_eq!(fill_window_zero_range(300, 1024, 0, 0), None);
     }
 
     #[test]

@@ -321,6 +321,13 @@ fn gz_read_fetch_failed_without_buffer(
     fetch_result == -1 as ::core::ffi::c_int && have == 0
 }
 
+fn gz_cursor_advance(
+    pos: crate::stdlib::off64_t,
+    consumed: ::core::ffi::c_uint,
+) -> crate::stdlib::off64_t {
+    pos.wrapping_add(consumed as crate::stdlib::off64_t)
+}
+
 fn gz_read_progress(
     len: crate::stdlib::z_size_t,
     got: crate::stdlib::z_size_t,
@@ -334,7 +341,7 @@ fn gz_read_progress(
     (
         len.wrapping_sub(chunk_len as crate::stdlib::z_size_t),
         got.wrapping_add(chunk_len as crate::stdlib::z_size_t),
-        pos.wrapping_add(chunk_len as crate::stdlib::off64_t),
+        gz_cursor_advance(pos, chunk_len),
     )
 }
 
@@ -943,7 +950,7 @@ fn gz_skip_core(
 ) -> ::core::ffi::c_uint {
     let n = gz_skip_len(*have, *skip, intmax);
     *have = have.wrapping_sub(n);
-    *pos += n as crate::stdlib::off64_t;
+    *pos = gz_cursor_advance(*pos, n);
     *skip -= n as crate::stdlib::off64_t;
     n
 }
@@ -1013,7 +1020,7 @@ fn gzgets_progress(
     (
         have.wrapping_sub(copied),
         left.wrapping_sub(copied),
-        pos + copied as crate::stdlib::off64_t,
+        gz_cursor_advance(pos, copied),
     )
 }
 
@@ -1628,6 +1635,15 @@ mod tests {
         assert_eq!(
             gz_read_progress(0, crate::stdlib::z_size_t::MAX, 0, 1),
             (crate::stdlib::z_size_t::MAX, 0, 1)
+        );
+    }
+
+    #[test]
+    fn gz_cursor_advance_preserves_forward_wrapping() {
+        assert_eq!(gz_cursor_advance(42, 3), 45);
+        assert_eq!(
+            gz_cursor_advance(crate::stdlib::off64_t::MAX, 1),
+            crate::stdlib::off64_t::MIN
         );
     }
 
