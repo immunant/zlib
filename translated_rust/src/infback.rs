@@ -74,6 +74,22 @@ struct InflateBackStateConfig {
     wsize: ::core::ffi::c_uint,
 }
 
+// An inflateBack input callback is allowed to signal exhaustion with zero.
+// Any nonzero length, however, must come with a buffer before the decoder
+// advances and dereferences `next`.  Keep that callback contract check at
+// every refill site in the raw decoder rather than relying on a later byte
+// load to discover an invalid callback result.
+macro_rules! inflate_back_refill {
+    ($input:expr, $input_desc:expr, $next:ident) => {{
+        let have = $input.expect("non-null function pointer")($input_desc, &raw mut $next);
+        if have != 0 && $next.is_null() {
+            0
+        } else {
+            have
+        }
+    }};
+}
+
 // Keep the public initializer's validation order independent of its raw
 // stream and window bindings.  In particular, a bad version must win over
 // every other error, as it does in zlib.
@@ -829,7 +845,7 @@ pub unsafe extern "C" fn inflateBack(
                 } else {
                     while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
                         if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                            have = inflate_back_refill!(in_0, in_desc, next);
                             if have == 0 as ::core::ffi::c_uint {
                                 next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                 ret = crate::zlib_h::Z_BUF_ERROR;
@@ -859,7 +875,7 @@ pub unsafe extern "C" fn inflateBack(
                 inflate_back_drop_bits(&mut hold, &mut bits, padding);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
                     if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                        have = inflate_back_refill!(in_0, in_desc, next);
                         if have == 0 as ::core::ffi::c_uint {
                             next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                             ret = crate::zlib_h::Z_BUF_ERROR;
@@ -879,7 +895,7 @@ pub unsafe extern "C" fn inflateBack(
                     while state_ref.length != 0 as ::core::ffi::c_uint {
                         copy = state_ref.length;
                         if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                            have = inflate_back_refill!(in_0, in_desc, next);
                             if have == 0 as ::core::ffi::c_uint {
                                 next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                 ret = crate::zlib_h::Z_BUF_ERROR;
@@ -917,7 +933,7 @@ pub unsafe extern "C" fn inflateBack(
             16196 => {
                 while bits < 14 as ::core::ffi::c_int as ::core::ffi::c_uint {
                     if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                        have = inflate_back_refill!(in_0, in_desc, next);
                         if have == 0 as ::core::ffi::c_uint {
                             next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                             ret = crate::zlib_h::Z_BUF_ERROR;
@@ -944,10 +960,7 @@ pub unsafe extern "C" fn inflateBack(
                     while state_ref.have < state_ref.ncode {
                         while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
                             if have == 0 as ::core::ffi::c_uint {
-                                have = in_0.expect("non-null function pointer")(
-                                    in_desc,
-                                    &raw mut next,
-                                );
+                                have = inflate_back_refill!(in_0, in_desc, next);
                                 if have == 0 as ::core::ffi::c_uint {
                                     next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                     ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1005,10 +1018,7 @@ pub unsafe extern "C" fn inflateBack(
                                     break;
                                 }
                                 if have == 0 as ::core::ffi::c_uint {
-                                    have = in_0.expect("non-null function pointer")(
-                                        in_desc,
-                                        &raw mut next,
-                                    );
+                                    have = inflate_back_refill!(in_0, in_desc, next);
                                     if have == 0 as ::core::ffi::c_uint {
                                         next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                         ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1038,10 +1048,7 @@ pub unsafe extern "C" fn inflateBack(
                                     inflate_back_code_length_repeat(here.val);
                                 while bits < here.bits as ::core::ffi::c_uint + repeat_bits {
                                     if have == 0 as ::core::ffi::c_uint {
-                                        have = in_0.expect("non-null function pointer")(
-                                            in_desc,
-                                            &raw mut next,
-                                        );
+                                        have = inflate_back_refill!(in_0, in_desc, next);
                                         if have == 0 as ::core::ffi::c_uint {
                                             next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                             ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1209,7 +1216,7 @@ pub unsafe extern "C" fn inflateBack(
                     break;
                 }
                 if have == 0 as ::core::ffi::c_uint {
-                    have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                    have = inflate_back_refill!(in_0, in_desc, next);
                     if have == 0 as ::core::ffi::c_uint {
                         next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                         ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1237,7 +1244,7 @@ pub unsafe extern "C" fn inflateBack(
                         break;
                     }
                     if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                        have = inflate_back_refill!(in_0, in_desc, next);
                         if have == 0 as ::core::ffi::c_uint {
                             next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                             ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1289,7 +1296,7 @@ pub unsafe extern "C" fn inflateBack(
                 if state_ref.extra != 0 as ::core::ffi::c_uint {
                     while bits < state_ref.extra {
                         if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                            have = inflate_back_refill!(in_0, in_desc, next);
                             if have == 0 as ::core::ffi::c_uint {
                                 next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                 ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1315,7 +1322,7 @@ pub unsafe extern "C" fn inflateBack(
                         break;
                     }
                     if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                        have = inflate_back_refill!(in_0, in_desc, next);
                         if have == 0 as ::core::ffi::c_uint {
                             next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                             ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1343,7 +1350,7 @@ pub unsafe extern "C" fn inflateBack(
                             break;
                         }
                         if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                            have = inflate_back_refill!(in_0, in_desc, next);
                             if have == 0 as ::core::ffi::c_uint {
                                 next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                 ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1377,10 +1384,7 @@ pub unsafe extern "C" fn inflateBack(
                     if state_ref.extra != 0 as ::core::ffi::c_uint {
                         while bits < state_ref.extra {
                             if have == 0 as ::core::ffi::c_uint {
-                                have = in_0.expect("non-null function pointer")(
-                                    in_desc,
-                                    &raw mut next,
-                                );
+                                have = inflate_back_refill!(in_0, in_desc, next);
                                 if have == 0 as ::core::ffi::c_uint {
                                     next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                     ret = crate::zlib_h::Z_BUF_ERROR;
