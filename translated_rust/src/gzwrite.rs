@@ -68,14 +68,26 @@ fn gz_init_finish(state: &mut crate::gzguts_h::gz_state) {
 // error bridges are confined to the initialization boundary below.
 fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
+    let init = crate::src::gzlib::gz_init_plan(state);
+    let input_len = match init {
+        crate::src::gzlib::GzInitPlan::Direct { input_len }
+        | crate::src::gzlib::GzInitPlan::Deflate { input_len, .. } => input_len,
+    };
+    let deflate = match init {
+        crate::src::gzlib::GzInitPlan::Direct { .. } => None,
+        crate::src::gzlib::GzInitPlan::Deflate {
+            output_len,
+            level,
+            strategy,
+            ..
+        } => Some((output_len, level, strategy)),
+    };
     // SAFETY: the validated write state is uninitialized on entry. This
     // boundary allocates its gzip buffers, configures its deflater, and on
     // failure frees only allocations made here before updating that same
     // state's error record.
     unsafe {
-        state.in_0 = crate::stdlib::malloc(
-            (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-        ) as *mut ::core::ffi::c_uchar;
+        state.in_0 = crate::stdlib::malloc(input_len) as *mut ::core::ffi::c_uchar;
         if state.in_0.is_null() {
             crate::src::gzlib::gz_error(
                 state,
@@ -84,9 +96,8 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
-        if state.direct == 0 {
-            state.out = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
-                as *mut ::core::ffi::c_uchar;
+        if let Some((output_len, level, strategy)) = deflate {
+            state.out = crate::stdlib::malloc(output_len) as *mut ::core::ffi::c_uchar;
             if state.out.is_null() {
                 crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
                 crate::src::gzlib::gz_error(
@@ -99,11 +110,11 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             gz_init_prepare_deflater(state);
             ret = crate::src::deflate::deflateInit2_(
                 &mut state.strm,
-                state.level,
+                level,
                 8 as ::core::ffi::c_int,
                 15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
                 8 as ::core::ffi::c_int,
-                state.strategy,
+                strategy,
                 crate::zlib_h::ZLIB_VERSION.as_ptr(),
                 ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
             );

@@ -628,6 +628,37 @@ pub(crate) fn gz_write_needs_init(state: &crate::gzguts_h::gz_state) -> bool {
     state.size == 0
 }
 
+// Initialization either writes directly with only an input buffer, or needs
+// the output buffer and deflater configured from the current write settings.
+// Keep this state-only choice separate from the allocation boundary in
+// `gz_init()` so its resource ownership remains explicit there.
+#[derive(Clone, Copy)]
+pub(crate) enum GzInitPlan {
+    Direct {
+        input_len: crate::__stddef_size_t_h::size_t,
+    },
+    Deflate {
+        input_len: crate::__stddef_size_t_h::size_t,
+        output_len: crate::__stddef_size_t_h::size_t,
+        level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    },
+}
+
+pub(crate) fn gz_init_plan(state: &crate::gzguts_h::gz_state) -> GzInitPlan {
+    let input_len = (state.want << 1) as crate::__stddef_size_t_h::size_t;
+    if state.direct != 0 {
+        GzInitPlan::Direct { input_len }
+    } else {
+        GzInitPlan::Deflate {
+            input_len,
+            output_len: state.want as crate::__stddef_size_t_h::size_t,
+            level: state.level,
+            strategy: state.strategy,
+        }
+    }
+}
+
 // Choose the next state-only step for gz_write().  Initialization and sparse
 // seek handling can change the state, so the raw buffer adapter asks again
 // after each succeeds before it selects a copy or stream operation.
