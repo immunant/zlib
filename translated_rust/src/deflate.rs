@@ -419,38 +419,26 @@ fn slide_hash(
     true
 }
 
-unsafe extern "C" fn read_buf(
-    mut strm: crate::zlib_h::z_streamp,
-    mut buf: *mut crate::stdlib::Bytef,
-    mut size: ::core::ffi::c_uint,
+fn read_buf(
+    strm: &mut crate::zlib_h::z_stream,
+    wrap: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
 ) -> ::core::ffi::c_uint {
-    let mut len: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-    if len > size {
-        len = size;
+    let len = (strm.avail_in as usize).min(input.len()).min(output.len());
+    if len == 0 {
+        return 0;
     }
-    if len == 0 as ::core::ffi::c_uint {
-        return 0 as ::core::ffi::c_uint;
+    output[..len].copy_from_slice(&input[..len]);
+    if wrap == 1 as ::core::ffi::c_int {
+        strm.adler = crate::src::adler32::adler32(strm.adler, Some(&output[..len]));
+    } else if wrap == 2 as ::core::ffi::c_int {
+        strm.adler = crate::src::crc32::crc32(strm.adler, Some(&output[..len]));
     }
-    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    crate::stdlib::memcpy(
-        buf as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
-    );
-    if (*(*strm).state).wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32(
-            (*strm).adler,
-            Some(::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t)),
-        );
-    } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::crc32::crc32(
-            (*strm).adler,
-            Some(::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t)),
-        );
-    }
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
-    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
-    return len;
+    strm.avail_in = strm.avail_in.wrapping_sub(len as crate::stdlib::uInt);
+    strm.next_in = strm.next_in.wrapping_add(len);
+    strm.total_in = strm.total_in.wrapping_add(len as crate::stdlib::uLong);
+    len as ::core::ffi::c_uint
 }
 
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
@@ -503,13 +491,16 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
             break;
         }
-        n = read_buf(
-            (*s).strm,
-            (*s).window
+        let strm = &mut *(*s).strm;
+        let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+        let output = ::core::slice::from_raw_parts_mut(
+            (*s)
+                .window
                 .offset((*s).strstart as isize)
                 .offset((*s).lookahead as isize),
-            more,
+            more as usize,
         );
+        n = read_buf(strm, (*s).wrap, input, output);
         (*s).lookahead = (*s).lookahead.wrapping_add(n);
         if (*s).lookahead.wrapping_add((*s).insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -2763,7 +2754,10 @@ unsafe extern "C" fn deflate_stored(
             len = len.wrapping_sub(left);
         }
         if len != 0 {
-            read_buf((*s).strm, (*(*s).strm).next_out, len);
+            let strm = &mut *(*s).strm;
+            let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+            let output = ::core::slice::from_raw_parts_mut(strm.next_out, len as usize);
+            read_buf(strm, (*s).wrap, input, output);
             (*(*s).strm).next_out = (*(*s).strm).next_out.offset(len as isize);
             (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
             (*(*s).strm).total_out = (*(*s).strm)
@@ -2858,7 +2852,13 @@ unsafe extern "C" fn deflate_stored(
         have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
-        read_buf((*s).strm, (*s).window.offset((*s).strstart as isize), have);
+        let strm = &mut *(*s).strm;
+        let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+        let output = ::core::slice::from_raw_parts_mut(
+            (*s).window.offset((*s).strstart as isize),
+            have as usize,
+        );
+        read_buf(strm, (*s).wrap, input, output);
         (*s).strstart = (*s).strstart.wrapping_add(have);
         (*s).insert = (*s)
             .insert
