@@ -508,19 +508,6 @@ enum GzFreadOutcome {
     },
 }
 
-// A byte getter either consumes the checked buffered cursor immediately or
-// delegates one byte to the shared owned item-read transaction.  The latter
-// deliberately keeps its publication stage separate: `x.next` must be
-// rebuilt at the opaque-state boundary before an EAGAIN result is recorded.
-enum GzGetcOutcome {
-    Rejected,
-    Buffered(::core::ffi::c_int),
-    Read {
-        read_len: ::core::ffi::c_uint,
-        byte: ::core::ffi::c_uchar,
-    },
-}
-
 // Both exported byte-read variants enter through the same opaque-handle
 // boundary.  The request and result tags keep their distinct C return
 // policies out of the FFI wrappers without giving either pointer-free core
@@ -551,6 +538,17 @@ impl GzReadAbiResult {
     fn items(self) -> crate::stdlib::z_size_t {
         match self {
             Self::Items(result) => result,
+            Self::Bytes(_) | Self::Unget(_) => unreachable!(),
+        }
+    }
+
+    // `gzgetc()` is the one-byte form of the item-read transaction.  Keep
+    // its return conversion in this pointer-free result owner instead of
+    // reintroducing a second opaque-state adapter just to expose the byte.
+    fn getc(self, byte: ::core::ffi::c_uchar) -> ::core::ffi::c_int {
+        match self {
+            Self::Items(1) => byte as ::core::ffi::c_int,
+            Self::Items(_) => -1,
             Self::Bytes(_) | Self::Unget(_) => unreachable!(),
         }
     }
@@ -1952,142 +1950,19 @@ pub unsafe extern "C" fn gzfread_ffi(
     )
     .items()
 }
-fn gzgetc_owned(owner: &mut GzReadOwner) -> GzGetcOutcome {
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let request = GzReadRequest::new(owner.mode, owner.err, owner.again);
-    let mut error = crate::src::gzlib::GzErrorState {
-        message: &mut owner.message,
-        error: &mut owner.err,
-        buffered: &mut owner.have,
-        again: owner.again,
-        path: owner.path.as_deref(),
-    };
-    if !request.begin(&mut error) {
-        return GzGetcOutcome::Rejected;
-    }
-    drop(error);
-    if owner.have != 0 {
-        let Some((byte, next_cursor)) = (|| {
-            let buffer = owner.buffers.output.as_deref()?;
-            let cursor = owner.buffers.output_cursor()?;
-            let (byte, _) = cursor.buffered(buffer)?.consume_one()?;
-            Some((byte, cursor.advance(1)?))
-        })() else {
-            return GzGetcOutcome::Rejected;
-        };
-        owner.have = next_cursor.have();
-        owner.pos += 1;
-        owner.buffers.set_output_cursor(next_cursor);
-        return GzGetcOutcome::Buffered(byte as ::core::ffi::c_int);
-    }
-    let read_len = gzread_owner(owner, &mut buf);
-    GzGetcOutcome::Read {
-        read_len,
-        byte: buf[0],
-    }
-}
-
-// The owner imports all persistent read resources before the byte policy
-// runs.  This boundary alone republishes the public `gzFile_s::next` cursor;
-// the owner never stores or derives a raw ABI pointer.
-unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let Some(fd) = state.fd.take() else {
-        return -1;
-    };
-    let mut owner = GzReadOwner {
-        mode: state.mode,
-        fd,
-        path: state.path.take(),
-        want: state.want,
-        buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
-        direct: state.direct,
-        junk: state.junk,
-        how: state.how,
-        again: state.again,
-        eof: state.eof,
-        past: state.past,
-        skip: state.skip,
-        err: state.err,
-        message: state.msg.take(),
-        have: state.x.have,
-        pos: state.x.pos,
-        avail_in: state.strm.avail_in,
-        avail_out: state.strm.avail_out,
-        total_in: state.strm.total_in,
-        total_out: state.strm.total_out,
-    };
-    let outcome = gzgetc_owned(&mut owner);
-    let publish = |state: &mut crate::gzguts_h::gz_state, owner: &mut GzReadOwner| {
-        match owner
-            .buffers
-            .output_cursor()
-            .map(|cursor| (cursor.start(), cursor.have()))
-        {
-            Some((start, have)) if have == owner.have => owner
-                .buffers
-                .output
-                .as_deref_mut()
-                .and_then(|buffer| buffer.get_mut(start..))
-                .map(|buffer| {
-                    state.x.next = buffer.as_mut_ptr();
-                })
-                .is_some(),
-            None if owner.have == 0 => {
-                state.x.next = ::core::ptr::null_mut();
-                true
-            }
-            _ => false,
-        }
-    };
-    let result = match outcome {
-        GzGetcOutcome::Rejected => -1,
-        GzGetcOutcome::Buffered(result) => {
-            if publish(state, &mut owner) {
-                result
-            } else {
-                -1
-            }
-        }
-        GzGetcOutcome::Read {
-            read_len,
-            byte,
-        } => {
-            if publish(state, &mut owner) && gzfread_finish(&mut owner, read_len, 1) != 0 {
-                byte as ::core::ffi::c_int
-            } else {
-                -1
-            }
-        }
-    };
-    state.mode = owner.mode;
-    state.fd = Some(owner.fd);
-    state.path = owner.path;
-    state.want = owner.want;
-    state.buffers = owner.buffers;
-    state.direct = owner.direct;
-    state.junk = owner.junk;
-    state.how = owner.how;
-    state.again = owner.again;
-    state.eof = owner.eof;
-    state.past = owner.past;
-    state.skip = owner.skip;
-    state.err = owner.err;
-    state.msg = owner.message;
-    state.x.have = owner.have;
-    state.x.pos = owner.pos;
-    state.strm.avail_in = owner.avail_in;
-    state.strm.avail_out = owner.avail_out;
-    state.strm.total_in = owner.total_in;
-    state.strm.total_out = owner.total_out;
-    result
-}
 #[export_name = "gzgetc"]
 
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    gzgetc(state)
+    let mut byte = 0;
+    gzread_from_state(
+        state,
+        ::core::slice::from_mut(&mut byte),
+        GzReadAbiRequest::Items { size: 1, nitems: 1 },
+    )
+    .getc(byte)
 }
 #[export_name = "gzgetc_"]
 
@@ -2095,7 +1970,13 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    gzgetc(state)
+    let mut byte = 0;
+    gzread_from_state(
+        state,
+        ::core::slice::from_mut(&mut byte),
+        GzReadAbiRequest::Items { size: 1, nitems: 1 },
+    )
+    .getc(byte)
 }
 // The unget byte policy is wholly owned by the buffered read facade.  LOOK
 // classification and refills are requested through the supplied action
