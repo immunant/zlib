@@ -2016,6 +2016,18 @@ pub(crate) fn gz_with_owned_output_buffer<R>(
     Some(operation(&mut buffers.output))
 }
 
+// Read-side refills use the same owned allocation.  Keeping that borrow in
+// the registry means the gzip state machine need not recreate a mutable slice
+// from its C cursor merely to compact and refill the input buffer.
+pub(crate) fn gz_with_owned_input_buffer<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(&mut buffers.input))
+}
+
 // The close paths call this only after their last input/output use. Dropping
 // the registry entry releases both lazy arrays before the opaque state box.
 pub(crate) fn gz_release_owned_buffers(state: &crate::gzguts_h::gz_state) {

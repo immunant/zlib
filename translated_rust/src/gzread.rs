@@ -176,38 +176,34 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         requested: _,
     } = plan
     {
-        // `gz_look()` creates this fixed-size input allocation before
-        // `gz_avail()` can refill it. Bind it once, then keep compaction and
-        // the descriptor request slice-based.
-        let input = match ::core::ptr::NonNull::new(state.in_0) {
-            Some(input) => input,
-            None => return -1,
-        };
-        // SAFETY: the initialized gzip state owns exactly `size` input
-        // bytes at `in_0`. The planner above has already ensured that the
-        // buffered count fits this allocation.
-        let buffer =
-            unsafe { ::core::slice::from_raw_parts_mut(input.as_ptr(), state.size as usize) };
-        if buffered != 0 {
-            let cursor_at_start = state.strm.next_in == state.in_0;
-            if crate::src::gzlib::gz_avail_needs_compaction(buffered, cursor_at_start) {
-                let cursor = match ::core::ptr::NonNull::new(state.strm.next_in) {
-                    Some(cursor) => cursor,
-                    None => return -1,
-                };
-                let Some(range) = gz_buffered_input_range(
-                    input.as_ptr().addr(),
-                    cursor.as_ptr().addr(),
-                    buffered,
-                    buffer.len(),
-                )
-                else {
-                    return -1;
-                };
-                buffer.copy_within(range, 0);
+        // `gz_look()` publishes this fixed-size allocation in the owned
+        // buffer registry before `gz_avail()` can refill it. Borrow the Vec
+        // there instead of rebuilding a slice from `state.in_0`.
+        let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+        let refill = crate::src::gzlib::gz_with_owned_input_buffer(state_key, |buffer| {
+            if state.in_0 != buffer.as_mut_ptr() || state.size as usize != buffer.len() {
+                return None;
             }
-        }
-        let result = gz_load_slice(state, &mut buffer[buffered as usize..]);
+            if buffered != 0 {
+                let cursor_at_start = state.strm.next_in == state.in_0;
+                if crate::src::gzlib::gz_avail_needs_compaction(buffered, cursor_at_start) {
+                    let Some(range) = gz_buffered_input_range(
+                        buffer.as_ptr().addr(),
+                        state.strm.next_in.addr(),
+                        buffered,
+                        buffer.len(),
+                    )
+                    else {
+                        return None;
+                    };
+                    buffer.copy_within(range, 0);
+                }
+            }
+            Some(gz_load_slice(state, &mut buffer[buffered as usize..]))
+        });
+        let Some(Some(result)) = refill else {
+            return -1;
+        };
         got = result.received;
         if result.status == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
