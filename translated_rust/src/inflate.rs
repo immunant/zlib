@@ -1485,15 +1485,19 @@ pub fn inflate(
                                                                                         (*state).distcode = (*state).next as *const crate::src::inftrees::code;
                                                                                         (*state).lencode = (*state).distcode;
                                                                                         (*state).lenbits = 7 as ::core::ffi::c_uint;
-                                                                                        ret = crate::src::inftrees::inflate_table(
+                                                                                        ret = match inflate_build_dynamic_table(
+                                                                                            &mut *state,
                                                                                             crate::src::inftrees::CODES,
-                                                                                            &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
+                                                                                            0,
                                                                                             19 as ::core::ffi::c_uint,
-                                                                                            
-                                                                                            &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
-                                                                                            &raw mut (*state).lenbits,
-                                                                                            &raw mut (*state).work as *mut ::core::ffi::c_ushort,
-                                                                                        );
+                                                                                            7 as ::core::ffi::c_uint,
+                                                                                        ) {
+                                                                                            Ok(bits) => {
+                                                                                                (*state).lenbits = bits;
+                                                                                                0
+                                                                                            }
+                                                                                            Err(error) => error,
+                                                                                        };
                                                                                         if ret != 0
                                                                                         {
                                                                                             (*strm).msg = INFLATE_MSG_INVALID_CODE_LENGTHS.as_ptr()
@@ -1756,15 +1760,20 @@ pub fn inflate(
                                                                             (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                                                                             (*state).lencode = (*state).next as *const crate::src::inftrees::code;
                                                                             (*state).lenbits = 9 as ::core::ffi::c_uint;
-                                                                            ret = crate::src::inftrees::inflate_table(
+                                                                            let nlen = (*state).nlen;
+                                                                            ret = match inflate_build_dynamic_table(
+                                                                                &mut *state,
                                                                                 crate::src::inftrees::LENS,
-                                                                                &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
-                                                                                (*state).nlen,
-                                                                                
-                                                                                &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
-                                                                                &raw mut (*state).lenbits,
-                                                                                &raw mut (*state).work as *mut ::core::ffi::c_ushort,
-                                                                            );
+                                                                                0,
+                                                                                nlen,
+                                                                                9 as ::core::ffi::c_uint,
+                                                                            ) {
+                                                                                Ok(bits) => {
+                                                                                    (*state).lenbits = bits;
+                                                                                    0
+                                                                                }
+                                                                                Err(error) => error,
+                                                                            };
                                                                             if ret != 0 {
                                                                                 (*strm).msg = INFLATE_MSG_INVALID_LITERAL_LENGTHS.as_ptr()
                                                                                     as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
@@ -1773,22 +1782,20 @@ pub fn inflate(
                                                                             } else {
                                                                                 (*state).distcode = (*state).next as *const crate::src::inftrees::code;
                                                                                 (*state).distbits = 6 as ::core::ffi::c_uint;
-                                                                                ret = crate::src::inftrees::inflate_table(
+                                                                                let (nlen, ndist) = ((*state).nlen, (*state).ndist);
+                                                                                ret = match inflate_build_dynamic_table(
+                                                                                    &mut *state,
                                                                                     crate::src::inftrees::DISTS,
-                                                                                    // `nlen` is checked against the
-                                                                                    // literal/length-code limit before
-                                                                                    // reaching this state. Bind the
-                                                                                    // remaining fixed state array instead
-                                                                                    // of deriving its cursor with raw
-                                                                                    // pointer arithmetic.
-                                                                                    (&mut (*state).lens)[(*state).nlen as usize..]
-                                                                                        .as_mut_ptr(),
-                                                                                    (*state).ndist,
-                                                                                    
-                                                                                    &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
-                                                                                    &raw mut (*state).distbits,
-                                                                                    &raw mut (*state).work as *mut ::core::ffi::c_ushort,
-                                                                                );
+                                                                                    nlen as usize,
+                                                                                    ndist,
+                                                                                    6 as ::core::ffi::c_uint,
+                                                                                ) {
+                                                                                    Ok(bits) => {
+                                                                                        (*state).distbits = bits;
+                                                                                        0
+                                                                                    }
+                                                                                    Err(error) => error,
+                                                                                };
                                                                                 if ret != 0 {
                                                                                     (*strm).msg = INFLATE_MSG_INVALID_DISTANCES.as_ptr()
                                                                                         as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
@@ -3139,6 +3146,34 @@ fn inflate_codes_cursor_index(
         return None;
     }
     Some(offset / code_size)
+}
+
+// Dynamic table construction happens entirely within an inflater's fixed
+// `lens`, `codes`, and `work` arrays. Keep that path slice-bound: the raw
+// `inflate_table()` entry point is only needed for its C-facing ABI.
+fn inflate_build_dynamic_table(
+    state: &mut crate::src::inflate::inflate_state,
+    type_0: crate::src::inftrees::codetype,
+    lens_start: usize,
+    codes: ::core::ffi::c_uint,
+    mut bits: ::core::ffi::c_uint,
+) -> Result<::core::ffi::c_uint, ::core::ffi::c_int> {
+    let lens_end = lens_start.checked_add(codes as usize).ok_or(1)?;
+    let next = inflate_codes_cursor_index(
+        state.codes.len(),
+        ::core::mem::size_of::<crate::src::inftrees::code>(),
+        state.codes.as_ptr().addr(),
+        state.next.addr(),
+        true,
+    )
+    .ok_or(1)?;
+    let used = {
+        let lens = state.lens.get(lens_start..lens_end).ok_or(1)?;
+        let table = state.codes.get_mut(next..).ok_or(1)?;
+        crate::src::inftrees::inflate_table_bound(type_0, lens, codes, table, &mut bits, &mut state.work)?
+    };
+    state.next = state.codes.get_mut(next + used..).ok_or(1)?.as_mut_ptr();
+    Ok(bits)
 }
 
 // A live decoder uses either zlib's fixed tables or a bounded subrange of its
