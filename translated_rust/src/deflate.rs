@@ -2350,11 +2350,11 @@ struct GzipFixedHeader {
     extra_len: crate::stdlib::uInt,
 }
 
-/// Scalar gzip-header metadata retained for one `deflate()` dispatch.  The
-/// caller-owned payload cursors remain in the existing ABI snapshot and are
-/// lent only at the EXTRA, NAME, and COMMENT copy boundaries.
+/// Scalar gzip-header metadata retained for one `deflate()` dispatch. The
+/// ABI boundary creates it with the caller-owned payload views, so the
+/// compressor does not retain or dereference a header cursor.
 #[derive(Copy, Clone)]
-struct GzipHeaderFields {
+pub(crate) struct GzipHeaderFields {
     text: bool,
     hcrc: bool,
     has_extra: bool,
@@ -2371,6 +2371,7 @@ struct GzipHeaderFields {
 /// slices.  They must not be retained after the call: an application remains
 /// free to replace its header buffers between calls.
 pub struct DeflateGzipPayloads<'a> {
+    header: Option<GzipHeaderFields>,
     extra: Option<&'a [crate::stdlib::Byte]>,
     name: Option<&'a [u8]>,
     comment: Option<&'a [u8]>,
@@ -2379,18 +2380,21 @@ pub struct DeflateGzipPayloads<'a> {
 impl<'a> DeflateGzipPayloads<'a> {
     pub const fn empty() -> Self {
         Self {
+            header: None,
             extra: None,
             name: None,
             comment: None,
         }
     }
 
-    pub fn new(
+    pub(crate) fn new(
+        header: Option<GzipHeaderFields>,
         extra: Option<&'a [crate::stdlib::Byte]>,
         name: Option<&'a [u8]>,
         comment: Option<&'a [u8]>,
     ) -> Self {
         Self {
+            header,
             extra,
             name,
             comment,
@@ -2398,11 +2402,10 @@ impl<'a> DeflateGzipPayloads<'a> {
     }
 }
 
-// This expands only at existing ABI boundaries.  It lends the optional gzip
-// header payloads once per ordinary deflate invocation; the compressor itself
-// receives only safe views and never reconstructs slices from retained header
-// pointers.  The state pointer is checked before it is adopted so malformed
-// streams remain ordinary stream errors at the caller.
+// This expands only at existing ABI boundaries. It snapshots the optional gzip
+// header and lends its payloads once per ordinary deflate invocation; the
+// compressor itself receives only safe values and views. The state pointer is
+// checked before it is adopted so malformed streams remain stream errors.
 macro_rules! deflate_gzip_payloads_at_boundary {
     ($strm:expr $(,)?) => {{
         let strm = $strm;
@@ -2414,6 +2417,7 @@ macro_rules! deflate_gzip_payloads_at_boundary {
                 None => crate::src::deflate::DeflateGzipPayloads::empty(),
                 Some(header) => {
                     let header = &*header.as_ptr();
+                    let fields = crate::src::deflate::gzip_header_fields(header);
                     let extra = if header.extra.is_null() {
                         None
                     } else {
@@ -2430,7 +2434,12 @@ macro_rules! deflate_gzip_payloads_at_boundary {
                     } else {
                         Some(::std::ffi::CStr::from_ptr(header.comment.cast()).to_bytes_with_nul())
                     };
-                    crate::src::deflate::DeflateGzipPayloads::new(extra, name, comment)
+                    crate::src::deflate::DeflateGzipPayloads::new(
+                        Some(fields),
+                        extra,
+                        name,
+                        comment,
+                    )
                 }
             };
             Some(payloads)
@@ -2442,7 +2451,7 @@ pub(crate) use deflate_gzip_payloads_at_boundary;
 /// Reduce the copied caller-owned ABI header to fields used by the fixed
 /// header and HCRC transitions.  Payload pointer handling stays at its
 /// individual copy boundary.
-fn gzip_header_fields(header: &crate::zlib_h::gz_header) -> GzipHeaderFields {
+pub(crate) fn gzip_header_fields(header: &crate::zlib_h::gz_header) -> GzipHeaderFields {
     GzipHeaderFields {
         text: header.text != 0,
         hcrc: header.hcrc != 0,
@@ -3026,7 +3035,7 @@ pub fn deflate(
         // This transitional dispatcher still uses raw cursors in its legacy
         // compression loop. Validate the safe stream and adopt its raw state
         // once at entry rather than routing through the private state checker.
-        let (s, pending, avail_in, gzip_header_fields) = {
+        let (s, pending, avail_in) = {
             let stream = deflate_reborrow_mut(strm_ref);
             let state_ptr = stream.state as *mut crate::src::deflate::deflate_state;
             if state_ptr.is_null() {
@@ -3072,18 +3081,12 @@ pub fn deflate(
             old_flush = state.last_flush;
             state.last_flush = flush;
             let pending = state.pending != 0;
-            // The retained gzip header belongs to the caller, but this
-            // dispatch only needs a value snapshot of its scalar fields and
-            // payload cursors.  Taking that snapshot while the existing
-            // state-adoption boundary is active avoids repeatedly lending the
-            // header through each gzip state transition (and, importantly,
-            // does not retain a header reference across pending flushes).
-            let gzip_header_fields = match state.gzhead {
-                Some(header) => Some(gzip_header_fields(&*header.as_ptr())),
-                None => None,
-            };
-            (state, pending, stream.avail_in, gzip_header_fields)
+            (state, pending, stream.avail_in)
         };
+        // The FFI boundary reduced the caller-retained header to this scalar
+        // snapshot along with its bounded payload views. Do not observe that
+        // caller-owned pointer again in the ordinary compressor.
+        let gzip_header_fields = gzip_payloads.header;
         let Ok(input_len) = usize::try_from(avail_in) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
