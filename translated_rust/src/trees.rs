@@ -4379,15 +4379,14 @@ pub fn tr_flush_block_safe(
     sym_buf: &[crate::zutil_h::uchf],
     buf: Option<&[crate::stdlib::Bytef]>,
     last: ::core::ffi::c_int,
-    data_type: &mut ::core::ffi::c_int,
 ) {
     let stored_len = buf.map_or(0, |stored| stored.len() as crate::zutil_h::ulg);
     let mut opt_lenb: crate::zutil_h::ulg = 0;
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0;
     if s.level > 0 {
-        if *data_type == crate::zlib_h::Z_UNKNOWN {
-            *data_type = detect_data_type(&s.dyn_ltree);
+        if s.data_type == crate::zlib_h::Z_UNKNOWN {
+            s.data_type = detect_data_type(&s.dyn_ltree);
         }
         build_tree_safe(s, DynamicTree::Literal);
         build_tree_safe(s, DynamicTree::Distance);
@@ -4467,9 +4466,8 @@ pub unsafe extern "C" fn _tr_flush_block(
             stored_len as usize,
         ))
     };
-    let data_type = &mut (*s.strm).data_type;
     s.with_pending(|state, pending_buf| {
-        tr_flush_block_safe(state, pending_buf, &sym_buf, stored, last, data_type)
+        tr_flush_block_safe(state, pending_buf, &sym_buf, stored, last)
     });
 }
 #[export_name = "_tr_flush_block"]
