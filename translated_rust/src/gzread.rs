@@ -303,14 +303,17 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     };
 }
 
-// All callers have already checked and bound the gzip state.  Keep the fetch
-// state machine reference-bound; its raw I/O and buffer adapters remain in
-// `gz_look`, `gz_load`, and `gz_decomp`.
-unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// The fetch state machine only coordinates an already-bound gzip state. Raw
+// I/O and buffer access remain confined to `gz_look`, `gz_load`, and
+// `gz_decomp`.
+fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         match crate::src::gzlib::gz_fetch_plan(state) {
             crate::src::gzlib::GzFetchPlan::Look => {
-                if gz_look(state) == -1 as ::core::ffi::c_int {
+                // SAFETY: `state` is the validated read-state reference
+                // passed to this coordinator; `gz_look` owns its raw buffer
+                // and allocation boundary.
+                if unsafe { gz_look(state) } == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
                 if state.how == crate::gzguts_h::LOOK {
@@ -328,16 +331,22 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             crate::src::gzlib::GzFetchPlan::Gzip { output } => {
                 state.strm.avail_out = output as crate::stdlib::uInt;
                 state.strm.next_out = state.out;
-                if gz_decomp(state) == -1 as ::core::ffi::c_int {
+                // SAFETY: `state` remains the validated read-state reference;
+                // `gz_decomp` owns the inflater and output-buffer boundary.
+                if unsafe { gz_decomp(state) } == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
             crate::src::gzlib::GzFetchPlan::Corrupt => {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
-                );
+                // SAFETY: the validated state reference is also the state
+                // whose error ownership `gz_error` updates.
+                unsafe {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                }
                 return -1 as ::core::ffi::c_int;
             }
         }
