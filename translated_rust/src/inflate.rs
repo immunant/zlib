@@ -213,6 +213,27 @@ fn inflate_output_checksum(
     }
 }
 
+/// Decide and compute the checksum publication for ordinary inflate's exit.
+/// The decoder boundary owns the temporary output view; this core makes the
+/// wrapper bit and empty-output behavior explicit without consulting ABI
+/// state.
+fn inflate_exit_needs_checksum(wrap: ::core::ffi::c_int, output_len: usize) -> bool {
+    wrap & 4 as ::core::ffi::c_int != 0 && output_len != 0
+}
+
+fn inflate_exit_checksum(
+    wrap: ::core::ffi::c_int,
+    check: crate::stdlib::uLong,
+    flags: ::core::ffi::c_int,
+    output: &[u8],
+) -> Option<::core::ffi::c_ulong> {
+    if !inflate_exit_needs_checksum(wrap, output.len()) {
+        None
+    } else {
+        Some(inflate_output_checksum(check, flags, output))
+    }
+}
+
 /// Update the gzip-header CRC from an already-bounded byte span.  The
 /// transitional decoder owns any raw cursor lending; header parsing itself
 /// only carries this scalar checksum and a safe byte slice.
@@ -2976,17 +2997,20 @@ pub unsafe fn inflate(
         state_ref.total = state_ref
             .total
             .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
-        if state_ref.wrap & 4 as ::core::ffi::c_int != 0 && exit.output_used != 0 {
+        if inflate_exit_needs_checksum(state_ref.wrap, exit.output_used as usize) {
             let output = core::slice::from_raw_parts(
                 strm_ref.next_out.wrapping_sub(exit.output_used as usize),
                 exit.output_used as usize,
             );
-            state_ref.check = inflate_output_checksum(
+            if let Some(check) = inflate_exit_checksum(
+                state_ref.wrap,
                 state_ref.check as crate::stdlib::uLong,
                 state_ref.flags,
                 output,
-            );
-            strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+            ) {
+                state_ref.check = check;
+                strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+            }
         }
         strm_ref.data_type = exit.data_type;
     }
