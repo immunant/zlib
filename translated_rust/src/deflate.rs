@@ -545,13 +545,8 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
             break;
         }
-        n = read_buf(
-            (*s).strm,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize),
-            more,
-        );
+        let cursor = fill_window_cursor((*s).strstart, (*s).lookahead);
+        n = read_buf((*s).strm, (*s).window.wrapping_add(cursor as usize), more);
         (*s).lookahead = (*s).lookahead.wrapping_add(n);
         if (*s).lookahead.wrapping_add((*s).insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt

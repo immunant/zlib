@@ -154,6 +154,10 @@ fn gz_avail_refill_len(
     size.wrapping_sub(avail_in as ::core::ffi::c_uint)
 }
 
+fn gz_avail_should_compact(compact_input: bool, input_is_buffer_start: bool) -> bool {
+    compact_input && !input_is_buffer_start
+}
+
 fn gz_fread_request_len(
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
@@ -504,13 +508,11 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
         GzAvailAction::Error => return -1 as ::core::ffi::c_int,
         GzAvailAction::Done => return 0 as ::core::ffi::c_int,
         GzAvailAction::Refill { compact_input } => {
-            if compact_input {
-                let state_ref = &mut *state;
-                let p: *mut ::core::ffi::c_uchar = state_ref.in_0;
-                let q: *const ::core::ffi::c_uchar = state_ref.strm.next_in;
-                if q != p as *const ::core::ffi::c_uchar {
-                    core::ptr::copy_nonoverlapping(q, p, state_ref.strm.avail_in as usize);
-                }
+            let state_ref = &mut *state;
+            let p = state_ref.in_0;
+            let q = state_ref.strm.next_in;
+            if gz_avail_should_compact(compact_input, q == p) {
+                core::ptr::copy_nonoverlapping(q, p, state_ref.strm.avail_in as usize);
             }
             let (buf, len) = {
                 let state_ref = &*state;
@@ -1081,6 +1083,14 @@ mod tests {
             gz_avail_action(crate::zlib_h::Z_DATA_ERROR, 1, 4),
             GzAvailAction::Error
         );
+    }
+
+    #[test]
+    fn gz_avail_compacts_only_moved_refill_input() {
+        assert!(!gz_avail_should_compact(false, false));
+        assert!(!gz_avail_should_compact(false, true));
+        assert!(gz_avail_should_compact(true, false));
+        assert!(!gz_avail_should_compact(true, true));
     }
 
     #[test]

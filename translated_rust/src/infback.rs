@@ -97,6 +97,40 @@ fn inflate_back_stored_block_length(hold: ::core::ffi::c_ulong) -> Option<::core
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum InflateBackBlockKind {
+    Stored,
+    Fixed,
+    Dynamic,
+    Invalid,
+}
+
+struct InflateBackBlockHeader {
+    last: ::core::ffi::c_int,
+    kind: InflateBackBlockKind,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+}
+
+fn inflate_back_block_header(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+) -> InflateBackBlockHeader {
+    let kind = match (hold >> 1) & 3 {
+        0 => InflateBackBlockKind::Stored,
+        1 => InflateBackBlockKind::Fixed,
+        2 => InflateBackBlockKind::Dynamic,
+        _ => InflateBackBlockKind::Invalid,
+    };
+
+    InflateBackBlockHeader {
+        last: (hold & 1) as ::core::ffi::c_int,
+        kind,
+        hold: hold >> 3,
+        bits: bits.wrapping_sub(3),
+    }
+}
+
 pub unsafe fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -251,35 +285,28 @@ pub unsafe extern "C" fn inflateBack(
                         hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).last = (hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 1 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                        as ::core::ffi::c_int;
-                    hold >>= 1 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(1 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                    match hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 2 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                    {
-                        0 => {
+                    let header = inflate_back_block_header(hold, bits);
+                    (*state).last = header.last;
+                    hold = header.hold;
+                    bits = header.bits;
+                    match header.kind {
+                        InflateBackBlockKind::Stored => {
                             (*state).mode = crate::src::inflate::STORED;
                         }
-                        1 => {
+                        InflateBackBlockKind::Fixed => {
                             crate::src::inftrees::inflate_fixed(&mut *state);
                             (*state).mode = crate::src::inflate::LEN;
                         }
-                        2 => {
+                        InflateBackBlockKind::Dynamic => {
                             (*state).mode = crate::src::inflate::TABLE;
                         }
-                        _ => {
+                        InflateBackBlockKind::Invalid => {
                             (*strm).msg = b"invalid block type\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
                             (*state).mode = crate::src::inflate::BAD;
                         }
                     }
-                    hold >>= 2 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
                     continue;
                 }
             }
@@ -1050,8 +1077,9 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        inflate_back_init_metadata_is_valid, inflate_back_stored_block_length,
-        inflate_back_window_bits_are_valid, inflate_back_window_size,
+        inflate_back_block_header, inflate_back_init_metadata_is_valid,
+        inflate_back_stored_block_length, inflate_back_window_bits_are_valid,
+        inflate_back_window_size, InflateBackBlockKind,
     };
 
     #[test]
@@ -1105,5 +1133,37 @@ mod tests {
         assert_eq!(inflate_back_stored_block_length(0xedcb1234), Some(0x1234));
         assert_eq!(inflate_back_stored_block_length(0xffff0000), Some(0));
         assert_eq!(inflate_back_stored_block_length(0xedca1234), None);
+    }
+
+    #[test]
+    fn inflate_back_block_header_decodes_all_block_kinds() {
+        let stored = inflate_back_block_header(0b000, 3);
+        assert_eq!(stored.last, 0);
+        assert_eq!(stored.kind, InflateBackBlockKind::Stored);
+        assert_eq!(stored.hold, 0);
+        assert_eq!(stored.bits, 0);
+
+        let fixed = inflate_back_block_header(0b011, 3);
+        assert_eq!(fixed.last, 1);
+        assert_eq!(fixed.kind, InflateBackBlockKind::Fixed);
+
+        assert_eq!(
+            inflate_back_block_header(0b100, 3).kind,
+            InflateBackBlockKind::Dynamic
+        );
+        assert_eq!(
+            inflate_back_block_header(0b110, 3).kind,
+            InflateBackBlockKind::Invalid
+        );
+    }
+
+    #[test]
+    fn inflate_back_block_header_preserves_remaining_bits() {
+        let header = inflate_back_block_header(0b101_101, 11);
+
+        assert_eq!(header.last, 1);
+        assert_eq!(header.kind, InflateBackBlockKind::Dynamic);
+        assert_eq!(header.hold, 0b101);
+        assert_eq!(header.bits, 8);
     }
 }
