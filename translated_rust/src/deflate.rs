@@ -1344,7 +1344,7 @@ pub unsafe fn deflateInit2_(
         s.level = level;
         s.strategy = strategy;
         s.method = method as crate::stdlib::Byte;
-        deflateReset(strm)
+        deflate_reset_state(strm, s)
     }
 }
 #[export_name = "deflateInit2_"]
@@ -1643,14 +1643,14 @@ fn lm_init(s: &mut crate::src::deflate::deflate_state) {
     s.match_available = 0 as ::core::ffi::c_int;
     s.ins_h = 0 as crate::stdlib::uInt;
 }
-pub unsafe fn deflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    if !deflate_params_stream_is_valid(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let s = unsafe { &mut *strm.state };
-    if !deflate_params_state_is_valid(s) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
+/// Reset a stream after its state link has been validated and borrowed.
+///
+/// Initialization already owns both sides of this relationship, so it can
+/// reuse the reset behavior without another raw state-link traversal.
+fn deflate_reset_state(
+    strm: &mut crate::zlib_h::z_stream_s,
+    s: &mut crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
     strm.total_out = 0 as crate::stdlib::uLong;
     strm.total_in = strm.total_out;
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -1674,6 +1674,17 @@ pub unsafe fn deflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi:
     crate::src::trees::tr_init(s);
     lm_init(s);
     crate::zlib_h::Z_OK
+}
+
+pub unsafe fn deflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    if !deflate_params_stream_is_valid(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let s = unsafe { &mut *strm.state };
+    if !deflate_params_state_is_valid(s) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflate_reset_state(strm, s)
 }
 #[export_name = "deflateReset"]
 
