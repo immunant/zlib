@@ -3983,13 +3983,15 @@ fn deflate_stored(
         // stream adoption before the loop without changing when input is read.
         let mut used: ::core::ffi::c_uint = 0;
         let mut remaining_avail_in: crate::stdlib::uInt = 0;
+        let mut input_start: *mut crate::stdlib::Bytef = ::core::ptr::null_mut();
         let mut first_block = true;
         loop {
-            let (initial_avail_in, plan) = {
+            let (initial_avail_in, initial_input, plan) = {
                 let state = &mut *s;
                 let strm = &mut *state.strm;
                 (
                     strm.avail_in,
+                    strm.next_in,
                     stored_initial_block_plan(
                         state.pending_buf_size,
                         state.w_size,
@@ -4005,6 +4007,7 @@ fn deflate_stored(
             remaining_avail_in = initial_avail_in;
             if first_block {
                 used = initial_avail_in;
+                input_start = initial_input;
                 first_block = false;
             }
             let Some(plan) = plan else {
@@ -4107,19 +4110,17 @@ fn deflate_stored(
         used = stored_input_consumed(used, remaining_avail_in);
         if used != 0 {
             let state = &mut *s;
-            let strm = &mut *state.strm;
             let Ok(window_len) = usize::try_from(state.window_size) else {
                 return need_more;
             };
             let Ok(used_len) = usize::try_from(used) else {
                 return need_more;
             };
-            if state.window.is_null() || strm.next_in.is_null() {
+            if state.window.is_null() || input_start.is_null() {
                 return need_more;
             }
             let window = ::core::slice::from_raw_parts_mut(state.window, window_len);
-            let consumed =
-                ::core::slice::from_raw_parts(strm.next_in.wrapping_sub(used as usize), used_len);
+            let consumed = ::core::slice::from_raw_parts(input_start, used_len);
             if !update_stored_history_state(state, window, consumed) {
                 return need_more;
             }
