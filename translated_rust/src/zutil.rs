@@ -19,18 +19,31 @@ enum ZAllocation {
     Zeroed(Vec<ZAllocationByte>),
 }
 
-/// Records which half of an initializer's allocator pair was supplied by the
-/// caller.  This is deliberately pointer-free: future owned stream storage
-/// can opt in only for a fully default pair without comparing ABI callback
-/// pointers or treating a custom callback as a Rust allocator.
-pub(crate) type AllocatorProvenance = (bool, bool);
+/// Records how initialization completed an allocator callback pair.
+///
+/// This stays deliberately pointer-free: a future owned-storage facade can
+/// select only `DefaultPair` without comparing ABI callbacks or treating a
+/// caller callback as a Rust allocator. `Mixed` is distinct because zlib
+/// permits either callback to be supplied independently.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum AllocatorProvenance {
+    /// The state was not installed by an initializer that observed the ABI
+    /// allocator pair (for example, an empty value before initialization).
+    Unknown,
+    /// Both callbacks were absent and zlib installed its default pair.
+    DefaultPair,
+    /// At least one callback came from the caller; each flag says whether the
+    /// other half was filled with zlib's default callback.
+    Mixed {
+        default_zalloc: bool,
+        default_zfree: bool,
+    },
+}
 
-pub(crate) const UNKNOWN_ALLOCATOR_PROVENANCE: AllocatorProvenance = (false, false);
+pub(crate) const UNKNOWN_ALLOCATOR_PROVENANCE: AllocatorProvenance = AllocatorProvenance::Unknown;
 
-pub(crate) const fn allocator_pair_is_fully_default(
-    provenance: AllocatorProvenance,
-) -> bool {
-    provenance.0 && provenance.1
+pub(crate) const fn allocator_pair_is_fully_default(provenance: &AllocatorProvenance) -> bool {
+    matches!(provenance, AllocatorProvenance::DefaultPair)
 }
 #[no_mangle]
 
@@ -165,7 +178,14 @@ pub(crate) fn install_default_allocators(
     if zfree_defaulted {
         strm.zfree = Some(zcfree);
     }
-    (zalloc_defaulted, zfree_defaulted)
+    if zalloc_defaulted && zfree_defaulted {
+        AllocatorProvenance::DefaultPair
+    } else {
+        AllocatorProvenance::Mixed {
+            default_zalloc: zalloc_defaulted,
+            default_zfree: zfree_defaulted,
+        }
+    }
 }
 
 pub extern "C" fn zcalloc(

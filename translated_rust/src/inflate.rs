@@ -338,7 +338,7 @@ pub(crate) fn empty_inflate_state() -> inflate_state {
 fn copy_inflate_state(source: &inflate_state) -> inflate_state {
     inflate_state {
         strm: source.strm,
-        allocator_provenance: source.allocator_provenance,
+        allocator_provenance: source.allocator_provenance.clone(),
         mode: source.mode,
         last: source.last,
         wrap: source.wrap,
