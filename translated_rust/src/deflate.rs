@@ -4054,12 +4054,24 @@ fn tally_current_literal_state(
     Some(flush_now)
 }
 
-fn huff_tally_literal_state(
+/// Select the current literal for Huffman-only mode without borrowing the
+/// callback-owned symbol buffer.  The legacy adapter lends that buffer only
+/// after this window read has completed.
+fn huff_literal_plan_state(
     s: &mut crate::src::deflate::deflate_state,
     window: &[crate::stdlib::Byte],
+) -> Option<crate::stdlib::uInt> {
+    Some((*window.get(usize::try_from(s.strstart).ok()?)?).into())
+}
+
+/// Commit a previously selected Huffman-only literal.  Match state changes
+/// remain after the bounded tally, matching the original cursor ordering.
+fn huff_tally_literal_state(
+    s: &mut crate::src::deflate::deflate_state,
     symbols: &mut [crate::zutil_h::uch],
+    literal: crate::stdlib::uInt,
 ) -> Option<bool> {
-    let flush_now = tally_current_literal_state(s, window, symbols)?;
+    let flush_now = tally_symbol_state(s, symbols, 0, literal)?;
     s.match_length = 0;
     Some(flush_now)
 }
@@ -4298,17 +4310,12 @@ unsafe extern "C" fn deflate_huff(
                 break;
             }
         }
-        {
-            let state = &mut *s;
+        let state = &mut *s;
+        let literal = {
             let Ok(window_len) = usize::try_from(state.window_size) else {
                 return need_more;
             };
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
-            };
-            if (window_len != 0 && state.window.is_null())
-                || (symbol_len != 0 && state.sym_buf.is_null())
-            {
+            if window_len != 0 && state.window.is_null() {
                 return need_more;
             }
             let window = if window_len == 0 {
@@ -4316,12 +4323,24 @@ unsafe extern "C" fn deflate_huff(
             } else {
                 ::core::slice::from_raw_parts(state.window, window_len)
             };
+            let Some(literal) = huff_literal_plan_state(state, window) else {
+                return need_more;
+            };
+            literal
+        };
+        {
+            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                return need_more;
+            };
+            if symbol_len != 0 && state.sym_buf.is_null() {
+                return need_more;
+            }
             let symbols = if symbol_len == 0 {
                 &mut []
             } else {
                 ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
             };
-            let Some(flush_now) = huff_tally_literal_state(state, window, symbols) else {
+            let Some(flush_now) = huff_tally_literal_state(state, symbols, literal) else {
                 return need_more;
             };
             bflush = flush_now as ::core::ffi::c_int;
