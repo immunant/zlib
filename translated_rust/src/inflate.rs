@@ -3100,18 +3100,32 @@ pub fn inflateCopy(
     }
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if let Some(window_len) = plan.window_len {
-        window = Some((*source).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*source).opaque,
+        // The first allocation callback may have changed the source stream's
+        // callbacks or opaque value. Rebind it after that callback, then
+        // snapshot the next allocation request before invoking it.
+        let (zalloc, opaque) = {
+            let Some((source, _source_state)) = inflateStateCheck(source) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            (
+                source.zalloc.expect("non-null function pointer"),
+                source.opaque,
+            )
+        };
+        window = Some(zalloc).expect("non-null function pointer")(
+            opaque,
             window_len as crate::stdlib::uInt,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
         if window.is_null() {
-            Some((*source).zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                (*source).opaque,
-                copy as crate::stdlib::voidpf,
-            );
+            // Match zlib's post-callback free lookup: the failed allocation
+            // itself may have replaced the source release callback or opaque
+            // value.
+            let Some((source, _source_state)) = inflateStateCheck(source) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            Some(source.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(source.opaque, copy as crate::stdlib::voidpf);
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
