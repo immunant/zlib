@@ -91,6 +91,20 @@ fn append_input_byte(
     )
 }
 
+fn refill_input_byte(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    input_remaining: crate::stdlib::uInt,
+    byte: ::core::ffi::c_uchar,
+) -> (
+    ::core::ffi::c_ulong,
+    ::core::ffi::c_uint,
+    crate::stdlib::uInt,
+) {
+    let (hold, bits) = append_input_byte(hold, bits, byte);
+    (hold, bits, input_remaining_after_read(input_remaining))
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct FastCodeEntry {
     op: ::core::ffi::c_uint,
@@ -505,8 +519,8 @@ pub unsafe extern "C" fn inflate_fast(
         for _ in 0..fast_decode_prefetch_byte_count(bits) {
             let input_byte = in_0;
             in_0 = in_0.wrapping_add(1);
-            input_remaining = input_remaining_after_read(input_remaining);
-            (hold, bits) = append_input_byte(hold, bits, *input_byte);
+            (hold, bits, input_remaining) =
+                refill_input_byte(hold, bits, input_remaining, *input_byte);
         }
         here = lcode.wrapping_add(table_index(hold, lmask));
         loop {
@@ -530,16 +544,16 @@ pub unsafe extern "C" fn inflate_fast(
                         if fast_length_extra_bits_need_input(bits, extra_bits) {
                             let c2rust_fresh3 = in_0;
                             in_0 = in_0.wrapping_add(1);
-                            input_remaining = input_remaining_after_read(input_remaining);
-                            (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh3);
+                            (hold, bits, input_remaining) =
+                                refill_input_byte(hold, bits, input_remaining, *c2rust_fresh3);
                         }
                         (len, hold, bits) = add_and_consume_extra_bits(len, hold, bits, extra_bits);
                     }
                     for _ in 0..fast_decode_prefetch_byte_count(bits) {
                         let input_byte = in_0;
                         in_0 = in_0.wrapping_add(1);
-                        input_remaining = input_remaining_after_read(input_remaining);
-                        (hold, bits) = append_input_byte(hold, bits, *input_byte);
+                        (hold, bits, input_remaining) =
+                            refill_input_byte(hold, bits, input_remaining, *input_byte);
                     }
                     here = dcode.wrapping_add(table_index(hold, dmask));
                     c2rust_current_block_141 = 3217834059723038609;
@@ -571,8 +585,8 @@ pub unsafe extern "C" fn inflate_fast(
                             for _ in 0..input_bytes_needed(bits, extra_bits) {
                                 let c2rust_fresh6 = in_0;
                                 in_0 = in_0.wrapping_add(1);
-                                input_remaining = input_remaining_after_read(input_remaining);
-                                (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh6);
+                                (hold, bits, input_remaining) =
+                                    refill_input_byte(hold, bits, input_remaining, *c2rust_fresh6);
                             }
                             let distance =
                                 finish_fast_distance(dist, hold, bits, extra_bits, output_produced);
@@ -797,11 +811,11 @@ mod tests {
         fast_length_extra_bits_need_input, fast_litlen_action, fast_match_copy_layout,
         fast_match_uses_window, fast_window_copy_plan, fast_window_distance_is_invalid,
         finish_fast_distance, input_bytes_needed, input_remaining_after_read, low_bits,
-        output_cursor_after_write, subtable_index, table_index, trailing_match_copy_byte_count,
-        trailing_match_copy_needs_second_byte, unread_input_state, validate_fast_window_distance,
-        FastCodeEntry, FastDecodeError, FastDecodeFailure, FastDistAction, FastDistance,
-        FastDistanceSource, FastLitLenAction, FastMatchCopyLayout, FastWindowContinuationSource,
-        FastWindowCopyPlan, FastWindowDistance,
+        output_cursor_after_write, refill_input_byte, subtable_index, table_index,
+        trailing_match_copy_byte_count, trailing_match_copy_needs_second_byte, unread_input_state,
+        validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDecodeFailure,
+        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
+        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -990,6 +1004,15 @@ mod tests {
     #[test]
     fn append_input_byte_preserves_existing_bits() {
         assert_eq!(append_input_byte(0b101, 3, 0b11), (0b1_1101, 11));
+    }
+
+    #[test]
+    fn refill_input_byte_updates_bit_buffer_and_remaining_input() {
+        assert_eq!(refill_input_byte(0b101, 3, 4, 0b11), (0b1_1101, 11, 3));
+        assert_eq!(
+            refill_input_byte(0, 0, 0, 0xab),
+            (0xab, 8, ::core::ffi::c_uint::MAX)
+        );
     }
 
     #[test]

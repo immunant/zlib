@@ -730,13 +730,31 @@ struct GzCompDirectWriteProgress {
     cursor_advance: usize,
 }
 
+struct GzCompWriteProgress {
+    remaining: crate::stdlib::uInt,
+    cursor_advance: usize,
+}
+
+fn gz_comp_write_progress(
+    available: crate::stdlib::uInt,
+    consumed: crate::stdlib::uInt,
+    cursor_advance: usize,
+) -> GzCompWriteProgress {
+    GzCompWriteProgress {
+        remaining: available.wrapping_sub(consumed),
+        cursor_advance,
+    }
+}
+
 fn gz_comp_direct_write_progress(
     avail_in: crate::stdlib::uInt,
     written: ::core::ffi::c_int,
 ) -> GzCompDirectWriteProgress {
+    let progress =
+        gz_comp_write_progress(avail_in, written as crate::stdlib::uInt, written as usize);
     GzCompDirectWriteProgress {
-        remaining_input: avail_in.wrapping_sub(written as crate::stdlib::uInt),
-        cursor_advance: written as usize,
+        remaining_input: progress.remaining,
+        cursor_advance: progress.cursor_advance,
     }
 }
 
@@ -769,9 +787,11 @@ fn gz_comp_output_write_progress(
     pending: crate::stdlib::uInt,
     written: ::core::ffi::c_int,
 ) -> GzCompOutputWriteProgress {
+    let progress =
+        gz_comp_write_progress(pending, written as crate::stdlib::uInt, written as usize);
     GzCompOutputWriteProgress {
-        remaining_pending: gz_comp_pending_after_write(pending, written),
-        cursor_advance: written as usize,
+        remaining_pending: progress.remaining,
+        cursor_advance: progress.cursor_advance,
     }
 }
 
@@ -832,7 +852,7 @@ fn gz_comp_pending_after_write(
     pending: crate::stdlib::uInt,
     written: ::core::ffi::c_int,
 ) -> crate::stdlib::uInt {
-    pending.wrapping_sub(written as crate::stdlib::uInt)
+    gz_comp_write_progress(pending, written as crate::stdlib::uInt, written as usize).remaining
 }
 
 fn gz_comp_write_failed(written: ::core::ffi::c_int) -> bool {
@@ -1658,10 +1678,10 @@ mod tests {
         gz_comp_output_write_chunk_len, gz_comp_output_write_progress, gz_comp_output_write_result,
         gz_comp_pending_after_write, gz_comp_reset_action, gz_comp_reset_after_flush,
         gz_comp_reset_value, gz_comp_skips_empty_flush, gz_comp_write_again,
-        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result,
-        gz_has_pending_input, gz_has_pending_skip, gz_init_allocation_plan, gz_init_deflate_failed,
-        gz_init_mode, gz_init_stream_defaults, gz_write_advanced_pos,
-        gz_write_apply_buffered_progress, gz_write_apply_chunk_progress,
+        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
+        gz_comp_write_progress, gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip,
+        gz_init_allocation_plan, gz_init_deflate_failed, gz_init_mode, gz_init_stream_defaults,
+        gz_write_advanced_pos, gz_write_apply_buffered_progress, gz_write_apply_chunk_progress,
         gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_input_action,
         gz_write_buffered_progress, gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed,
         gz_write_direct_action, gz_write_errno_is_retryable, gz_write_error_result,
@@ -2426,6 +2446,14 @@ mod tests {
     fn gz_comp_write_chunk_len_caps_lengths_above_limit() {
         assert_eq!(gz_comp_write_chunk_len(4097, 4096), 4096);
         assert_eq!(gz_comp_write_chunk_len(usize::MAX, 4096), 4096);
+    }
+
+    #[test]
+    fn gz_comp_write_progress_preserves_wrapping_accounting_and_cursor() {
+        let progress = gz_comp_write_progress(0, 1, 24);
+
+        assert_eq!(progress.remaining, crate::stdlib::uInt::MAX);
+        assert_eq!(progress.cursor_advance, 24);
     }
 
     #[test]
