@@ -512,41 +512,40 @@ pub unsafe extern "C" fn gzseek_ffi(
 ) -> crate::stdlib::off_t {
     gzseek(file, offset, whence)
 }
-pub unsafe extern "C" fn gztell64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as crate::stdlib::off64_t;
+/// Return the logical gzip position once the boundary has validated the
+/// opaque handle.  A read stream with `past` set deliberately ignores a
+/// previously scheduled skip, matching zlib's EOF-position semantics.
+fn gztell64_state(
+    mode: ::core::ffi::c_int,
+    pos: crate::stdlib::off64_t,
+    past: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+) -> Option<crate::stdlib::off64_t> {
+    if mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE {
+        return None;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return -1 as crate::stdlib::off64_t;
-    }
-    return (*state).x.pos
-        + (if (*state).past != 0 {
-            0 as crate::stdlib::off64_t
-        } else {
-            (*state).skip
-        });
+    Some(pos + if past != 0 { 0 } else { skip })
 }
 #[export_name = "gztell64"]
 
 pub unsafe extern "C" fn gztell64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    gztell64(file)
-}
-pub unsafe extern "C" fn gztell(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gztell64(file);
-    return if ret == ret {
-        ret
-    } else {
-        -1 as crate::stdlib::off_t
-    };
+    if file.is_null() {
+        return -1;
+    }
+    let state = &*(file as crate::gzguts_h::gz_statep);
+    gztell64_state(state.mode, state.x.pos, state.past, state.skip).unwrap_or(-1)
 }
 #[export_name = "gztell"]
 
 pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gztell(file)
+    if file.is_null() {
+        return -1;
+    }
+    let state = &*(file as crate::gzguts_h::gz_statep);
+    match gztell64_state(state.mode, state.x.pos, state.past, state.skip) {
+        Some(ret) if ret == ret => ret,
+        _ => -1,
+    }
 }
 pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
     let mut offset: crate::stdlib::off64_t = 0;
