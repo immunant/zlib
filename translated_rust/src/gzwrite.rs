@@ -317,10 +317,14 @@ unsafe extern "C" fn gz_comp(
         }
         return 0 as ::core::ffi::c_int;
     }
-    if (*state).reset != 0 {
-        if !gz_comp_needs_reset((*strm).avail_in, flush) {
-            return 0 as ::core::ffi::c_int;
-        }
+    let reset = (*state).reset;
+    if reset != 0
+        && (*strm).avail_in == 0 as crate::stdlib::uInt
+        && flush == crate::zlib_h::Z_NO_FLUSH
+    {
+        return 0 as ::core::ffi::c_int;
+    }
+    if reset != 0 {
         crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
         (*state).reset = 0 as ::core::ffi::c_int;
     }

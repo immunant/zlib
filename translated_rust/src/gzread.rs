@@ -209,6 +209,10 @@ fn gz_read_should_continue(len: crate::stdlib::z_size_t, err: ::core::ffi::c_int
     len != 0 && err == 0
 }
 
+fn gz_read_marks_past_eof(len: crate::stdlib::z_size_t, eof: ::core::ffi::c_int) -> bool {
+    len != 0 && eof != 0
+}
+
 fn gz_direct_needs_look(
     mode: ::core::ffi::c_int,
     how: ::core::ffi::c_int,
@@ -1269,6 +1273,13 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_marks_past_eof_only_for_unfilled_eof_requests() {
+        assert!(gz_read_marks_past_eof(1, 1));
+        assert!(!gz_read_marks_past_eof(0, 1));
+        assert!(!gz_read_marks_past_eof(1, 0));
+    }
+
+    #[test]
     fn gzclose_r_result_preserves_buffer_error_on_clean_close() {
         assert_eq!(
             gzclose_r_result(crate::zlib_h::Z_BUF_ERROR, 0),
@@ -1359,7 +1370,7 @@ unsafe extern "C" fn gz_read(
             break;
         }
     }
-    if len != 0 && (*state).eof != 0 {
+    if gz_read_marks_past_eof(len, (*state).eof) {
         (*state).past = 1 as ::core::ffi::c_int;
     }
     return got;

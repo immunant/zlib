@@ -446,6 +446,17 @@ fn gz_open_offset_plan(mode: ::core::ffi::c_int) -> Option<GzOpenOffsetPlan> {
     }
 }
 
+fn gz_open_recorded_offset(
+    record_offset: bool,
+    current_offset: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    if record_offset {
+        current_offset
+    } else {
+        0
+    }
+}
+
 fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::stdlib::off64_t) {
     gz_apply_post_open_metadata(state, current_offset);
     gz_reset_state(state);
@@ -528,11 +539,7 @@ unsafe extern "C" fn gz_open(
             let offset =
                 crate::stdlib::lseek64((*state).fd, 0 as crate::stdlib::__off64_t, plan.whence)
                     as crate::stdlib::off64_t;
-            if plan.record_offset {
-                offset
-            } else {
-                0
-            }
+            gz_open_recorded_offset(plan.record_offset, offset)
         }
         None => 0,
     };
@@ -1026,7 +1033,8 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_is_read_or_write_mode, gz_open_offset_plan, gz_parse_open_mode,
+        gz_clear_read_flags, gz_is_read_or_write_mode, gz_open_offset_plan,
+        gz_open_recorded_offset, gz_parse_open_mode,
         gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
         gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
         gz_legacy_offset_result,
@@ -1568,5 +1576,11 @@ mod tests {
     #[test]
     fn gz_open_offset_plan_skips_seeking_for_write_mode() {
         assert_eq!(gz_open_offset_plan(crate::gzguts_h::GZ_WRITE), None);
+    }
+
+    #[test]
+    fn gz_open_recorded_offset_keeps_only_requested_offsets() {
+        assert_eq!(gz_open_recorded_offset(true, 37), 37);
+        assert_eq!(gz_open_recorded_offset(false, 37), 0);
     }
 }
