@@ -3081,6 +3081,17 @@ fn longest_match_clamp_length(
     }
 }
 
+fn deflate_fast_match_codes(
+    match_length: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    match_start: crate::stdlib::uInt,
+) -> (crate::zutil_h::uch, crate::zutil_h::ush) {
+    (
+        match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch,
+        strstart.wrapping_sub(match_start) as crate::zutil_h::ush,
+    )
+}
+
 unsafe fn longest_match(
     mut s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
@@ -3544,10 +3555,8 @@ unsafe extern "C" fn deflate_fast(
             (*s).match_length = longest_match(s, hash_head);
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let mut len: crate::zutil_h::uch =
-                (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-            let mut dist: crate::zutil_h::ush =
-                (*s).strstart.wrapping_sub((*s).match_start) as crate::zutil_h::ush;
+            let (len, mut dist) =
+                deflate_fast_match_codes((*s).match_length, (*s).strstart, (*s).match_start);
             let c2rust_fresh47 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh47 as isize) =
@@ -4356,7 +4365,7 @@ mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
-        deflate_dictionary_state_after_load, deflate_fast_match_progress,
+        deflate_dictionary_state_after_load, deflate_fast_match_codes, deflate_fast_match_progress,
         deflate_fast_should_insert_match, deflate_final_flush_action,
         deflate_flush_block_state_after_output, deflate_flush_rank, deflate_huff_literal_progress,
         deflate_insert_after_block, deflate_literal_state_after_emit, deflate_literal_tally_plan,
@@ -5418,6 +5427,15 @@ mod tests {
         assert_eq!(fill_window_hash_update(0x12, 0xab, 5, 0xff), 0xeb);
         assert_eq!(fill_window_hash_update(0xff, 0x34, 8, 0x7fff), 0x7f34);
         assert_eq!(fill_window_hash_update(0x1234, 0xffff, 4, 0), 0);
+    }
+
+    #[test]
+    fn deflate_fast_match_codes_preserve_wrapping_and_narrowing() {
+        assert_eq!(deflate_fast_match_codes(258, 1_000, 1), (255, 999));
+        assert_eq!(
+            deflate_fast_match_codes(2, 0, 1),
+            (crate::zutil_h::uch::MAX, crate::zutil_h::ush::MAX),
+        );
     }
 
     #[test]

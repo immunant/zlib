@@ -180,6 +180,10 @@ fn gz_load_max_read_len() -> ::core::ffi::c_uint {
     (1 as ::core::ffi::c_uint) << (::core::ffi::c_uint::BITS - 2)
 }
 
+fn gz_load_reset_again(again: &mut ::core::ffi::c_int) {
+    *again = 0;
+}
+
 fn gz_load_step(
     eof: &mut ::core::ffi::c_int,
     again: &mut ::core::ffi::c_int,
@@ -751,7 +755,7 @@ unsafe fn gz_load(
 ) -> GzLoadResult {
     let max = gz_load_max_read_len();
     let mut have = 0 as ::core::ffi::c_uint;
-    state.again = 0 as ::core::ffi::c_int;
+    gz_load_reset_again(&mut state.again);
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     loop {
         let get = gz_load_read_len(len, have, max);
@@ -1596,6 +1600,17 @@ mod tests {
             gz_load_read_result(::core::ffi::c_int::MAX, 0),
             Ok(::core::ffi::c_int::MAX as ::core::ffi::c_uint),
         );
+    }
+
+    #[test]
+    fn gz_load_reset_again_clears_retry_state_idempotently() {
+        let mut again = -1;
+
+        gz_load_reset_again(&mut again);
+        assert_eq!(again, 0);
+
+        gz_load_reset_again(&mut again);
+        assert_eq!(again, 0);
     }
 
     #[test]

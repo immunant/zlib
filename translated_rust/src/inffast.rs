@@ -292,6 +292,20 @@ fn validate_fast_window_distance(
     }
 }
 
+fn fast_window_distance_back(
+    distance: ::core::ffi::c_uint,
+    output_produced: crate::stdlib::uInt,
+    window_available: ::core::ffi::c_uint,
+    sane: bool,
+) -> Result<::core::ffi::c_uint, FastDecodeFailure> {
+    match validate_fast_window_distance(distance, output_produced, window_available, sane) {
+        FastWindowDistance::Valid { distance_back } => Ok(distance_back),
+        FastWindowDistance::Invalid => {
+            Err(fast_decode_failure(FastDecodeError::DistanceTooFarBack))
+        }
+    }
+}
+
 fn fast_match_uses_window(
     distance: ::core::ffi::c_uint,
     output_produced: crate::stdlib::uInt,
@@ -668,16 +682,15 @@ pub unsafe extern "C" fn inflate_fast(
                         }
                     }
                     _ => {
-                        let distance_back = match validate_fast_window_distance(
+                        let distance_back = match fast_window_distance_back(
                             dist,
                             output_produced,
                             whave,
                             state.sane != 0,
                         ) {
-                            FastWindowDistance::Valid { distance_back } => distance_back,
-                            FastWindowDistance::Invalid => {
-                                pending_failure =
-                                    Some(fast_decode_failure(FastDecodeError::DistanceTooFarBack));
+                            Ok(distance_back) => distance_back,
+                            Err(failure) => {
+                                pending_failure = Some(failure);
                                 break;
                             }
                         };
@@ -817,14 +830,14 @@ mod tests {
         fast_code_entry, fast_decode_error_message, fast_decode_failure,
         fast_decode_needs_prefetch, fast_decode_prefetch_byte_count, fast_dist_action,
         fast_length_extra_bits_need_input, fast_litlen_action, fast_match_copy_layout,
-        fast_match_uses_window, fast_window_copy_plan, fast_window_distance_is_invalid,
-        finish_fast_distance, input_bytes_needed, input_remaining_after_read, low_bits,
-        output_cursor_after_write, output_produced_at_fast_path_start, refill_input_byte,
-        subtable_index, table_index, trailing_match_copy_byte_count,
-        trailing_match_copy_needs_second_byte, unread_input_state, validate_fast_window_distance,
-        FastCodeEntry, FastDecodeError, FastDecodeFailure, FastDistAction, FastDistance,
-        FastDistanceSource, FastLitLenAction, FastMatchCopyLayout, FastWindowContinuationSource,
-        FastWindowCopyPlan, FastWindowDistance,
+        fast_match_uses_window, fast_window_copy_plan, fast_window_distance_back,
+        fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
+        input_remaining_after_read, low_bits, output_cursor_after_write,
+        output_produced_at_fast_path_start, refill_input_byte, subtable_index, table_index,
+        trailing_match_copy_byte_count, trailing_match_copy_needs_second_byte, unread_input_state,
+        validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDecodeFailure,
+        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
+        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -1106,6 +1119,16 @@ mod tests {
     fn input_remaining_after_read_preserves_wrapping_decrement() {
         assert_eq!(input_remaining_after_read(6), 5);
         assert_eq!(input_remaining_after_read(0), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn fast_window_distance_back_returns_distance_or_decode_failure() {
+        assert_eq!(fast_window_distance_back(12, 7, 5, true), Ok(5));
+        assert_eq!(
+            fast_window_distance_back(13, 7, 5, true),
+            Err(fast_decode_failure(FastDecodeError::DistanceTooFarBack))
+        );
+        assert_eq!(fast_window_distance_back(13, 7, 5, false), Ok(6));
     }
 
     #[test]
