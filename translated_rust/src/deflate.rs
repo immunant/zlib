@@ -1400,6 +1400,19 @@ fn deflate_state_check_references(
     }
 }
 
+unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    if strm.is_null() {
+        return 1;
+    }
+    let stream = &*strm;
+    let state = stream.state as *mut crate::src::deflate::deflate_state;
+    if state.is_null() {
+        return 1;
+    }
+    let state = &*state;
+    deflate_state_check_references(stream, state, state.strm == strm)
+}
+
 fn deflate_reset_status_and_adler(
     wrap: ::core::ffi::c_int,
 ) -> (::core::ffi::c_int, crate::stdlib::uLong) {
@@ -1452,19 +1465,6 @@ fn deflate_dictionary_state_after_load(
         previous_match_length,
         0,
     )
-}
-
-unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return 1;
-    }
-    let stream = &*strm;
-    let state = stream.state as *mut crate::src::deflate::deflate_state;
-    if state.is_null() {
-        return 1;
-    }
-    let state = &*state;
-    deflate_state_check_references(stream, state, state.strm == strm)
 }
 
 macro_rules! deflate_state_check_at_ffi_boundary {
