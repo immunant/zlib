@@ -692,6 +692,39 @@ struct InflateWindowUpdate {
     whave: ::core::ffi::c_uint,
 }
 
+/// The complete scalar admission record for the transitional history-window
+/// boundary.  In particular, a missing allocation is only compatible with
+/// the pre-allocation `wsize == 0` state.  Keeping that relationship out of
+/// the raw callback/slice bridge prevents a malformed state from allocating
+/// one span and then lending a differently sized prefix of it.
+#[derive(Copy, Clone)]
+struct InflateWindowBoundaryPlan {
+    window_len: usize,
+    copy_len: usize,
+    allocate: bool,
+}
+
+fn inflate_window_boundary_plan(
+    window_is_null: bool,
+    wbits: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+    copy: ::core::ffi::c_uint,
+) -> Option<InflateWindowBoundaryPlan> {
+    let window_len = if window_is_null {
+        // A nonzero compatibility size promises that a matching allocation
+        // has already been published.  Do not replace it with a fresh,
+        // differently sized allocation when that promise is broken.
+        (wsize == 0).then(|| inflate_window_len(wbits, 0))??
+    } else {
+        inflate_window_len(wbits, wsize)?
+    };
+    Some(InflateWindowBoundaryPlan {
+        window_len,
+        copy_len: usize::try_from(copy).ok()?,
+        allocate: window_is_null,
+    })
+}
+
 /// Update the circular history window after a decoder call. Allocation and
 /// ABI-owned buffer lending stay at the codec boundary; this core owns the
 /// window sizing, cursor planning, and bounded copies, returning the scalar
@@ -1014,11 +1047,13 @@ unsafe fn updatewindow(
     // The legacy decoder already validated and adopted these records at its
     // boundary.  This helper is still unsafe because it invokes the caller
     // allocator and lends the ABI-owned window/output spans below.
-    if state.window.is_null() {
-        let Some(window_len) = inflate_window_len(state.wbits, 0) else {
-            return 1 as ::core::ffi::c_int;
-        };
-        let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(window_len) else {
+    let Some(plan) =
+        inflate_window_boundary_plan(state.window.is_null(), state.wbits, state.wsize, copy)
+    else {
+        return 1 as ::core::ffi::c_int;
+    };
+    if plan.allocate {
+        let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len) else {
             return 1 as ::core::ffi::c_int;
         };
         // `inflate()` normally reaches this boundary only after init has
@@ -1037,14 +1072,8 @@ unsafe fn updatewindow(
             return 1 as ::core::ffi::c_int;
         }
     }
-    let Some(window_len) = inflate_window_len(state.wbits, state.wsize) else {
-        return 1 as ::core::ffi::c_int;
-    };
-    let Ok(copy_len) = usize::try_from(copy) else {
-        return 1 as ::core::ffi::c_int;
-    };
-    let window = ::core::slice::from_raw_parts_mut(state.window, window_len);
-    let produced = if copy_len == 0 {
+    let window = ::core::slice::from_raw_parts_mut(state.window, plan.window_len);
+    let produced = if plan.copy_len == 0 {
         &[]
     } else {
         if end.is_null() {
@@ -1053,7 +1082,7 @@ unsafe fn updatewindow(
         // Preserve the translated cursor movement without making pointer
         // arithmetic itself an unsafe operation. The boundary still lends a
         // `copy_len` span only after validating the source pointer above.
-        ::core::slice::from_raw_parts(end.wrapping_sub(copy_len), copy_len)
+        ::core::slice::from_raw_parts(end.wrapping_sub(plan.copy_len), plan.copy_len)
     };
     let Some(update) = inflate_window_update(
         window,
