@@ -439,6 +439,28 @@ struct InflateBackDecodeResult {
     message: Option<&'static [u8]>,
 }
 
+// One callback-back operation owns all decoder-visible borrows.  In
+// particular, this keeps the implementation entry point free of the ABI
+// stream, callback descriptors, and caller-window address: the adapter only
+// creates this call-scoped owner and publishes its scalar completion once the
+// owner has been released.
+struct InflateBackInvocation<'a, InputVisitor, OutputVisitor> {
+    state: InflateBackDecoderState<'a>,
+    input: InflateBackInput<InputVisitor>,
+    output: InflateBackOutput<'a, OutputVisitor>,
+}
+
+impl<InputVisitor, OutputVisitor> InflateBackInvocation<'_, InputVisitor, OutputVisitor>
+where
+    InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
+    OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
+{
+    fn decode(&mut self) -> (InflateBackDecodeResult, InflateBackDecoderScalars) {
+        let result = inflate_back_decode(&mut self.state, &mut self.input, &mut self.output);
+        (result, self.state.scalars())
+    }
+}
+
 // The callback decoder owns only pointer-free state and bounded caller borrows.
 // Raw ABI cursor projection and diagnostic publication stay in inflateBack().
 fn inflate_back_decode<InputVisitor, OutputVisitor>(
@@ -453,8 +475,16 @@ where
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut here = crate::src::inftrees::code { op: 0, bits: 0, val: 0 };
-    let mut last = crate::src::inftrees::code { op: 0, bits: 0, val: 0 };
+    let mut here = crate::src::inftrees::code {
+        op: 0,
+        bits: 0,
+        val: 0,
+    };
+    let mut last = crate::src::inftrees::code {
+        op: 0,
+        bits: 0,
+        val: 0,
+    };
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut message: Option<&'static [u8]> = None;
@@ -1191,15 +1221,27 @@ where
     }
 }
 
-unsafe fn inflateBack(
+fn inflateBack<InputVisitor, OutputVisitor>(
+    invocation: &mut InflateBackInvocation<'_, InputVisitor, OutputVisitor>,
+) -> (InflateBackDecodeResult, InflateBackDecoderScalars)
+where
+    InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
+    OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
+{
+    invocation.decode()
+}
+
+// This is the complete ABI projection boundary.  It deliberately contains no
+// decoder work: after assembling a pointer-free invocation owner, it calls
+// `inflateBack()` and only writes the completed scalar/cursor state back to
+// the caller's stream.
+unsafe fn inflate_back_from_abi(
     strm: &mut crate::zlib_h::z_stream_s,
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    // This is the complete ABI projection boundary. The decoder below sees
-    // only bounded input/output facades and a pointer-free state view.
     let state_ptr = strm.state as *mut crate::src::inflate::inflate_state;
     if state_ptr.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -1210,7 +1252,11 @@ unsafe fn inflateBack(
     raw_state.last = 0;
     raw_state.whave = 0;
     let mut next = strm.next_in as *mut ::core::ffi::c_uchar;
-    let mut have = if next.is_null() { 0 } else { strm.avail_in as ::core::ffi::c_uint };
+    let mut have = if next.is_null() {
+        0
+    } else {
+        strm.avail_in as ::core::ffi::c_uint
+    };
     let window = ::core::slice::from_raw_parts_mut(
         raw_state.window.expect("inflateBack window").as_ptr(),
         raw_state.wsize as usize,
@@ -1238,14 +1284,14 @@ unsafe fn inflateBack(
         codes: &mut raw_state.codes,
         sane: raw_state.sane,
     };
-    let mut output = InflateBackOutput::new(window, |bytes| {
+    let output = InflateBackOutput::new(window, |bytes| {
         out.expect("non-null function pointer")(
             out_desc,
             bytes.as_ptr().cast_mut(),
             bytes.len() as u32,
         )
     });
-    let mut input = InflateBackInput::new(|consume| {
+    let input = InflateBackInput::new(|consume| {
         if have == 0 {
             have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
             if have == 0 {
@@ -1260,9 +1306,15 @@ unsafe fn inflateBack(
         next = next.wrapping_add(used);
         have = have.wrapping_sub(used as ::core::ffi::c_uint);
     });
-    let result = inflate_back_decode(&mut state, &mut input, &mut output);
-    let final_state = state.scalars();
-    drop(state);
+    let mut invocation = InflateBackInvocation {
+        state,
+        input,
+        output,
+    };
+    let (result, final_state) = inflateBack(&mut invocation);
+    // Release callback/window borrows before writing either the backing state
+    // or the ABI stream.  The completion above carries only scalar state.
+    drop(invocation);
     raw_state.mode = final_state.mode;
     raw_state.last = final_state.last;
     raw_state.whave = final_state.whave;
@@ -1279,10 +1331,6 @@ unsafe fn inflateBack(
     raw_state.ndist = final_state.ndist;
     raw_state.have = final_state.have;
     raw_state.next = final_state.next;
-    // Release callback/window borrows before publishing ABI cursor and
-    // diagnostic pointers.
-    drop(output);
-    drop(input);
     if let Some(message) = result.message {
         strm.msg = message.as_ptr().cast_mut().cast();
     }
@@ -1302,7 +1350,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateBack(strm, in_0, in_desc, out, out_desc)
+    inflate_back_from_abi(strm, in_0, in_desc, out, out_desc)
 }
 #[export_name = "inflateBackEnd"]
 
