@@ -978,8 +978,6 @@ pub unsafe fn inflate(
     strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -1078,20 +1076,18 @@ pub unsafe fn inflate(
         {
             state.normal.mode = crate::src::inflate::TYPEDO;
         }
-        put = strm.next_out as *mut ::core::ffi::c_uchar;
         left = strm.avail_out as ::core::ffi::c_uint;
-        // Keep the caller-owned output range as one bounded view. `put` remains
-        // only as the ABI cursor that is republished on return.
-        let output = ::core::slice::from_raw_parts_mut(put, left as usize);
+        // Keep the caller-owned output range as one bounded view. Cursor
+        // publication below derives its progress from this bounded range.
+        let output = ::core::slice::from_raw_parts_mut(strm.next_out, left as usize);
         let mut output_chunk_start = 0usize;
-        next = strm.next_in as *mut ::core::ffi::c_uchar;
         have = strm.avail_in as ::core::ffi::c_uint;
         // Preserve the C API's null-plus-zero input convention while keeping the
         // decoder's byte pulls bounded by the caller's advertised input range.
         let input = if have == 0 {
             &[][..]
         } else {
-            ::core::slice::from_raw_parts(next, have as usize)
+            ::core::slice::from_raw_parts(strm.next_in, have as usize)
         };
         hold = state.normal.hold;
         bits = state.normal.bits;
@@ -1131,7 +1127,6 @@ pub unsafe fn inflate(
                                                                                                             if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                                                 break '_inf_leave;
                                                                                                             }
-                                                                                                            next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                                         }
                                                                                                         if state.normal.wrap & 2 as ::core::ffi::c_int != 0
                                                                                                             && hold == 0x8b1f as ::core::ffi::c_ulong
@@ -1223,7 +1218,6 @@ pub unsafe fn inflate(
                                                                                                         if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                                             break '_inf_leave;
                                                                                                         }
-                                                                                                        next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                                     }
                                                                                                     state.normal.flags = hold as ::core::ffi::c_int;
                                                                                                     if state.normal.flags & 0xff as ::core::ffi::c_int != crate::zlib_h::Z_DEFLATED
@@ -1287,7 +1281,6 @@ pub unsafe fn inflate(
                                                                                                         if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                                             break '_inf_leave;
                                                                                                         }
-                                                                                                        next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                                     }
                                                                                                     state.normal.check = (hold >> 24 as ::core::ffi::c_int
                                                                                                         & 0xff as ::core::ffi::c_ulong)
@@ -1326,7 +1319,6 @@ pub unsafe fn inflate(
                                                                                                         if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                                             break '_inf_leave;
                                                                                                         }
-                                                                                                        next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                                     }
                                                                                                     if hold & 0xffff as ::core::ffi::c_ulong
                                                                                                         != hold >> 16 as ::core::ffi::c_int
@@ -1361,7 +1353,6 @@ pub unsafe fn inflate(
                                                                                                         if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                                             break '_inf_leave;
                                                                                                         }
-                                                                                                        next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                                     }
                                                                                                     state.normal.nlen = (hold as ::core::ffi::c_uint
                                                                                                         & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
@@ -1435,7 +1426,6 @@ pub unsafe fn inflate(
                                                                                                     let output_index = output.len() - left as usize;
                                                                                                     output[output_index] = state.normal.length
                                                                                                         as ::core::ffi::c_uchar;
-                                                                                                    put = output.as_mut_ptr().wrapping_add(output_index + 1);
                                                                                                     left = left.wrapping_sub(1);
                                                                                                     state.normal.mode = crate::src::inflate::LEN;
                                                                                                     continue '_inf_leave;
@@ -1447,7 +1437,6 @@ pub unsafe fn inflate(
                                                                                                             if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                                                 break '_inf_leave;
                                                                                                             }
-                                                                                                            next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                                         }
                                                                                                         out = out.wrapping_sub(left);
                                                                                                         strm.total_out = (*strm)
@@ -1530,7 +1519,6 @@ pub unsafe fn inflate(
                                                                                                     if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                                         break '_inf_leave;
                                                                                                     }
-                                                                                                    next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                                 }
                                                                                                 if state.normal.wrap & 4 as ::core::ffi::c_int != 0
                                                                                                     && hold
@@ -1554,7 +1542,6 @@ pub unsafe fn inflate(
                                                                                                 if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                                     break '_inf_leave;
                                                                                                 }
-                                                                                                next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                             }
                                                                                             let c2rust_fresh15 = state.normal.have;
                                                                                             state.normal.have = state.normal.have.wrapping_add(1);
@@ -1620,9 +1607,13 @@ pub unsafe fn inflate(
                                                                                             }
                                                                                         }
                                                                                         if state.normal.havedict == 0 as ::core::ffi::c_int {
-                                                                                        strm.next_out = put as *mut crate::stdlib::Bytef;
+                                                                                        strm.next_out = strm
+                                                                                            .next_out
+                                                                                            .wrapping_add(output.len() - left as usize);
                                                                                         strm.avail_out = left as crate::stdlib::uInt;
-                                                                                        strm.next_in = next as *mut crate::stdlib::Bytef;
+                                                                                        strm.next_in = strm
+                                                                                            .next_in
+                                                                                            .wrapping_add(input.len() - have as usize);
                                                                                         strm.avail_in = have as crate::stdlib::uInt;
                                                                                         state.normal.hold = hold;
                                                                                         state.normal.bits = bits;
@@ -1646,7 +1637,6 @@ pub unsafe fn inflate(
                                                                                     if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                                                                         break '_inf_leave;
                                                                                     }
-                                                                                    next = input[in_0.wrapping_sub(have) as usize..].as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                 }
                                                                                     if let Some(
                                                                                         head,
@@ -1709,8 +1699,6 @@ pub unsafe fn inflate(
                                                                                     &mut hold,
                                                                                     &mut bits,
                                                                                 );
-                                                                                    next = input[in_0.wrapping_sub(have) as usize..]
-                                                                                    .as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                 }
                                                                                 if (here.val as ::core::ffi::c_int)
                                                                                 < 16 as ::core::ffi::c_int
@@ -1734,8 +1722,6 @@ pub unsafe fn inflate(
                                                                                         inflate_pull_byte(
                                                                                             input, in_0, &mut have, &mut hold, &mut bits,
                                                                                         );
-                                                                                        next = input[in_0.wrapping_sub(have) as usize..]
-                                                                                            .as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                     }
                                                                                     hold >>= here.bits as ::core::ffi::c_int;
                                                                                     bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
@@ -1774,8 +1760,6 @@ pub unsafe fn inflate(
                                                                                         inflate_pull_byte(
                                                                                             input, in_0, &mut have, &mut hold, &mut bits,
                                                                                         );
-                                                                                        next = input[in_0.wrapping_sub(have) as usize..]
-                                                                                            .as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                     }
                                                                                     hold >>= here.bits as ::core::ffi::c_int;
                                                                                     bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
@@ -1802,8 +1786,6 @@ pub unsafe fn inflate(
                                                                                         inflate_pull_byte(
                                                                                             input, in_0, &mut have, &mut hold, &mut bits,
                                                                                         );
-                                                                                        next = input[in_0.wrapping_sub(have) as usize..]
-                                                                                            .as_ptr() as *mut ::core::ffi::c_uchar;
                                                                                     }
                                                                                     hold >>= here.bits as ::core::ffi::c_int;
                                                                                     bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
@@ -1971,17 +1953,8 @@ pub unsafe fn inflate(
                                                                             );
                                                                             have = have
                                                                                 .wrapping_sub(copy);
-                                                                            next = input[in_0.wrapping_sub(have) as usize..]
-                                                                            .as_ptr()
-                                                                            as *mut ::core::ffi::c_uchar;
                                                                             left = left
                                                                                 .wrapping_sub(copy);
-                                                                            put = output
-                                                                                .as_mut_ptr()
-                                                                                .wrapping_add(
-                                                                                    output_start
-                                                                                        + copy_len,
-                                                                                );
                                                                             state.normal.length =
                                                                                 (*state)
                                                                                     .normal
@@ -2005,11 +1978,6 @@ pub unsafe fn inflate(
                                                                         ) {
                                                                             break '_inf_leave;
                                                                         }
-                                                                        next = input[in_0
-                                                                        .wrapping_sub(have)
-                                                                        as usize..]
-                                                                        .as_ptr()
-                                                                        as *mut ::core::ffi::c_uchar;
                                                                     }
                                                                     if let Some(head) =
                                                                         header.as_mut()
@@ -2079,10 +2047,6 @@ pub unsafe fn inflate(
                                                                 ) {
                                                                     break '_inf_leave;
                                                                 }
-                                                                next = input[in_0.wrapping_sub(have)
-                                                                    as usize..]
-                                                                    .as_ptr()
-                                                                    as *mut ::core::ffi::c_uchar;
                                                             }
                                                             state.normal.last = (hold
                                                                 as ::core::ffi::c_uint
@@ -2165,10 +2129,6 @@ pub unsafe fn inflate(
                                                             ) {
                                                                 break '_inf_leave;
                                                             }
-                                                            next = input
-                                                                [in_0.wrapping_sub(have) as usize..]
-                                                                .as_ptr()
-                                                                as *mut ::core::ffi::c_uchar;
                                                         }
                                                         state.normal.length =
                                                             hold as ::core::ffi::c_uint;
@@ -2251,14 +2211,8 @@ pub unsafe fn inflate(
                                                     "normal inflate checked its fast output cursor",
                                                 );
                                                 let result = owner.run_fast();
-                                                next =
-                                                    input.as_ptr().wrapping_add(result.input_used)
-                                                        as *mut ::core::ffi::c_uchar;
                                                 have =
                                                     result.input_remaining as ::core::ffi::c_uint;
-                                                put = output
-                                                    .as_mut_ptr()
-                                                    .wrapping_add(result.output_used);
                                                 left =
                                                     result.output_remaining as ::core::ffi::c_uint;
                                                 hold = result.hold;
@@ -2316,9 +2270,6 @@ pub unsafe fn inflate(
                                                     ) {
                                                         break '_inf_leave;
                                                     }
-                                                    next = input[in_0.wrapping_sub(have) as usize..]
-                                                        .as_ptr()
-                                                        as *mut ::core::ffi::c_uchar;
                                                 }
                                                 if here.op as ::core::ffi::c_int != 0
                                                     && here.op as ::core::ffi::c_int
@@ -2358,10 +2309,6 @@ pub unsafe fn inflate(
                                                         ) {
                                                             break '_inf_leave;
                                                         }
-                                                        next = input
-                                                            [in_0.wrapping_sub(have) as usize..]
-                                                            .as_ptr()
-                                                            as *mut ::core::ffi::c_uchar;
                                                     }
                                                     hold >>= last.bits as ::core::ffi::c_int;
                                                     bits = bits.wrapping_sub(
@@ -2444,9 +2391,6 @@ pub unsafe fn inflate(
                                                         as ::core::ffi::c_ulong;
                                                 }
                                                 have = have.wrapping_sub(copy);
-                                                next = input[in_0.wrapping_sub(have) as usize..]
-                                                    .as_ptr()
-                                                    as *mut ::core::ffi::c_uchar;
                                                 state.normal.length =
                                                     state.normal.length.wrapping_sub(copy);
                                             }
@@ -2465,9 +2409,6 @@ pub unsafe fn inflate(
                                             ) {
                                                 break '_inf_leave;
                                             }
-                                            next = input[in_0.wrapping_sub(have) as usize..]
-                                                .as_ptr()
-                                                as *mut ::core::ffi::c_uchar;
                                         }
                                         state.normal.length = state.normal.length.wrapping_add(
                                             hold as ::core::ffi::c_uint
@@ -2523,8 +2464,6 @@ pub unsafe fn inflate(
                                             as ::core::ffi::c_ulong;
                                     }
                                     have = have.wrapping_sub(copy);
-                                    next = input[in_0.wrapping_sub(have) as usize..].as_ptr()
-                                        as *mut ::core::ffi::c_uchar;
                                     if len != 0 {
                                         break '_inf_leave;
                                     }
@@ -2552,8 +2491,6 @@ pub unsafe fn inflate(
                                 {
                                     break '_inf_leave;
                                 }
-                                next = input[in_0.wrapping_sub(have) as usize..].as_ptr()
-                                    as *mut ::core::ffi::c_uchar;
                             }
                             if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
                                 == 0 as ::core::ffi::c_int
@@ -2585,8 +2522,6 @@ pub unsafe fn inflate(
                                     ) {
                                         break '_inf_leave;
                                     }
-                                    next = input[in_0.wrapping_sub(have) as usize..].as_ptr()
-                                        as *mut ::core::ffi::c_uchar;
                                 }
                                 hold >>= last.bits as ::core::ffi::c_int;
                                 bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
@@ -2642,8 +2577,6 @@ pub unsafe fn inflate(
                                     as ::core::ffi::c_ulong;
                             }
                             have = have.wrapping_sub(copy);
-                            next = input[in_0.wrapping_sub(have) as usize..].as_ptr()
-                                as *mut ::core::ffi::c_uchar;
                             if len != 0 {
                                 break '_inf_leave;
                             }
@@ -2658,8 +2591,6 @@ pub unsafe fn inflate(
                             if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                                 break '_inf_leave;
                             }
-                            next = input[in_0.wrapping_sub(have) as usize..].as_ptr()
-                                as *mut ::core::ffi::c_uchar;
                         }
                         state.normal.offset = state.normal.offset.wrapping_add(
                             hold as ::core::ffi::c_uint
@@ -2680,8 +2611,6 @@ pub unsafe fn inflate(
                         if !inflate_pull_byte(input, in_0, &mut have, &mut hold, &mut bits) {
                             break '_inf_leave;
                         }
-                        next = input[in_0.wrapping_sub(have) as usize..].as_ptr()
-                            as *mut ::core::ffi::c_uchar;
                     }
                     if state.normal.wrap & 4 as ::core::ffi::c_int != 0
                         && hold != state.normal.check & 0xffff as ::core::ffi::c_ulong
@@ -2753,16 +2682,15 @@ pub unsafe fn inflate(
             } else {
                 copy_inflate_match(output, produced, offset, None, copy_len);
             }
-            put = output.as_mut_ptr().wrapping_add(produced + copy_len);
             left = left.wrapping_sub(copy);
             state.normal.length = state.normal.length.wrapping_sub(copy);
             if state.normal.length == 0 as ::core::ffi::c_uint {
                 state.normal.mode = crate::src::inflate::LEN;
             }
         }
-        strm.next_out = put as *mut crate::stdlib::Bytef;
+        strm.next_out = strm.next_out.wrapping_add(output.len() - left as usize);
         strm.avail_out = left as crate::stdlib::uInt;
-        strm.next_in = next as *mut crate::stdlib::Bytef;
+        strm.next_in = strm.next_in.wrapping_add(input.len() - have as usize);
         strm.avail_in = have as crate::stdlib::uInt;
         state.normal.hold = hold;
         state.normal.bits = bits;
