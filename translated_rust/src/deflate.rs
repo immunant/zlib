@@ -2726,35 +2726,6 @@ fn longest_match_state(
     Some((best_len as crate::stdlib::uInt).min(s.lookahead))
 }
 
-unsafe extern "C" fn longest_match(
-    s: *mut crate::src::deflate::deflate_state,
-    cur_match: crate::src::deflate::IPos,
-) -> crate::stdlib::uInt {
-    if s.is_null() {
-        return 0;
-    }
-    let Ok(window_len) = usize::try_from((*s).window_size) else {
-        return 0;
-    };
-    let Ok(prev_len) = usize::try_from((*s).w_size) else {
-        return 0;
-    };
-    if (window_len != 0 && (*s).window.is_null()) || (prev_len != 0 && (*s).prev.is_null()) {
-        return 0;
-    }
-    let window = if window_len == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts((*s).window, window_len)
-    };
-    let prev = if prev_len == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts((*s).prev, prev_len)
-    };
-    longest_match_state(&mut *s, window, prev, cur_match).unwrap_or(0)
-}
-
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
 fn update_stored_history_state(
@@ -3193,13 +3164,14 @@ unsafe extern "C" fn deflate_fast(
                 return need_more;
             };
             hash_head = previous;
-        }
-        if hash_match_is_usable(
-            (*s).strstart as crate::src::deflate::IPos,
-            hash_head,
-            (*s).w_size,
-        ) {
-            (*s).match_length = longest_match(s, hash_head);
+            if hash_match_is_usable(
+                state.strstart as crate::src::deflate::IPos,
+                hash_head,
+                state.w_size,
+            ) {
+                state.match_length =
+                    longest_match_state(state, window, prev, hash_head).unwrap_or(0);
+            }
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let state = &mut *s;
@@ -3427,6 +3399,10 @@ unsafe extern "C" fn deflate_slow(
             }
         }
         hash_head = NIL as crate::src::deflate::IPos;
+        (*s).prev_length = (*s).match_length;
+        (*s).prev_match = (*s).match_start as crate::src::deflate::IPos;
+        (*s).match_length =
+            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let state = &mut *s;
             let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
@@ -3470,25 +3446,22 @@ unsafe extern "C" fn deflate_slow(
                 return need_more;
             };
             hash_head = previous;
-        }
-        (*s).prev_length = (*s).match_length;
-        (*s).prev_match = (*s).match_start as crate::src::deflate::IPos;
-        (*s).match_length =
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        if lazy_hash_match_is_usable(
-            (*s).strstart as crate::src::deflate::IPos,
-            hash_head,
-            (*s).prev_length,
-            (*s).max_lazy_match,
-            (*s).w_size,
-        ) {
-            (*s).match_length = longest_match(s, hash_head);
-            (*s).match_length = filtered_match_length(
-                (*s).match_length,
-                (*s).strategy,
-                (*s).strstart,
-                (*s).match_start,
-            );
+            if lazy_hash_match_is_usable(
+                state.strstart as crate::src::deflate::IPos,
+                hash_head,
+                state.prev_length,
+                state.max_lazy_match,
+                state.w_size,
+            ) {
+                state.match_length =
+                    longest_match_state(state, window, prev, hash_head).unwrap_or(0);
+                state.match_length = filtered_match_length(
+                    state.match_length,
+                    state.strategy,
+                    state.strstart,
+                    state.match_start,
+                );
+            }
         }
         if (*s).prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             && (*s).match_length <= (*s).prev_length
