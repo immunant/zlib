@@ -306,15 +306,15 @@ unsafe extern "C" fn gz_write(
             if copy as crate::stdlib::z_size_t > len {
                 copy = len as ::core::ffi::c_uint;
             }
-            crate::stdlib::memcpy(
-                (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
-                buf as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
-            );
+            if copy != 0 {
+                let buffer =
+                    ::core::slice::from_raw_parts_mut((*state).in_0, (*state).size as usize);
+                let source = ::core::slice::from_raw_parts(buf.cast::<u8>(), copy as usize);
+                buffer[have as usize..have as usize + copy as usize].copy_from_slice(source);
+            }
             (*state).strm.avail_in = (*state).strm.avail_in.wrapping_add(copy);
             (*state).x.pos += copy as crate::stdlib::off64_t;
-            buf =
-                (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
+            buf = buf.cast::<u8>().wrapping_add(copy as usize).cast();
             len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
             if len == 0 as crate::stdlib::z_size_t {
                 break;
