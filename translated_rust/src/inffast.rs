@@ -172,11 +172,15 @@ fn fast_decode_prefetch_byte_count(bits: ::core::ffi::c_uint) -> ::core::ffi::c_
     }
 }
 
-fn fast_length_extra_bits_need_input(
+fn fast_length_extra_bits_refill_byte_count(
     bits: ::core::ffi::c_uint,
     extra_bits: ::core::ffi::c_uint,
-) -> bool {
-    extra_bits != 0 && bits < extra_bits
+) -> ::core::ffi::c_uint {
+    if extra_bits != 0 && bits < extra_bits {
+        1
+    } else {
+        0
+    }
 }
 
 fn output_cursor_after_write(
@@ -563,7 +567,7 @@ pub unsafe extern "C" fn inflate_fast(
                 FastLitLenAction::Length { extra_bits } => {
                     len = entry.value;
                     if extra_bits != 0 {
-                        if fast_length_extra_bits_need_input(bits, extra_bits) {
+                        for _ in 0..fast_length_extra_bits_refill_byte_count(bits, extra_bits) {
                             let c2rust_fresh3 = in_0;
                             in_0 = in_0.wrapping_add(1);
                             (hold, bits, input_remaining) =
@@ -829,7 +833,7 @@ mod tests {
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_code_entry, fast_decode_error_message, fast_decode_failure,
         fast_decode_needs_prefetch, fast_decode_prefetch_byte_count, fast_dist_action,
-        fast_length_extra_bits_need_input, fast_litlen_action, fast_match_copy_layout,
+        fast_length_extra_bits_refill_byte_count, fast_litlen_action, fast_match_copy_layout,
         fast_match_uses_window, fast_window_copy_plan, fast_window_distance_back,
         fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
         input_remaining_after_read, low_bits, output_cursor_after_write,
@@ -1164,15 +1168,15 @@ mod tests {
     }
 
     #[test]
-    fn fast_length_extra_bits_refill_requires_nonzero_missing_bits() {
-        assert!(!fast_length_extra_bits_need_input(0, 0));
-        assert!(fast_length_extra_bits_need_input(0, 1));
-        assert!(fast_length_extra_bits_need_input(4, 5));
-        assert!(!fast_length_extra_bits_need_input(5, 5));
-        assert!(!fast_length_extra_bits_need_input(
-            ::core::ffi::c_uint::MAX,
-            15
-        ));
+    fn fast_length_extra_bits_refill_count_requires_nonzero_missing_bits() {
+        assert_eq!(fast_length_extra_bits_refill_byte_count(0, 0), 0);
+        assert_eq!(fast_length_extra_bits_refill_byte_count(0, 1), 1);
+        assert_eq!(fast_length_extra_bits_refill_byte_count(4, 5), 1);
+        assert_eq!(fast_length_extra_bits_refill_byte_count(5, 5), 0);
+        assert_eq!(
+            fast_length_extra_bits_refill_byte_count(::core::ffi::c_uint::MAX, 15),
+            0
+        );
     }
 
     #[test]

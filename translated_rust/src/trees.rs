@@ -4998,12 +4998,15 @@ unsafe fn build_bl_tree(mut s: *mut crate::src::deflate::deflate_state) -> ::cor
         s,
         &raw mut (*s).bl_desc as *mut crate::src::deflate::tree_desc,
     );
-    let mut code_lengths = [0; BL_CODE_ORDER_LEN];
-    for (code, length) in code_lengths.iter_mut().enumerate() {
-        *length = (*s).bl_tree[code].dl.len;
+    let mut max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
+    while max_blindex >= 3 as ::core::ffi::c_int
+        && (*s).bl_tree[bl_code_index_at_rank(max_blindex)].dl.len == 0
+    {
+        max_blindex -= 1;
     }
-    let (max_blindex, opt_len) = bl_tree_header_update(&code_lengths, (*s).opt_len);
-    (*s).opt_len = opt_len;
+    (*s).opt_len = (*s)
+        .opt_len
+        .wrapping_add(bl_tree_header_bit_length(max_blindex));
     return max_blindex;
 }
 

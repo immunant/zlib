@@ -451,6 +451,13 @@ fn gz_read_action(
     }
 }
 
+fn gz_read_action_advances_output(action: &GzReadAction) -> bool {
+    matches!(
+        action,
+        GzReadAction::DrainBuffered | GzReadAction::Load | GzReadAction::Decompress
+    )
+}
+
 fn gz_read_step(
     len: crate::stdlib::z_size_t,
     have: ::core::ffi::c_uint,
@@ -2553,6 +2560,15 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_action_advances_output_only_for_writing_actions() {
+        assert!(gz_read_action_advances_output(&GzReadAction::DrainBuffered));
+        assert!(!gz_read_action_advances_output(&GzReadAction::StopAtEof));
+        assert!(!gz_read_action_advances_output(&GzReadAction::Fetch));
+        assert!(gz_read_action_advances_output(&GzReadAction::Load));
+        assert!(gz_read_action_advances_output(&GzReadAction::Decompress));
+    }
+
+    #[test]
     fn gz_read_step_pairs_chunk_length_with_its_control_action() {
         let buffered = gz_read_step(17, 5, 1, 0, crate::gzguts_h::LOOK, 8);
         assert_eq!(buffered.chunk_len, 5);
@@ -3377,7 +3393,8 @@ unsafe fn gz_read(
             state_ref.size,
         );
         n = step.chunk_len;
-        let advance = match step.action {
+        let advance = gz_read_action_advances_output(&step.action);
+        match step.action {
             GzReadAction::DrainBuffered => {
                 let next = state_ref.x.next;
                 let have = state_ref.x.have;
@@ -3390,7 +3407,6 @@ unsafe fn gz_read(
                 );
                 state_ref.x.next = state_ref.x.next.wrapping_add(plan.next_advance);
                 gz_read_apply_drain_plan(&mut state_ref.x.have, &mut err, &plan);
-                true
             }
             GzReadAction::StopAtEof => break,
             GzReadAction::Fetch => {
@@ -3399,13 +3415,11 @@ unsafe fn gz_read(
                 {
                     err = fetch_error;
                 }
-                false
             }
             GzReadAction::Load => {
                 let load = gz_load(state_ref, buf as *mut ::core::ffi::c_uchar, n);
                 n = load.have;
                 err = gz_read_load_status(load.failed);
-                true
             }
             GzReadAction::Decompress => {
                 state_ref.strm.avail_out = n as crate::stdlib::uInt;
@@ -3413,9 +3427,8 @@ unsafe fn gz_read(
                     buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
                 err = gz_decomp(state_ref);
                 (n, state_ref.x.have) = gz_read_take_decompressed(state_ref.x.have);
-                true
             }
-        };
+        }
         let progress = gz_read_loop_progress(advance, len, got, state_ref.x.pos, n, err);
         len = progress.len;
         got = progress.got;
