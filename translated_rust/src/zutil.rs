@@ -5,19 +5,31 @@ pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
-#[no_mangle]
+static Z_ERROR_MESSAGES: [&[u8]; 10] = [
+    b"need dictionary\0",
+    b"stream end\0",
+    b"\0",
+    b"file error\0",
+    b"stream error\0",
+    b"data error\0",
+    b"insufficient memory\0",
+    b"buffer error\0",
+    b"incompatible version\0",
+    b"\0",
+];
 
+#[no_mangle]
 pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    b"need dictionary\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream end\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"file error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"data error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"insufficient memory\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"buffer error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[0].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[1].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[2].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[3].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[4].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[5].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[6].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[7].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[8].as_ptr() as *mut ::core::ffi::c_char,
+    Z_ERROR_MESSAGES[9].as_ptr() as *mut ::core::ffi::c_char,
 ];
 pub fn zlibVersion() -> &'static [::core::ffi::c_char; 15] {
     &crate::zlib_h::ZLIB_VERSION
@@ -103,17 +115,17 @@ fn zlib_compile_flags() -> crate::stdlib::uLong {
 pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
     zlib_compile_flags()
 }
-pub unsafe extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    return z_errmsg[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
+pub fn zError(mut err: ::core::ffi::c_int) -> &'static [u8] {
+    &Z_ERROR_MESSAGES[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
         9 as ::core::ffi::c_int
     } else {
         2 as ::core::ffi::c_int - err
-    }) as usize];
+    }) as usize]
 }
 #[export_name = "zError"]
 
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    zError(err)
+    zError(err).as_ptr().cast()
 }
 pub unsafe extern "C" fn zcalloc(
     _opaque: crate::stdlib::voidpf,
