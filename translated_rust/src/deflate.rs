@@ -891,42 +891,61 @@ pub unsafe extern "C" fn deflateInit2_(
         slid: 0,
     });
     stream.state = s as *mut crate::src::deflate::internal_state;
-    (*s).window =
-        ::core::ptr::NonNull::new(Some(stream.zalloc.expect("non-null function pointer"))
+    // Do not keep a Rust borrow of the installed state across an allocator
+    // callback: a caller allocator may observe the stream re-entrantly.
+    // Each callback result is instead published through a short projection,
+    // and all work after the final callback uses an ordinary Rust borrow.
+    let window = ::core::ptr::NonNull::new(
+        Some(stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            stream.opaque,
-            storage.window.items,
-            storage.window.size,
-        ) as *mut crate::stdlib::Bytef);
-    (*s).prev = ::core::ptr::NonNull::new(Some(stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        stream.opaque, storage.prev.items, storage.prev.size
-    ) as *mut crate::src::deflate::Posf);
-    (*s).head = ::core::ptr::NonNull::new(Some(stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        stream.opaque, storage.head.items, storage.head.size
-    ) as *mut crate::src::deflate::Posf);
-    (*s).high_water = 0 as crate::zutil_h::ulg;
-    (*s).lit_bufsize = layout.lit_bufsize;
-    (*s).pending_buf =
-        ::core::ptr::NonNull::new(Some(stream.zalloc.expect("non-null function pointer"))
+                stream.opaque,
+                storage.window.items,
+                storage.window.size,
+            ) as *mut crate::stdlib::Bytef,
+    );
+    (&mut *s).window = window;
+    let prev = ::core::ptr::NonNull::new(
+        Some(stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            stream.opaque,
-            storage.pending.items,
-            storage.pending.size,
-        ) as *mut crate::zutil_h::uchf
-            as *mut crate::stdlib::Bytef);
-    (*s).pending_buf_size = storage
+                stream.opaque,
+                storage.prev.items,
+                storage.prev.size,
+            ) as *mut crate::src::deflate::Posf,
+    );
+    (&mut *s).prev = prev;
+    let head = ::core::ptr::NonNull::new(
+        Some(stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+                stream.opaque,
+                storage.head.items,
+                storage.head.size,
+            ) as *mut crate::src::deflate::Posf,
+    );
+    (&mut *s).head = head;
+    let pending_buf = ::core::ptr::NonNull::new(
+        Some(stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+                stream.opaque,
+                storage.pending.items,
+                storage.pending.size,
+            ) as *mut crate::zutil_h::uchf
+            as *mut crate::stdlib::Bytef,
+    );
+    let state = &mut *s;
+    state.high_water = 0 as crate::zutil_h::ulg;
+    state.lit_bufsize = layout.lit_bufsize;
+    state.pending_buf = pending_buf;
+    state.pending_buf_size = storage
         .pending
         .byte_len()
         .expect("validated pending allocation geometry")
         as crate::zutil_h::ulg;
-    if (*s).window.is_none()
-        || (*s).prev.is_none()
-        || (*s).head.is_none()
-        || (*s).pending_buf.is_none()
+    if state.window.is_none()
+        || state.prev.is_none()
+        || state.head.is_none()
+        || state.pending_buf.is_none()
     {
-        (*s).status = crate::src::deflate::FINISH_STATE;
+        state.status = crate::src::deflate::FINISH_STATE;
         stream.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
             || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -939,14 +958,14 @@ pub unsafe extern "C" fn deflateInit2_(
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf_start = (*s).lit_bufsize as usize;
-    (*s).sym_end = (*s)
+    state.sym_buf_start = state.lit_bufsize as usize;
+    state.sym_end = state
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_mul(3 as crate::stdlib::uInt);
-    (*s).level = layout.level;
-    (*s).strategy = strategy;
-    (*s).method = method as crate::stdlib::Byte;
+    state.level = layout.level;
+    state.strategy = strategy;
+    state.method = method as crate::stdlib::Byte;
     return deflateReset(strm);
 }
 #[export_name = "deflateInit2_"]
