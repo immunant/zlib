@@ -3833,6 +3833,17 @@ fn stored_tail_block_plan(
     })
 }
 
+/// Translate stored-mode input availability into the number of caller bytes
+/// consumed by this dispatch. The mode boundary owns the ABI stream borrow;
+/// this helper preserves zlib's wrapping counter arithmetic without looking
+/// through that record.
+fn stored_input_consumed(
+    initial_avail_in: crate::stdlib::uInt,
+    remaining_avail_in: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    initial_avail_in.wrapping_sub(remaining_avail_in)
+}
+
 /// Record the history-window cursors after stored mode has copied `have`
 /// caller bytes into the window.  The legacy adapter retains the raw input and
 /// window lends; this transition is only scalar state and deliberately keeps
@@ -4003,11 +4014,12 @@ fn deflate_stored(
                 break;
             }
         }
-        used = used.wrapping_sub({
+        let remaining_avail_in = {
             let state = &mut *s;
             let strm = &mut *state.strm;
             strm.avail_in
-        });
+        };
+        used = stored_input_consumed(used, remaining_avail_in);
         if used != 0 {
             let state = &mut *s;
             let strm = &mut *state.strm;
