@@ -193,7 +193,7 @@ pub(crate) fn inflate_one_shot(
         if stream.avail_in == 0 {
             stream.avail_in = owner.next_input_chunk(max);
         }
-        status = unsafe { inflate_from_abi_stream(&mut stream, crate::zlib_h::Z_NO_FLUSH) };
+        status = unsafe { inflate_from_stream(&mut stream, crate::zlib_h::Z_NO_FLUSH) };
         if status != crate::zlib_h::Z_OK {
             break;
         }
@@ -1179,7 +1179,7 @@ struct InflateDecoderResult {
 // header pointer.  The stream adapter constructs this request only after all
 // three foreign projections have been checked, and consumes its completion
 // before publishing any ABI cursor or header changes.
-struct InflateDecoderRequest<'normal, 'input, 'output, 'header, 'stream> {
+struct InflateStreamOwner<'normal, 'input, 'output, 'header, 'stream> {
     normal: &'normal mut InflateNormalState,
     input: &'input [u8],
     output: &'output mut [u8],
@@ -1188,9 +1188,9 @@ struct InflateDecoderRequest<'normal, 'input, 'output, 'header, 'stream> {
     flush: ::core::ffi::c_int,
 }
 
-impl InflateDecoderRequest<'_, '_, '_, '_, '_> {
+impl InflateStreamOwner<'_, '_, '_, '_, '_> {
     fn run(self) -> InflateDecoderResult {
-        inflate_from_stream(self)
+        inflate(self)
     }
 }
 
@@ -1216,8 +1216,8 @@ fn inflate_pull_byte(
 // returns scalar cursor/header publication before the ABI adapter republishes
 // either.  The ABI-shaped adapter deliberately has a distinct name, so this
 // remains the implementation entry point for bounded decoder requests.
-fn inflate_from_stream(request: InflateDecoderRequest<'_, '_, '_, '_, '_>) -> InflateDecoderResult {
-    let InflateDecoderRequest {
+fn inflate(request: InflateStreamOwner<'_, '_, '_, '_, '_>) -> InflateDecoderResult {
+    let InflateStreamOwner {
         normal,
         input,
         output,
@@ -2896,9 +2896,11 @@ fn inflate_from_stream(request: InflateDecoderRequest<'_, '_, '_, '_, '_>) -> In
 // The stream/state association, foreign header registration, and caller
 // cursor views remain at this ABI-shaped boundary.  The decoder itself sees
 // only pointer-free normal state, bounded slices, and scalar publication.
-// Keep this projection separate from `inflate_from_stream()`, which is the
-// pointer-free decoder core consumed by direct bounded callers.
-pub(crate) unsafe fn inflate_from_abi_stream(
+// Keep this projection separate from `inflate()`, which is the pointer-free
+// decoder core consumed by direct bounded callers.  The owner constructed
+// below consumes every scoped cursor and registered-header view before this
+// adapter republishes ABI state.
+pub(crate) unsafe fn inflate_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -2956,14 +2958,15 @@ pub(crate) unsafe fn inflate_from_abi_stream(
         data_type: strm.data_type,
         message: None,
     };
-    let result = inflate_from_stream(InflateDecoderRequest {
+    let result = InflateStreamOwner {
         normal: &mut state.normal,
         input,
         output,
         header,
         stream: &mut stream,
         flush,
-    });
+    }
+    .run();
     strm.next_out = strm.next_out.wrapping_add(result.cursor.output_used);
     strm.avail_out = result.cursor.output_remaining;
     strm.next_in = strm.next_in.wrapping_add(result.cursor.input_used);
@@ -3027,7 +3030,7 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_abi_stream(strm, flush)
+    inflate_from_stream(strm, flush)
 }
 // Ending a normal inflate stream has a pointer-free half: consume the Rust
 // history owner before the ABI adapter releases the callback-owned state

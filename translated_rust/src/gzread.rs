@@ -18,7 +18,7 @@ pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::src::inflate::inflateReset;
-use crate::src::inflate::inflate_from_abi_stream;
+use crate::src::inflate::inflate_from_stream;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidp;
@@ -918,7 +918,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             strm.avail_in = dispatch.input_available();
             strm.avail_out = dispatch.output_available();
             strm.next_out = dispatch.output_mut().as_mut_ptr();
-            let result = inflate_from_abi_stream(strm, crate::zlib_h::Z_NO_FLUSH);
+            let result = inflate_from_stream(strm, crate::zlib_h::Z_NO_FLUSH);
             // Snapshot the ABI projection immediately.  The gzip state
             // machine handles the resulting checked cursors and diagnostics
             // through the pointer-free embedded-codec result facade.
