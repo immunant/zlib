@@ -1431,7 +1431,7 @@ fn gz_open(
     gz_reset(state_ref);
     gz_error(state_ref, crate::zlib_h::Z_OK, None);
     let state_ptr = ::core::ptr::from_mut(state.as_mut());
-    owned_states.push((state_ptr.addr(), GzOwnedState(state)));
+    owned_states.push((state_ptr.addr(), GzOwnedState(send_wrapper::SendWrapper::new(state))));
     state_ptr as crate::zlib_h::gzFile
 }
 #[export_name = "gzopen"]
@@ -2001,12 +2001,11 @@ static GZ_OWNED_STRINGS: ::std::sync::OnceLock<
 // The registry holds the allocation behind each opaque `gzFile` handle.  It
 // gives the core constructor an owned state without requiring a raw-pointer
 // bind; close removes the entry only after it has finished using the state.
-struct GzOwnedState(Box<crate::gzguts_h::gz_state>);
+struct GzOwnedState(send_wrapper::SendWrapper<Box<crate::gzguts_h::gz_state>>);
 
 // The registry only moves ownership of the opaque allocation. Access to the
 // pointee remains governed by zlib's `gzFile` contract, and the mutex guards
 // only registry insertion/removal, never a gzip operation on the state.
-unsafe impl Send for GzOwnedState {}
 
 static GZ_OWNED_STATES: ::std::sync::OnceLock<
     ::std::sync::Mutex<Vec<(usize, GzOwnedState)>>,
@@ -2089,7 +2088,7 @@ pub(crate) fn gz_take_owned_state_with_mode(
     if !gz_has_mode(states[index].1.0.as_ref(), mode) {
         return None;
     }
-    Some(states.swap_remove(index).1.0)
+    Some(states.swap_remove(index).1.0.take())
 }
 
 pub(crate) fn gz_take_owned_state(
@@ -2109,7 +2108,7 @@ pub(crate) fn gz_take_owned_state(
     }) {
         return None;
     }
-    Some(states.swap_remove(index).1.0)
+    Some(states.swap_remove(index).1.0.take())
 }
 
 fn gz_owned_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>> {
