@@ -1322,6 +1322,10 @@ mod callback_owner {
         let mut state: Option<::core::ptr::NonNull<crate::src::deflate::deflate_state>> = None;
         let mut complete = true;
         for slot in DeflateAllocationPlan::allocation_slots() {
+            // Copy this pointer-free request before crossing the callback
+            // boundary.  No layout borrow or prior callback result survives
+            // into the next allocation request.
+            let request = plan.allocation_for(slot);
             let callback = stream.zalloc;
             let opaque = stream.opaque;
             // Match the just-reloaded callback result here, before this loop
@@ -1331,8 +1335,8 @@ mod callback_owner {
             let allocation = match callback {
                 Some(callback) => ::core::ptr::NonNull::new(callback(
                     opaque,
-                    plan.allocation_for(slot).items,
-                    plan.allocation_for(slot).size,
+                    request.items,
+                    request.size,
                 )),
                 None => None,
             };
