@@ -2684,17 +2684,6 @@ fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[u8]) -> ::core::ffi::c_uint
     next as ::core::ffi::c_uint
 }
 
-unsafe fn inflate_input<'a>(
-    input: *const ::core::ffi::c_uchar,
-    avail_in: crate::stdlib::uInt,
-) -> &'a [u8] {
-    if avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(input, avail_in as usize)
-    }
-}
-
 pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut len: ::core::ffi::c_uint = 0;
     let mut flags: ::core::ffi::c_int = 0;
@@ -2729,7 +2718,19 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
         (*state).have = 0 as ::core::ffi::c_uint;
         syncsearch(&mut (*state).have, &buf[..len as usize]);
     }
-    let input = inflate_input((*strm).next_in, (*strm).avail_in);
+    let input_start = (*strm).next_in;
+    let input_len = (*strm).avail_in as usize;
+    if input_len > isize::MAX as usize || (input_len != 0 && input_start.is_null()) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let input = if input_len == 0 {
+        &[]
+    } else {
+        // `next_in` is part of the stream's caller-provided input range.
+        // The length is bounded above before constructing this transient
+        // slice, satisfying `from_raw_parts`' platform-size requirement.
+        ::core::slice::from_raw_parts(input_start, input_len)
+    };
     len = syncsearch(&mut (*state).have, input);
     (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
     (*strm).next_in = (*strm).next_in.offset(len as isize);
