@@ -90,11 +90,11 @@ pub unsafe extern "C" fn inflateBackInit_(
     }
     crate::zlib_h::clear_stream_message(&mut *strm);
     if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(crate::src::zutil::zcalloc);
+        (*strm).zalloc = Some(crate::zlib_h::default_stream_allocator());
         (*strm).opaque = crate::zlib_h::Opaque::default();
     }
     if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(crate::src::zutil::zcfree);
+        (*strm).zfree = Some(crate::zlib_h::default_stream_allocator());
     }
     let mut state = crate::src::inflate::inflate_state::default();
     state.strm = strm;

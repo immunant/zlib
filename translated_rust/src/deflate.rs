@@ -914,11 +914,11 @@ pub fn deflateInit2_(
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
     strm.msg = None;
     if strm.zalloc.is_none() {
-        strm.zalloc = Some(crate::src::zutil::zcalloc);
+        strm.zalloc = Some(crate::zlib_h::default_stream_allocator());
         strm.opaque = crate::zlib_h::Opaque::default();
     }
     if strm.zfree.is_none() {
-        strm.zfree = Some(crate::src::zutil::zcfree);
+        strm.zfree = Some(crate::zlib_h::default_stream_allocator());
     }
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;

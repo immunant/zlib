@@ -156,11 +156,15 @@ pub mod zlib_h {
         ::core::mem::transmute::<[u8; 15], [::core::ffi::c_char; 15]>(*b"1.3.2.1-motley\0")
     };
 
-    pub type alloc_func = Option<
-        extern "C" fn(Opaque, crate::stdlib::uInt, crate::stdlib::uInt) -> crate::stdlib::voidpf,
-    >;
+    /// A nullable, pointer-sized marker for the stream's internal Rust
+    /// allocator.  Keeping the marker as a non-zero integer maintains the C
+    /// stream layout without retaining a callable raw allocator pointer.
+    pub type alloc_func = Option<::core::num::NonZeroUsize>;
+    pub type free_func = Option<::core::num::NonZeroUsize>;
 
-    pub type free_func = Option<extern "C" fn(Opaque, crate::stdlib::voidpf) -> ()>;
+    pub fn default_stream_allocator() -> ::core::num::NonZeroUsize {
+        ::core::num::NonZeroUsize::new(1).expect("one is non-zero")
+    }
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 

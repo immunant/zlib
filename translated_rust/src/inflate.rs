@@ -307,10 +307,7 @@ pub unsafe extern "C" fn inflateReset2(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if !(*state).window.is_null() && (*state).wbits != windowBits as ::core::ffi::c_uint {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
-        );
+        crate::src::zutil::zcfree((*strm).opaque, (*state).window as crate::stdlib::voidpf);
         (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
     (*state).wrap = wrap;
@@ -345,11 +342,11 @@ pub unsafe extern "C" fn inflateInit2_(
     }
     crate::zlib_h::clear_stream_message(&mut *strm);
     if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(crate::src::zutil::zcalloc);
+        (*strm).zalloc = Some(crate::zlib_h::default_stream_allocator());
         (*strm).opaque = crate::zlib_h::Opaque::default();
     }
     if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(crate::src::zutil::zcfree);
+        (*strm).zfree = Some(crate::zlib_h::default_stream_allocator());
     }
     let mut state = crate::src::inflate::inflate_state::default();
     state.strm = strm;
@@ -441,8 +438,7 @@ unsafe extern "C" fn updatewindow(
 ) -> ::core::ffi::c_int {
     let mut dist: ::core::ffi::c_uint = 0;
     if (*state).window.is_null() {
-        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+        (*state).window = crate::src::zutil::zcalloc(
             (*strm).opaque,
             (1 as crate::stdlib::uInt) << (*state).wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
@@ -2237,10 +2233,7 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         .expect("inflate state was checked above");
     let mut state = state_handle.borrow_mut();
     if !(*state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
-        );
+        crate::src::zutil::zcfree((*strm).opaque, (*state).window as crate::stdlib::voidpf);
     }
     drop(state);
     (*strm).state = None;
@@ -2517,8 +2510,7 @@ pub unsafe extern "C" fn inflateCopy(
     let mut copy = Box::new(*state);
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if !(*state).window.is_null() {
-        window = Some((*source).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+        window = crate::src::zutil::zcalloc(
             (*source).opaque,
             (1 as crate::stdlib::uInt) << (*state).wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
