@@ -349,12 +349,28 @@ pub unsafe extern "C" fn inflateInit2__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit2_(strm, windowBits, version, stream_size)
 }
-pub unsafe extern "C" fn inflateInit_(
-    mut strm: crate::zlib_h::z_streamp,
-    mut version: *const ::core::ffi::c_char,
+pub unsafe fn inflateInit_(
+    strm: Option<&mut crate::zlib_h::z_stream>,
+    version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    return inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size);
+    let Some(version) = version else {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    };
+    if *version != crate::zlib_h::ZLIB_VERSION[0]
+        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+    {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    }
+    let Some(strm) = strm else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    return inflateInit2_(
+        strm,
+        crate::zutil_h::DEF_WBITS,
+        ::core::ptr::from_ref(version),
+        stream_size,
+    );
 }
 #[export_name = "inflateInit_"]
 
@@ -363,7 +379,7 @@ pub unsafe extern "C" fn inflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit_(strm, version, stream_size)
+    inflateInit_(strm.as_mut(), version.as_ref(), stream_size)
 }
 pub unsafe extern "C" fn inflatePrime(
     mut strm: crate::zlib_h::z_streamp,

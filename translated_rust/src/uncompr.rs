@@ -70,8 +70,8 @@ pub unsafe extern "C" fn uncompress2_z(
     stream.zfree = None;
     stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     err = crate::src::inflate::inflateInit_(
-        &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        crate::zlib_h::ZLIB_VERSION.as_ptr(),
+        Some(&mut stream),
+        Some(&crate::zlib_h::ZLIB_VERSION[0]),
         ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
     );
     if err != crate::zlib_h::Z_OK {

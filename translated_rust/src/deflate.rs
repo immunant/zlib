@@ -584,12 +584,23 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         }
     }
 }
-pub unsafe extern "C" fn deflateInit_(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn deflateInit_(
+    strm: Option<&mut crate::zlib_h::z_stream>,
     mut level: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
+    version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(version) = version else {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    };
+    if *version != crate::zlib_h::ZLIB_VERSION[0]
+        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+    {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    }
+    let Some(strm) = strm else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     return deflateInit2_(
         strm,
         level,
@@ -597,7 +608,7 @@ pub unsafe extern "C" fn deflateInit_(
         crate::stdlib::MAX_WBITS,
         crate::zutil_h::DEF_MEM_LEVEL,
         crate::zlib_h::Z_DEFAULT_STRATEGY,
-        version,
+        ::core::ptr::from_ref(version),
         stream_size,
     );
 }
@@ -609,7 +620,7 @@ pub unsafe extern "C" fn deflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateInit_(strm, level, version, stream_size)
+    deflateInit_(strm.as_mut(), level, version.as_ref(), stream_size)
 }
 pub unsafe extern "C" fn deflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
