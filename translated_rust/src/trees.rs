@@ -2465,17 +2465,6 @@ pub(crate) enum BitOutputAction {
     Align,
 }
 
-// Tree operations that need the callback-backed pending allocation share one
-// state adapter. Their byte/tree work runs below that adapter over bounded
-// slices and scalar state only.
-pub(crate) enum PendingTreeAction {
-    BitOutput(BitOutputAction),
-    Tally {
-        dist: ::core::ffi::c_uint,
-        lc: ::core::ffi::c_uint,
-    },
-}
-
 // This is the pointer-free portion of the deflate bit-output state.  The ABI
 // state owns the backing allocation; its callers construct this bounded view
 // at the projection boundary before dispatching the byte-only operation.
@@ -2507,49 +2496,6 @@ pub(crate) fn bit_output(state: BitOutputState<'_>, action: BitOutputAction) {
 // callback-backed deflate storage.
 pub(crate) fn bi_flush_or_windup(state: BitOutputState<'_>, action: BitOutputAction) {
     bit_output(state, action);
-}
-
-// The export boundary validates and borrows the opaque state.  Keep the
-// callback-backed pending-buffer projection in this named adapter, so the
-// export remains only a conversion-and-dispatch boundary.
-unsafe fn bit_output_from_deflate_state(
-    state: &mut crate::src::deflate::deflate_state,
-    action: PendingTreeAction,
-) -> ::core::ffi::c_int {
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    match action {
-        PendingTreeAction::BitOutput(action) => {
-            bi_flush_or_windup(
-                BitOutputState {
-                    pending_buf,
-                    pending: &mut state.pending,
-                    bi_buf: &mut state.bi_buf,
-                    bi_valid: &mut state.bi_valid,
-                    bi_used: &mut state.bi_used,
-                },
-                action,
-            );
-            0
-        }
-        PendingTreeAction::Tally { dist, lc } => _tr_tally(
-            TallyState {
-                sym_buf: &mut pending_buf[state.sym_buf_start..],
-                sym_next: &mut state.sym_next,
-                sym_end: state.sym_end,
-                dyn_ltree: &mut state.dyn_ltree,
-                dyn_dtree: &mut state.dyn_dtree,
-                matches: &mut state.matches,
-            },
-            dist,
-            lc,
-        ),
-    }
 }
 
 fn tr_align_bytes(
@@ -3278,29 +3224,21 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut last: ::core::ffi::c_int,
 ) {
     // This is the ABI conversion boundary: a null payload is valid only for
-    // an empty block. The core itself receives ordinary bounded slices.
+    // an empty block. The complete callback-storage projection remains in
+    // deflate's named C4 adapter; this wrapper only forms the caller slice.
     let state = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
     let input = if stored_len == 0 {
         &[]
     } else {
         ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
     };
-    stored_block_bytes(
-        pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-        &mut state.bi_used,
-        input,
-        stored_len,
-        last,
+    crate::src::deflate::deflate_tree_from_state(
+        state,
+        crate::src::deflate::DeflateTreeAction::StoredBlock {
+            input,
+            stored_len,
+            last,
+        },
     );
 }
 #[export_name = "_tr_flush_bits"]
@@ -3309,7 +3247,10 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     let Some(state) = s.as_mut() else {
         return;
     };
-    bit_output_from_deflate_state(state, PendingTreeAction::BitOutput(BitOutputAction::Flush));
+    crate::src::deflate::deflate_tree_from_state(
+        state,
+        crate::src::deflate::DeflateTreeAction::BitOutput(BitOutputAction::Flush),
+    );
 }
 #[export_name = "_tr_align"]
 
@@ -3317,7 +3258,10 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let Some(state) = s.as_mut() else {
         return;
     };
-    bit_output_from_deflate_state(state, PendingTreeAction::BitOutput(BitOutputAction::Align));
+    crate::src::deflate::deflate_tree_from_state(
+        state,
+        crate::src::deflate::DeflateTreeAction::BitOutput(BitOutputAction::Align),
+    );
 }
 fn compress_block(
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -3740,11 +3684,6 @@ pub unsafe extern "C" fn _tr_flush_block(
     mut last: ::core::ffi::c_int,
 ) {
     let state = &mut *s;
-    let data_type = if state.level > 0 {
-        Some(&mut state.data_type)
-    } else {
-        None
-    };
     let input = if buf.is_null() {
         None
     } else if stored_len == 0 {
@@ -3755,43 +3694,13 @@ pub unsafe extern "C" fn _tr_flush_block(
             stored_len as usize,
         ))
     };
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    flush_block_from_views(
-        data_type,
-        BlockFlushState {
-            level: state.level,
-            strategy: state.strategy,
-            pending_buf,
-            pending: &mut state.pending,
-            bi_buf: &mut state.bi_buf,
-            bi_valid: &mut state.bi_valid,
-            bi_used: &mut state.bi_used,
-            dyn_ltree: &mut state.dyn_ltree,
-            dyn_dtree: &mut state.dyn_dtree,
-            bl_tree: &mut state.bl_tree,
-            l_desc: &mut state.l_desc,
-            d_desc: &mut state.d_desc,
-            bl_desc: &mut state.bl_desc,
-            heap: &mut state.heap,
-            heap_len: &mut state.heap_len,
-            heap_max: &mut state.heap_max,
-            depth: &mut state.depth,
-            bl_count: &mut state.bl_count,
-            opt_len: &mut state.opt_len,
-            static_len: &mut state.static_len,
-            matches: &mut state.matches,
-            sym_buf_start: state.sym_buf_start,
-            sym_next: &mut state.sym_next,
+    crate::src::deflate::deflate_tree_from_state(
+        state,
+        crate::src::deflate::DeflateTreeAction::FlushBlock {
+            input,
+            stored_len,
+            last,
         },
-        input,
-        stored_len,
-        last,
     );
 }
 #[export_name = "_tr_flush_block"]
@@ -3885,5 +3794,8 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     let Some(state) = s.as_mut() else {
         return 0;
     };
-    bit_output_from_deflate_state(state, PendingTreeAction::Tally { dist, lc })
+    crate::src::deflate::deflate_tree_from_state(
+        state,
+        crate::src::deflate::DeflateTreeAction::Tally { dist, lc },
+    )
 }

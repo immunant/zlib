@@ -1599,20 +1599,16 @@ struct DeflateDictionaryStorage<'stream> {
 
 enum DeflateStorageProjection<'request> {
     None,
-    // Bit priming needs only the callback-owned pending bytes.  Project that
-    // view at the shared stream/state boundary so the bit operation itself
-    // never reconstructs a slice from an allocation handle.
-    Pending,
     // A full reset only clears the hash table.  Keep that bounded callback
     // view in the shared stream/state projection, rather than reconstructing
     // it at the reset adapter after the opaque state has been borrowed.
     Hash,
     Dictionary,
-    // Deflate dispatch needs the three dictionary/history tables and the
-    // pending bytes together.  Keep that complete callback-storage view at
-    // the shared stream/state boundary rather than rebuilding its pending
-    // slice in the dispatch adapter.
-    Dispatch,
+    // C4 consumers that touch the pending allocation receive every
+    // callback-backed region together.  Keep that complete call-scoped view
+    // at the shared stream/state boundary rather than rebuilding a pending
+    // slice in a consumer-specific adapter.
+    Complete,
     // Dictionary installation is a complete pointer-free operation once the
     // shared boundary has lent it the callback-owned views.  Keep its status
     // slot in the request so the FFI export can dispatch directly without
@@ -1695,28 +1691,13 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         }
     });
     let storage_layout = state.callback_storage.storage();
-    let dispatches_with_pending = matches!(&projection, DeflateStorageProjection::Dispatch);
+    let complete_storage = matches!(&projection, DeflateStorageProjection::Complete);
     let storage = match projection {
         DeflateStorageProjection::None => DeflateCallbackStorage {
             window: None,
             prev: None,
             head: None,
             pending: None,
-        },
-        DeflateStorageProjection::Pending => DeflateCallbackStorage {
-            window: None,
-            prev: None,
-            head: None,
-            pending: Some(::core::slice::from_raw_parts_mut(
-                state
-                    .pending_buf
-                    .expect("initialized pending buffer")
-                    .as_ptr(),
-                storage_layout
-                    .pending
-                    .byte_len()
-                    .expect("validated pending allocation geometry"),
-            )),
         },
         DeflateStorageProjection::Hash => DeflateCallbackStorage {
             window: None,
@@ -1731,7 +1712,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             pending: None,
         },
         DeflateStorageProjection::Dictionary
-        | DeflateStorageProjection::Dispatch
+        | DeflateStorageProjection::Complete
         | DeflateStorageProjection::DictionaryInstall { .. }
         | DeflateStorageProjection::DictionaryQuery { .. } => DeflateCallbackStorage {
             window: Some(::core::slice::from_raw_parts_mut(
@@ -1755,7 +1736,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                     .element_len::<crate::src::deflate::Posf>()
                     .expect("validated head allocation geometry"),
             )),
-            pending: if dispatches_with_pending {
+            pending: if complete_storage {
                 Some(::core::slice::from_raw_parts_mut(
                     state
                         .pending_buf
@@ -2851,7 +2832,7 @@ pub(crate) unsafe fn deflateTune(
     let projection = match action {
         DeflateScalarAction::Reset(DeflateResetKind::Keep) => DeflateStorageProjection::None,
         DeflateScalarAction::Reset(DeflateResetKind::Full) => DeflateStorageProjection::Hash,
-        DeflateScalarAction::Prime { .. } => DeflateStorageProjection::Pending,
+        DeflateScalarAction::Prime { .. } => DeflateStorageProjection::Complete,
         DeflateScalarAction::Pending { .. }
         | DeflateScalarAction::Used { .. }
         | DeflateScalarAction::Tune { .. } => DeflateStorageProjection::None,
@@ -2914,7 +2895,11 @@ pub(crate) unsafe fn deflateTune(
             crate::zlib_h::Z_OK
         }
         DeflateScalarAction::Prime { bits, value } => {
-            let pending_buf = storage.pending.expect("initialized pending buffer");
+            let pending_buf = s
+                .callback_storage
+                .dispatch_storage(storage)
+                .expect("complete pending storage projection")
+                .pending_buf;
             deflate_prime_bits(
                 pending_buf,
                 &mut s.pending,
@@ -4129,6 +4114,162 @@ struct DeflateDispatchStorage<'state> {
     head: &'state mut [crate::src::deflate::Posf],
 }
 
+// Tree exports receive only an opaque deflate-state handle, but their pending
+// bytes have the same callback lifetime as normal deflate dispatch.  Carry
+// their pointer-free inputs to this one complete-storage boundary instead of
+// letting each tree adapter recover a pending-only raw slice.
+pub(crate) enum DeflateTreeAction<'input> {
+    BitOutput(crate::src::trees::BitOutputAction),
+    Tally {
+        dist: ::core::ffi::c_uint,
+        lc: ::core::ffi::c_uint,
+    },
+    StoredBlock {
+        input: &'input [crate::stdlib::Bytef],
+        stored_len: crate::zutil_h::ulg,
+        last: ::core::ffi::c_int,
+    },
+    FlushBlock {
+        input: Option<&'input [crate::stdlib::Bytef]>,
+        stored_len: crate::zutil_h::ulg,
+        last: ::core::ffi::c_int,
+    },
+}
+
+// This is the tree-facing C4 projection.  The callback owner verifies that
+// all four allocations completed and that their immutable request geometry
+// still matches before the tree kernel receives ordinary bounded slices.
+pub(crate) unsafe fn deflate_tree_from_state(
+    state: &mut crate::src::deflate::deflate_state,
+    action: DeflateTreeAction<'_>,
+) -> ::core::ffi::c_int {
+    let layout = state.callback_storage.storage();
+    let storage = DeflateCallbackStorage {
+        window: Some(::core::slice::from_raw_parts_mut(
+            state.window.expect("initialized window").as_ptr(),
+            layout
+                .window
+                .byte_len()
+                .expect("validated window allocation geometry"),
+        )),
+        prev: Some(::core::slice::from_raw_parts_mut(
+            state.prev.expect("initialized prev table").as_ptr(),
+            layout
+                .prev
+                .element_len::<crate::src::deflate::Posf>()
+                .expect("validated prev allocation geometry"),
+        )),
+        head: Some(::core::slice::from_raw_parts_mut(
+            state.head.expect("initialized head table").as_ptr(),
+            layout
+                .head
+                .element_len::<crate::src::deflate::Posf>()
+                .expect("validated head allocation geometry"),
+        )),
+        pending: Some(::core::slice::from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("initialized pending buffer")
+                .as_ptr(),
+            layout
+                .pending
+                .byte_len()
+                .expect("validated pending allocation geometry"),
+        )),
+    };
+    let storage = state
+        .callback_storage
+        .dispatch_storage(storage)
+        .expect("complete tree storage projection");
+    match action {
+        DeflateTreeAction::BitOutput(action) => {
+            crate::src::trees::bi_flush_or_windup(
+                crate::src::trees::BitOutputState {
+                    pending_buf: storage.pending_buf,
+                    pending: &mut state.pending,
+                    bi_buf: &mut state.bi_buf,
+                    bi_valid: &mut state.bi_valid,
+                    bi_used: &mut state.bi_used,
+                },
+                action,
+            );
+            0
+        }
+        DeflateTreeAction::Tally { dist, lc } => crate::src::trees::_tr_tally(
+            crate::src::trees::TallyState {
+                sym_buf: &mut storage.pending_buf[state.sym_buf_start..],
+                sym_next: &mut state.sym_next,
+                sym_end: state.sym_end,
+                dyn_ltree: &mut state.dyn_ltree,
+                dyn_dtree: &mut state.dyn_dtree,
+                matches: &mut state.matches,
+            },
+            dist,
+            lc,
+        ),
+        DeflateTreeAction::StoredBlock {
+            input,
+            stored_len,
+            last,
+        } => {
+            crate::src::trees::stored_block_bytes(
+                storage.pending_buf,
+                &mut state.pending,
+                &mut state.bi_buf,
+                &mut state.bi_valid,
+                &mut state.bi_used,
+                input,
+                stored_len,
+                last,
+            );
+            0
+        }
+        DeflateTreeAction::FlushBlock {
+            input,
+            stored_len,
+            last,
+        } => {
+            let data_type = if state.level > 0 {
+                Some(&mut state.data_type)
+            } else {
+                None
+            };
+            crate::src::trees::flush_block_from_views(
+                data_type,
+                crate::src::trees::BlockFlushState {
+                    level: state.level,
+                    strategy: state.strategy,
+                    pending_buf: storage.pending_buf,
+                    pending: &mut state.pending,
+                    bi_buf: &mut state.bi_buf,
+                    bi_valid: &mut state.bi_valid,
+                    bi_used: &mut state.bi_used,
+                    dyn_ltree: &mut state.dyn_ltree,
+                    dyn_dtree: &mut state.dyn_dtree,
+                    bl_tree: &mut state.bl_tree,
+                    l_desc: &mut state.l_desc,
+                    d_desc: &mut state.d_desc,
+                    bl_desc: &mut state.bl_desc,
+                    heap: &mut state.heap,
+                    heap_len: &mut state.heap_len,
+                    heap_max: &mut state.heap_max,
+                    depth: &mut state.depth,
+                    bl_count: &mut state.bl_count,
+                    opt_len: &mut state.opt_len,
+                    static_len: &mut state.static_len,
+                    matches: &mut state.matches,
+                    sym_buf_start: state.sym_buf_start,
+                    sym_next: &mut state.sym_next,
+                },
+                input,
+                stored_len,
+                last,
+            );
+            0
+        }
+    }
+}
+
 struct DeflateDispatch<'input, 'output, 'state> {
     flush: DeflateFlush,
     stream: DeflateDispatchStream<'input, 'output>,
@@ -4907,7 +5048,7 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
     // handling, plus pending bytes. Reuse the single complete callback-
     // storage projection instead of rebuilding any storage slice here.
     let Some((strm, state, storage, _)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Dispatch, None)
+        deflate_stream_and_state(strm, DeflateStorageProjection::Complete, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
