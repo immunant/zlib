@@ -168,6 +168,10 @@ fn gz_comp_needs_reset(avail_in: crate::stdlib::uInt, flush: ::core::ffi::c_int)
     avail_in != 0 || flush != crate::zlib_h::Z_NO_FLUSH
 }
 
+fn gz_write_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
+    errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
+}
+
 fn gz_comp_write_chunk_len(available: usize, max: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if available > max as usize {
         max
@@ -256,9 +260,7 @@ unsafe extern "C" fn gz_comp(
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             if writ < 0 as ::core::ffi::c_int {
-                if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                    || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                {
+                if gz_write_errno_is_retryable(*crate::stdlib::__errno_location()) {
                     (*state).again = 1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_error(
@@ -296,9 +298,7 @@ unsafe extern "C" fn gz_comp(
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 if writ < 0 as ::core::ffi::c_int {
-                    if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                        || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                    {
+                    if gz_write_errno_is_retryable(*crate::stdlib::__errno_location()) {
                         (*state).again = 1 as ::core::ffi::c_int;
                     }
                     crate::src::gzlib::gz_error(
@@ -776,6 +776,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 mod tests {
     use super::{
         gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_write_chunk_len,
+        gz_write_errno_is_retryable,
         gz_write_buffered_copy_len, gz_write_chunk_consumed_len, gz_write_chunk_len,
         gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
         gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
@@ -833,6 +834,14 @@ mod tests {
     fn gzputs_result_returns_written_count() {
         assert_eq!(gzputs_result(5, 5), 5);
         assert_eq!(gzputs_result(5, 3), 3);
+    }
+
+    #[test]
+    fn gz_write_errno_is_retryable_for_nonblocking_write_errors() {
+        assert!(gz_write_errno_is_retryable(crate::stdlib::EAGAIN));
+        assert!(gz_write_errno_is_retryable(crate::stdlib::EWOULDBLOCK));
+        assert!(!gz_write_errno_is_retryable(0));
+        assert!(!gz_write_errno_is_retryable(1));
     }
 
     #[test]

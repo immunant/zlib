@@ -314,6 +314,10 @@ fn gz_is_gzip_header(
     first == 31 && second == 139 && third == 8 && fourth < 32
 }
 
+fn gz_look_forces_gzip(direct: ::core::ffi::c_int, junk: ::core::ffi::c_int) -> bool {
+    direct == -1 || junk == 0
+}
+
 fn gz_look_needs_more_input(avail_in: crate::stdlib::uInt, again: ::core::ffi::c_int) -> bool {
     avail_in == 0 || again != 0 && avail_in < 4
 }
@@ -383,7 +387,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             return -1 as ::core::ffi::c_int;
         }
     }
-    if (*state).direct == -1 as ::core::ffi::c_int || (*state).junk == 0 as ::core::ffi::c_int {
+    if gz_look_forces_gzip((*state).direct, (*state).junk) {
         crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
         (*state).how = crate::gzguts_h::GZIP;
         (*state).junk = ((*state).junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
@@ -551,13 +555,19 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if !((*state).x.have == 0 as ::core::ffi::c_uint
-            && ((*state).eof == 0 || (*strm).avail_in != 0))
-        {
+        if !gz_fetch_should_continue((*state).x.have, (*state).eof, (*strm).avail_in) {
             break;
         }
     }
     return 0 as ::core::ffi::c_int;
+}
+
+fn gz_fetch_should_continue(
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+) -> bool {
+    have == 0 && (eof == 0 || avail_in != 0)
 }
 
 fn gz_skip_core(
@@ -891,6 +901,13 @@ mod tests {
     }
 
     #[test]
+    fn gz_look_forces_gzip_for_direct_or_completed_members() {
+        assert!(gz_look_forces_gzip(-1, 1));
+        assert!(gz_look_forces_gzip(0, 0));
+        assert!(!gz_look_forces_gzip(0, 1));
+    }
+
+    #[test]
     fn gz_look_needs_more_input_requires_data_for_initial_probe() {
         assert!(gz_look_needs_more_input(0, 0));
         assert!(!gz_look_needs_more_input(4, 0));
@@ -915,6 +932,14 @@ mod tests {
             GzLookAction::TransparentCopy
         );
         assert_eq!(gz_look_action(3, 0, None), GzLookAction::TransparentCopy);
+    }
+
+    #[test]
+    fn gz_fetch_should_continue_only_without_output_and_with_work_remaining() {
+        assert!(gz_fetch_should_continue(0, 0, 0));
+        assert!(gz_fetch_should_continue(0, 1, 1));
+        assert!(!gz_fetch_should_continue(1, 0, 1));
+        assert!(!gz_fetch_should_continue(0, 1, 0));
     }
 
     #[test]

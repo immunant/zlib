@@ -588,9 +588,17 @@ pub unsafe extern "C" fn gzdopen_ffi(
 ) -> crate::zlib_h::gzFile {
     gzdopen(fd, mode)
 }
+fn gzbuffer_normalized_want(size: ::core::ffi::c_uint) -> Option<::core::ffi::c_uint> {
+    if (size << 1 as ::core::ffi::c_int) < size {
+        None
+    } else {
+        Some(size.max(8 as ::core::ffi::c_uint))
+    }
+}
+
 fn gzbuffer_core(
     state: &mut crate::gzguts_h::gz_state,
-    mut size: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     if !gz_is_read_or_write_mode(state.mode) {
         return -1 as ::core::ffi::c_int;
@@ -598,12 +606,9 @@ fn gzbuffer_core(
     if state.size != 0 as ::core::ffi::c_uint {
         return -1 as ::core::ffi::c_int;
     }
-    if (size << 1 as ::core::ffi::c_int) < size {
+    let Some(size) = gzbuffer_normalized_want(size) else {
         return -1 as ::core::ffi::c_int;
-    }
-    if size < 8 as ::core::ffi::c_uint {
-        size = 8 as ::core::ffi::c_uint;
-    }
+    };
     state.want = size;
     return 0 as ::core::ffi::c_int;
 }
@@ -997,7 +1002,7 @@ mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
         gz_prepare_open, gz_reset_core, gzclearerr_core, gzerror_core,
-        gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
+        gzbuffer_normalized_want, gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
         gzseek_can_fast_forward, gzseek_error_allows_positioning,
         gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
         gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
@@ -1097,6 +1102,23 @@ mod tests {
         assert!(gz_is_read_or_write_mode(crate::gzguts_h::GZ_WRITE));
         assert!(!gz_is_read_or_write_mode(crate::gzguts_h::GZ_NONE));
         assert!(!gz_is_read_or_write_mode(crate::gzguts_h::GZ_APPEND));
+    }
+
+    #[test]
+    fn gzbuffer_normalizes_small_requested_sizes() {
+        assert_eq!(gzbuffer_normalized_want(0), Some(8));
+        assert_eq!(gzbuffer_normalized_want(7), Some(8));
+    }
+
+    #[test]
+    fn gzbuffer_preserves_valid_requested_sizes() {
+        assert_eq!(gzbuffer_normalized_want(8), Some(8));
+        assert_eq!(gzbuffer_normalized_want(9), Some(9));
+    }
+
+    #[test]
+    fn gzbuffer_rejects_sizes_that_overflow_when_doubled() {
+        assert_eq!(gzbuffer_normalized_want(::core::ffi::c_uint::MAX), None);
     }
 
     #[test]
