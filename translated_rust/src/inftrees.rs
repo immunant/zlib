@@ -3227,15 +3227,29 @@ pub unsafe extern "C" fn inflate_table_ffi(
 ) -> ::core::ffi::c_int {
     inflate_table_raw(type_0, lens, codes, table, bits, work)
 }
-unsafe fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
-    state.lencode = &raw const lenfix as *const crate::src::inftrees::code;
-    state.lenbits = 9 as ::core::ffi::c_uint;
-    state.distcode = &raw const distfix as *const crate::src::inftrees::code;
-    state.distbits = 5 as ::core::ffi::c_uint;
+struct FixedTables {
+    len: &'static [crate::src::inftrees::code; 512],
+    lenbits: ::core::ffi::c_uint,
+    dist: &'static [crate::src::inftrees::code; 32],
+    distbits: ::core::ffi::c_uint,
+}
+
+fn get_fixed_tables() -> FixedTables {
+    FixedTables {
+        len: &lenfix,
+        lenbits: 9 as ::core::ffi::c_uint,
+        dist: &distfix,
+        distbits: 5 as ::core::ffi::c_uint,
+    }
 }
 
 pub unsafe fn inflate_fixed(state: *mut crate::src::inflate::inflate_state) {
-    inflate_fixed_state(&mut *state)
+    let tables = get_fixed_tables();
+    let state = &mut *state;
+    state.lencode = tables.len.as_ptr();
+    state.lenbits = tables.lenbits;
+    state.distcode = tables.dist.as_ptr();
+    state.distbits = tables.distbits;
 }
 #[export_name = "inflate_fixed"]
 
