@@ -43,6 +43,10 @@ pub mod gzguts_h {
         pub size: ::core::ffi::c_uint,
         pub input: Option<Box<[u8]>>,
         pub output: Option<Box<[u8]>>,
+        // The read-side codec cursor belongs to the same allocation as its
+        // input bytes.  Keep it as a checked index/count rather than relying
+        // on the ABI stream cursor between refill and inflate calls.
+        pub input_cursor: Option<crate::src::gzlib::GzCodecInput>,
     }
 
     #[repr(C)]

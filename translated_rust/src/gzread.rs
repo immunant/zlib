@@ -745,12 +745,10 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
         return 0;
     }
-    let Some(mut input_cursor) = state.buffers.input.as_deref().and_then(|buffer| {
-        GzCodecInput::from_owned_buffer(buffer, state.strm.next_in.addr(), state.strm.avail_in)
-    }) else {
+    let Some(mut input_cursor) = state.buffers.input_cursor.take() else {
         return -1 as ::core::ffi::c_int;
     };
-    if gz_avail(GzAvailState {
+    let refill = gz_avail(GzAvailState {
         err: &mut state.err,
         eof: &mut state.eof,
         input_cursor: &mut input_cursor,
@@ -761,11 +759,12 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         message: &mut state.msg,
         buffered: &mut state.x.have,
         path: state.path.as_deref(),
-    })
-    .is_none()
-    {
+    });
+    state.buffers.input_cursor = Some(input_cursor);
+    if refill.is_none() {
         return -1 as ::core::ffi::c_int;
     }
+    let input_cursor = state.buffers.input_cursor.as_ref().unwrap();
     state.strm.next_in = state.buffers.input.as_deref_mut().unwrap().as_mut_ptr();
     state.strm.avail_in = input_cursor.available();
     // The successful refill above leaves a checked owner cursor.  Retain that
@@ -802,6 +801,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             state.x.next = output.as_mut_ptr();
             state.x.have = have as ::core::ffi::c_uint;
             state.strm.avail_in = 0;
+            state.buffers.input_cursor = Some(GzCodecInput::empty());
             0
         }
         Err(()) => -1,
@@ -818,9 +818,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     }) else {
         return -1 as ::core::ffi::c_int;
     };
-    let Some(input) = state.buffers.input.as_deref().and_then(|buffer| {
-        GzCodecInput::from_owned_buffer(buffer, state.strm.next_in.addr(), state.strm.avail_in)
-    }) else {
+    let Some(input) = state.buffers.input_cursor.as_ref() else {
         return -1 as ::core::ffi::c_int;
     };
     let Some(mut decomp) =
@@ -892,11 +890,13 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     };
     state.x.have = finish.written as ::core::ffi::c_uint;
     state.x.next = output_start;
+    state.buffers.input_cursor = Some(finish.input);
     let Some(buffer) = state.buffers.input.as_deref_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    state.strm.next_in = buffer.as_mut_ptr().wrapping_add(finish.input.cursor());
-    state.strm.avail_in = finish.input.available();
+    let input_cursor = state.buffers.input_cursor.as_ref().unwrap();
+    state.strm.next_in = buffer.as_mut_ptr().wrapping_add(input_cursor.cursor());
+    state.strm.avail_in = input_cursor.available();
     state.junk = finish.junk;
     state.eof = finish.eof;
     state.how = finish.how;

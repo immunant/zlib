@@ -199,6 +199,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     };
     state.buffers.input = Some(buffers.input);
     state.buffers.output = buffers.output;
+    state.buffers.input_cursor = None;
     if state.direct == 0 {
         state.strm.zalloc = None;
         state.strm.zfree = None;
