@@ -3196,8 +3196,10 @@ fn deflate_stored_impl(
     }) as block_state;
 }
 
-// The fast strategy receives validated state and stream references, then binds
-// its allocations and caller cursors once for the bounded algorithm below.
+// `deflate_fast` is the established configuration-table target for fast
+// compression. It now owns the common raw-buffer binding for every
+// symbol-based strategy, leaving the other strategy dispatchers
+// reference- and slice-based.
 fn deflate_fast(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
@@ -3225,9 +3227,23 @@ fn deflate_fast(
         } else {
             ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
         };
-        deflate_fast_impl(
-            state, stream, window, head, prev, pending, symbols, input, output, flush,
-        )
+        if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
+            deflate_huff_impl(
+                state, stream, window, head, prev, pending, symbols, input, output, flush,
+            )
+        } else if state.strategy == crate::zlib_h::Z_RLE {
+            deflate_rle_impl(
+                state, stream, window, head, prev, pending, symbols, input, output, flush,
+            )
+        } else if state.level <= 3 {
+            deflate_fast_impl(
+                state, stream, window, head, prev, pending, symbols, input, output, flush,
+            )
+        } else {
+            deflate_slow_impl(
+                state, stream, window, head, prev, pending, symbols, input, output, flush,
+            )
+        }
     }
 }
 
@@ -3364,39 +3380,14 @@ fn deflate_fast_impl(
     block_done
 }
 
-// The lazy strategy receives validated state and stream references, then binds
-// its allocations and caller cursors once for the bounded algorithm below.
+// The lazy strategy receives validated state and stream references, then
+// dispatches through the shared raw-buffer binder.
 fn deflate_slow(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    // SAFETY: the validated compression dispatch supplies one live deflater
-    // and its bounded allocations and caller cursors for this call.
-    unsafe {
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-        let pending =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        let symbols = ::core::slice::from_raw_parts_mut(
-            state.sym_buf,
-            state.lit_bufsize.wrapping_mul(3) as usize,
-        );
-        let input = if stream.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-        };
-        let output = if stream.avail_out == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-        };
-        deflate_slow_impl(
-            state, stream, window, head, prev, pending, symbols, input, output, flush,
-        )
-    }
+    deflate_fast(state, stream, flush)
 }
 
 // The lazy deflater retains bounded views of every allocation and caller
@@ -3609,39 +3600,14 @@ fn rle_match_length(
     length as crate::stdlib::uInt
 }
 
-// The RLE strategy receives validated state and stream references, then binds
-// its allocations and caller cursors once for the bounded compression loop.
+// The RLE strategy receives validated state and stream references, then
+// dispatches through the shared raw-buffer binder.
 fn deflate_rle(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    // SAFETY: the validated compression dispatch supplies one live deflater
-    // and its bounded allocations and caller cursors for this call.
-    unsafe {
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-        let pending =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        let symbols = ::core::slice::from_raw_parts_mut(
-            state.sym_buf,
-            state.lit_bufsize.wrapping_mul(3) as usize,
-        );
-        let input = if stream.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-        };
-        let output = if stream.avail_out == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-        };
-        deflate_rle_impl(
-            state, stream, window, head, prev, pending, symbols, input, output, flush,
-        )
-    }
+    deflate_fast(state, stream, flush)
 }
 
 fn deflate_rle_impl(
@@ -3747,38 +3713,13 @@ fn deflate_rle_impl(
 }
 
 // The Huffman-only strategy receives validated state and stream references,
-// then binds its allocations and caller cursors once for the bounded loop.
+// then dispatches through the shared raw-buffer binder.
 fn deflate_huff(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    // SAFETY: the validated compression dispatch supplies one live deflater
-    // and its bounded allocations and caller cursors for this call.
-    unsafe {
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-        let pending =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        let symbols = ::core::slice::from_raw_parts_mut(
-            state.sym_buf,
-            state.lit_bufsize.wrapping_mul(3) as usize,
-        );
-        let input = if stream.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-        };
-        let output = if stream.avail_out == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-        };
-        deflate_huff_impl(
-            state, stream, window, head, prev, pending, symbols, input, output, flush,
-        )
-    }
+    deflate_fast(state, stream, flush)
 }
 
 fn flush_pending_symbols(
