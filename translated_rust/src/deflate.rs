@@ -3830,26 +3830,34 @@ unsafe fn deflate_stored(
     let mut len: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    let mut used: ::core::ffi::c_uint = {
-        let state = &mut *s;
-        let strm = &mut *state.strm;
-        strm.avail_in
-    };
+    // Snapshot the initial input availability together with the first block
+    // admission.  The planner is scalar-only, so this avoids a separate raw
+    // stream adoption before the loop without changing when input is read.
+    let mut used: ::core::ffi::c_uint = 0;
+    let mut first_block = true;
     loop {
-        let Some(plan) = ({
+        let (initial_avail_in, plan) = {
             let state = &mut *s;
             let strm = &mut *state.strm;
-            stored_initial_block_plan(
-                state.pending_buf_size,
-                state.w_size,
-                state.bi_valid,
-                strm.avail_out,
-                state.strstart,
-                state.block_start,
+            (
                 strm.avail_in,
-                flush,
+                stored_initial_block_plan(
+                    state.pending_buf_size,
+                    state.w_size,
+                    state.bi_valid,
+                    strm.avail_out,
+                    state.strstart,
+                    state.block_start,
+                    strm.avail_in,
+                    flush,
+                ),
             )
-        }) else {
+        };
+        if first_block {
+            used = initial_avail_in;
+            first_block = false;
+        }
+        let Some(plan) = plan else {
             break;
         };
         len = plan.len;
