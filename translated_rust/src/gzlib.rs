@@ -78,8 +78,8 @@ fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0 as crate::stdlib::uInt;
 }
 
-unsafe extern "C" fn gz_open(
-    mut path: *const ::core::ffi::c_void,
+unsafe fn gz_open(
+    mut path: *const ::core::ffi::c_char,
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
@@ -207,7 +207,7 @@ unsafe extern "C" fn gz_open(
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
+    len = crate::stdlib::strlen(path) as crate::stdlib::z_size_t;
     (*state).path = crate::stdlib::malloc(
         (len as crate::__stddef_size_t_h::size_t)
             .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
@@ -221,7 +221,7 @@ unsafe extern "C" fn gz_open(
         (len as crate::__stddef_size_t_h::size_t)
             .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
-        path as *const ::core::ffi::c_char,
+        path,
     );
     oflag |= crate::stdlib::O_LARGEFILE
         | (if (*state).mode == crate::gzguts_h::GZ_READ {
@@ -242,7 +242,7 @@ unsafe extern "C" fn gz_open(
         });
     if fd == -1 as ::core::ffi::c_int {
         (*state).fd = crate::stdlib::open(
-            path as *const ::core::ffi::c_char,
+            path,
             oflag,
             0o666 as ::core::ffi::c_int,
         );
@@ -289,33 +289,13 @@ unsafe extern "C" fn gz_open(
     gz_reset_state(&mut *state);
     return state as crate::zlib_h::gzFile;
 }
-pub unsafe extern "C" fn gzopen(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    return gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    );
-}
 #[export_name = "gzopen"]
 
 pub unsafe extern "C" fn gzopen_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen(path, mode)
-}
-pub unsafe extern "C" fn gzopen64(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    return gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    );
+    gz_open(path, -1 as ::core::ffi::c_int, mode)
 }
 #[export_name = "gzopen64"]
 
@@ -323,7 +303,7 @@ pub unsafe extern "C" fn gzopen64_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen64(path, mode)
+    gz_open(path, -1 as ::core::ffi::c_int, mode)
 }
 pub unsafe extern "C" fn gzdopen(
     mut fd: ::core::ffi::c_int,
@@ -351,7 +331,7 @@ pub unsafe extern "C" fn gzdopen(
         b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
         fd,
     );
-    gz = gz_open(path as *const ::core::ffi::c_void, fd, mode);
+    gz = gz_open(path, fd, mode);
     crate::stdlib::free(path as *mut ::core::ffi::c_void);
     return gz;
 }
