@@ -2930,13 +2930,16 @@ pub fn deflate(
         };
         if zlib_header_is_pending {
             flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
-            let pending_after_flush = {
+            let pending_remains = {
                 let state = &mut *s;
-                state.pending
+                if state.pending != 0 as crate::zutil_h::ulg {
+                    state.last_flush = -1 as ::core::ffi::c_int;
+                    true
+                } else {
+                    false
+                }
             };
-            if pending_after_flush != 0 as crate::zutil_h::ulg {
-                let state = &mut *s;
-                state.last_flush = -1 as ::core::ffi::c_int;
+            if pending_remains {
                 return crate::zlib_h::Z_OK;
             }
         }
