@@ -472,6 +472,10 @@ pub(crate) struct DeflateCallbackStorageOwner {
     prev: bool,
     head: bool,
     pending: bool,
+    // The reverse callback schedule has consumed the ledger but may still be
+    // inside a re-entrant `zfree`.  Keep that state pointer-free so a nested
+    // stream operation cannot clear `stream.state` before the final callback.
+    releasing: bool,
 }
 
 impl DeflateCallbackStorageOwner {
@@ -483,6 +487,7 @@ impl DeflateCallbackStorageOwner {
             prev: false,
             head: false,
             pending: false,
+            releasing: false,
         }
     }
 
@@ -518,7 +523,15 @@ impl DeflateCallbackStorageOwner {
         self.state && self.window && self.prev && self.head && self.pending
     }
 
-    fn take_release_plan(&mut self, status: ::core::ffi::c_int) -> DeflateReleasePlan {
+    fn is_releasing(&self) -> bool {
+        self.releasing
+    }
+
+    fn begin_release(&mut self, status: ::core::ffi::c_int) -> Option<DeflateReleasePlan> {
+        if self.releasing {
+            return None;
+        }
+        self.releasing = true;
         let slots = DeflateAllocationPlan::release_slots().map(|slot| {
             let allocated = match slot {
                 DeflateCallbackSlot::State => self.state,
@@ -535,7 +548,7 @@ impl DeflateCallbackStorageOwner {
         self.prev = false;
         self.window = false;
         self.state = false;
-        plan
+        Some(plan)
     }
 
     // Pending output has the same callback lifecycle as the three history
@@ -1489,6 +1502,13 @@ mod callback_owner {
         // borrow so teardown does not re-read `strm.state` after projection.
         let mut state_handle = strm.state?.cast::<crate::src::deflate::deflate_state>();
         let state = state_handle.as_mut();
+        // A `zfree` callback may re-enter the public API while this owner is
+        // still walking its reverse release schedule. The ledger has already
+        // consumed the live slots in that case, but the outer transaction
+        // must remain the only code that clears `strm.state`.
+        if state.callback_storage.is_releasing() {
+            return None;
+        }
         let admission = admit_deflate_projection(
             state.status,
             state.level,
@@ -1657,8 +1677,10 @@ mod callback_owner {
         // owner, next to the liveness ledger and the callback order.
         let (release_plan, allocations) = {
             let state = state_handle.as_mut();
+            let Some(release_plan) = state.callback_storage.begin_release(state.status) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
             drop(state.gzhead.take());
-            let release_plan = state.callback_storage.take_release_plan(state.status);
             // Snapshot the recorded, typed handles before the first callback.
             // `Iterator::map()` would retain this state borrow until each later
             // iteration, including across a re-entrant `zfree` call.  Array::map
