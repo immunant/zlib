@@ -1660,7 +1660,8 @@ pub unsafe extern "C" fn gzputs_ffi(
 ) -> ::core::ffi::c_int {
     gzputs(file, s)
 }
-pub unsafe extern "C" fn gzflush(
+#[export_name = "gzflush"]
+pub unsafe extern "C" fn gzflush_ffi(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -1692,14 +1693,6 @@ pub unsafe extern "C" fn gzflush(
     }
     gz_comp(state, flush);
     return (*state).err;
-}
-#[export_name = "gzflush"]
-
-pub unsafe extern "C" fn gzflush_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzflush(file, flush)
 }
 pub unsafe extern "C" fn gzsetparams(
     mut file: crate::zlib_h::gzFile,
