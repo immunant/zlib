@@ -857,6 +857,20 @@ enum GzDecompAction {
     Continue,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum GzDecompDataErrorMessage {
+    Generic,
+    Inflate,
+}
+
+fn gz_decomp_data_error_message(inflate_message_present: bool) -> GzDecompDataErrorMessage {
+    if inflate_message_present {
+        GzDecompDataErrorMessage::Inflate
+    } else {
+        GzDecompDataErrorMessage::Generic
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct GzDecompDecision {
     clear_junk: bool,
@@ -1007,14 +1021,16 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
                 break;
             }
             GzDecompAction::DataError => {
+                let message = match gz_decomp_data_error_message(!(*strm).msg.is_null()) {
+                    GzDecompDataErrorMessage::Generic => {
+                        b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
+                    }
+                    GzDecompDataErrorMessage::Inflate => (*strm).msg as *const ::core::ffi::c_char,
+                };
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_DATA_ERROR,
-                    if (*strm).msg.is_null() {
-                        b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                    } else {
-                        (*strm).msg as *const ::core::ffi::c_char
-                    },
+                    message,
                 );
                 break;
             }
@@ -1581,6 +1597,18 @@ mod tests {
                 clear_junk: false,
                 action: GzDecompAction::DataError,
             }
+        );
+    }
+
+    #[test]
+    fn gz_decomp_data_error_message_selects_inflate_text_only_when_present() {
+        assert_eq!(
+            gz_decomp_data_error_message(false),
+            GzDecompDataErrorMessage::Generic
+        );
+        assert_eq!(
+            gz_decomp_data_error_message(true),
+            GzDecompDataErrorMessage::Inflate
         );
     }
 

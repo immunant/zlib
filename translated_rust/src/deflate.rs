@@ -432,6 +432,25 @@ pub(crate) fn symbol_triplet_cursors(
     ([start, second, third], third.wrapping_add(1))
 }
 
+fn deflate_huff_literal_progress(
+    sym_next_after_literal: crate::stdlib::uInt,
+    sym_end: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+) -> (
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+    bool,
+) {
+    (
+        sym_next_after_literal,
+        lookahead.wrapping_sub(1),
+        strstart.wrapping_add(1),
+        sym_next_after_literal == sym_end,
+    )
+}
+
 fn can_search_hash_match(
     hash_head: crate::src::deflate::IPos,
     strstart: crate::stdlib::uInt,
@@ -3827,14 +3846,16 @@ unsafe fn deflate_huff(
         let mut cc: crate::zutil_h::uch =
             *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
         let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
-        (*s).sym_next = next;
         *(*s).sym_buf.offset(cursors[0] as isize) = 0 as crate::zutil_h::uchf;
         *(*s).sym_buf.offset(cursors[1] as isize) = 0 as crate::zutil_h::uchf;
         *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
         (*s).dyn_ltree[cc as usize].fc.value = (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-        (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-        (*s).strstart = (*s).strstart.wrapping_add(1);
+        let (sym_next, lookahead, strstart, must_flush_block) =
+            deflate_huff_literal_progress(next, (*s).sym_end, (*s).lookahead, (*s).strstart);
+        (*s).sym_next = sym_next;
+        (*s).lookahead = lookahead;
+        (*s).strstart = strstart;
+        bflush = must_flush_block as ::core::ffi::c_int;
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
@@ -3916,22 +3937,22 @@ mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_flush_rank,
-        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
-        deflate_rle_clamp_match_length, deflate_rle_match_state_after_emit,
-        deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
-        deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
-        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
-        fill_window_cursor, fill_window_insert_after_slide, fill_window_should_refill,
-        fill_window_should_slide, fill_window_zero_range, flush_pending_accounting,
-        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        lm_match_parameters, longest_match_clamp_length, longest_match_limit,
-        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
-        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_len,
-        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
-        stored_block_available_output, stored_block_can_emit, stored_block_is_last,
-        stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
-        symbol_triplet_cursors, zlib_header, DeflatePreflight,
+        deflate_huff_literal_progress, deflate_pending_value, deflate_preflight,
+        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
+        deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
+        deflate_rle_match_state_after_emit, deflate_set_dictionary_allowed,
+        deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
+        deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
+        dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
+        fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
+        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_match_parameters,
+        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
+        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
+        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        stored_block_is_last, stored_block_min_size, stored_block_should_wait,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
 
     #[test]
@@ -3982,6 +4003,19 @@ mod tests {
         assert_eq!(
             deflate_rle_match_state_after_emit(0, crate::stdlib::uInt::MAX, 1),
             (crate::stdlib::uInt::MAX, 0, 0),
+        );
+    }
+
+    #[test]
+    fn deflate_huff_literal_progress_preserves_cursor_and_flush_boundaries() {
+        assert_eq!(
+            deflate_huff_literal_progress(3, 6, 5, 10),
+            (3, 4, 11, false)
+        );
+        assert_eq!(deflate_huff_literal_progress(6, 6, 5, 10), (6, 4, 11, true));
+        assert_eq!(
+            deflate_huff_literal_progress(7, 6, 0, crate::stdlib::uInt::MAX),
+            (7, crate::stdlib::uInt::MAX, 0, false)
         );
     }
 
