@@ -152,22 +152,29 @@ pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
+    if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let strm_ref = &*strm;
+    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
     if state.is_null()
-        || (*state).strm != strm
-        || ((*state).mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || (*state).mode as ::core::ffi::c_uint
-            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
+        || !inflate_state_is_valid(strm_ref, &*state, (*state).strm == strm)
     {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
+}
+
+fn inflate_state_is_valid(
+    strm: &crate::zlib_h::z_stream,
+    state: &crate::src::inflate::inflate_state,
+    points_back_to_stream: bool,
+) -> bool {
+    strm.zalloc.is_some()
+        && strm.zfree.is_some()
+        && points_back_to_stream
+        && state.mode >= crate::src::inflate::HEAD
+        && state.mode <= crate::src::inflate::SYNC
 }
 pub unsafe extern "C" fn inflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
