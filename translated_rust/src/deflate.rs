@@ -3776,11 +3776,11 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     if (*ss).pending_buf.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>() as crate::__stddef_size_t_h::size_t,
-    );
+    // `z_stream` is an ABI mirror made entirely of `Copy` fields.  Copy the
+    // initialized record directly instead of crossing the foreign `memcpy`
+    // boundary; the opaque state pointer is rebound below after its separate
+    // callback allocation succeeds.
+    *dest = *source;
     ds = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
@@ -3791,14 +3791,11 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     (*dest).state = ds as *mut ::core::ffi::c_void;
-    // The source state is copied over the complete callback allocation before
-    // any field is observed.  Clearing it first is therefore redundant.
-    crate::stdlib::memcpy(
-        ds as *mut ::core::ffi::c_void,
-        ss as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>()
-            as crate::__stddef_size_t_h::size_t,
-    );
+    // The internal state is likewise a fully initialized `Copy` record at
+    // this boundary.  Its separately allocated buffers are replaced below,
+    // so this preserves the existing shallow-copy-then-rebind sequence
+    // without a foreign whole-record copy.
+    *ds = *ss;
     (*ds).strm = dest;
     (*ds).window = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
