@@ -1106,7 +1106,16 @@ pub(crate) fn gz_gets_should_continue(
 pub(crate) enum GzUngetcPlan {
     First { buffer_end: ::core::ffi::c_uint },
     Full,
-    Prepend { move_to_end: bool },
+    Prepend {
+        move_to_end: Option<GzUngetcMove>,
+    },
+}
+
+// Moving pushed-back output only depends on the initialized buffer's scalar
+// bounds. Keep that arithmetic separate from the raw overlapping copy.
+pub(crate) struct GzUngetcMove {
+    pub source_len: ::core::ffi::c_uint,
+    pub destination_offset: ::core::ffi::c_uint,
 }
 
 pub(crate) fn gz_ungetc_plan(state: &crate::gzguts_h::gz_state) -> GzUngetcPlan {
@@ -1117,7 +1126,10 @@ pub(crate) fn gz_ungetc_plan(state: &crate::gzguts_h::gz_state) -> GzUngetcPlan 
         GzUngetcPlan::Full
     } else {
         GzUngetcPlan::Prepend {
-            move_to_end: state.x.next == state.out,
+            move_to_end: (state.x.next == state.out).then_some(GzUngetcMove {
+                source_len: state.x.have,
+                destination_offset: buffer_end.wrapping_sub(state.x.have),
+            }),
         }
     }
 }

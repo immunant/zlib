@@ -833,12 +833,13 @@ pub fn gzungetc(
             // SAFETY: this plan is derived from the initialized output
             // buffer's available capacity. The backwards copy stays within
             // that buffer and preserves the translated overlapping move.
-            if move_to_end {
-                let mut src: *mut ::core::ffi::c_uchar =
-                    state.out.wrapping_add(state.x.have as usize);
+            if let Some(move_to_end) = move_to_end {
+                let mut src: *mut ::core::ffi::c_uchar = state
+                    .out
+                    .wrapping_add(move_to_end.source_len as usize);
                 let mut dest: *mut ::core::ffi::c_uchar = state
                     .out
-                    .wrapping_add((state.size << 1 as ::core::ffi::c_int) as usize);
+                    .wrapping_add(move_to_end.destination_offset as usize);
                 unsafe {
                     while src > state.out {
                         src = src.wrapping_sub(1);
