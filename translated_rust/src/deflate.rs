@@ -4080,25 +4080,46 @@ fn record_stored_output_state(
     true
 }
 
-/// Record the history-window cursors after stored mode has copied `have`
-/// caller bytes into the window.  The legacy adapter retains the raw input and
-/// window lends; this transition is only scalar state and deliberately keeps
-/// zlib's wrapping arithmetic.
+/// The checked scalar commit after stored mode has copied caller bytes into
+/// the history window.  Keeping the prospective values separate lets the
+/// cursor boundary reject an incoherent state before it consumes input.
+struct StoredInputProgress {
+    strstart: crate::stdlib::uInt,
+    insert: crate::stdlib::uInt,
+    high_water: crate::zutil_h::ulg,
+}
+
+fn stored_input_progress_state(
+    s: &crate::src::deflate::deflate_state,
+    have: crate::stdlib::uInt,
+) -> Option<StoredInputProgress> {
+    if s.insert > s.w_size {
+        return None;
+    }
+    let strstart = s.strstart.checked_add(have)?;
+    let insert_room = s.w_size.checked_sub(s.insert)?;
+    let insert = s.insert.checked_add(have.min(insert_room))?;
+    Some(StoredInputProgress {
+        strstart,
+        insert,
+        high_water: s.high_water.max(strstart as crate::zutil_h::ulg),
+    })
+}
+
+/// Commit one checked stored-mode history-input transition.  The legacy
+/// adapter retains the raw input and window lends; this function only
+/// publishes scalar state after the bytes have been copied.
 fn record_stored_input_state(
     s: &mut crate::src::deflate::deflate_state,
     have: crate::stdlib::uInt,
-) {
-    s.strstart = s.strstart.wrapping_add(have);
-    s.insert = s
-        .insert
-        .wrapping_add(if have > s.w_size.wrapping_sub(s.insert) {
-            (s.w_size as ::core::ffi::c_uint).wrapping_sub(s.insert as ::core::ffi::c_uint)
-        } else {
-            have
-        });
-    if s.high_water < s.strstart as crate::zutil_h::ulg {
-        s.high_water = s.strstart as crate::zutil_h::ulg;
-    }
+) -> bool {
+    let Some(progress) = stored_input_progress_state(s, have) else {
+        return false;
+    };
+    s.strstart = progress.strstart;
+    s.insert = progress.insert;
+    s.high_water = progress.high_water;
+    true
 }
 
 /// Select the bytes for a stored block from the owned deflate window.  The
@@ -4320,6 +4341,12 @@ fn deflate_stored(
                 // `fill_window`, rather than advancing a raw window cursor.
                 // The raw adapter remains responsible only for its existing
                 // ABI input/output lends.
+                // Validate the complete possible state commit before reading:
+                // `read_buf()` may advance the ABI input cursor, so a malformed
+                // history state must be rejected before that observable change.
+                if stored_input_progress_state(state, have).is_none() {
+                    return need_more;
+                }
                 let Some(write_span) =
                     fill_window_write_span(window.len(), state.strstart, 0, have)
                 else {
@@ -4329,7 +4356,9 @@ fn deflate_stored(
                     return need_more;
                 };
                 let progress = read_buf(stream, output, have, state.wrap);
-                record_stored_input_state(state, progress.copied);
+                if progress.copied > have || !record_stored_input_state(state, progress.copied) {
+                    return need_more;
+                }
             }
             let tail_plan = stored_tail_block_plan(
                 state.pending_buf_size,
