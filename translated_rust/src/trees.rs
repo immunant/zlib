@@ -4380,16 +4380,20 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 ) {
     _tr_stored_block(s, buf, stored_len, last)
 }
-pub unsafe extern "C" fn _tr_flush_bits(mut s: *mut crate::src::deflate::deflate_state) {
-    let pending_buf = unsafe {
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize)
-    };
-    bi_flush(&mut *s, pending_buf);
+pub fn _tr_flush_bits(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Byte],
+) {
+    bi_flush(state, pending_buf);
 }
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_flush_bits(s)
+    let state = unsafe { &mut *s };
+    let pending_buf = unsafe {
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize)
+    };
+    _tr_flush_bits(state, pending_buf);
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
