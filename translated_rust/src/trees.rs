@@ -2658,6 +2658,20 @@ pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_s
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 
+fn pq_node_is_smaller(
+    tree: &[crate::src::deflate::ct_data],
+    depth: &[crate::zutil_h::uch; 573],
+    lhs: ::core::ffi::c_int,
+    rhs: ::core::ffi::c_int,
+) -> bool {
+    let lhs_freq = tree[lhs as usize].freq as ::core::ffi::c_int;
+    let rhs_freq = tree[rhs as usize].freq as ::core::ffi::c_int;
+    lhs_freq < rhs_freq
+        || lhs_freq == rhs_freq
+            && depth[lhs as usize] as ::core::ffi::c_int
+                <= depth[rhs as usize] as ::core::ffi::c_int
+}
+
 fn pqdownheap(
     heap: &mut [::core::ffi::c_int; 573],
     heap_len: ::core::ffi::c_int,
@@ -2669,25 +2683,16 @@ fn pqdownheap(
     let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
     while j <= heap_len {
         if j < heap_len
-            && ((tree[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize].freq
-                as ::core::ffi::c_int)
-                < tree[heap[j as usize] as usize].freq as ::core::ffi::c_int
-                || tree[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize].freq
-                    as ::core::ffi::c_int
-                    == tree[heap[j as usize] as usize].freq as ::core::ffi::c_int
-                    && depth[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
-                        as ::core::ffi::c_int
-                        <= depth[heap[j as usize] as usize] as ::core::ffi::c_int)
+            && pq_node_is_smaller(
+                tree,
+                depth,
+                heap[(j + 1 as ::core::ffi::c_int) as usize],
+                heap[j as usize],
+            )
         {
             j += 1;
         }
-        if (tree[v as usize].freq as ::core::ffi::c_int)
-            < tree[heap[j as usize] as usize].freq as ::core::ffi::c_int
-            || tree[v as usize].freq as ::core::ffi::c_int
-                == tree[heap[j as usize] as usize].freq as ::core::ffi::c_int
-                && depth[v as usize] as ::core::ffi::c_int
-                    <= depth[heap[j as usize] as usize] as ::core::ffi::c_int
-        {
+        if pq_node_is_smaller(tree, depth, v, heap[j as usize]) {
             break;
         }
         heap[k as usize] = heap[j as usize];

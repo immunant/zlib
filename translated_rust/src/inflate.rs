@@ -2583,22 +2583,24 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
     inflateValidate(state, check)
 }
+fn inflate_mark_progress(
+    mode: crate::src::inflate::inflate_mode,
+    length: ::core::ffi::c_uint,
+    was: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    if mode == crate::src::inflate::COPY_1 {
+        length
+    } else if mode == crate::src::inflate::MATCH {
+        was.wrapping_sub(length)
+    } else {
+        0 as ::core::ffi::c_uint
+    }
+}
+
 pub fn inflateMark(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_long {
     return ((state.back as ::core::ffi::c_long as ::core::ffi::c_ulong) << 16 as ::core::ffi::c_int)
         as ::core::ffi::c_long
-        + (if state.mode as ::core::ffi::c_uint
-            == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            state.length
-        } else {
-            if state.mode as ::core::ffi::c_uint
-                == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                state.was.wrapping_sub(state.length)
-            } else {
-                0 as ::core::ffi::c_uint
-            }
-        }) as ::core::ffi::c_long;
+        + inflate_mark_progress(state.mode, state.length, state.was) as ::core::ffi::c_long;
 }
 #[export_name = "inflateMark"]
 

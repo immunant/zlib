@@ -535,6 +535,10 @@ fn gz_read_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
             || state.again != 0)
 }
 
+fn gzread_zero_needs_errno(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {
+    again != 0 && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR)
+}
+
 fn gz_decomp_should_continue(avail_out: crate::stdlib::uInt, ret: ::core::ffi::c_int) -> bool {
     avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END
 }
@@ -646,7 +650,7 @@ pub unsafe extern "C" fn gzread_ffi(
         if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
             return -1 as ::core::ffi::c_int;
         }
-        if (*state).again != 0 {
+        if gzread_zero_needs_errno((*state).err, (*state).again) {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_ERRNO,
