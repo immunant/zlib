@@ -2837,22 +2837,20 @@ fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[u8]) -> ::core::ffi::c_uint
     next as ::core::ffi::c_uint
 }
 
-pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+/// Search the current bit buffer and supplied input for an empty stored
+/// block, then reset the inflater after finding one.  The ABI wrapper owns
+/// conversion of the caller's pointer-and-length input into `input`; this
+/// implementation only advances ordinary counters and state.
+fn inflate_sync_impl(
+    stream: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
+    input: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
     let mut len: ::core::ffi::c_uint = 0;
     let mut flags: ::core::ffi::c_int = 0;
     let mut in_0: ::core::ffi::c_ulong = 0;
     let mut out: ::core::ffi::c_ulong = 0;
     let mut buf: [::core::ffi::c_uchar; 4] = [0; 4];
-    let Some(stream) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let Some(state) = stream
-        .state
-        .cast::<crate::src::inflate::inflate_state>()
-        .as_mut()
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     if inflate_validate_state(stream, state).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2878,22 +2876,11 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
         state.have = 0 as ::core::ffi::c_uint;
         syncsearch(&mut state.have, &buf[..len as usize]);
     }
-    let input_start = stream.next_in;
-    let input_len = stream.avail_in as usize;
-    if input_len > isize::MAX as usize || (input_len != 0 && input_start.is_null()) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let input = if input_len == 0 {
-        &[]
-    } else {
-        // `next_in` is part of the stream's caller-provided input range.
-        // The length is bounded above before constructing this transient
-        // slice, satisfying `from_raw_parts`' platform-size requirement.
-        ::core::slice::from_raw_parts(input_start, input_len)
-    };
     len = syncsearch(&mut state.have, input);
     stream.avail_in = stream.avail_in.wrapping_sub(len);
-    stream.next_in = stream.next_in.offset(len as isize);
+    if len != 0 {
+        stream.next_in = stream.next_in.wrapping_add(len as usize);
+    }
     stream.total_in = stream.total_in.wrapping_add(len as crate::stdlib::uLong);
     if state.have != 4 as ::core::ffi::c_uint {
         return crate::zlib_h::Z_DATA_ERROR;
@@ -2911,12 +2898,33 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     stream.total_out = out as crate::stdlib::uLong;
     state.flags = flags;
     state.mode = crate::src::inflate::TYPE;
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    inflateSync(strm)
+    let Some(stream) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(state) = stream
+        .state
+        .cast::<crate::src::inflate::inflate_state>()
+        .as_mut()
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let input_start = stream.next_in;
+    let input_len = stream.avail_in as usize;
+    if input_len > isize::MAX as usize || (input_len != 0 && input_start.is_null()) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let input = if input_len == 0 {
+        &[]
+    } else {
+        // `next_in` is a caller-owned range that is valid for this FFI call.
+        ::core::slice::from_raw_parts(input_start, input_len)
+    };
+    inflate_sync_impl(stream, state, input)
 }
 fn inflate_sync_point_impl(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
     (state.mode as ::core::ffi::c_uint
