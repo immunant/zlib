@@ -2262,11 +2262,9 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
             (*state).bits = (*state).bits.wrapping_sub(8 as ::core::ffi::c_uint);
         }
         (*state).have = 0 as ::core::ffi::c_uint;
-        syncsearch(
-            &raw mut (*state).have,
-            &raw mut buf as *mut ::core::ffi::c_uchar,
-            len,
-        );
+        let mut have = 0 as ::core::ffi::c_uint;
+        syncsearch_safe(&mut have, &buf[..len as usize]);
+        (*state).have = have;
     }
     len = syncsearch(
         &raw mut (*state).have,

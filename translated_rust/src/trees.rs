@@ -3463,7 +3463,7 @@ pub const REPZ_3_10: ::core::ffi::c_int = 17 as ::core::ffi::c_int;
 
 pub const REPZ_11_138: ::core::ffi::c_int = 18 as ::core::ffi::c_int;
 
-static mut extra_lbits: [::core::ffi::c_int; 29] = [
+static extra_lbits: [::core::ffi::c_int; 29] = [
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
@@ -3495,7 +3495,7 @@ static mut extra_lbits: [::core::ffi::c_int; 29] = [
     0 as ::core::ffi::c_int,
 ];
 
-static mut extra_dbits: [::core::ffi::c_int; 30] = [
+static extra_dbits: [::core::ffi::c_int; 30] = [
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
@@ -3528,7 +3528,7 @@ static mut extra_dbits: [::core::ffi::c_int; 30] = [
     13 as ::core::ffi::c_int,
 ];
 
-static mut extra_blbits: [::core::ffi::c_int; 19] = [
+static extra_blbits: [::core::ffi::c_int; 19] = [
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
@@ -3550,7 +3550,7 @@ static mut extra_blbits: [::core::ffi::c_int; 19] = [
     7 as ::core::ffi::c_int,
 ];
 
-static mut bl_order: [crate::zutil_h::uch; 19] = [
+static bl_order: [crate::zutil_h::uch; 19] = [
     16 as ::core::ffi::c_int as crate::zutil_h::uch,
     17 as ::core::ffi::c_int as crate::zutil_h::uch,
     18 as ::core::ffi::c_int as crate::zutil_h::uch,
@@ -5095,4 +5095,17 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     _tr_tally(s, dist, lc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bl_order;
+
+    #[test]
+    fn bit_length_code_order_matches_deflate_spec() {
+        assert_eq!(
+            bl_order,
+            [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+        );
+    }
 }
