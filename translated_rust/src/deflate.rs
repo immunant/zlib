@@ -2734,6 +2734,10 @@ unsafe extern "C" fn deflate_stored(
     // stored-mode policy below can then operate on fields through the scoped
     // Rust view instead of repeatedly dereferencing the ABI cursor.
     let state = &mut *s;
+    // The backing window has the exact `window_size` established by
+    // `deflateInit2_()` and retained by `deflateCopy()`. Retain this one
+    // bounded view while stored blocks copy or slide its contents.
+    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
     let mut min_block: ::core::ffi::c_uint = (if state
         .pending_buf_size
         .wrapping_sub(5 as crate::zutil_h::ulg)
@@ -2797,11 +2801,9 @@ unsafe extern "C" fn deflate_stored(
             if left > len {
                 left = len;
             }
-            crate::stdlib::memcpy(
-                (*state.strm).next_out as *mut ::core::ffi::c_void,
-                state.window.wrapping_add(state.block_start as usize) as *const ::core::ffi::c_void,
-                left as crate::__stddef_size_t_h::size_t,
-            );
+            let output = ::core::slice::from_raw_parts_mut((*state.strm).next_out, left as usize);
+            let start = state.block_start as usize;
+            output.copy_from_slice(&window[start..start + left as usize]);
             (*state.strm).next_out = (*state.strm).next_out.wrapping_add(left as usize);
             (*state.strm).avail_out = (*state.strm).avail_out.wrapping_sub(left);
             (*state.strm).total_out = (*state.strm)
@@ -2832,12 +2834,11 @@ unsafe extern "C" fn deflate_stored(
     if used != 0 {
         if used >= state.w_size {
             state.matches = 2 as crate::stdlib::uInt;
-            crate::stdlib::memcpy(
-                state.window as *mut ::core::ffi::c_void,
-                (*state.strm).next_in.wrapping_sub(state.w_size as usize)
-                    as *const ::core::ffi::c_void,
-                state.w_size as crate::__stddef_size_t_h::size_t,
+            let input = ::core::slice::from_raw_parts(
+                (*state.strm).next_in.wrapping_sub(state.w_size as usize),
+                state.w_size as usize,
             );
+            window[..state.w_size as usize].copy_from_slice(input);
             state.strstart = state.w_size;
             state.insert = state.strstart;
         } else {
@@ -2847,10 +2848,9 @@ unsafe extern "C" fn deflate_stored(
                 <= used as crate::zutil_h::ulg
             {
                 state.strstart = state.strstart.wrapping_sub(state.w_size);
-                crate::stdlib::memcpy(
-                    state.window as *mut ::core::ffi::c_void,
-                    state.window.wrapping_add(state.w_size as usize) as *const ::core::ffi::c_void,
-                    state.strstart as crate::__stddef_size_t_h::size_t,
+                window.copy_within(
+                    state.w_size as usize..state.w_size as usize + state.strstart as usize,
+                    0,
                 );
                 if state.matches < 2 as crate::stdlib::uInt {
                     state.matches = state.matches.wrapping_add(1);
@@ -2859,11 +2859,12 @@ unsafe extern "C" fn deflate_stored(
                     state.insert = state.strstart;
                 }
             }
-            crate::stdlib::memcpy(
-                state.window.wrapping_add(state.strstart as usize) as *mut ::core::ffi::c_void,
-                (*state.strm).next_in.wrapping_sub(used as usize) as *const ::core::ffi::c_void,
-                used as crate::__stddef_size_t_h::size_t,
+            let input = ::core::slice::from_raw_parts(
+                (*state.strm).next_in.wrapping_sub(used as usize),
+                used as usize,
             );
+            let start = state.strstart as usize;
+            window[start..start + used as usize].copy_from_slice(input);
             state.strstart = state.strstart.wrapping_add(used);
             state.insert =
                 state
@@ -2897,10 +2898,9 @@ unsafe extern "C" fn deflate_stored(
     if (*state.strm).avail_in > have && state.block_start >= state.w_size as ::core::ffi::c_long {
         state.block_start -= state.w_size as ::core::ffi::c_long;
         state.strstart = state.strstart.wrapping_sub(state.w_size);
-        crate::stdlib::memcpy(
-            state.window as *mut ::core::ffi::c_void,
-            state.window.wrapping_add(state.w_size as usize) as *const ::core::ffi::c_void,
-            state.strstart as crate::__stddef_size_t_h::size_t,
+        window.copy_within(
+            state.w_size as usize..state.w_size as usize + state.strstart as usize,
+            0,
         );
         if state.matches < 2 as crate::stdlib::uInt {
             state.matches = state.matches.wrapping_add(1);
