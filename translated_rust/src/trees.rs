@@ -3424,7 +3424,7 @@ fn compress_block_impl<L: HuffmanEntry, D: HuffmanEntry>(
     let _ = send_huffman_code(s, ltree, 256);
 }
 
-unsafe fn detect_data_type(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
+fn detect_data_type(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     detect_data_type_impl(s)
 }
 
