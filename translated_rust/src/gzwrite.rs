@@ -822,8 +822,8 @@ enum GzFlushBehavior<'a> {
     Closing(&'a mut GzFlushFailures),
 }
 
-unsafe fn gzflush(
-    state: &mut crate::gzguts_h::gz_state,
+fn gzflush_impl(
+    compressor: &mut GzCompressor<'_>,
     flush: ::core::ffi::c_int,
     behavior: GzFlushBehavior<'_>,
 ) -> ::core::ffi::c_int {
@@ -837,32 +837,40 @@ unsafe fn gzflush(
         GzFlushBehavior::Closing(failures) => (false, false, false, Some(failures)),
     };
     if validate_state
-        && (state.mode != crate::gzguts_h::GZ_WRITE
-            || state.err != crate::zlib_h::Z_OK && state.again == 0)
+        && (compressor.state.mode != crate::gzguts_h::GZ_WRITE
+            || compressor.state.err != crate::zlib_h::Z_OK && compressor.state.again == 0)
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if clear_error {
-        crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
+        crate::src::gzlib::gz_error_state(compressor.state, crate::zlib_h::Z_OK, None);
     }
     if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if compressor.state.skip != 0 && gz_zero_impl(compressor) == -1 as ::core::ffi::c_int {
         if let Some(failures) = failures.as_deref_mut() {
-            failures.zero = Some(state.err);
+            failures.zero = Some(compressor.state.err);
         }
         if stop_after_zero_failure {
-            return state.err;
+            return compressor.state.err;
         }
     }
-    let compression_failed = (GzCompressor { state }).buffered(flush) == -1 as ::core::ffi::c_int;
+    let compression_failed = compressor.buffered(flush) == -1 as ::core::ffi::c_int;
     if compression_failed {
         if let Some(failures) = failures.as_deref_mut() {
-            failures.compression = Some(state.err);
+            failures.compression = Some(compressor.state.err);
         }
     }
-    return state.err;
+    compressor.state.err
+}
+
+unsafe fn gzflush(
+    state: &mut crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+    behavior: GzFlushBehavior<'_>,
+) -> ::core::ffi::c_int {
+    gzflush_impl(&mut GzCompressor { state }, flush, behavior)
 }
 #[export_name = "gzflush"]
 
@@ -922,8 +930,8 @@ pub unsafe fn gzclose_w(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ff
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         let mut failures = GzFlushFailures::default();
-        gzflush(
-            state,
+        gzflush_impl(
+            &mut GzCompressor { state },
             crate::zlib_h::Z_FINISH,
             GzFlushBehavior::Closing(&mut failures),
         );
