@@ -548,7 +548,10 @@ pub unsafe extern "C" fn gzflush_ffi(
     }
     gzflush(&mut *(file as crate::gzguts_h::gz_statep), flush)
 }
-pub unsafe extern "C" fn gzsetparams(
+// Parameter selection only needs the already-bound write state. Keep the
+// deflater call scoped to its one C boundary so the surrounding validation,
+// skip handling, and bookkeeping remain safe Rust.
+pub fn gzsetparams(
     state: &mut crate::gzguts_h::gz_state,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
@@ -569,7 +572,11 @@ pub unsafe extern "C" fn gzsetparams(
         {
             return state.err;
         }
-        crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
+        // SAFETY: `gz_init` created the deflater in this validated write
+        // state before a nonzero `size` can reach this branch.
+        unsafe {
+            crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
+        }
     }
     state.level = level;
     state.strategy = strategy;
