@@ -3196,20 +3196,43 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     };
     inflate_sync_point_from_stream(strm, state)
 }
-unsafe fn inflate_copy_impl(
+/// Safe input prepared after the ABI boundary has resolved the source state.
+/// Allocator validation stays here, before any state storage is requested.
+struct InflateCopyRequest<'a> {
+    state: &'a crate::src::inflate::inflate_state,
+    allocators_present: bool,
+}
+
+/// Validate and clone the decoder state without touching ABI allocator
+/// storage.  Keeping this separate means an allocation failure cannot leave a
+/// partially installed destination stream behind.
+fn inflate_copy_impl(
+    source: InflateCopyRequest<'_>,
+) -> Result<crate::src::inflate::inflate_state, ::core::ffi::c_int> {
+    if !source.allocators_present || !inflate_state_mode_valid(source.state) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    Ok(source.state.clone())
+}
+
+/// Install a prepared decoder-state clone using the source stream's paired
+/// ABI allocator.  This is deliberately the only raw ownership handoff in
+/// the copy path; cloning and validation remain in `inflate_copy_impl`.
+unsafe fn inflate_copy_install(
     dest: &mut crate::zlib_h::z_stream_s,
     source: &crate::zlib_h::z_stream_s,
-    state: &crate::src::inflate::inflate_state,
+    source_state: &crate::src::inflate::inflate_state,
+    copied_state: crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
     if source.zalloc.is_none() && source.zfree.is_none() {
-        let copy = Box::new(state.clone());
+        let copy = Box::new(copied_state);
         let copy_pointer = core::ptr::from_ref(copy.as_ref());
         let address = copy_pointer.addr();
         if !retain_default_inflate_state(copy) {
             return crate::zlib_h::Z_MEM_ERROR;
         }
         *dest = *source;
-        copy_inflate_header_registration(state, address);
+        copy_inflate_header_registration(source_state, address);
         dest.state = copy_pointer.cast_mut().cast();
         return crate::zlib_h::Z_OK;
     }
@@ -3225,11 +3248,11 @@ unsafe fn inflate_copy_impl(
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    copy.write(copied_state);
     *dest = *source;
-    copy.write(state.clone());
-    copy_inflate_header_registration(state, copy.addr());
-    dest.state = copy as *mut crate::src::deflate::internal_state;
-    return crate::zlib_h::Z_OK;
+    copy_inflate_header_registration(source_state, copy.addr());
+    dest.state = copy.cast();
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateCopy"]
 
@@ -3246,10 +3269,14 @@ pub unsafe extern "C" fn inflateCopy_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &*state;
-    if !inflate_state_valid(&source, state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflate_copy_impl(&mut *dest, &source, state)
+    let copied_state = match inflate_copy_impl(InflateCopyRequest {
+        state,
+        allocators_present: inflate_stream_has_state_allocation(&source),
+    }) {
+        Ok(copy) => copy,
+        Err(error) => return error,
+    };
+    inflate_copy_install(&mut *dest, &source, state, copied_state)
 }
 fn inflate_undermine_impl(
     strm: &mut crate::zlib_h::z_stream_s,
