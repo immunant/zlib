@@ -2236,23 +2236,30 @@ fn deflate_tune_state(
     return crate::zlib_h::Z_OK;
 }
 
-/// Validate the ABI stream and its already-borrowed deflate state.
+/// The pointer-free view needed by `deflateTune` after the exported boundary
+/// has borrowed the ABI stream and its state link.
+struct DeflateTuneStream<'a> {
+    allocators_present: bool,
+    state: Option<&'a mut crate::src::deflate::deflate_state>,
+}
+
+/// Validate the converted stream view and tune its state.
 ///
 /// The exported wrapper only converts the ABI state link; all validation and
 /// tuning remain in this implementation boundary.
-pub unsafe fn deflateTune(
-    strm: &mut crate::zlib_h::z_stream_s,
-    state: &mut crate::src::deflate::deflate_state,
+fn deflateTune(
+    stream: DeflateTuneStream<'_>,
     good_length: ::core::ffi::c_int,
     max_lazy: ::core::ffi::c_int,
     nice_length: ::core::ffi::c_int,
     max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if !deflate_params_stream_is_valid(strm)
-        || !core::ptr::eq(strm.state.cast_const(), core::ptr::from_ref(state))
-    {
+    if !stream.allocators_present {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let Some(state) = stream.state else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflate_tune_state(state, good_length, max_lazy, nice_length, max_chain)
 }
 
@@ -2268,10 +2275,11 @@ pub unsafe extern "C" fn deflateTune_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(state) = strm.state.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
+    let stream = DeflateTuneStream {
+        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        state: strm.state.as_mut(),
     };
-    deflateTune(strm, state, good_length, max_lazy, nice_length, max_chain)
+    deflateTune(stream, good_length, max_lazy, nice_length, max_chain)
 }
 /// Compute a deflate bound after the ABI stream link has been converted at
 /// the caller boundary.  Keeping validation here lets both exported bounds
