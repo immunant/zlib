@@ -2655,54 +2655,66 @@ pub unsafe fn deflate(
             return crate::zlib_h::Z_OK;
         }
     }
-    if (*s).status == crate::src::deflate::GZIP_STATE {
-        (*strm).adler = crate::src::crc32::crc32_slice(0, &[]);
-        let header = if (*s).gzhead.is_null() {
-            None
-        } else {
-            let header = &*(*s).gzhead;
-            Some(GzipFixedHeader {
-                text: header.text != 0,
-                hcrc: header.hcrc != 0,
-                has_extra: !header.extra.is_null(),
-                has_name: !header.name.is_null(),
-                has_comment: !header.comment.is_null(),
-                time: header.time,
-                os: header.os,
-                extra_len: header.extra_len,
-            })
+    if (&*s).status == crate::src::deflate::GZIP_STATE {
+        // Keep fixed-header construction within one ordinary stream/state
+        // borrow.  The pending buffer is still lent only here, and the
+        // borrow ends before `flush_pending()` can revisit compatibility
+        // state or callback-owned output.
+        let has_header = {
+            let stream = &mut *strm;
+            let state = &mut *s;
+            stream.adler = crate::src::crc32::crc32_slice(0, &[]);
+            let header = if state.gzhead.is_null() {
+                None
+            } else {
+                let header = &*state.gzhead;
+                Some(GzipFixedHeader {
+                    text: header.text != 0,
+                    hcrc: header.hcrc != 0,
+                    has_extra: !header.extra.is_null(),
+                    has_name: !header.name.is_null(),
+                    has_comment: !header.comment.is_null(),
+                    time: header.time,
+                    os: header.os,
+                    extra_len: header.extra_len,
+                })
+            };
+            let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            if pending_len != 0 && state.pending_buf.is_null() {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let pending_buf = if pending_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+            };
+            if !append_gzip_fixed_header_state(
+                pending_buf,
+                &mut state.pending,
+                &mut stream.adler,
+                state.level,
+                state.strategy,
+                header,
+            ) {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            if header.is_some() {
+                state.gzindex = 0 as crate::zutil_h::ulg;
+                state.status = crate::src::deflate::EXTRA_STATE;
+            } else {
+                state.status = crate::src::deflate::BUSY_STATE;
+            }
+            header.is_some()
         };
-        let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        if pending_len != 0 && (*s).pending_buf.is_null() {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        let pending_buf = if pending_len == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
-        };
-        if !append_gzip_fixed_header_state(
-            pending_buf,
-            &mut (*s).pending,
-            &mut (*strm).adler,
-            (*s).level,
-            (*s).strategy,
-            header,
-        ) {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        if header.is_none() {
-            (*s).status = crate::src::deflate::BUSY_STATE;
+        if !has_header {
             flush_pending(strm);
-            if (*s).pending != 0 as crate::zutil_h::ulg {
-                (*s).last_flush = -1 as ::core::ffi::c_int;
+            let state = &mut *s;
+            if state.pending != 0 as crate::zutil_h::ulg {
+                state.last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
             }
-        } else {
-            (*s).gzindex = 0 as crate::zutil_h::ulg;
-            (*s).status = crate::src::deflate::EXTRA_STATE;
         }
     }
     if (*s).status == crate::src::deflate::EXTRA_STATE {
