@@ -423,6 +423,17 @@ struct DeflateStorageLayout {
     pending: DeflateAllocation,
 }
 
+// The raw-to-slice owner receives these already-checked capacities as one
+// pointer-free snapshot.  It therefore never derives a view length from
+// mutable codec fields while holding callback allocation identities.
+#[derive(Clone, Copy)]
+struct DeflateStorageViewLengths {
+    window: usize,
+    prev: usize,
+    head: usize,
+    pending: usize,
+}
+
 // The four backing allocations have an observable callback order: custom
 // zalloc implementations can fail or inspect the stream after each request.
 // Name that order independently of the raw allocation handles so the future
@@ -1238,6 +1249,27 @@ impl DeflateLayout {
 }
 
 impl DeflateStorageLayout {
+    fn view_lengths(&self) -> DeflateStorageViewLengths {
+        DeflateStorageViewLengths {
+            window: self
+                .window
+                .byte_len()
+                .expect("validated window allocation geometry"),
+            prev: self
+                .prev
+                .element_len::<crate::src::deflate::Posf>()
+                .expect("validated prev allocation geometry"),
+            head: self
+                .head
+                .element_len::<crate::src::deflate::Posf>()
+                .expect("validated head allocation geometry"),
+            pending: self
+                .pending
+                .byte_len()
+                .expect("validated pending allocation geometry"),
+        }
+    }
+
     fn same_geometry(&self, other: &Self) -> bool {
         self.window.items == other.window.items
             && self.window.size == other.window.size
@@ -1417,24 +1449,16 @@ mod callback_owner {
         let prev_handle = state.prev.expect("initialized prev table");
         let head_handle = state.head.expect("initialized head table");
         let pending_handle = state.pending_buf.expect("initialized pending buffer");
+        // Freeze all four checked capacities before constructing the first
+        // slice.  The complete view set then has one immutable allocation
+        // schedule for this request.
+        let lengths = storage_layout.view_lengths();
         // Every live C4 operation opens the same four regions once, then the
         // pointer-free request builder narrows those views to its action.
         let mut byte_views: [Option<&mut [crate::stdlib::Bytef]>; 2] = [None, None];
         for (view, (handle, len)) in byte_views.iter_mut().zip([
-            (
-                window_handle,
-                storage_layout
-                    .window
-                    .byte_len()
-                    .expect("validated window allocation geometry"),
-            ),
-            (
-                pending_handle,
-                storage_layout
-                    .pending
-                    .byte_len()
-                    .expect("validated pending allocation geometry"),
-            ),
+            (window_handle, lengths.window),
+            (pending_handle, lengths.pending),
         ]) {
             *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
         }
@@ -1445,20 +1469,8 @@ mod callback_owner {
         // through one projection site, just as the byte regions above do.
         let mut hash_views: [Option<&mut [crate::src::deflate::Posf]>; 2] = [None, None];
         for (view, (handle, len)) in hash_views.iter_mut().zip([
-            (
-                prev_handle,
-                storage_layout
-                    .prev
-                    .element_len::<crate::src::deflate::Posf>()
-                    .expect("validated prev allocation geometry"),
-            ),
-            (
-                head_handle,
-                storage_layout
-                    .head
-                    .element_len::<crate::src::deflate::Posf>()
-                    .expect("validated head allocation geometry"),
-            ),
+            (prev_handle, lengths.prev),
+            (head_handle, lengths.head),
         ]) {
             *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
         }
