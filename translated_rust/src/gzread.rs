@@ -564,6 +564,14 @@ fn gzgets_request_has_capacity(len: ::core::ffi::c_int) -> bool {
     len >= 1
 }
 
+fn gzgets_has_valid_inputs(
+    file_present: bool,
+    buffer_present: bool,
+    len: ::core::ffi::c_int,
+) -> bool {
+    file_present && buffer_present && gzgets_request_has_capacity(len)
+}
+
 fn gzgets_remaining_capacity(len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     (len as ::core::ffi::c_uint).wrapping_sub(1)
 }
@@ -1740,16 +1748,14 @@ mod tests {
 
     #[test]
     fn gz_look_gzip_state_marks_detected_headers_as_junk() {
-        for junk in [-1, 0] {
-            assert_eq!(
-                gz_look_gzip_state(GzLookGzipSource::Header),
-                GzLookGzipState {
-                    how: crate::gzguts_h::GZIP,
-                    junk: 1,
-                    direct: 0,
-                }
-            );
-        }
+        assert_eq!(
+            gz_look_gzip_state(GzLookGzipSource::Header),
+            GzLookGzipState {
+                how: crate::gzguts_h::GZIP,
+                junk: 1,
+                direct: 0,
+            }
+        );
     }
 
     #[test]
@@ -2983,6 +2989,28 @@ mod tests {
     }
 
     #[test]
+    fn gzgets_has_valid_inputs_rejects_missing_file() {
+        assert!(!gzgets_has_valid_inputs(false, true, 1));
+    }
+
+    #[test]
+    fn gzgets_has_valid_inputs_rejects_missing_buffer() {
+        assert!(!gzgets_has_valid_inputs(true, false, 1));
+    }
+
+    #[test]
+    fn gzgets_has_valid_inputs_rejects_negative_and_zero_lengths() {
+        assert!(!gzgets_has_valid_inputs(true, true, -1));
+        assert!(!gzgets_has_valid_inputs(true, true, 0));
+    }
+
+    #[test]
+    fn gzgets_has_valid_inputs_accepts_minimum_and_maximum_lengths() {
+        assert!(gzgets_has_valid_inputs(true, true, 1));
+        assert!(gzgets_has_valid_inputs(true, true, ::core::ffi::c_int::MAX));
+    }
+
+    #[test]
     fn gzgets_remaining_capacity_reserves_the_terminator() {
         assert_eq!(gzgets_remaining_capacity(1), 0);
         assert_eq!(gzgets_remaining_capacity(2), 1);
@@ -3378,7 +3406,7 @@ pub unsafe extern "C" fn gzgets(
     let mut eol: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() || buf.is_null() || !gzgets_request_has_capacity(len) {
+    if !gzgets_has_valid_inputs(!file.is_null(), !buf.is_null(), len) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     state = file as crate::gzguts_h::gz_statep;

@@ -251,6 +251,15 @@ fn inflate_is_gzip_header(wrap: ::core::ffi::c_int, hold: crate::stdlib::uLong) 
     wrap & 2 != 0 && hold == 0x8b1f as crate::stdlib::uLong
 }
 
+fn inflate_gzip_header_crc_bytes(hold: crate::stdlib::uLong) -> [::core::ffi::c_uchar; 4] {
+    [
+        hold as ::core::ffi::c_uchar,
+        (hold >> 8) as ::core::ffi::c_uchar,
+        (hold >> 16) as ::core::ffi::c_uchar,
+        (hold >> 24) as ::core::ffi::c_uchar,
+    ]
+}
+
 fn inflate_gzip_window_bits(wbits: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if wbits == 0 {
         15
@@ -1163,7 +1172,6 @@ pub unsafe extern "C" fn inflate(
     };
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
     if inflateStateCheck(strm) != 0
         || !inflate_stream_buffers_are_valid(
             !(*strm).next_out.is_null(),
@@ -1206,12 +1214,9 @@ pub unsafe extern "C" fn inflate(
                     if inflate_is_gzip_header((*state).wrap, hold) {
                         (*state).wbits = inflate_gzip_window_bits((*state).wbits);
                         (*state).check = crate::src::crc32::CRC32_INITIAL as ::core::ffi::c_ulong;
-                        hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
-                        hbuf[1 as ::core::ffi::c_int as usize] =
-                            (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
                         (*state).check = crate::src::crc32::crc32_z(
                             (*state).check as crate::stdlib::uLong,
-                            &hbuf[..2],
+                            &inflate_gzip_header_crc_bytes(hold)[..2],
                         ) as ::core::ffi::c_ulong;
                         hold = 0 as ::core::ffi::c_ulong;
                         bits = 0 as ::core::ffi::c_uint;
@@ -1303,12 +1308,9 @@ pub unsafe extern "C" fn inflate(
                     (*(*state).head).text = gzip_flags.text;
                 }
                 if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
-                    hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
-                    hbuf[1 as ::core::ffi::c_int as usize] =
-                        (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
                     (*state).check = crate::src::crc32::crc32_z(
                         (*state).check as crate::stdlib::uLong,
-                        &hbuf[..2],
+                        &inflate_gzip_header_crc_bytes(hold)[..2],
                     ) as ::core::ffi::c_ulong;
                 }
                 hold = 0 as ::core::ffi::c_ulong;
@@ -1641,16 +1643,9 @@ pub unsafe extern "C" fn inflate(
                     (*(*state).head).time = hold as crate::stdlib::uLong;
                 }
                 if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
-                    hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
-                    hbuf[1 as ::core::ffi::c_int as usize] =
-                        (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                    hbuf[2 as ::core::ffi::c_int as usize] =
-                        (hold >> 16 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                    hbuf[3 as ::core::ffi::c_int as usize] =
-                        (hold >> 24 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
                     (*state).check = crate::src::crc32::crc32_z(
                         (*state).check as crate::stdlib::uLong,
-                        &hbuf[..4],
+                        &inflate_gzip_header_crc_bytes(hold)[..4],
                     ) as ::core::ffi::c_ulong;
                 }
                 hold = 0 as ::core::ffi::c_ulong;
@@ -1865,12 +1860,9 @@ pub unsafe extern "C" fn inflate(
                     (*(*state).head).os = (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_int;
                 }
                 if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
-                    hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
-                    hbuf[1 as ::core::ffi::c_int as usize] =
-                        (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
                     (*state).check = crate::src::crc32::crc32_z(
                         (*state).check as crate::stdlib::uLong,
-                        &hbuf[..2],
+                        &inflate_gzip_header_crc_bytes(hold)[..2],
                     ) as ::core::ffi::c_ulong;
                 }
                 hold = 0 as ::core::ffi::c_ulong;
@@ -1953,12 +1945,9 @@ pub unsafe extern "C" fn inflate(
                             hold as ::core::ffi::c_uint as crate::stdlib::uInt;
                     }
                     if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
-                        hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
-                        hbuf[1 as ::core::ffi::c_int as usize] =
-                            (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
                         (*state).check = crate::src::crc32::crc32_z(
                             (*state).check as crate::stdlib::uLong,
-                            &hbuf[..2],
+                            &inflate_gzip_header_crc_bytes(hold)[..2],
                         ) as ::core::ffi::c_ulong;
                     }
                     hold = 0 as ::core::ffi::c_ulong;
@@ -3188,9 +3177,9 @@ mod tests {
         inflate_copy_match_from_output, inflate_copy_progress, inflate_data_type_value,
         inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
         inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
-        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_is_valid,
-        inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
-        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_bytes,
+        inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
+        inflate_gzip_header_has_crc, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_window_bits, inflate_head_skip_mode,
         inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
         inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
@@ -3493,6 +3482,25 @@ mod tests {
         assert!(!inflate_header_crc_enabled(0, 4));
         assert!(!inflate_header_crc_enabled(0x200, 0));
         assert!(!inflate_header_crc_enabled(0x400, 2));
+    }
+
+    #[test]
+    fn inflate_gzip_header_crc_bytes_are_low_byte_first() {
+        assert_eq!(
+            inflate_gzip_header_crc_bytes(0x4433_2211),
+            [0x11, 0x22, 0x33, 0x44]
+        );
+    }
+
+    #[test]
+    fn inflate_gzip_header_crc_bytes_support_prefix_crc_updates() {
+        let bytes = inflate_gzip_header_crc_bytes(0x4433_2211);
+
+        assert_eq!(&bytes[..2], &[0x11, 0x22]);
+        assert_eq!(
+            crate::src::crc32::crc32_z(crate::src::crc32::CRC32_INITIAL, &bytes[..2]),
+            0xc760_700b
+        );
     }
 
     #[test]

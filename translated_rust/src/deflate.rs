@@ -602,6 +602,18 @@ fn can_search_hash_match(
             <= w_size.wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
 }
 
+fn deflate_slow_can_search_match(
+    hash_head: crate::src::deflate::IPos,
+    previous_match_length: crate::stdlib::uInt,
+    max_lazy_match: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+) -> bool {
+    hash_head != NIL as crate::src::deflate::IPos
+        && previous_match_length < max_lazy_match
+        && can_search_hash_match(hash_head, strstart, w_size)
+}
+
 unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let wsize = (*s).w_size;
     let mut index = (*s).hash_size;
@@ -3665,13 +3677,13 @@ unsafe extern "C" fn deflate_slow(
         (*s).prev_match = (*s).match_start as crate::src::deflate::IPos;
         (*s).match_length =
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        if hash_head != NIL as crate::src::deflate::IPos
-            && (*s).prev_length < (*s).max_lazy_match
-            && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= (*s)
-                    .w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-        {
+        if deflate_slow_can_search_match(
+            hash_head,
+            (*s).prev_length,
+            (*s).max_lazy_match,
+            (*s).strstart,
+            (*s).w_size,
+        ) {
             (*s).match_length = longest_match(s, hash_head);
             if deflate_slow_should_discard_match(
                 (*s).match_length,
@@ -4230,17 +4242,17 @@ mod tests {
         deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
         deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
-        deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
-        deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
-        dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
-        fill_window_has_insertable_match, fill_window_hash_update, fill_window_insert_after_slide,
-        fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
-        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_clear_len,
-        lm_initial_state, lm_match_parameters, lm_reset_plan, longest_match_candidate_update,
-        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
-        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_checksum,
+        deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_check_impl,
+        deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
+        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
+        fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
+        fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
+        fill_window_state_after_slide, fill_window_zero_range, flush_pending_accounting,
+        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        lm_head_clear_len, lm_initial_state, lm_match_parameters, lm_reset_plan,
+        longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
+        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
         stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
@@ -4578,6 +4590,57 @@ mod tests {
             crate::stdlib::uInt::MAX as crate::src::deflate::IPos,
             0,
             w_size
+        ));
+    }
+
+    #[test]
+    fn deflate_slow_can_search_match_preserves_lazy_and_distance_boundaries() {
+        let w_size = 32_768;
+        let max_lazy_match = 16;
+        let maximum_distance = w_size - crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
+        let valid_strstart = maximum_distance.wrapping_add(1);
+
+        assert!(!deflate_slow_can_search_match(
+            crate::src::deflate::NIL as crate::src::deflate::IPos,
+            max_lazy_match - 1,
+            max_lazy_match,
+            valid_strstart,
+            w_size,
+        ));
+        assert!(!deflate_slow_can_search_match(
+            1,
+            max_lazy_match,
+            max_lazy_match,
+            valid_strstart,
+            w_size,
+        ));
+        assert!(deflate_slow_can_search_match(
+            1,
+            max_lazy_match - 1,
+            max_lazy_match,
+            valid_strstart,
+            w_size,
+        ));
+        assert!(deflate_slow_can_search_match(
+            1,
+            0,
+            max_lazy_match,
+            valid_strstart,
+            w_size,
+        ));
+        assert!(!deflate_slow_can_search_match(
+            1,
+            0,
+            max_lazy_match,
+            valid_strstart.wrapping_add(1),
+            w_size,
+        ));
+        assert!(deflate_slow_can_search_match(
+            crate::stdlib::uInt::MAX as crate::src::deflate::IPos,
+            0,
+            max_lazy_match,
+            0,
+            w_size,
         ));
     }
 
