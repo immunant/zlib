@@ -48,46 +48,35 @@ pub use crate::zlib_h::gz_headerp;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
-pub unsafe extern "C" fn inflate_fast(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
-) {
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-    let input = ::core::slice::from_raw_parts((*strm).next_in, (*strm).avail_in as usize);
-    let used = start.wrapping_sub((*strm).avail_out) as usize;
-    let output = ::core::slice::from_raw_parts_mut(
-        (*strm).next_out.wrapping_sub(used),
-        used + (*strm).avail_out as usize,
-    );
-    let window = if state.wsize == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(state.window, state.wsize as usize)
-    };
-    let lcode_len = if ::core::ptr::eq(
-        state.lencode,
-        crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
-    ) {
-        crate::src::inftrees::inffixed_h::lenfix.len()
-    } else {
-        crate::src::inftrees::ENOUGH_LENS as usize
-    };
-    let dcode_len = if ::core::ptr::eq(
-        state.distcode,
-        crate::src::inftrees::inffixed_h::distfix.as_ptr(),
-    ) {
-        crate::src::inftrees::inffixed_h::distfix.len()
-    } else {
-        crate::src::inftrees::ENOUGH_DISTS as usize
-    };
-    let lcode = ::core::slice::from_raw_parts(state.lencode, lcode_len);
-    let dcode = ::core::slice::from_raw_parts(state.distcode, dcode_len);
+#[derive(Clone, Copy)]
+enum InflateFastError {
+    DistanceTooFarBack,
+    InvalidDistanceCode,
+    InvalidLengthCode,
+}
+
+struct InflateFastResult {
+    input_index: usize,
+    output_index: usize,
+    error: Option<InflateFastError>,
+}
+
+fn inflate_fast_impl(
+    state: &mut crate::src::inflate::inflate_state,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    window: &[crate::stdlib::Bytef],
+    lcode: &[crate::src::inftrees::code],
+    dcode: &[crate::src::inftrees::code],
+    used: usize,
+) -> InflateFastResult {
     let mut input_index = 0usize;
     let mut output_index = used;
     let mut hold = state.hold;
     let mut bits = state.bits;
     let lmask = ((1 as ::core::ffi::c_uint) << state.lenbits).wrapping_sub(1);
     let dmask = ((1 as ::core::ffi::c_uint) << state.distbits).wrapping_sub(1);
+    let mut error = None;
     'outer: loop {
         if bits < 15 {
             hold = hold.wrapping_add((input[input_index] as ::core::ffi::c_ulong) << bits);
@@ -169,10 +158,8 @@ pub unsafe extern "C" fn inflate_fast(
                         if dist > produced {
                             let needed = dist.wrapping_sub(produced);
                             if needed > state.whave && state.sane != 0 {
-                                (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                                    as *const ::core::ffi::c_char
-                                    as *mut ::core::ffi::c_char;
                                 state.mode = crate::src::inflate::BAD;
+                                error = Some(InflateFastError::DistanceTooFarBack);
                                 break 'outer;
                             }
                             let mut from = (state.wsize.wrapping_add(state.wnext)
@@ -202,10 +189,8 @@ pub unsafe extern "C" fn inflate_fast(
                                 & ((1 as ::core::ffi::c_uint) << op).wrapping_sub(1)
                                     as ::core::ffi::c_ulong) as usize;
                     } else {
-                        (*strm).msg = b"invalid distance code\0".as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
                         state.mode = crate::src::inflate::BAD;
+                        error = Some(InflateFastError::InvalidDistanceCode);
                         break 'outer;
                     }
                 }
@@ -218,10 +203,8 @@ pub unsafe extern "C" fn inflate_fast(
                 state.mode = crate::src::inflate::TYPE;
                 break 'outer;
             } else {
-                (*strm).msg = b"invalid literal/length code\0".as_ptr()
-                    as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
                 state.mode = crate::src::inflate::BAD;
+                error = Some(InflateFastError::InvalidLengthCode);
                 break 'outer;
             }
         }
@@ -233,12 +216,62 @@ pub unsafe extern "C" fn inflate_fast(
     input_index -= back;
     bits = bits.wrapping_sub((back as ::core::ffi::c_uint) << 3);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1) as ::core::ffi::c_ulong;
-    (*strm).next_in = input.as_ptr().wrapping_add(input_index) as *mut crate::stdlib::Bytef;
-    (*strm).next_out = output.as_mut_ptr().wrapping_add(output_index) as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = (input.len() - input_index) as crate::stdlib::uInt;
-    (*strm).avail_out = (output.len() - output_index) as crate::stdlib::uInt;
     state.hold = hold;
     state.bits = bits;
+    InflateFastResult {
+        input_index,
+        output_index,
+        error,
+    }
+}
+
+pub unsafe fn inflate_fast(
+    mut strm: crate::zlib_h::z_streamp,
+    mut start: ::core::ffi::c_uint,
+) {
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+    let used = start.wrapping_sub(strm.avail_out) as usize;
+    let output = ::core::slice::from_raw_parts_mut(
+        strm.next_out.wrapping_sub(used),
+        used + strm.avail_out as usize,
+    );
+    let window = if state.wsize == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(state.window, state.wsize as usize)
+    };
+    let lcode_len = if ::core::ptr::eq(
+        state.lencode,
+        crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
+    ) {
+        crate::src::inftrees::inffixed_h::lenfix.len()
+    } else {
+        crate::src::inftrees::ENOUGH_LENS as usize
+    };
+    let dcode_len = if ::core::ptr::eq(
+        state.distcode,
+        crate::src::inftrees::inffixed_h::distfix.as_ptr(),
+    ) {
+        crate::src::inftrees::inffixed_h::distfix.len()
+    } else {
+        crate::src::inftrees::ENOUGH_DISTS as usize
+    };
+    let lcode = ::core::slice::from_raw_parts(state.lencode, lcode_len);
+    let dcode = ::core::slice::from_raw_parts(state.distcode, dcode_len);
+    let result = inflate_fast_impl(state, input, output, window, lcode, dcode, used);
+    if let Some(error) = result.error {
+        strm.msg = match error {
+            InflateFastError::DistanceTooFarBack => b"invalid distance too far back\0".as_ptr(),
+            InflateFastError::InvalidDistanceCode => b"invalid distance code\0".as_ptr(),
+            InflateFastError::InvalidLengthCode => b"invalid literal/length code\0".as_ptr(),
+        } as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+    }
+    strm.next_in = input.as_ptr().wrapping_add(result.input_index) as *mut crate::stdlib::Bytef;
+    strm.next_out = output.as_mut_ptr().wrapping_add(result.output_index) as *mut crate::stdlib::Bytef;
+    strm.avail_in = (input.len() - result.input_index) as crate::stdlib::uInt;
+    strm.avail_out = (output.len() - result.output_index) as crate::stdlib::uInt;
 }
 #[export_name = "inflate_fast"]
 
