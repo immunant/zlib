@@ -134,6 +134,26 @@ macro_rules! gz_init {
     }};
 }
 
+macro_rules! gz_deflate_reset_if_needed {
+    ($state:expr, $flush:expr, $will_have_input:expr) => {{
+        let will_have_input = $will_have_input;
+        let state: &mut crate::gzguts_h::gz_state = &mut *$state;
+        if state.direct == 0 && state.reset != 0 {
+            if !(state.strm.avail_in == 0 as crate::stdlib::uInt
+                && !will_have_input
+                && $flush == crate::zlib_h::Z_NO_FLUSH)
+            {
+                unsafe {
+                    crate::src::deflate::deflateReset_ffi(
+                        &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                    );
+                }
+                state.reset = 0 as ::core::ffi::c_int;
+            }
+        }
+    }};
+}
+
 fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
@@ -192,12 +212,12 @@ fn gz_comp(
             return 0 as ::core::ffi::c_int;
         }
         GzCompResetAction::ResetStream => {
-            unsafe {
-                crate::src::deflate::deflateReset_ffi(
-                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-                );
-            }
-            state.reset = 0 as ::core::ffi::c_int;
+            crate::src::gzlib::gz_error_static(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal error: deflate reset not performed at boundary\0",
+            );
+            return -1 as ::core::ffi::c_int;
         }
     }
     ret = crate::zlib_h::Z_OK;
@@ -634,6 +654,7 @@ pub unsafe extern "C" fn gzwrite_ffi(
     if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
         return 0 as ::core::ffi::c_int;
     }
+    gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
     return gz_with_input_buffer_mut(state, |state, input_buf| {
         let input_buf = &mut input_buf[..state.size as usize];
         gz_write(state, input_buf, input) as ::core::ffi::c_int
@@ -668,6 +689,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
             return 0 as crate::stdlib::z_size_t;
         }
+        gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
         gz_with_input_buffer_mut(state, |state, input_buf| {
             let input_buf = &mut input_buf[..state.size as usize];
             gz_write(state, input_buf, input)
@@ -694,6 +716,7 @@ pub unsafe extern "C" fn gzputc_ffi(
     if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
+    gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
     return gz_with_input_buffer_mut(state, |state, input_buf| {
         let input_buf = &mut input_buf[..state.size as usize];
         gzputc_impl(state, input_buf, c)
@@ -767,6 +790,7 @@ pub unsafe extern "C" fn gzputs_ffi(
     if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
+    gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
     return gz_with_input_buffer_mut(state, |state, input_buf| {
         let input_buf = &mut input_buf[..state.size as usize];
         gzputs_impl(state, input_buf, input, len)
@@ -797,6 +821,7 @@ pub unsafe extern "C" fn gzflush_ffi(
         if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
             return state.err;
         }
+        gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
         if gz_with_input_buffer_mut(state, |state, input_buf| {
             let input_buf = &mut input_buf[..state.size as usize];
             gz_zero(state, input_buf)
@@ -808,6 +833,11 @@ pub unsafe extern "C" fn gzflush_ffi(
     if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
+    gz_deflate_reset_if_needed!(
+        state,
+        flush,
+        state.strm.avail_in != 0 as crate::stdlib::uInt
+    );
     gz_comp_with_state_input(state, flush);
     return state.err;
 }
@@ -861,6 +891,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
             return state.err;
         }
+        gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
         if gz_with_input_buffer_mut(state, |state, input_buf| {
             let input_buf = &mut input_buf[..state.size as usize];
             gz_zero(state, input_buf)
@@ -870,10 +901,11 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         }
     }
     if state.size != 0 {
-        if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int
-        {
-            return state.err;
+        if state.strm.avail_in != 0 {
+            gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_BLOCK, true);
+            if gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int {
+                return state.err;
+            }
         }
         crate::src::deflate::deflateParams_ffi(
             &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
@@ -899,6 +931,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
             true
         } else {
+            gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
             gz_with_input_buffer_mut(state, |state, input_buf| {
                 let input_buf = &mut input_buf[..state.size as usize];
                 gz_zero(state, input_buf)
@@ -912,6 +945,13 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int;
     if init_failed {
         ret = gzclose_w_after_step(ret, true, state.err);
+    }
+    if !init_failed {
+        gz_deflate_reset_if_needed!(
+            state,
+            crate::zlib_h::Z_FINISH,
+            state.strm.avail_in != 0 as crate::stdlib::uInt
+        );
     }
     let comp_failed = init_failed
         || gz_comp_with_state_input(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int;
