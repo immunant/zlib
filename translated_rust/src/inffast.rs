@@ -58,6 +58,56 @@ struct InflateFastProgress {
     error: Option<usize>,
 }
 
+/// All bounded state the fast decoder needs for one invocation.  A future C3
+/// stream boundary can construct this view after validating the ABI cursors;
+/// the decoder itself only sees ordinary slices and scalar cursors.
+struct InflateFastViews<'a> {
+    input: &'a [u8],
+    output: &'a mut [u8],
+    window: &'a [u8],
+    lcode: &'a [crate::src::inftrees::code],
+    dcode: &'a [crate::src::inftrees::code],
+    wsize: usize,
+    whave: usize,
+    wnext: usize,
+    hold: u64,
+    bits: u32,
+    lenbits: u32,
+    distbits: u32,
+    start: u32,
+}
+
+impl InflateFastViews<'_> {
+    /// The fast loop is optional: callers fall back to the regular decoder
+    /// when either of its documented six-input-byte or 258-output-byte
+    /// reserves is unavailable.
+    fn validate(&self) -> Result<(), InflateFastProgress> {
+        if self.input.len() < 6 || self.output.len() < 258 {
+            return Err(InflateFastProgress::no_progress(self.hold, self.bits));
+        }
+        if self.lenbits >= u32::BITS || self.distbits >= u32::BITS || self.bits >= u64::BITS {
+            return Err(InflateFastProgress::invalid(self.hold, self.bits, 14));
+        }
+        if self.wsize > self.window.len()
+            || self.whave > self.wsize
+            || (self.wsize == 0 && self.wnext != 0)
+            || (self.wsize != 0 && self.wnext >= self.wsize)
+        {
+            return Err(InflateFastProgress::invalid(self.hold, self.bits, 17));
+        }
+        let Ok(output_capacity) = u32::try_from(self.output.len()) else {
+            return Err(InflateFastProgress::invalid(self.hold, self.bits, 17));
+        };
+        // The legacy fast loop receives the output availability at entry as
+        // `start`, so its distance accounting is relative to this output
+        // slice. A bounded caller must preserve that same contract.
+        if self.start != output_capacity {
+            return Err(InflateFastProgress::invalid(self.hold, self.bits, 17));
+        }
+        Ok(())
+    }
+}
+
 impl InflateFastProgress {
     /// The fast loop is optional: callers fall back to the regular decoder
     /// when either of its documented six-input-byte or 258-output-byte
@@ -99,46 +149,25 @@ fn inflate_fast_mask(bits: u32) -> Option<u64> {
 /// buffers.  The ABI adapter owns construction of these views and commits the
 /// resulting cursors, so this core cannot retain or dereference foreign
 /// pointers.
-fn inflate_fast_core(
-    input: &[u8],
-    output: &mut [u8],
-    window: &[u8],
-    lcode: &[crate::src::inftrees::code],
-    dcode: &[crate::src::inftrees::code],
-    wsize: usize,
-    whave: usize,
-    wnext: usize,
-    mut hold: u64,
-    mut bits: u32,
-    lenbits: u32,
-    distbits: u32,
-    _sane: bool,
-    start: u32,
-) -> InflateFastProgress {
-    // The translated raw loop relies on these reserves before it reads ahead.
-    // A bounded caller with less space should use the normal decoder instead.
-    if input.len() < 6 || output.len() < 258 {
-        return InflateFastProgress::no_progress(hold, bits);
+fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
+    if let Err(progress) = views.validate() {
+        return progress;
     }
-    if lenbits >= u32::BITS || distbits >= u32::BITS || bits >= u64::BITS {
-        return InflateFastProgress::invalid(hold, bits, 14);
-    }
-    if wsize > window.len()
-        || whave > wsize
-        || (wsize == 0 && wnext != 0)
-        || (wsize != 0 && wnext >= wsize)
-    {
-        return InflateFastProgress::invalid(hold, bits, 17);
-    }
-    let Ok(output_capacity) = u32::try_from(output.len()) else {
-        return InflateFastProgress::invalid(hold, bits, 17);
-    };
-    // The legacy fast loop receives the output availability at entry as
-    // `start`, so its distance accounting is relative to this output slice.
-    // A future bounded caller must preserve that same contract.
-    if start != output_capacity {
-        return InflateFastProgress::invalid(hold, bits, 17);
-    }
+    let InflateFastViews {
+        input,
+        output,
+        window,
+        lcode,
+        dcode,
+        wsize,
+        whave,
+        wnext,
+        mut hold,
+        mut bits,
+        lenbits,
+        distbits,
+        ..
+    } = views;
     let mut input_at = 0usize;
     let mut output_at = 0usize;
     let lmask = (1u32 << lenbits).wrapping_sub(1) as u64;
