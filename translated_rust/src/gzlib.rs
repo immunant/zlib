@@ -168,16 +168,6 @@ fn gz_reset_after_error(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0 as crate::stdlib::uInt;
 }
 
-unsafe fn gz_reset(state: crate::gzguts_h::gz_statep) {
-    gz_reset_before_error(&mut *state);
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    gz_reset_after_error(&mut *state);
-}
-
 unsafe fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -251,30 +241,42 @@ unsafe fn gz_open(
         }
         (*state).fd = fd;
     }
-    if (*state).fd == -1 as ::core::ffi::c_int {
-        crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    if (*state).mode == crate::gzguts_h::GZ_APPEND {
-        crate::stdlib::lseek64(
-            (*state).fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_END,
-        );
-        (*state).mode = crate::gzguts_h::GZ_WRITE;
-    }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).start = crate::stdlib::lseek64(
-            (*state).fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if (*state).start == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
-            (*state).start = 0 as crate::stdlib::off64_t;
+    {
+        let state_ref = &mut *state;
+        if state_ref.fd == -1 as ::core::ffi::c_int {
+            crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
+            crate::stdlib::free(state as *mut ::core::ffi::c_void);
+            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
+        if state_ref.mode == crate::gzguts_h::GZ_APPEND {
+            crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_END,
+            );
+            state_ref.mode = crate::gzguts_h::GZ_WRITE;
+        }
+        if state_ref.mode == crate::gzguts_h::GZ_READ {
+            state_ref.start = crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_CUR,
+            ) as crate::stdlib::off64_t;
+            if state_ref.start == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
+                state_ref.start = 0 as crate::stdlib::off64_t;
+            }
+        }
+        gz_reset_before_error(state_ref);
     }
-    gz_reset(state);
+    gz_error(
+        state,
+        crate::zlib_h::Z_OK,
+        ::core::ptr::null::<::core::ffi::c_char>(),
+    );
+    {
+        let state_ref = &mut *state;
+        gz_reset_after_error(state_ref);
+    }
     return state as crate::zlib_h::gzFile;
 }
 #[export_name = "gzopen"]
@@ -549,7 +551,13 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     {
         return -1 as ::core::ffi::c_int;
     }
-    gz_reset(state);
+    gz_reset_before_error(state_ref);
+    gz_error(
+        state,
+        crate::zlib_h::Z_OK,
+        ::core::ptr::null::<::core::ffi::c_char>(),
+    );
+    gz_reset_after_error(state_ref);
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzseek64"]
