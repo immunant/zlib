@@ -67,7 +67,6 @@ pub const SYNC: crate::src::inflate::inflate_mode = 16211;
 #[repr(C)]
 
 pub struct inflate_state {
-    pub strm: crate::zlib_h::z_streamp,
     pub mode: crate::src::inflate::inflate_mode,
     pub last: ::core::ffi::c_int,
     pub wrap: ::core::ffi::c_int,
@@ -112,7 +111,6 @@ impl Default for inflate_state {
             val: 0,
         };
         Self {
-            strm: ::core::ptr::null_mut(),
             mode: HEAD,
             last: 0,
             wrap: 0,
@@ -164,7 +162,6 @@ impl inflate_state {
             None
         };
         Some(Self {
-            strm: self.strm,
             mode: self.mode,
             last: self.last,
             wrap: self.wrap,
@@ -257,9 +254,8 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     };
     let state = state_handle.borrow();
-    if (*state).strm != strm
-        || ((*state).mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
+    if ((*state).mode as ::core::ffi::c_uint)
+        < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
         || (*state).mode as ::core::ffi::c_uint
             > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
     {
@@ -276,9 +272,8 @@ fn inflate_state_invalid(strm: &crate::zlib_h::z_stream) -> bool {
         return true;
     };
     let state = state_handle.borrow();
-    !::core::ptr::eq(state.strm, strm)
-        || (state.mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
+    (state.mode as ::core::ffi::c_uint)
+        < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
         || (state.mode as ::core::ffi::c_uint)
             > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
 }
@@ -414,7 +409,6 @@ pub unsafe extern "C" fn inflateInit2_(
         (*strm).zfree = Some(crate::zlib_h::default_stream_allocator());
     }
     let mut state = crate::src::inflate::inflate_state::default();
-    state.strm = strm;
     state.mode = crate::src::inflate::HEAD;
     (*strm).set_inflate_state(state);
     ret = inflateReset2(strm, windowBits);
@@ -2578,7 +2572,6 @@ pub unsafe extern "C" fn inflateCopy(
     if inflateStateCheck(source) != 0 || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let dest_ptr = dest;
     let dest = &mut *dest;
     let state_handle = (&*source)
         .inflate_state()
@@ -2589,7 +2582,6 @@ pub unsafe extern "C" fn inflateCopy(
     };
     let mut copy = Box::new(copy_state);
     *dest = (*source).clone();
-    (*copy).strm = dest_ptr;
     if (*state).lencode
         >= &raw mut (*state).codes as *mut crate::src::inftrees::code
             as *const crate::src::inftrees::code

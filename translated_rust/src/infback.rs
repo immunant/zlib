@@ -97,7 +97,6 @@ pub unsafe extern "C" fn inflateBackInit_(
         (*strm).zfree = Some(crate::zlib_h::default_stream_allocator());
     }
     let mut state = crate::src::inflate::inflate_state::default();
-    state.strm = strm;
     state.dmax = 32768 as ::core::ffi::c_uint;
     state.wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
     state.wsize = (1 as ::core::ffi::c_uint) << windowBits;
