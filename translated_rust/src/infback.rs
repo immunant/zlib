@@ -82,18 +82,16 @@ fn inflate_back_state_config(window_bits: ::core::ffi::c_int) -> InflateBackStat
     }
 }
 
-pub unsafe extern "C" fn inflateBackInit_(
+pub unsafe fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
     mut window: *mut ::core::ffi::c_uchar,
-    mut version: *const ::core::ffi::c_char,
+    version_first: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if version.is_null()
-        || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
+    if version_first != Some(crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize])
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_VERSION_ERROR;
@@ -152,7 +150,8 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateBackInit_(strm, windowBits, window, version, stream_size)
+    let version_first = version.as_ref().copied();
+    inflateBackInit_(strm, windowBits, window, version_first, stream_size)
 }
 pub unsafe extern "C" fn inflateBack(
     strm: &mut crate::zlib_h::z_stream,
