@@ -87,11 +87,7 @@ fn gz_open(
 ) -> Result<NonNull<crate::gzguts_h::gz_state>, Option<OwnedFd>> {
     let mut oflag: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut exclusive: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut allocation = Vec::new();
-    if allocation.try_reserve_exact(1).is_err() {
-        return Err(owned_fd);
-    }
-    allocation.push(crate::gzguts_h::gz_state {
+    let mut allocation = match Box::try_new(crate::gzguts_h::gz_state {
         x: crate::zlib_h::gzFile_s {
             have: 0,
             next: ::core::ptr::null_mut(),
@@ -133,8 +129,11 @@ fn gz_open(
             adler: 0,
             reserved: 0,
         },
-    });
-    let state = &mut allocation[0];
+    }) {
+        Ok(allocation) => allocation,
+        Err(_) => return Err(owned_fd),
+    };
+    let state = allocation.as_mut();
     for &mode in mode.to_bytes() {
         if mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
             && mode as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
@@ -277,7 +276,7 @@ fn gz_open(
     }
     state.fd = owned_fd;
     gz_reset_state(state);
-    Ok(NonNull::new(Box::into_raw(allocation.into_boxed_slice()).cast()).expect("one-element allocation"))
+    Ok(NonNull::new(Box::into_raw(allocation)).expect("gzip state allocation"))
 }
 #[export_name = "gzopen"]
 

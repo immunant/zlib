@@ -19,12 +19,8 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub fn gzclose(allocation: Box<[crate::gzguts_h::gz_state]>) -> ::core::ffi::c_int {
-    if allocation.len() != 1 {
-        ::core::mem::forget(allocation);
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if allocation[0].mode == crate::gzguts_h::GZ_READ {
+pub fn gzclose(allocation: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    if allocation.mode == crate::gzguts_h::GZ_READ {
         crate::src::gzread::gzclose_r(allocation)
     } else {
         crate::src::gzwrite::gzclose_w(allocation)
@@ -36,9 +32,6 @@ pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let allocation = Box::from_raw(::core::ptr::slice_from_raw_parts_mut(
-        file as crate::gzguts_h::gz_statep,
-        1,
-    ));
+    let allocation = Box::from_raw(file as crate::gzguts_h::gz_statep);
     gzclose(allocation)
 }

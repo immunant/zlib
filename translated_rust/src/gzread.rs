@@ -984,15 +984,15 @@ fn gzclose_r_cleanup(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_in
     drop(::core::mem::ManuallyDrop::into_inner(path));
     err
 }
-pub fn gzclose_r(mut allocation: Box<[crate::gzguts_h::gz_state]>) -> ::core::ffi::c_int {
-    // `gz_open` allocates exactly one state.  Keep the C error path's
+pub fn gzclose_r(mut allocation: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    // `gz_open` allocates exactly one state. Keep the C error path's
     // non-consuming behavior for a mismatched close entry point.
-    if allocation.len() != 1 || allocation[0].mode != crate::gzguts_h::GZ_READ {
+    if allocation.mode != crate::gzguts_h::GZ_READ {
         ::core::mem::forget(allocation);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let (fd, err) = {
-        let state = &mut allocation[0];
+        let state = allocation.as_mut();
         if state.size != 0 {
             // The initialized gzip state owns this stream until close.
             crate::src::inflate::inflateEnd(&mut state.strm);
@@ -1016,9 +1016,6 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let allocation = Box::from_raw(::core::ptr::slice_from_raw_parts_mut(
-        file as crate::gzguts_h::gz_statep,
-        1,
-    ));
+    let allocation = Box::from_raw(file as crate::gzguts_h::gz_statep);
     gzclose_r(allocation)
 }
