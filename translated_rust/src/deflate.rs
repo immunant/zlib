@@ -1396,12 +1396,6 @@ pub unsafe fn deflateInit2_(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let storage = initialization.allocation.storage;
-    // This mirrors the ledger stored in the callback-allocated state.  It is
-    // deliberately pointer-free, so it can decide the post-allocation path
-    // without reopening that raw state solely to inspect completion.  The
-    // state copy is still published after every callback for re-entrant
-    // allocator observation.
-    let mut callback_owner = DeflateCallbackStorageOwner::new_state(storage);
     let s = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         stream.opaque,
@@ -1422,7 +1416,12 @@ pub unsafe fn deflateInit2_(
         pending_buf_size: initialization.initial_state.pending_buf_size,
         pending_out: initialization.initial_state.pending_out,
         pending: initialization.initial_state.pending,
-        callback_storage: callback_owner,
+        // This persistent, pointer-free ledger is the single authority for
+        // callback completion and eventual release.  Each callback below
+        // updates it only after publishing its returned handle, so a
+        // re-entrant allocator always observes matching handle/liveness
+        // state without a second temporary ledger.
+        callback_storage: DeflateCallbackStorageOwner::new_state(storage),
         wrap: initialization.initial_state.wrap,
         gzhead: None,
         gzindex: initialization.initial_state.gzindex,
@@ -1522,7 +1521,6 @@ pub unsafe fn deflateInit2_(
             }
         }
         state.callback_storage.record_storage(*slot, allocated);
-        callback_owner.record_storage(*slot, allocated);
     });
     // The same shared projection lends the completed hash table to the reset
     // core.  Incomplete callback storage has no hash view, allowing the
@@ -1541,7 +1539,7 @@ pub unsafe fn deflateInit2_(
         .byte_len()
         .expect("validated pending allocation geometry")
         as crate::zutil_h::ulg;
-    if !callback_owner.is_complete() {
+    if !state.callback_storage.is_complete() {
         state.status = crate::src::deflate::FINISH_STATE;
         stream.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
