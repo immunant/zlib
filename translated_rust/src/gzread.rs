@@ -946,12 +946,17 @@ pub fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 fn gzgetc_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     state.map_or(-1, gzgetc)
 }
+
+// Reading does not close the handle or invoke user callbacks, so the owned
+// state registry can keep the opaque handle valid for the full operation.
+fn gzgetc_handle(file_key: usize) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| gzgetc_dispatch(Some(state)))
+        .unwrap_or(-1)
+}
 #[export_name = "gzgetc"]
 
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
-    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
-    gzgetc_dispatch(state)
+    gzgetc_handle(file.addr())
 }
 pub fn gzgetc_(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     gzgetc(state)
@@ -960,12 +965,15 @@ pub fn gzgetc_(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 fn gzgetc__dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     state.map_or(-1, gzgetc_)
 }
+
+fn gzgetc__handle(file_key: usize) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| gzgetc__dispatch(Some(state)))
+        .unwrap_or(-1)
+}
 #[export_name = "gzgetc_"]
 
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
-    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
-    gzgetc__dispatch(state)
+    gzgetc__handle(file.addr())
 }
 // Classify the push-back request before the ABI adapter binds the output
 // allocation. In particular, a failed initial `gz_look()` must not make the
@@ -1048,17 +1056,19 @@ fn gzungetc(c: ::core::ffi::c_int, state: &mut crate::gzguts_h::gz_state) -> ::c
     })
     .unwrap_or(-1)
 }
+
+// The owned output-buffer lookup remains inside `gzungetc()`.  This outer
+// registry borrow only resolves the opaque handle for this non-closing call.
+fn gzungetc_handle(file_key: usize, c: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| gzungetc(c, state)).unwrap_or(-1)
+}
 #[export_name = "gzungetc"]
 
 pub unsafe extern "C" fn gzungetc_ffi(
     mut c: ::core::ffi::c_int,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    gzungetc(c, state)
+    gzungetc_handle(file.addr(), c)
 }
 // The ABI wrapper binds the caller's writable string once. Reuse `gz_read()`
 // for each byte, so this line reader shares the existing bounded handling of
@@ -1106,6 +1116,16 @@ fn gzgets_ffi_dispatch(
     };
     gzgets(state, destination)
 }
+
+fn gzgets_handle(
+    file_key: usize,
+    destination: Option<&mut [::core::ffi::c_char]>,
+) -> bool {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        gzgets_ffi_dispatch(Some(state), destination)
+    })
+    .unwrap_or(false)
+}
 #[export_name = "gzgets"]
 
 pub unsafe extern "C" fn gzgets_ffi(
@@ -1113,13 +1133,6 @@ pub unsafe extern "C" fn gzgets_ffi(
     mut buf: *mut ::core::ffi::c_char,
     mut len: ::core::ffi::c_int,
 ) -> *mut ::core::ffi::c_char {
-    let state = if file.is_null() {
-        None
-    } else {
-        // SAFETY: a non-null gzip handle identifies the state bound by this
-        // ABI entry. Its read-mode preflight remains in the dispatcher.
-        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
-    };
     let destination = if file.is_null() || buf.is_null() || len < 1 {
         None
     } else {
@@ -1128,7 +1141,7 @@ pub unsafe extern "C" fn gzgets_ffi(
         // dispatcher owns gzip-state validation and the read operation.
         Some(unsafe { ::core::slice::from_raw_parts_mut(buf, len as usize) })
     };
-    if gzgets_ffi_dispatch(state, destination) {
+    if gzgets_handle(file.addr(), destination) {
         buf
     } else {
         ::core::ptr::null_mut::<::core::ffi::c_char>()
@@ -1146,12 +1159,15 @@ fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 fn gzdirect_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     state.map_or(0, gzdirect)
 }
+
+fn gzdirect_handle(file_key: usize) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| gzdirect_dispatch(Some(state)))
+        .unwrap_or(0)
+}
 #[export_name = "gzdirect"]
 
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
-    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
-    gzdirect_dispatch(state)
+    gzdirect_handle(file.addr())
 }
 
 // Closing a read stream has a small state-only tail after its raw inflater,
