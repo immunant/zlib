@@ -2454,7 +2454,8 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     };
     inflateSync(strm, input)
 }
-pub unsafe extern "C" fn inflateSyncPoint(
+#[export_name = "inflateSyncPoint"]
+pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
@@ -2466,13 +2467,6 @@ pub unsafe extern "C" fn inflateSyncPoint(
     return ((*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
         && (*state).bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
-}
-#[export_name = "inflateSyncPoint"]
-
-pub unsafe extern "C" fn inflateSyncPoint_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    inflateSyncPoint(strm)
 }
 pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
@@ -2576,7 +2570,8 @@ pub unsafe extern "C" fn inflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     inflateCopy(dest, source)
 }
-pub unsafe extern "C" fn inflateUndermine(
+#[export_name = "inflateUndermine"]
+pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -2589,15 +2584,8 @@ pub unsafe extern "C" fn inflateUndermine(
     (*state).sane = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_DATA_ERROR;
 }
-#[export_name = "inflateUndermine"]
-
-pub unsafe extern "C" fn inflateUndermine_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut subvert: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateUndermine(strm, subvert)
-}
-pub unsafe extern "C" fn inflateValidate(
+#[export_name = "inflateValidate"]
+pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -2614,15 +2602,10 @@ pub unsafe extern "C" fn inflateValidate(
     }
     return crate::zlib_h::Z_OK;
 }
-#[export_name = "inflateValidate"]
-
-pub unsafe extern "C" fn inflateValidate_ffi(
+#[export_name = "inflateMark"]
+pub unsafe extern "C" fn inflateMark_ffi(
     mut strm: crate::zlib_h::z_streamp,
-    mut check: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateValidate(strm, check)
-}
-pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_long {
+) -> ::core::ffi::c_long {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
@@ -2645,14 +2628,8 @@ pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::co
             }
         }) as ::core::ffi::c_long;
 }
-#[export_name = "inflateMark"]
-
-pub unsafe extern "C" fn inflateMark_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_long {
-    inflateMark(strm)
-}
-pub unsafe extern "C" fn inflateCodesUsed(
+#[export_name = "inflateCodesUsed"]
+pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
     let mut state: *mut crate::src::inflate::inflate_state =
@@ -2665,11 +2642,4 @@ pub unsafe extern "C" fn inflateCodesUsed(
         .next
         .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
         as ::core::ffi::c_ulong;
-}
-#[export_name = "inflateCodesUsed"]
-
-pub unsafe extern "C" fn inflateCodesUsed_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_ulong {
-    inflateCodesUsed(strm)
 }
