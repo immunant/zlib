@@ -3135,7 +3135,7 @@ pub fn inflateCopy(
     // The allocator callbacks have completed. Reuse the checked stream/state
     // binding for the final stream copy instead of reopening `source` through
     // a raw dereference.
-    let Some((source, _source_state)) = inflateStateCheck(source) else {
+    let Some((source, live_state)) = inflateStateCheck(source) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let dest = &mut *dest;
@@ -3151,7 +3151,7 @@ pub fn inflateCopy(
             ),
         ))
     };
-    inflate_copy_state(dest, source, copy, &source_state, window);
+    inflate_copy_state(dest, source, copy, &source_state, live_state, window);
     dest.state =
         copy as *mut crate::src::inflate::inflate_state as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
@@ -3281,6 +3281,7 @@ fn inflate_copy_state(
     source: &crate::zlib_h::z_stream,
     copy: &mut crate::src::inflate::inflate_state,
     state: &crate::src::inflate::inflate_state,
+    live_state: &crate::src::inflate::inflate_state,
     window: Option<(&[crate::stdlib::Bytef], &mut [crate::stdlib::Bytef])>,
 ) {
     *dest = *source;
@@ -3288,7 +3289,11 @@ fn inflate_copy_state(
     copy.strm = dest;
 
     let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-    let source_codes = state.codes.as_ptr().addr();
+    // `state` is a value snapshot taken before the allocator callbacks, so
+    // its `codes` array lives on this stack frame while its cursors still
+    // point into the stream-owned workspace.  Measure those cursors against
+    // the live workspace, not the snapshot array.
+    let source_codes = live_state.codes.as_ptr().addr();
     let lencode_index = inflate_codes_cursor_index(
         state.codes.len(),
         code_size,
