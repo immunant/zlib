@@ -621,6 +621,35 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     return 0 as ::core::ffi::c_int;
 }
+
+fn inflate_reset_keep_state(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_int {
+    state.total = 0 as ::core::ffi::c_ulong;
+    strm.total_out = state.total as crate::stdlib::uLong;
+    strm.total_in = strm.total_out;
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    strm.data_type = 0 as ::core::ffi::c_int;
+    if state.wrap != 0 {
+        strm.adler = (state.wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong;
+    }
+    state.mode = crate::src::inflate::HEAD;
+    state.last = 0 as ::core::ffi::c_int;
+    state.havedict = 0 as ::core::ffi::c_int;
+    state.flags = -1 as ::core::ffi::c_int;
+    state.dmax = 32768 as ::core::ffi::c_uint;
+    state.head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+    state.hold = 0 as ::core::ffi::c_ulong;
+    state.bits = 0 as ::core::ffi::c_uint;
+    state.next = state.codes.as_mut_ptr();
+    state.distcode = state.next;
+    state.lencode = state.distcode;
+    state.sane = 1 as ::core::ffi::c_int;
+    state.back = -1 as ::core::ffi::c_int;
+    crate::zlib_h::Z_OK
+}
+
 #[export_name = "inflateResetKeep"]
 
 pub unsafe extern "C" fn inflateResetKeep_ffi(
@@ -632,28 +661,7 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).total = 0 as ::core::ffi::c_ulong;
-    (*strm).total_out = (*state).total as crate::stdlib::uLong;
-    (*strm).total_in = (*strm).total_out;
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*strm).data_type = 0 as ::core::ffi::c_int;
-    if (*state).wrap != 0 {
-        (*strm).adler = ((*state).wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong;
-    }
-    (*state).mode = crate::src::inflate::HEAD;
-    (*state).last = 0 as ::core::ffi::c_int;
-    (*state).havedict = 0 as ::core::ffi::c_int;
-    (*state).flags = -1 as ::core::ffi::c_int;
-    (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
-    (*state).hold = 0 as ::core::ffi::c_ulong;
-    (*state).bits = 0 as ::core::ffi::c_uint;
-    (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-    (*state).distcode = (*state).next;
-    (*state).lencode = (*state).distcode;
-    (*state).sane = 1 as ::core::ffi::c_int;
-    (*state).back = -1 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_OK;
+    return inflate_reset_keep_state(&mut *strm, &mut *state);
 }
 #[export_name = "inflateReset"]
 

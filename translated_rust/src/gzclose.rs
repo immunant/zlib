@@ -20,6 +20,20 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+enum GzCloseRoute {
+    Read,
+    Write,
+}
+
+fn gzclose_route(mode: ::core::ffi::c_int) -> GzCloseRoute {
+    if mode == crate::gzguts_h::GZ_READ {
+        GzCloseRoute::Read
+    } else {
+        GzCloseRoute::Write
+    }
+}
+
 #[export_name = "gzclose"]
 
 pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -27,9 +41,12 @@ pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core:
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &*(file as crate::gzguts_h::gz_statep);
-    return if state.mode == crate::gzguts_h::GZ_READ {
-        crate::src::gzread::gzclose_r_ffi(file as *mut crate::zlib_h::gzFile_s)
-    } else {
-        crate::src::gzwrite::gzclose_w_ffi(file as *mut crate::zlib_h::gzFile_s)
-    };
+    match gzclose_route(state.mode) {
+        GzCloseRoute::Read => {
+            return crate::src::gzread::gzclose_r_ffi(file as *mut crate::zlib_h::gzFile_s);
+        }
+        GzCloseRoute::Write => {
+            return crate::src::gzwrite::gzclose_w_ffi(file as *mut crate::zlib_h::gzFile_s);
+        }
+    }
 }

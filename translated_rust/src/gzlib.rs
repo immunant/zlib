@@ -149,6 +149,15 @@ fn gz_open_oflag_for_mode(
     oflag
 }
 
+fn gzdopen_path_capacity() -> crate::__stddef_size_t_h::size_t {
+    (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
+        (3 as crate::__stddef_size_t_h::size_t)
+            .wrapping_mul(
+                ::core::mem::size_of::<::core::ffi::c_int>() as crate::__stddef_size_t_h::size_t
+            ),
+    )
+}
+
 fn gz_reset_before_error(state: &mut crate::gzguts_h::gz_state) {
     state.x.have = 0 as ::core::ffi::c_uint;
     if state.mode == crate::gzguts_h::GZ_READ {
@@ -332,25 +341,16 @@ pub unsafe extern "C" fn gzdopen_ffi(
     let Some(parsed_mode) = gz_parse_open_mode(::core::ffi::CStr::from_ptr(mode).to_bytes()) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
+    let path_capacity = gzdopen_path_capacity();
     if {
-        path = crate::stdlib::malloc(
-            (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-                (3 as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()
-                        as crate::__stddef_size_t_h::size_t),
-            ),
-        ) as *mut ::core::ffi::c_char;
+        path = crate::stdlib::malloc(path_capacity) as *mut ::core::ffi::c_char;
         path.is_null()
     } {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     crate::stdlib::snprintf(
         path,
-        (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-            (3 as crate::__stddef_size_t_h::size_t)
-                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()
-                    as crate::__stddef_size_t_h::size_t),
-        ),
+        path_capacity,
         b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
         fd,
     );

@@ -3231,12 +3231,17 @@ pub unsafe extern "C" fn inflate_table_ffi(
     *bits = root;
     return 0 as ::core::ffi::c_int;
 }
+
+pub(crate) fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
+    let fixed = inflate_fixed_tables();
+    state.lencode = fixed.lencode.as_ptr();
+    state.lenbits = fixed.lenbits;
+    state.distcode = fixed.distcode.as_ptr();
+    state.distbits = fixed.distbits;
+}
+
 #[export_name = "inflate_fixed"]
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
-    let fixed = inflate_fixed_tables();
-    (*state).lencode = fixed.lencode.as_ptr();
-    (*state).lenbits = fixed.lenbits;
-    (*state).distcode = fixed.distcode.as_ptr();
-    (*state).distbits = fixed.distbits;
+    inflate_fixed_state(&mut *state);
 }
