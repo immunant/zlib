@@ -3437,6 +3437,22 @@ pub(crate) fn dist_code_table_index(dist_minus_one: ::core::ffi::c_uint) -> usiz
     }
 }
 
+pub(crate) struct TrTallyMatchCodes {
+    pub(crate) length_code: ::core::ffi::c_int,
+    pub(crate) dist_code: ::core::ffi::c_int,
+}
+
+pub(crate) fn tr_tally_match_codes(
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> TrTallyMatchCodes {
+    let dist_minus_one = dist.wrapping_sub(1 as ::core::ffi::c_uint);
+    TrTallyMatchCodes {
+        length_code: _length_code[lc as usize] as ::core::ffi::c_int,
+        dist_code: _dist_code[dist_code_table_index(dist_minus_one)] as ::core::ffi::c_int,
+    }
+}
+
 pub(crate) fn tr_tally_update_match_counts(
     dyn_ltree: &mut [crate::src::deflate::ct_data; 573],
     dyn_dtree: &mut [crate::src::deflate::ct_data; 61],
@@ -3923,18 +3939,15 @@ pub unsafe extern "C" fn _tr_tally_ffi(
             0,
         );
     } else {
-        dist = dist.wrapping_sub(1);
-        let length_code = crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int;
-        let dist_code =
-            crate::src::trees::_dist_code[dist_code_table_index(dist)] as ::core::ffi::c_int;
+        let codes = tr_tally_match_codes(original_dist, lc);
         tr_tally_update_counts(
             &mut state.dyn_ltree,
             &mut state.dyn_dtree,
             &mut state.matches,
             original_dist,
             lc,
-            length_code,
-            dist_code,
+            codes.length_code,
+            codes.dist_code,
         );
     }
     return (state.sym_next == state.sym_end) as ::core::ffi::c_int;

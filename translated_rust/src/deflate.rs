@@ -2794,16 +2794,13 @@ unsafe extern "C" fn deflate_fast(
                 (*s).sym_next = (*s).sym_next.wrapping_add(1);
                 *(*s).sym_buf.offset(sym_next as isize) = byte;
             }
-            dist = dist.wrapping_sub(1);
-            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
-            let dist_code = crate::src::trees::_dist_code
-                [crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint)]
-                as ::core::ffi::c_int;
+            let codes =
+                crate::src::trees::tr_tally_match_codes(original_dist, len as ::core::ffi::c_uint);
             crate::src::trees::tr_tally_update_match_counts(
                 &mut (*s).dyn_ltree,
                 &mut (*s).dyn_dtree,
-                length_code,
-                dist_code,
+                codes.length_code,
+                codes.dist_code,
             );
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
@@ -3018,16 +3015,13 @@ unsafe extern "C" fn deflate_slow(
                 (*s).sym_next = (*s).sym_next.wrapping_add(1);
                 *(*s).sym_buf.offset(sym_next as isize) = byte;
             }
-            dist = dist.wrapping_sub(1);
-            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
-            let dist_code = crate::src::trees::_dist_code
-                [crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint)]
-                as ::core::ffi::c_int;
+            let codes =
+                crate::src::trees::tr_tally_match_codes(original_dist, len as ::core::ffi::c_uint);
             crate::src::trees::tr_tally_update_match_counts(
                 &mut (*s).dyn_ltree,
                 &mut (*s).dyn_dtree,
-                length_code,
-                dist_code,
+                codes.length_code,
+                codes.dist_code,
             );
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s)
@@ -3298,16 +3292,13 @@ unsafe extern "C" fn deflate_rle(
                 (*s).sym_next = (*s).sym_next.wrapping_add(1);
                 *(*s).sym_buf.offset(sym_next as isize) = byte;
             }
-            dist = dist.wrapping_sub(1);
-            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
-            let dist_code = crate::src::trees::_dist_code
-                [crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint)]
-                as ::core::ffi::c_int;
+            let codes =
+                crate::src::trees::tr_tally_match_codes(original_dist, len as ::core::ffi::c_uint);
             crate::src::trees::tr_tally_update_match_counts(
                 &mut (*s).dyn_ltree,
                 &mut (*s).dyn_dtree,
-                length_code,
-                dist_code,
+                codes.length_code,
+                codes.dist_code,
             );
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);

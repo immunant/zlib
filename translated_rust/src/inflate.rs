@@ -348,6 +348,13 @@ fn inflate_gzip_header_crc_matches(
     hold == check & 0xffff as ::core::ffi::c_ulong
 }
 
+fn inflate_gzip_header_crc_update_enabled(
+    flags: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+) -> bool {
+    flags & 0x200 as ::core::ffi::c_int != 0 && wrap & 4 as ::core::ffi::c_int != 0
+}
+
 enum InflateZlibHeaderError {
     IncorrectHeaderCheck,
     UnknownCompressionMethod,
@@ -934,9 +941,7 @@ pub unsafe extern "C" fn inflate_ffi(
                             & 1 as ::core::ffi::c_ulong)
                             as ::core::ffi::c_int;
                     }
-                    if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                        && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    {
+                    if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
                             (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1270,9 +1275,7 @@ pub unsafe extern "C" fn inflate_ffi(
                 if !(*state).head.is_null() {
                     (*(*state).head).time = hold as crate::stdlib::uLong;
                 }
-                if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                    && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                {
+                if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
                     hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                     hbuf[1 as ::core::ffi::c_int as usize] =
                         (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1490,9 +1493,7 @@ pub unsafe extern "C" fn inflate_ffi(
                         (hold & 0xff as ::core::ffi::c_ulong) as ::core::ffi::c_int;
                     (*(*state).head).os = (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_int;
                 }
-                if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                    && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                {
+                if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
                     hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                     hbuf[1 as ::core::ffi::c_int as usize] =
                         (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1585,9 +1586,7 @@ pub unsafe extern "C" fn inflate_ffi(
                         (*(*state).head).extra_len =
                             hold as ::core::ffi::c_uint as crate::stdlib::uInt;
                     }
-                    if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                        && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    {
+                    if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
                             (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1741,9 +1740,7 @@ pub unsafe extern "C" fn inflate_ffi(
                                     as crate::__stddef_size_t_h::size_t,
                             );
                         }
-                        if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                            && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                        {
+                        if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
                             (*state).check = crate::src::crc32::crc32_ffi(
                                 (*state).check as crate::stdlib::uLong,
                                 next,
@@ -1815,9 +1812,7 @@ pub unsafe extern "C" fn inflate_ffi(
                             break;
                         }
                     }
-                    if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                        && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    {
+                    if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
                         (*state).check = crate::src::crc32::crc32_ffi(
                             (*state).check as crate::stdlib::uLong,
                             next,
@@ -1931,9 +1926,7 @@ pub unsafe extern "C" fn inflate_ffi(
                             break;
                         }
                     }
-                    if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                        && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    {
+                    if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
                         (*state).check = crate::src::crc32::crc32_ffi(
                             (*state).check as crate::stdlib::uLong,
                             next,
