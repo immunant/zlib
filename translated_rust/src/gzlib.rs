@@ -2028,6 +2028,20 @@ pub(crate) fn gz_with_owned_input_buffer<R>(
     Some(operation(&mut buffers.input))
 }
 
+// Lookahead must inspect the owned input and, for a transparent stream, copy
+// it into the owned output buffer as one operation.  Borrow both fields of
+// the one registry entry together instead of reconstructing either slice from
+// the C-facing pointers.  The closure must not re-enter the buffer registry.
+pub(crate) fn gz_with_owned_read_buffers<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar], &mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    let GzOwnedBuffers { input, output } = buffers;
+    Some(operation(input, output))
+}
+
 // The close paths call this only after their last input/output use. Dropping
 // the registry entry releases both lazy arrays before the opaque state box.
 pub(crate) fn gz_release_owned_buffers(state: &crate::gzguts_h::gz_state) {

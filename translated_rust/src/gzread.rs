@@ -273,20 +273,42 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     let available = state.strm.avail_in;
-    // SAFETY: `gz_avail` maintains `next_in` within the initialized input
-    // allocation for exactly `available` bytes. This one binding is reused
-    // for both header detection and transparent-stream copying below.
-    let input = if available == 0 {
-        &[]
-    } else {
-        unsafe { ::core::slice::from_raw_parts(state.strm.next_in, available as usize) }
+    // Both allocations were published together by `gz_look()` initialization.
+    // Keep the cursor range within the owned input Vec and perform a possible
+    // transparent-stream copy while both Rust slices are borrowed from that
+    // single registry entry.  This avoids rebuilding slices from `next_in`
+    // and `out`, and does not nest the registry mutex.
+    let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+    let look = crate::src::gzlib::gz_with_owned_read_buffers(state_key, |input, output| {
+        if state.in_0 != input.as_mut_ptr() || state.out != output.as_mut_ptr() {
+            return None;
+        }
+        let input_range = gz_buffered_input_range(
+            input.as_ptr().addr(),
+            state.strm.next_in.addr(),
+            available,
+            input.len(),
+        )?;
+        let gzip_header = if available > 3 {
+            let header = &input[input_range.start..input_range.start + 4];
+            crate::src::gzlib::gz_is_gzip_header([header[0], header[1], header[2], header[3]])
+        } else {
+            false
+        };
+        let plan = crate::src::gzlib::gz_look_plan(available, state.again != 0, gzip_header);
+        if let crate::src::gzlib::GzLookPlan::Copy { copied } = plan {
+            let copied = copied as usize;
+            if copied > output.len() {
+                return None;
+            }
+            gz_copy_lookahead_output(&mut output[..copied], &input[input_range]);
+        }
+        Some(plan)
+    });
+    let Some(Some(look)) = look else {
+        return -1;
     };
-    let gzip_header = if available > 3 {
-        crate::src::gzlib::gz_is_gzip_header([input[0], input[1], input[2], input[3]])
-    } else {
-        false
-    };
-    match crate::src::gzlib::gz_look_plan(available, state.again != 0, gzip_header) {
+    match look {
         crate::src::gzlib::GzLookPlan::NeedMore => return 0 as ::core::ffi::c_int,
         crate::src::gzlib::GzLookPlan::Gzip => {
             crate::src::inflate::inflate_reset_stream_bound(&mut state.strm);
@@ -294,14 +316,6 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return 0 as ::core::ffi::c_int;
         }
         crate::src::gzlib::GzLookPlan::Copy { copied } => {
-            // SAFETY: `gz_avail` has made `copied` input bytes available, and
-            // `out` was allocated with twice the input-buffer capacity. The
-            // ranges are distinct gzip buffers. Bind them once; the transfer
-            // itself is then bounds-checked Rust slice work.
-            unsafe {
-                let output = ::core::slice::from_raw_parts_mut(state.out, copied as usize);
-                gz_copy_lookahead_output(output, &input[..copied as usize]);
-            }
             crate::src::gzlib::gz_set_copy_input(state, copied);
             return 0 as ::core::ffi::c_int;
         }
