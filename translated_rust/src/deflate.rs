@@ -1770,14 +1770,14 @@ macro_rules! deflate_params_at_boundary {
             }
             let s = (*strm).state as *mut crate::src::deflate::deflate_state;
             let Some(plan) = crate::src::deflate::deflate_params_plan(
-                    level,
-                    strategy,
-                    (*s).level,
-                    (*s).strategy,
-                    (*s).last_flush,
-                ) else {
-                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                };
+                level,
+                strategy,
+                (*s).level,
+                (*s).strategy,
+                (*s).last_flush,
+            ) else {
+                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+            };
             if plan.needs_block_flush {
                 let err = crate::src::deflate::deflate(strm, crate::zlib_h::Z_BLOCK);
                 if err == crate::zlib_h::Z_STREAM_ERROR {
@@ -1796,11 +1796,11 @@ macro_rules! deflate_params_at_boundary {
                 {
                     if (*s).matches == 1 as crate::stdlib::uInt {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                            };
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
                         let Ok(prev_len) = usize::try_from((*s).w_size) else {
-                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                            };
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
                         if (head_len != 0 && (*s).head.is_null())
                             || (prev_len != 0 && (*s).prev.is_null())
                         {
@@ -1820,8 +1820,8 @@ macro_rules! deflate_params_at_boundary {
                         (*s).slid = 1;
                     } else {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                            };
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
                         if head_len != 0 && (*s).head.is_null() {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         }
@@ -3577,10 +3577,14 @@ fn stored_initial_block_plan(
     avail_in: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
 ) -> Option<StoredBlockPlan> {
-    let min_block = (if pending_buf_size.wrapping_sub(5) > wsize as crate::zutil_h::ulg {
+    // A valid deflate state always has room for the stored-block header.  Do
+    // not let a malformed transitional state turn a too-small pending buffer
+    // into a huge capacity through wrapping subtraction.
+    let pending_capacity = pending_buf_size.checked_sub(5)?;
+    let min_block = (if pending_capacity > wsize as crate::zutil_h::ulg {
         wsize as crate::zutil_h::ulg
     } else {
-        pending_buf_size.wrapping_sub(5)
+        pending_capacity
     }) as ::core::ffi::c_uint;
     stored_block_plan(
         min_block,
@@ -3606,12 +3610,11 @@ fn stored_tail_block_plan(
     flush: ::core::ffi::c_int,
 ) -> Option<StoredBlockPlan> {
     let bit_bytes = (bi_valid as ::core::ffi::c_uint).wrapping_add(42) >> 3;
-    let have = (if pending_buf_size.wrapping_sub(bit_bytes as crate::zutil_h::ulg)
-        > 65535 as crate::zutil_h::ulg
-    {
+    let pending_capacity = pending_buf_size.checked_sub(bit_bytes as crate::zutil_h::ulg)?;
+    let have = (if pending_capacity > 65535 as crate::zutil_h::ulg {
         65535 as crate::zutil_h::ulg
     } else {
-        pending_buf_size.wrapping_sub(bit_bytes as crate::zutil_h::ulg)
+        pending_capacity
     }) as ::core::ffi::c_uint;
     let min_block = if have > wsize {
         wsize as ::core::ffi::c_uint
