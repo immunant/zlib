@@ -284,7 +284,7 @@ pub unsafe extern "C" fn adler32_ffi(
 ) -> crate::stdlib::uLong {
     adler32(adler, buf, len)
 }
-unsafe extern "C" fn adler32_combine_(
+fn adler32_combine_(
     mut adler1: crate::stdlib::uLong,
     mut adler2: crate::stdlib::uLong,
     mut len2: crate::stdlib::off64_t,
@@ -326,7 +326,7 @@ unsafe extern "C" fn adler32_combine_(
     return sum1 as crate::stdlib::uLong
         | (sum2 as crate::stdlib::uLong) << 16 as ::core::ffi::c_int;
 }
-pub unsafe extern "C" fn adler32_combine(
+pub fn adler32_combine(
     mut adler1: crate::stdlib::uLong,
     mut adler2: crate::stdlib::uLong,
     mut len2: crate::stdlib::off_t,
@@ -342,7 +342,7 @@ pub unsafe extern "C" fn adler32_combine_ffi(
 ) -> crate::stdlib::uLong {
     adler32_combine(adler1, adler2, len2)
 }
-pub unsafe extern "C" fn adler32_combine64(
+pub fn adler32_combine64(
     mut adler1: crate::stdlib::uLong,
     mut adler2: crate::stdlib::uLong,
     mut len2: crate::stdlib::off64_t,
