@@ -508,6 +508,39 @@ enum GzFreadOutcome {
     },
 }
 
+// Both exported byte-read variants enter through the same opaque-handle
+// boundary.  The request and result tags keep their distinct C return
+// policies out of the FFI wrappers without giving either pointer-free core
+// an ABI-shaped state.
+enum GzReadAbiRequest {
+    Bytes,
+    Items {
+        size: crate::stdlib::z_size_t,
+        nitems: crate::stdlib::z_size_t,
+    },
+}
+
+enum GzReadAbiResult {
+    Bytes(::core::ffi::c_int),
+    Items(crate::stdlib::z_size_t),
+}
+
+impl GzReadAbiResult {
+    fn bytes(self) -> ::core::ffi::c_int {
+        match self {
+            Self::Bytes(result) => result,
+            Self::Items(_) => unreachable!(),
+        }
+    }
+
+    fn items(self) -> crate::stdlib::z_size_t {
+        match self {
+            Self::Items(result) => result,
+            Self::Bytes(_) => unreachable!(),
+        }
+    }
+}
+
 // This is the persistent half of the read action boundary.  It contains all
 // fields an action may update, but deliberately excludes `gzFile_s::next` and
 // the embedded stream's raw cursors.  The outer ABI adapter publishes those
@@ -1443,13 +1476,93 @@ fn gzread_with_dispatch(
     len as ::core::ffi::c_uint
 }
 
-// The ABI-shaped state is projected exactly once for a byte-read request.
-// Keep that projection under this adapter; `gzread()` itself is the
-// pointer-free owner loop used after the projection has completed.
+// The ABI-shaped state is projected exactly once for either exported read
+// request.  Keep that projection under this established adapter; `gzread()`
+// and `gzfread()` themselves are pointer-free owner loops once it completes.
 unsafe fn gzread_from_state(
     state: &mut crate::gzguts_h::gz_state,
     output: &mut [u8],
-) -> ::core::ffi::c_int {
+    request: GzReadAbiRequest,
+) -> GzReadAbiResult {
+    if let GzReadAbiRequest::Items { size, nitems } = request {
+        let Some(fd) = state.fd.take() else {
+            return GzReadAbiResult::Items(0);
+        };
+        let mut owner = GzReadOwner {
+            mode: state.mode,
+            fd,
+            path: state.path.take(),
+            want: state.want,
+            buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+            direct: state.direct,
+            junk: state.junk,
+            how: state.how,
+            again: state.again,
+            eof: state.eof,
+            past: state.past,
+            skip: state.skip,
+            err: state.err,
+            message: state.msg.take(),
+            have: state.x.have,
+            pos: state.x.pos,
+            avail_in: state.strm.avail_in,
+            avail_out: state.strm.avail_out,
+            total_in: state.strm.total_in,
+            total_out: state.strm.total_out,
+        };
+        let outcome = gzfread(&mut owner, output, size, nitems);
+        let result = match outcome {
+            GzFreadOutcome::Complete(result) => result,
+            GzFreadOutcome::PublishThenFinish { read_len, size } => {
+                let published = match owner
+                    .buffers
+                    .output_cursor()
+                    .map(|cursor| (cursor.start(), cursor.have()))
+                {
+                    Some((start, have)) if have == owner.have => owner
+                        .buffers
+                        .output
+                        .as_deref_mut()
+                        .and_then(|buffer| buffer.get_mut(start..))
+                        .map(|buffer| {
+                            state.x.next = buffer.as_mut_ptr();
+                        })
+                        .is_some(),
+                    None if owner.have == 0 => {
+                        state.x.next = ::core::ptr::null_mut();
+                        true
+                    }
+                    _ => false,
+                };
+                if !published {
+                    0
+                } else {
+                    gzfread_finish(&mut owner, read_len, size)
+                }
+            }
+        };
+        state.mode = owner.mode;
+        state.fd = Some(owner.fd);
+        state.path = owner.path;
+        state.want = owner.want;
+        state.buffers = owner.buffers;
+        state.direct = owner.direct;
+        state.junk = owner.junk;
+        state.how = owner.how;
+        state.again = owner.again;
+        state.eof = owner.eof;
+        state.past = owner.past;
+        state.skip = owner.skip;
+        state.err = owner.err;
+        state.msg = owner.message;
+        state.x.have = owner.have;
+        state.x.pos = owner.pos;
+        state.strm.avail_in = owner.avail_in;
+        state.strm.avail_out = owner.avail_out;
+        state.strm.total_in = owner.total_in;
+        state.strm.total_out = owner.total_out;
+        return GzReadAbiResult::Items(result);
+    }
     let request = GzReadRequest::new(state.mode, state.err, state.again);
     let mut error = crate::src::gzlib::GzErrorState {
         message: &mut state.msg,
@@ -1459,14 +1572,14 @@ unsafe fn gzread_from_state(
         path: state.path.as_deref(),
     };
     if !request.begin(&mut error) {
-        return -1 as ::core::ffi::c_int;
+        return GzReadAbiResult::Bytes(-1 as ::core::ffi::c_int);
     }
     if (output.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
         error.set(
             crate::zlib_h::Z_STREAM_ERROR,
             Some(b"request does not fit in an int"),
         );
-        return -1 as ::core::ffi::c_int;
+        return GzReadAbiResult::Bytes(-1 as ::core::ffi::c_int);
     }
     drop(error);
     let mut read = GzReadState {
@@ -1511,19 +1624,19 @@ unsafe fn gzread_from_state(
     {
         Some((start, have)) if have == state.x.have => {
             let Some(buffer) = state.buffers.output.as_deref_mut() else {
-                return 0;
+                return GzReadAbiResult::Bytes(0);
             };
             let Some(buffer) = buffer.get_mut(start..) else {
-                return 0;
+                return GzReadAbiResult::Bytes(0);
             };
             state.x.next = buffer.as_mut_ptr();
         }
         None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
-        _ => return 0,
+        _ => return GzReadAbiResult::Bytes(0),
     }
     if len == 0 as ::core::ffi::c_uint {
         if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
-            return -1 as ::core::ffi::c_int;
+            return GzReadAbiResult::Bytes(-1 as ::core::ffi::c_int);
         }
         if state.again != 0 {
             let errno_value = errno::errno().0;
@@ -1537,10 +1650,10 @@ unsafe fn gzread_from_state(
                 crate::zlib_h::Z_ERRNO,
                 Some(message.as_bytes()),
             );
-            return -1 as ::core::ffi::c_int;
+            return GzReadAbiResult::Bytes(-1 as ::core::ffi::c_int);
         }
     }
-    return len as ::core::ffi::c_int;
+    GzReadAbiResult::Bytes(len as ::core::ffi::c_int)
 }
 #[export_name = "gzread"]
 
@@ -1557,7 +1670,7 @@ pub unsafe extern "C" fn gzread_ffi(
     let Some(mut state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
         return -1 as ::core::ffi::c_int;
     };
-    gzread_from_state(state.as_mut(), output)
+    gzread_from_state(state.as_mut(), output, GzReadAbiRequest::Bytes).bytes()
 }
 fn gzfread(
     owner: &mut GzReadOwner,
@@ -1654,98 +1767,6 @@ fn gzfread_finish(owner: &mut GzReadOwner, read_len: ::core::ffi::c_uint, size: 
     read_len as usize / size
 }
 
-// The opaque-handle boundary still owns import and publication of the public
-// `gzFile_s` cursor.  All request, refill, codec, and item-count behavior is
-// delegated to the pointer-free `GzReadOwner` above.
-unsafe fn gzfread_from_state(
-    state: &mut crate::gzguts_h::gz_state,
-    output: &mut [u8],
-    size: crate::stdlib::z_size_t,
-    nitems: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
-    let Some(fd) = state.fd.take() else {
-        return 0;
-    };
-    let mut owner = GzReadOwner {
-        mode: state.mode,
-        fd,
-        path: state.path.take(),
-        want: state.want,
-        buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
-        direct: state.direct,
-        junk: state.junk,
-        how: state.how,
-        again: state.again,
-        eof: state.eof,
-        past: state.past,
-        skip: state.skip,
-        err: state.err,
-        message: state.msg.take(),
-        have: state.x.have,
-        pos: state.x.pos,
-        avail_in: state.strm.avail_in,
-        avail_out: state.strm.avail_out,
-        total_in: state.strm.total_in,
-        total_out: state.strm.total_out,
-    };
-    let outcome = gzfread(&mut owner, output, size, nitems);
-    let result = match outcome {
-        GzFreadOutcome::Complete(result) => result,
-        GzFreadOutcome::PublishThenFinish { read_len, size } => {
-            let published = match owner
-                .buffers
-                .output_cursor()
-                .map(|cursor| (cursor.start(), cursor.have()))
-            {
-                Some((start, have)) if have == owner.have => {
-                    match owner
-                        .buffers
-                        .output
-                        .as_deref_mut()
-                        .and_then(|buffer| buffer.get_mut(start..))
-                    {
-                        Some(buffer) => {
-                            state.x.next = buffer.as_mut_ptr();
-                            true
-                        }
-                        None => false,
-                    }
-                }
-                None if owner.have == 0 => {
-                    state.x.next = ::core::ptr::null_mut();
-                    true
-                }
-                _ => false,
-            };
-            if !published {
-                0
-            } else {
-                gzfread_finish(&mut owner, read_len, size)
-            }
-        }
-    };
-    state.mode = owner.mode;
-    state.fd = Some(owner.fd);
-    state.path = owner.path;
-    state.want = owner.want;
-    state.buffers = owner.buffers;
-    state.direct = owner.direct;
-    state.junk = owner.junk;
-    state.how = owner.how;
-    state.again = owner.again;
-    state.eof = owner.eof;
-    state.past = owner.past;
-    state.skip = owner.skip;
-    state.err = owner.err;
-    state.msg = owner.message;
-    state.x.have = owner.have;
-    state.x.pos = owner.pos;
-    state.strm.avail_in = owner.avail_in;
-    state.strm.avail_out = owner.avail_out;
-    state.strm.total_in = owner.total_in;
-    state.strm.total_out = owner.total_out;
-    result
-}
 #[export_name = "gzfread"]
 
 pub unsafe extern "C" fn gzfread_ffi(
@@ -1761,7 +1782,12 @@ pub unsafe extern "C" fn gzfread_ffi(
     let Some(mut state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
         return 0 as crate::stdlib::z_size_t;
     };
-    gzfread_from_state(state.as_mut(), output, size, nitems)
+    gzread_from_state(
+        state.as_mut(),
+        output,
+        GzReadAbiRequest::Items { size, nitems },
+    )
+    .items()
 }
 unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
@@ -1795,7 +1821,9 @@ unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.buffers.set_output_cursor(next_cursor);
         return byte as ::core::ffi::c_int;
     }
-    return if gzread_from_state(state, &mut buf) < 1 as ::core::ffi::c_int {
+    return if gzread_from_state(state, &mut buf, GzReadAbiRequest::Bytes).bytes()
+        < 1 as ::core::ffi::c_int
+    {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as usize] as ::core::ffi::c_int
