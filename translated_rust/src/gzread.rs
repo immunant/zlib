@@ -599,19 +599,15 @@ pub unsafe extern "C" fn gzfread_ffi(
     }
     gzfread(buf, size, nitems, &mut *(file as crate::gzguts_h::gz_statep))
 }
-pub unsafe extern "C" fn gzgetc(
-    state: &mut crate::gzguts_h::gz_state,
-) -> ::core::ffi::c_int {
+// Reading one byte through `gz_read` preserves the buffered and unbuffered
+// paths' cursor and EOF bookkeeping while keeping the internal buffer access
+// in that reader's existing raw-copy boundary.
+pub fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_clear_read_error(state);
-    if state.x.have != 0 {
-        let c2rust_fresh2 = state.x.next;
-        gz_consume(state, 1);
-        return *c2rust_fresh2 as ::core::ffi::c_int;
-    }
     return if gz_read(
         state,
         &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
@@ -631,7 +627,7 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
     }
     gzgetc(&mut *(file as crate::gzguts_h::gz_statep))
 }
-pub unsafe extern "C" fn gzgetc_(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+pub fn gzgetc_(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     gzgetc(state)
 }
 #[export_name = "gzgetc_"]
