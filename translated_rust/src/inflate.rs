@@ -776,6 +776,56 @@ pub(crate) fn inflate_fast_tables(
     Some((lcode?, dcode?))
 }
 
+/// Run normal inflate's bounded fast decoder after its ABI boundary has
+/// validated and lent the input, output, and history spans.  Table-token
+/// resolution and the complete scalar decoder configuration live here so the
+/// legacy loop only performs the temporary boundary conversion and commits
+/// the resulting progress.
+///
+/// `output` and `window` must not overlap.  Normal inflate owns a separate
+/// history window; unlike inflateBack, it can therefore lend both views to
+/// the slice-only core at once.
+#[allow(clippy::too_many_arguments)]
+fn inflate_fast_normal(
+    input: &[u8],
+    output: &mut [u8],
+    output_start: usize,
+    window: &[u8],
+    codes: &[crate::src::inftrees::code],
+    lencode: usize,
+    distcode: usize,
+    wsize: usize,
+    whave: usize,
+    wnext: usize,
+    sane: bool,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+    lenbits: ::core::ffi::c_uint,
+    distbits: ::core::ffi::c_uint,
+    start: ::core::ffi::c_uint,
+) -> Option<crate::src::inffast::InflateFastProgress> {
+    let (lcode, dcode) = inflate_fast_tables(codes, lencode, distcode)?;
+    Some(crate::src::inffast::inflate_fast_core(
+        crate::src::inffast::InflateFastViews {
+            input,
+            output,
+            output_start,
+            history: crate::src::inffast::InflateFastHistory::Separate(window),
+            lcode,
+            dcode,
+            wsize,
+            whave,
+            wnext,
+            sane,
+            hold,
+            bits,
+            lenbits,
+            distbits,
+            start,
+        },
+    ))
+}
+
 /// A checked, pointer-free commit plan for one bounded fast-decode call.
 /// The transitional decoder keeps compatibility cursors at its boundary, but
 /// it can validate all scalar progress before publishing any of them.
@@ -2126,14 +2176,7 @@ pub unsafe fn inflate(
                                                         wsize,
                                                     ))
                                                 };
-                                                if let (Some(window), Some((lcode, dcode))) = (
-                                                    window,
-                                                    inflate_fast_tables(
-                                                        &state_ref.codes,
-                                                        state_ref.lencode as usize,
-                                                        state_ref.distcode as usize,
-                                                    ),
-                                                ) {
+                                                if let Some(window) = window {
                                                     let input = ::core::slice::from_raw_parts(
                                                         next,
                                                         have as usize,
@@ -2142,25 +2185,24 @@ pub unsafe fn inflate(
                                                         put.wrapping_sub(output_start),
                                                         out as usize,
                                                     );
-                                                    Some(crate::src::inffast::inflate_fast_core(
-                                                        crate::src::inffast::InflateFastViews {
-                                                            input,
-                                                            output,
-                                                            output_start,
-                                                            history: crate::src::inffast::InflateFastHistory::Separate(window),
-                                                            lcode,
-                                                            dcode,
-                                                            wsize,
-                                                            whave: state_ref.whave as usize,
-                                                            wnext: state_ref.wnext as usize,
-                                                            sane: state_ref.sane != 0,
-                                                            hold,
-                                                            bits,
-                                                            lenbits: state_ref.lenbits,
-                                                            distbits: state_ref.distbits,
-                                                            start: out,
-                                                        },
-                                                    ))
+                                                    inflate_fast_normal(
+                                                        input,
+                                                        output,
+                                                        output_start,
+                                                        window,
+                                                        &state_ref.codes,
+                                                        state_ref.lencode as usize,
+                                                        state_ref.distcode as usize,
+                                                        wsize,
+                                                        state_ref.whave as usize,
+                                                        state_ref.wnext as usize,
+                                                        state_ref.sane != 0,
+                                                        hold,
+                                                        bits,
+                                                        state_ref.lenbits,
+                                                        state_ref.distbits,
+                                                        out,
+                                                    )
                                                 } else {
                                                     None
                                                 }
