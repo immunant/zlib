@@ -1149,10 +1149,23 @@ pub(crate) fn inflateBack(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    // SAFETY: this decoder is reached only after the ABI adapter has bound
-    // the stream. Its callback and cursor protocol is validated at the
-    // existing refill, output, and state-check sites below; keeping those raw
-    // operations scoped here avoids exposing an unsafe function contract to
+    // Keep stream validation in this named implementation. The exported ABI
+    // forwarder only binds its foreign stream reference and dispatches here.
+    let Some(strm) = strm else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // `inflateBackInit_()` establishes the reciprocal stream/state binding
+    // above. Reuse the shared checked binder so this decoder's state setup is
+    // reference-bound; the raw callback and window cursors remain below.
+    let Some((strm, state_ref)) =
+        crate::src::inflate::inflateStateCheck(strm as *mut crate::zlib_h::z_stream)
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // SAFETY: the reference-based setup above has validated the live
+    // stream/state pair. The remaining raw operations are limited to the
+    // callback-owned input cursor and its one stored-block range binding;
+    // keeping them in this narrow scope avoids exposing an unsafe contract to
     // Rust callers of the implementation.
     unsafe {
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -1172,19 +1185,6 @@ pub(crate) fn inflateBack(
         val: 0,
     };
     let mut ret: ::core::ffi::c_int = 0;
-    // Keep stream validation in this named implementation. The exported ABI
-    // forwarder only binds its foreign stream reference and dispatches here.
-    let Some(strm) = strm else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // `inflateBackInit_()` establishes the reciprocal stream/state binding
-    // above. Reuse the shared checked binder so this decoder's state setup is
-    // reference-bound; the raw callback and window cursors remain below.
-    let Some((strm, state_ref)) =
-        crate::src::inflate::inflateStateCheck(strm as *mut crate::zlib_h::z_stream)
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     left = inflate_back_begin_decode(strm, state_ref);
     next = strm.next_in as *mut ::core::ffi::c_uchar;
     have = inflate_back_initial_input_available(strm, !next.is_null());
