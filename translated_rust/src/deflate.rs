@@ -373,7 +373,7 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
         ::core::slice::from_raw_parts_mut((*s).prev, prev_len)
     };
     slide_hash_state(head, prev, (*s).w_size);
-    (*s).slid = 1 as ::core::ffi::c_int;
+    (*s).slid = 1;
 }
 
 fn read_buf_state(
