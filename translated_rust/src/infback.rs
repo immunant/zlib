@@ -1106,7 +1106,7 @@ fn inflateBackInit_(
     if ret != crate::zlib_h::Z_OK {
         return ret;
     }
-    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
+    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     (strm.total_in, strm.total_out, strm.data_type, strm.adler) = public_fields;
@@ -1145,7 +1145,7 @@ pub(crate) fn inflateBack(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
+    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     macro_rules! decode_with_window {
