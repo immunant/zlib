@@ -133,6 +133,14 @@ fn inflate_back_consume_input_byte(
     )
 }
 
+fn inflate_back_low_bits(
+    hold: ::core::ffi::c_ulong,
+    count: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << count).wrapping_sub(1 as ::core::ffi::c_uint)
+}
+
 fn inflate_back_take_bits(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -621,11 +629,8 @@ pub unsafe extern "C" fn inflateBack(
                         }
                         let c2rust_fresh4 = (*state).have;
                         (*state).have = (*state).have.wrapping_add(1);
-                        (*state).lens[ORDER[c2rust_fresh4 as usize] as usize] = (hold
-                            as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << 3 as ::core::ffi::c_int)
-                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                            as ::core::ffi::c_ushort;
+                        (*state).lens[ORDER[c2rust_fresh4 as usize] as usize] =
+                            inflate_back_low_bits(hold, 3) as ::core::ffi::c_ushort;
                         hold >>= 3 as ::core::ffi::c_int;
                         bits = bits.wrapping_sub(3 as ::core::ffi::c_int as ::core::ffi::c_uint);
                     }
@@ -1165,7 +1170,8 @@ mod tests {
         inflate_back_code_length_repeat_plan, inflate_back_consume_input_byte,
         inflate_back_copy_count, inflate_back_copy_match, inflate_back_distance_exceeds_window,
         inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
-        inflate_back_litlen_action, inflate_back_match_copy_plan, inflate_back_stored_block_length,
+        inflate_back_litlen_action, inflate_back_low_bits, inflate_back_match_copy_plan,
+        inflate_back_stored_block_length,
         inflate_back_take_bits, inflate_back_window_bits_are_valid, inflate_back_window_size,
         InflateBackBlockKind, InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan,
         InflateBackLitLenAction, InflateBackMatchSource,
@@ -1215,6 +1221,13 @@ mod tests {
     fn inflate_back_take_bits_returns_low_bits_and_advances_buffer() {
         assert_eq!(inflate_back_take_bits(0b101101, 6, 3), (0b101, 0b101, 3));
         assert_eq!(inflate_back_take_bits(0x1234, 16, 4), (0x4, 0x123, 12));
+    }
+
+    #[test]
+    fn inflate_back_low_bits_masks_only_requested_bits() {
+        assert_eq!(inflate_back_low_bits(0x1234, 0), 0);
+        assert_eq!(inflate_back_low_bits(0b101101, 3), 0b101);
+        assert_eq!(inflate_back_low_bits(0x1234, 12), 0x234);
     }
 
     #[test]

@@ -4144,6 +4144,13 @@ fn tree_code_count(max_code: ::core::ffi::c_int) -> usize {
     max_code as usize + 1
 }
 
+fn append_tree_code_length(
+    lengths: &mut Vec<crate::zutil_h::ush>,
+    length: crate::zutil_h::ush,
+) {
+    lengths.push(length);
+}
+
 unsafe fn gen_codes(
     tree: *mut crate::src::deflate::ct_data,
     max_code: ::core::ffi::c_int,
@@ -4152,7 +4159,7 @@ unsafe fn gen_codes(
     let tree = &mut *::core::ptr::slice_from_raw_parts_mut(tree, tree_code_count(max_code));
     let mut lengths = Vec::with_capacity(tree.len());
     for entry in tree.iter() {
-        lengths.push(entry.dl.len);
+        append_tree_code_length(&mut lengths, entry.dl.len);
     }
     assign_canonical_codes(tree, &lengths, bl_count);
 }

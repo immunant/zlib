@@ -315,6 +315,14 @@ fn gzrewind_request_is_valid(mode: ::core::ffi::c_int, err: ::core::ffi::c_int) 
     gz_is_read_mode(mode) && gzseek_error_allows_positioning(err)
 }
 
+fn gzrewind_start_offset(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    start: crate::stdlib::off64_t,
+) -> Option<crate::stdlib::off64_t> {
+    gzrewind_request_is_valid(mode, err).then_some(start)
+}
+
 fn gz_lseek_succeeded(result: crate::stdlib::__off64_t) -> bool {
     result != -1 as ::core::ffi::c_int as crate::stdlib::__off64_t
 }
@@ -865,26 +873,22 @@ pub unsafe extern "C" fn gzbuffer_ffi(
 }
 #[export_name = "gzrewind"]
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    {
-        let state_ref = &mut *state;
-        if !gzrewind_request_is_valid(state_ref.mode, state_ref.err) {
-            return -1 as ::core::ffi::c_int;
-        }
-        if !gz_lseek_succeeded(crate::stdlib::lseek64(
-            state_ref.fd,
-            state_ref.start as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_SET,
-        )) {
-            return -1 as ::core::ffi::c_int;
-        }
-        gz_reset_state(state_ref);
+
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    let Some(start) = gzrewind_start_offset(state.mode, state.err, state.start) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    if !gz_lseek_succeeded(crate::stdlib::lseek64(
+        state.fd,
+        start as crate::stdlib::__off64_t,
+        crate::stdlib::SEEK_SET,
+    )) {
+        return -1 as ::core::ffi::c_int;
     }
+    gz_reset_state(state);
     gz_error(
         state,
         crate::zlib_h::Z_OK,
@@ -1274,6 +1278,7 @@ mod tests {
         gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
         gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result, gzerror_core,
         gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
+        gzrewind_start_offset,
         gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
         gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan_fast_forward,
@@ -2050,6 +2055,22 @@ mod tests {
             crate::gzguts_h::GZ_READ,
             crate::zlib_h::Z_MEM_ERROR
         ));
+    }
+
+    #[test]
+    fn gzrewind_start_offset_preserves_start_only_for_valid_requests() {
+        assert_eq!(
+            gzrewind_start_offset(crate::gzguts_h::GZ_READ, crate::zlib_h::Z_OK, 42),
+            Some(42)
+        );
+        assert_eq!(
+            gzrewind_start_offset(crate::gzguts_h::GZ_WRITE, crate::zlib_h::Z_OK, 42),
+            None
+        );
+        assert_eq!(
+            gzrewind_start_offset(crate::gzguts_h::GZ_READ, crate::zlib_h::Z_MEM_ERROR, 42),
+            None
+        );
     }
 
     #[test]
