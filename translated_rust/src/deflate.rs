@@ -1227,8 +1227,8 @@ pub unsafe extern "C" fn deflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateInit2_(
-        strm.as_mut(),
+    deflate_init2_impl(
+        strm.as_mut().map(DeflateStateStream::new),
         level,
         crate::zlib_h::Z_DEFLATED,
         crate::stdlib::MAX_WBITS,
@@ -1241,8 +1241,12 @@ pub unsafe extern "C" fn deflateInit__ffi(
 
 pub use deflateInit__ffi as deflateInit_;
 
-pub unsafe fn deflateInit2_(
-    strm: Option<&mut crate::zlib_h::z_stream_s>,
+/// Validate and normalize the arguments accepted by `deflateInit2_`.
+///
+/// This deliberately has no stream parameter: all ABI stream handling,
+/// including allocator pairing, stays in `deflate_init2_impl`. Keeping the
+/// argument phase pointer-free lets both exported entry points share it.
+pub fn deflateInit2_(
     mut level: ::core::ffi::c_int,
     mut method: ::core::ffi::c_int,
     mut windowBits: ::core::ffi::c_int,
@@ -1250,25 +1254,21 @@ pub unsafe fn deflateInit2_(
     mut strategy: ::core::ffi::c_int,
     version: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+) -> Result<DeflateInitOptions, ::core::ffi::c_int> {
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
     static MY_VERSION: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version != Some(MY_VERSION[0 as usize])
         || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>()
     {
-        return crate::zlib_h::Z_VERSION_ERROR;
+        return Err(crate::zlib_h::Z_VERSION_ERROR);
     }
-    let Some(strm) = strm else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
     if windowBits < 0 as ::core::ffi::c_int {
         wrap = 0 as ::core::ffi::c_int;
         if windowBits < -15 as ::core::ffi::c_int {
-            return crate::zlib_h::Z_STREAM_ERROR;
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
         }
         windowBits = -windowBits;
     } else if windowBits > 15 as ::core::ffi::c_int {
@@ -1286,24 +1286,77 @@ pub unsafe fn deflateInit2_(
         || strategy > crate::zlib_h::Z_FIXED
         || windowBits == 8 as ::core::ffi::c_int && wrap != 1 as ::core::ffi::c_int
     {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
     if windowBits == 8 as ::core::ffi::c_int {
         windowBits = 9 as ::core::ffi::c_int;
     }
+    Ok(DeflateInitOptions {
+        level,
+        method,
+        window_bits: windowBits,
+        mem_level: memLevel,
+        strategy,
+        wrap,
+    })
+}
+
+/// The normalized, scalar-only configuration used to create a deflate state.
+pub struct DeflateInitOptions {
+    level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    window_bits: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+}
+
+/// Initialize a converted ABI stream after the FFI wrapper has converted its
+/// raw inputs. State allocation remains in the named installer, not in the
+/// exported entry point.
+fn deflate_init2_impl(
+    stream: Option<DeflateStateStream<'_>>,
+    level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    window_bits: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    version: Option<::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let options = match deflateInit2_(
+        level,
+        method,
+        window_bits,
+        mem_level,
+        strategy,
+        version,
+        stream_size,
+    ) {
+        Ok(options) => options,
+        Err(error) => return error,
+    };
+    let Some(mut stream) = stream else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    stream.destination.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     // Build the Rust-owned portions before requesting the ABI state slot.
     // The codec buffers use Rust owners, so this leaves no partially
     // initialized callback allocation to clean up if one of them cannot be
     // allocated.
-    let Some(state) = prepare_deflate_state(level, method, windowBits, memLevel, strategy, wrap)
-    else {
-        strm.msg = crate::src::zutil::z_errmsg[6].load(::core::sync::atomic::Ordering::Relaxed);
+    let Some(state) = prepare_deflate_state(
+        options.level,
+        options.method,
+        options.window_bits,
+        options.mem_level,
+        options.strategy,
+        options.wrap,
+    ) else {
+        stream.destination.msg =
+            crate::src::zutil::z_errmsg[6].load(::core::sync::atomic::Ordering::Relaxed);
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    install_deflate_state(
-        DeflateStateStream::new(strm),
-        DeflateStateInstallation::Initialize(state),
-    )
+    install_deflate_state(stream, DeflateStateInstallation::Initialize(state))
 }
 
 /// Construct a fully owned deflate state before it is installed in the ABI
@@ -1417,8 +1470,8 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateInit2_(
-        strm.as_mut(),
+    deflate_init2_impl(
+        strm.as_mut().map(DeflateStateStream::new),
         level,
         method,
         windowBits,
