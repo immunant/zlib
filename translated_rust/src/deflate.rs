@@ -1356,6 +1356,30 @@ fn deflate_stream_state_valid(
     };
     deflate_state_valid(strm, state)
 }
+
+/// Call an operation with the opaque state after its caller has completed
+/// operation-specific ABI checks.
+///
+/// Validation intentionally stays with each operation: their callback and
+/// null-state checks have distinct required order.  This type-specific
+/// boundary only creates the two disjoint mutable views needed by the legacy
+/// state allocation, avoiding repeated opaque-state conversions.
+fn with_deflate_stream_state<R>(
+    stream: &mut crate::zlib_h::z_stream,
+    action: impl FnOnce(
+        &mut crate::zlib_h::z_stream,
+        &mut crate::src::deflate::deflate_state,
+    ) -> R,
+) -> Option<R> {
+    let state = stream.state as *mut crate::src::deflate::deflate_state;
+    if state.is_null() {
+        return None;
+    }
+    // The state allocation is separate from the caller-owned `z_stream`.
+    // The validated opaque handle is only exposed for this synchronous call.
+    unsafe { Some(action(stream, &mut *state)) }
+}
+
 fn deflate_set_dictionary(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::deflate::deflate_state,
@@ -1767,8 +1791,10 @@ pub(crate) fn deflate_reset_legacy_stream(
     if !deflate_reset_keep_stream_valid(Some(stream)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() };
-    deflate_reset_state(stream, state)
+    with_deflate_stream_state(stream, |stream, state| {
+        deflate_reset_state(stream, Some(state))
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
 #[export_name = "deflateReset"]
@@ -3552,12 +3578,7 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int 
     if stream.zalloc.is_none() || stream.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) =
-        (unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() })
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    deflate_end(stream, state)
+    with_deflate_stream_state(stream, deflate_end).unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 #[export_name = "deflateEnd"]
 
