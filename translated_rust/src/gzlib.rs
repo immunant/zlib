@@ -215,38 +215,36 @@ pub unsafe extern "C" fn gzdopen_ffi(
     let path = std::ffi::CString::new(format!("<fd:{fd}>")).unwrap();
     Box::into_raw(gzopen_with_file(path, settings, file)) as crate::zlib_h::gzFile
 }
-pub unsafe extern "C" fn gzbuffer(
-    mut file: crate::zlib_h::gzFile,
+/// Set the requested buffer size before any gzip I/O has started.
+pub fn gzbuffer(
+    state: &mut crate::gzguts_h::gz_state,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
+    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
+        return -1;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return -1 as ::core::ffi::c_int;
+    if state.size != 0 {
+        return -1;
     }
-    if (*state).size != 0 as ::core::ffi::c_uint {
-        return -1 as ::core::ffi::c_int;
+    if size.checked_mul(2).is_none() {
+        return -1;
     }
-    if (size << 1 as ::core::ffi::c_int) < size {
-        return -1 as ::core::ffi::c_int;
+    if size < 8 {
+        size = 8;
     }
-    if size < 8 as ::core::ffi::c_uint {
-        size = 8 as ::core::ffi::c_uint;
-    }
-    (*state).want = size;
-    return 0 as ::core::ffi::c_int;
+    state.want = size;
+    0
 }
 #[export_name = "gzbuffer"]
 
 pub unsafe extern "C" fn gzbuffer_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut size: ::core::ffi::c_uint,
+    file: crate::zlib_h::gzFile,
+    size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzbuffer(file, size)
+    let Some(state) = (unsafe { (file as crate::gzguts_h::gz_statep).as_mut() }) else {
+        return -1;
+    };
+    gzbuffer(state, size)
 }
 pub fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_READ
