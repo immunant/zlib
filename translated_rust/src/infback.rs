@@ -148,20 +148,14 @@ fn refill_inflate_back_input(
     true
 }
 
-/// Read a byte selected by the legacy cursor from the current owned input
-/// buffer.  Pointer addresses are compared only after the FFI wrapper has
-/// copied the callback result into this buffer.
-fn inflate_back_input_byte(input: &[u8], next_address: usize) -> Option<u8> {
-    next_address
-        .checked_sub(input.as_ptr().addr())
-        .and_then(|index| input.get(index))
-        .copied()
+/// Read a byte selected by the decoder's owned-input cursor.
+fn inflate_back_input_byte(input: &[u8], next_index: usize) -> Option<u8> {
+    input.get(next_index).copied()
 }
 
-fn inflate_back_input_slice(input: &[u8], next_address: usize, len: usize) -> Option<&[u8]> {
-    let start = next_address.checked_sub(input.as_ptr().addr())?;
-    let end = start.checked_add(len)?;
-    input.get(start..end)
+fn inflate_back_input_slice(input: &[u8], next_index: usize, len: usize) -> Option<&[u8]> {
+    let end = next_index.checked_add(len)?;
+    input.get(next_index..end)
 }
 
 /// Allocate, initialize, and install the inflateBack state through the shared
@@ -183,8 +177,7 @@ fn initialize_allocated_inflate_back_state(
             state.allocator_provenance = allocator_provenance;
             initialize_inflate_back_state(state, window_bits);
             crate::src::inflate::bind_inflate_back_window(state, window);
-            strm.state =
-                ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
+            strm.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
             crate::zlib_h::Z_OK
         },
     )
@@ -281,7 +274,9 @@ where
     F: FnMut(&mut [u8], ::core::ffi::c_uint) -> bool,
     R: FnMut(&mut Vec<u8>) -> bool,
 {
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    // Callback input is copied into `input`, so an index fully represents the
+    // decoder cursor and cannot outlive or escape that owned buffer.
+    let mut next_index: usize = 0;
     // `window` is the one validated caller-owned history/output span.  Keep
     // its output cursor as an index so the decoder never advances a raw
     // pointer through that span.
@@ -328,7 +323,6 @@ where
     state.mode = crate::src::inflate::TYPE;
     state.last = 0 as ::core::ffi::c_int;
     state.whave = 0 as ::core::ffi::c_uint;
-    next = input.as_mut_ptr();
     have = input.len() as ::core::ffi::c_uint;
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
@@ -348,14 +342,14 @@ where
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             }
-                            next = input.as_mut_ptr();
+                            next_index = 0;
                             have = input.len() as ::core::ffi::c_uint;
                         }
                         have = have.wrapping_sub(1);
-                        let c2rust_fresh0 = next;
-                        next = next.wrapping_add(1);
+                        let c2rust_fresh0 = next_index;
+                        next_index = next_index.wrapping_add(1);
                         hold = hold.wrapping_add(
-                            (inflate_back_input_byte(&input, c2rust_fresh0.addr()).unwrap_or(0)
+                            (inflate_back_input_byte(&input, c2rust_fresh0).unwrap_or(0)
                                 as ::core::ffi::c_ulong)
                                 << bits,
                         );
@@ -402,14 +396,14 @@ where
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         }
-                        next = input.as_mut_ptr();
+                        next_index = 0;
                         have = input.len() as ::core::ffi::c_uint;
                     }
                     have = have.wrapping_sub(1);
-                    let c2rust_fresh1 = next;
-                    next = next.wrapping_add(1);
+                    let c2rust_fresh1 = next_index;
+                    next_index = next_index.wrapping_add(1);
                     hold = hold.wrapping_add(
-                        (inflate_back_input_byte(&input, c2rust_fresh1.addr()).unwrap_or(0)
+                        (inflate_back_input_byte(&input, c2rust_fresh1).unwrap_or(0)
                             as ::core::ffi::c_ulong)
                             << bits,
                     );
@@ -434,7 +428,7 @@ where
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             }
-                            next = input.as_mut_ptr();
+                            next_index = 0;
                             have = input.len() as ::core::ffi::c_uint;
                         }
                         if left == 0 as ::core::ffi::c_uint {
@@ -460,22 +454,14 @@ where
                             ret = crate::zlib_h::Z_STREAM_ERROR;
                             break '_inf_leave;
                         };
-                        // `copy` is clamped to `have` above, and the initial
-                        // cursor treats a null input pointer as no input. A
-                        // callback that reports bytes must likewise provide a
-                        // non-null span before it can be borrowed.
-                        if next.is_null() {
-                            ret = crate::zlib_h::Z_STREAM_ERROR;
-                            break '_inf_leave;
-                        }
-                        let Some(source) = inflate_back_input_slice(&input, next.addr(), copy_len)
+                        let Some(source) = inflate_back_input_slice(&input, next_index, copy_len)
                         else {
                             ret = crate::zlib_h::Z_STREAM_ERROR;
                             break '_inf_leave;
                         };
                         destination.copy_from_slice(source);
                         have = have.wrapping_sub(copy);
-                        next = next.wrapping_add(copy as usize);
+                        next_index = next_index.wrapping_add(copy_len);
                         left = left.wrapping_sub(copy);
                         put_index = put_index.wrapping_add(copy_len);
                         state.length = state.length.wrapping_sub(copy);
@@ -491,14 +477,14 @@ where
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         }
-                        next = input.as_mut_ptr();
+                        next_index = 0;
                         have = input.len() as ::core::ffi::c_uint;
                     }
                     have = have.wrapping_sub(1);
-                    let c2rust_fresh2 = next;
-                    next = next.wrapping_add(1);
+                    let c2rust_fresh2 = next_index;
+                    next_index = next_index.wrapping_add(1);
                     hold = hold.wrapping_add(
-                        (inflate_back_input_byte(&input, c2rust_fresh2.addr()).unwrap_or(0)
+                        (inflate_back_input_byte(&input, c2rust_fresh2).unwrap_or(0)
                             as ::core::ffi::c_ulong)
                             << bits,
                     );
@@ -539,14 +525,14 @@ where
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break '_inf_leave;
                                 }
-                                next = input.as_mut_ptr();
+                                next_index = 0;
                                 have = input.len() as ::core::ffi::c_uint;
                             }
                             have = have.wrapping_sub(1);
-                            let c2rust_fresh3 = next;
-                            next = next.wrapping_add(1);
+                            let c2rust_fresh3 = next_index;
+                            next_index = next_index.wrapping_add(1);
                             hold = hold.wrapping_add(
-                                (inflate_back_input_byte(&input, c2rust_fresh3.addr()).unwrap_or(0)
+                                (inflate_back_input_byte(&input, c2rust_fresh3).unwrap_or(0)
                                     as ::core::ffi::c_ulong)
                                     << bits,
                             );
@@ -614,15 +600,14 @@ where
                                         ret = crate::zlib_h::Z_BUF_ERROR;
                                         break '_inf_leave;
                                     }
-                                    next = input.as_mut_ptr();
+                                    next_index = 0;
                                     have = input.len() as ::core::ffi::c_uint;
                                 }
                                 have = have.wrapping_sub(1);
-                                let c2rust_fresh6 = next;
-                                next = next.wrapping_add(1);
+                                let c2rust_fresh6 = next_index;
+                                next_index = next_index.wrapping_add(1);
                                 hold = hold.wrapping_add(
-                                    (inflate_back_input_byte(&input, c2rust_fresh6.addr())
-                                        .unwrap_or(0)
+                                    (inflate_back_input_byte(&input, c2rust_fresh6).unwrap_or(0)
                                         as ::core::ffi::c_ulong)
                                         << bits,
                                 );
@@ -646,14 +631,14 @@ where
                                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                                 break '_inf_leave;
                                             }
-                                            next = input.as_mut_ptr();
+                                            next_index = 0;
                                             have = input.len() as ::core::ffi::c_uint;
                                         }
                                         have = have.wrapping_sub(1);
-                                        let c2rust_fresh8 = next;
-                                        next = next.wrapping_add(1);
+                                        let c2rust_fresh8 = next_index;
+                                        next_index = next_index.wrapping_add(1);
                                         hold = hold.wrapping_add(
-                                            (inflate_back_input_byte(&input, c2rust_fresh8.addr())
+                                            (inflate_back_input_byte(&input, c2rust_fresh8)
                                                 .unwrap_or(0)
                                                 as ::core::ffi::c_ulong)
                                                 << bits,
@@ -697,14 +682,14 @@ where
                                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                                 break '_inf_leave;
                                             }
-                                            next = input.as_mut_ptr();
+                                            next_index = 0;
                                             have = input.len() as ::core::ffi::c_uint;
                                         }
                                         have = have.wrapping_sub(1);
-                                        let c2rust_fresh9 = next;
-                                        next = next.wrapping_add(1);
+                                        let c2rust_fresh9 = next_index;
+                                        next_index = next_index.wrapping_add(1);
                                         hold = hold.wrapping_add(
-                                            (inflate_back_input_byte(&input, c2rust_fresh9.addr())
+                                            (inflate_back_input_byte(&input, c2rust_fresh9)
                                                 .unwrap_or(0)
                                                 as ::core::ffi::c_ulong)
                                                 << bits,
@@ -735,14 +720,14 @@ where
                                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                                 break '_inf_leave;
                                             }
-                                            next = input.as_mut_ptr();
+                                            next_index = 0;
                                             have = input.len() as ::core::ffi::c_uint;
                                         }
                                         have = have.wrapping_sub(1);
-                                        let c2rust_fresh10 = next;
-                                        next = next.wrapping_add(1);
+                                        let c2rust_fresh10 = next_index;
+                                        next_index = next_index.wrapping_add(1);
                                         hold = hold.wrapping_add(
-                                            (inflate_back_input_byte(&input, c2rust_fresh10.addr())
+                                            (inflate_back_input_byte(&input, c2rust_fresh10)
                                                 .unwrap_or(0)
                                                 as ::core::ffi::c_ulong)
                                                 << bits,
@@ -877,15 +862,15 @@ where
             };
             strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
             strm.avail_out = left as crate::stdlib::uInt;
-            strm.next_in = next as *mut crate::stdlib::Bytef;
             strm.avail_in = have as crate::stdlib::uInt;
             state.hold = hold;
             state.bits = bits;
-            let Some(fast_input) = inflate_back_input_slice(&input, next.addr(), have as usize)
+            let Some(fast_input) = inflate_back_input_slice(&input, next_index, have as usize)
             else {
                 ret = crate::zlib_h::Z_STREAM_ERROR;
                 break '_inf_leave;
             };
+            strm.next_in = fast_input.as_ptr() as *mut crate::stdlib::Bytef;
             crate::src::inffast::inflate_fast(
                 strm,
                 state,
@@ -905,8 +890,17 @@ where
                 break '_inf_leave;
             }
             put_index = produced;
-            next = strm.next_in as *mut ::core::ffi::c_uchar;
-            have = strm.avail_in as ::core::ffi::c_uint;
+            let remaining = strm.avail_in as ::core::ffi::c_uint;
+            let Some(consumed) = have.checked_sub(remaining) else {
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break '_inf_leave;
+            };
+            let Some(updated_next_index) = next_index.checked_add(consumed as usize) else {
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break '_inf_leave;
+            };
+            next_index = updated_next_index;
+            have = remaining;
             hold = state.hold;
             bits = state.bits;
         } else {
@@ -930,14 +924,14 @@ where
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     }
-                    next = input.as_mut_ptr();
+                    next_index = 0;
                     have = input.len() as ::core::ffi::c_uint;
                 }
                 have = have.wrapping_sub(1);
-                let c2rust_fresh13 = next;
-                next = next.wrapping_add(1);
+                let c2rust_fresh13 = next_index;
+                next_index = next_index.wrapping_add(1);
                 hold = hold.wrapping_add(
-                    (inflate_back_input_byte(&input, c2rust_fresh13.addr()).unwrap_or(0)
+                    (inflate_back_input_byte(&input, c2rust_fresh13).unwrap_or(0)
                         as ::core::ffi::c_ulong)
                         << bits,
                 );
@@ -976,14 +970,14 @@ where
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         }
-                        next = input.as_mut_ptr();
+                        next_index = 0;
                         have = input.len() as ::core::ffi::c_uint;
                     }
                     have = have.wrapping_sub(1);
-                    let c2rust_fresh14 = next;
-                    next = next.wrapping_add(1);
+                    let c2rust_fresh14 = next_index;
+                    next_index = next_index.wrapping_add(1);
                     hold = hold.wrapping_add(
-                        (inflate_back_input_byte(&input, c2rust_fresh14.addr()).unwrap_or(0)
+                        (inflate_back_input_byte(&input, c2rust_fresh14).unwrap_or(0)
                             as ::core::ffi::c_ulong)
                             << bits,
                     );
@@ -1045,14 +1039,14 @@ where
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             }
-                            next = input.as_mut_ptr();
+                            next_index = 0;
                             have = input.len() as ::core::ffi::c_uint;
                         }
                         have = have.wrapping_sub(1);
-                        let c2rust_fresh16 = next;
-                        next = next.wrapping_add(1);
+                        let c2rust_fresh16 = next_index;
+                        next_index = next_index.wrapping_add(1);
                         hold = hold.wrapping_add(
-                            (inflate_back_input_byte(&input, c2rust_fresh16.addr()).unwrap_or(0)
+                            (inflate_back_input_byte(&input, c2rust_fresh16).unwrap_or(0)
                                 as ::core::ffi::c_ulong)
                                 << bits,
                         );
@@ -1087,14 +1081,14 @@ where
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         }
-                        next = input.as_mut_ptr();
+                        next_index = 0;
                         have = input.len() as ::core::ffi::c_uint;
                     }
                     have = have.wrapping_sub(1);
-                    let c2rust_fresh17 = next;
-                    next = next.wrapping_add(1);
+                    let c2rust_fresh17 = next_index;
+                    next_index = next_index.wrapping_add(1);
                     hold = hold.wrapping_add(
-                        (inflate_back_input_byte(&input, c2rust_fresh17.addr()).unwrap_or(0)
+                        (inflate_back_input_byte(&input, c2rust_fresh17).unwrap_or(0)
                             as ::core::ffi::c_ulong)
                             << bits,
                     );
@@ -1132,14 +1126,14 @@ where
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             }
-                            next = input.as_mut_ptr();
+                            next_index = 0;
                             have = input.len() as ::core::ffi::c_uint;
                         }
                         have = have.wrapping_sub(1);
-                        let c2rust_fresh18 = next;
-                        next = next.wrapping_add(1);
+                        let c2rust_fresh18 = next_index;
+                        next_index = next_index.wrapping_add(1);
                         hold = hold.wrapping_add(
-                            (inflate_back_input_byte(&input, c2rust_fresh18.addr()).unwrap_or(0)
+                            (inflate_back_input_byte(&input, c2rust_fresh18).unwrap_or(0)
                                 as ::core::ffi::c_ulong)
                                 << bits,
                         );
@@ -1164,14 +1158,14 @@ where
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break '_inf_leave;
                                 }
-                                next = input.as_mut_ptr();
+                                next_index = 0;
                                 have = input.len() as ::core::ffi::c_uint;
                             }
                             have = have.wrapping_sub(1);
-                            let c2rust_fresh19 = next;
-                            next = next.wrapping_add(1);
+                            let c2rust_fresh19 = next_index;
+                            next_index = next_index.wrapping_add(1);
                             hold = hold.wrapping_add(
-                                (inflate_back_input_byte(&input, c2rust_fresh19.addr()).unwrap_or(0)
+                                (inflate_back_input_byte(&input, c2rust_fresh19).unwrap_or(0)
                                     as ::core::ffi::c_ulong)
                                     << bits,
                             );
@@ -1257,7 +1251,9 @@ where
             ret = crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    strm.next_in = next as *mut crate::stdlib::Bytef;
+    // The FFI wrapper restores the corresponding ABI pointer into the
+    // callback's original buffer.  Only the remaining length crosses this
+    // safe decoder boundary.
     strm.avail_in = have as crate::stdlib::uInt;
     return ret;
 }
