@@ -571,6 +571,27 @@ fn inflate_gzip_time_plan(
     }
 }
 
+/// Scalar commit for gzip's XFL and OS bytes.  The cursor and retained ABI
+/// header remain at the decoder boundary; this plan keeps byte extraction and
+/// optional little-endian header-CRC input pointer-free.
+struct InflateGzipOsPlan {
+    xflags: ::core::ffi::c_int,
+    os: ::core::ffi::c_int,
+    crc_bytes: Option<[u8; 2]>,
+}
+
+fn inflate_gzip_os_plan(
+    flags: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+    hold: ::core::ffi::c_ulong,
+) -> InflateGzipOsPlan {
+    InflateGzipOsPlan {
+        xflags: (hold & 0xff) as ::core::ffi::c_int,
+        os: (hold >> 8) as ::core::ffi::c_int,
+        crc_bytes: (flags & 0x200 != 0 && wrap & 4 != 0).then_some([hold as u8, (hold >> 8) as u8]),
+    }
+}
+
 /// Preserve zlib's final no-progress/finish result mapping independently of
 /// the ABI cursor commit that precedes it.
 fn inflate_exit_status(
@@ -2658,36 +2679,28 @@ pub fn inflate(
                                                                     // Reuse one adopted state record for the retained header,
                                                                     // optional header CRC, and mode transition.
                                                                     let state_ref = &mut *state;
+                                                                    let os_plan =
+                                                                        inflate_gzip_os_plan(
+                                                                            state_ref.flags,
+                                                                            state_ref.wrap,
+                                                                            hold,
+                                                                        );
                                                                     if !state_ref.head.is_null() {
                                                                         let head =
                                                                             &mut *state_ref.head;
-                                                                        head.xflags = (hold & 0xff
-                                                                            as ::core::ffi::c_ulong)
-                                                                            as ::core::ffi::c_int;
-                                                                        head.os = (hold >> 8
-                                                                            as ::core::ffi::c_int)
-                                                                            as ::core::ffi::c_int;
+                                                                        head.xflags =
+                                                                            os_plan.xflags;
+                                                                        head.os = os_plan.os;
                                                                     }
-                                                                    if state_ref.flags
-                                                                    & 0x200 as ::core::ffi::c_int
-                                                                    != 0
-                                                                    && state_ref.wrap
-                                                                        & 4 as ::core::ffi::c_int
-                                                                        != 0
-                                                                {
-                                                                    hbuf[0 as ::core::ffi::c_int
-                                                                        as usize] = hold
-                                                                        as ::core::ffi::c_uchar;
-                                                                    hbuf[1 as ::core::ffi::c_int
-                                                                        as usize] = (hold
-                                                                        >> 8 as ::core::ffi::c_int)
-                                                                        as ::core::ffi::c_uchar;
-                                                                    state_ref.check =
+                                                                    if let Some(crc_bytes) =
+                                                                        os_plan.crc_bytes
+                                                                    {
+                                                                        state_ref.check =
                                                                         inflate_header_crc_update(
                                                                             state_ref.check,
-                                                                            &hbuf[..2],
+                                                                            &crc_bytes,
                                                                         );
-                                                                }
+                                                                    }
                                                                     hold =
                                                                         0 as ::core::ffi::c_ulong;
                                                                     bits = 0 as ::core::ffi::c_uint;
