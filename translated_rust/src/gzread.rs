@@ -794,17 +794,31 @@ fn gzgets_buffer_copy_plan(
     }
 }
 
+/// Result of copying a buffered line prefix.  The next owned-buffer index is
+/// returned only after the complete advertised buffered span was validated.
+struct GzGetsBufferedCopy {
+    copied: ::core::ffi::c_uint,
+    found_newline: bool,
+    next_index: usize,
+}
+
 /// Copy a bounded prefix of the owned read buffer into a caller-provided
-/// line buffer.  Both cursor positions are indices supplied by the export
-/// boundary, so this core can find a newline and copy bytes without C memory
-/// routines or pointer arithmetic.
+/// line buffer. Both cursor positions are indices supplied by the export
+/// boundary, so this core can validate the whole advertised buffer span,
+/// find a newline, and copy bytes without C memory routines or pointer
+/// arithmetic.
 fn gzgets_buffered_copy(
     destination: &mut [u8],
-    available: &[u8],
+    buffered: &[u8],
+    next_index: usize,
     have: crate::stdlib::uInt,
     left: ::core::ffi::c_uint,
-) -> Option<(::core::ffi::c_uint, bool)> {
-    let available = available.get(..have as usize)?;
+) -> Option<GzGetsBufferedCopy> {
+    // As with gzread, public gzgetc macro users can alter both x.next and
+    // x.have. Validate the full advertised range before publishing a cursor
+    // that might leave an unchecked residual buffered span.
+    let advertised_end = next_index.checked_add(have as usize)?;
+    let available = buffered.get(next_index..advertised_end)?;
     let limit = gzgets_buffer_copy_plan(have, left, None) as usize;
     let candidate = available.get(..limit)?;
     let copied = match candidate.iter().position(|byte| *byte == b'\n') {
@@ -814,10 +828,11 @@ fn gzgets_buffered_copy(
     destination
         .get_mut(..copied)?
         .copy_from_slice(candidate.get(..copied)?);
-    Some((
-        copied as ::core::ffi::c_uint,
-        copied != 0 && candidate[copied - 1] == b'\n',
-    ))
+    Some(GzGetsBufferedCopy {
+        copied: copied as ::core::ffi::c_uint,
+        found_newline: copied != 0 && candidate[copied - 1] == b'\n',
+        next_index: next_index.checked_add(copied)?,
+    })
 }
 
 /// Commit a preflighted `gzgets` buffered copy after the boundary has copied
@@ -1564,21 +1579,16 @@ pub unsafe extern "C" fn gzgets_ffi(
             ) else {
                 return ::core::ptr::null_mut();
             };
-            let Some(available) = output.get(next_index..) else {
+            let Some(copy) = gzgets_buffered_copy(
+                &mut destination[written..],
+                output,
+                next_index,
+                state.x.have,
+                left,
+            ) else {
                 return ::core::ptr::null_mut();
             };
-            let Some((copied, found_newline)) =
-                gzgets_buffered_copy(&mut destination[written..], available, state.x.have, left)
-            else {
-                return ::core::ptr::null_mut();
-            };
-            let Some(next_index) = next_index.checked_add(copied as usize) else {
-                return ::core::ptr::null_mut();
-            };
-            if next_index > output.len() {
-                return ::core::ptr::null_mut();
-            }
-            (copied, found_newline, next_index)
+            (copy.copied, copy.found_newline, copy.next_index)
         };
         let (copied, found_newline, next_index) = copied;
         let Some(output) = state
