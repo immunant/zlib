@@ -1004,7 +1004,7 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             match gz_avail_finish_refill(prior_avail_in, &load, &mut state.strm.avail_in) {
                 Err(()) => return -1 as ::core::ffi::c_int,
                 Ok(GzAvailNextInAction::ResetToInputStart) => {
-                    state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+                    state.strm.next_in = state.in_0;
                 }
             }
         }
