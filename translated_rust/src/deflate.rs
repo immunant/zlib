@@ -2920,67 +2920,39 @@ fn deflate_update(
 /// Construct one typed view of a callback-owned deflate workspace.
 ///
 /// Default-pair streams use `DeflateOwnedStorage` and never enter this
-/// bridge.  Custom and mixed streams still retain ABI allocation handles, so
-/// this is the single temporary conversion point before the safe strategy
-/// dispatcher sees their buffers.  A future callback-storage owner can
-/// replace this constructor without changing the dispatcher or strategies.
+/// bridge.  The legacy streaming engine converts callback-owned allocation
+/// handles to these typed views; this constructor and the strategy dispatcher
+/// only operate on already-borrowed storage.  A future callback-storage owner
+/// can replace that boundary without changing the dispatcher or strategies.
 fn callback_deflate_workspace<'a>(
-    state: &mut crate::src::deflate::deflate_state,
+    window: &'a mut [crate::stdlib::Bytef],
+    head: Option<&'a mut [crate::src::deflate::Posf]>,
+    prev: Option<&'a mut [crate::src::deflate::Posf]>,
     input: &'a [crate::stdlib::Bytef],
     output: &'a mut [crate::stdlib::Bytef],
     pending_buf: &'a mut [crate::stdlib::Bytef],
-) -> Option<DeflateWorkspace<'a>> {
-    if state.window.is_null() || state.pending_buf.is_null() {
-        return None;
-    }
-    // Callback allocations retain their ABI pointer representation. Keep all
-    // conversions to safe workspace slices at this one named ownership
-    // boundary until the allocator facade can own those allocations directly.
-    unsafe {
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-        let head = if state.head.is_null() {
-            None
-        } else {
-            Some(::core::slice::from_raw_parts_mut(
-                state.head,
-                state.hash_size as usize,
-            ))
-        };
-        let prev = if state.prev.is_null() {
-            None
-        } else {
-            Some(::core::slice::from_raw_parts_mut(
-                state.prev,
-                state.w_size as usize,
-            ))
-        };
-        let mut workspace = DeflateWorkspace {
-            window,
-            head,
-            prev,
-            pending_buf,
-            input,
-            output,
-        };
-        Some(workspace)
+) -> DeflateWorkspace<'a> {
+    DeflateWorkspace {
+        window,
+        head,
+        prev,
+        pending_buf,
+        input,
+        output,
     }
 }
 
-/// Run one update against the four buffers supplied by a custom allocator.
+/// Run one update against the typed buffers supplied by a custom allocator.
 ///
-/// The raw callback-storage conversion is isolated in
-/// `callback_deflate_workspace`; this dispatcher only receives a typed
-/// workspace and retains the existing update behavior.
+/// The legacy streaming engine performs the raw callback-storage conversion;
+/// this dispatcher retains only the existing typed update behavior.
 fn update_callback_deflate_workspace(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
-    input: &[crate::stdlib::Bytef],
-    output: &mut [crate::stdlib::Bytef],
-    pending_buf: &mut [crate::stdlib::Bytef],
+    workspace: &mut DeflateWorkspace<'_>,
     flush: ::core::ffi::c_int,
 ) -> Option<block_state> {
-    let mut workspace = callback_deflate_workspace(state, input, output, pending_buf)?;
-    deflate_update(state, strm, &mut workspace, flush)
+    deflate_update(state, strm, workspace, flush)
 }
 
 pub fn deflate(
@@ -3370,14 +3342,35 @@ pub fn deflate(
             let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            let Some(bstate) = update_callback_deflate_workspace(
-                state,
-                strm,
-                input,
-                output,
-                &mut pending_buffer,
-                flush,
-            ) else {
+            // Custom and mixed allocator storage is represented by stable ABI
+            // handles. Convert all three workspace buffers together at this
+            // legacy engine boundary, then keep the constructor and strategy
+            // dispatcher entirely slice-based.
+            if state.window.is_null() {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let (window, head, prev) = unsafe {
+                (
+                    ::core::slice::from_raw_parts_mut(
+                        state.window,
+                        state.window_size as usize,
+                    ),
+                    (!state.head.is_null()).then(|| {
+                        ::core::slice::from_raw_parts_mut(
+                            state.head,
+                            state.hash_size as usize,
+                        )
+                    }),
+                    (!state.prev.is_null()).then(|| {
+                        ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize)
+                    }),
+                )
+            };
+            let mut workspace =
+                callback_deflate_workspace(window, head, prev, input, output, &mut pending_buffer);
+            let Some(bstate) =
+                update_callback_deflate_workspace(state, strm, &mut workspace, flush)
+            else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             bstate
