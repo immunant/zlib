@@ -76,10 +76,10 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     state = strm.state as *mut crate::src::inflate::inflate_state;
     in_0 = strm.next_in as *mut ::core::ffi::c_uchar;
-    last = in_0.offset(strm.avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
+    last = in_0.wrapping_offset(strm.avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
     out = strm.next_out as *mut ::core::ffi::c_uchar;
-    beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
-    end = out.offset(strm.avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
+    beg = out.wrapping_offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
+    end = out.wrapping_offset(strm.avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
     wsize = (*state).wsize;
     whave = (*state).whave;
     wnext = (*state).wnext;
@@ -171,7 +171,7 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                         );
                         hold >>= op;
                         bits = bits.wrapping_sub(op);
-                        op = out.offset_from(beg) as ::core::ffi::c_uint;
+                        op = out.addr().wrapping_sub(beg.addr()) as ::core::ffi::c_uint;
                         if dist > op {
                             op = dist.wrapping_sub(op);
                             if op > whave {
@@ -376,14 +376,14 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
     strm.next_in = in_0 as *mut crate::stdlib::Bytef;
     strm.next_out = out as *mut crate::stdlib::Bytef;
     strm.avail_in = (if in_0 < last {
-        5 as isize + last.offset_from(in_0)
+        (5usize).wrapping_add(last.addr().wrapping_sub(in_0.addr()))
     } else {
-        5 as isize - in_0.offset_from(last)
+        (5usize).wrapping_sub(in_0.addr().wrapping_sub(last.addr()))
     }) as ::core::ffi::c_uint as crate::stdlib::uInt;
     strm.avail_out = (if out < end {
-        257 as isize + end.offset_from(out)
+        (257usize).wrapping_add(end.addr().wrapping_sub(out.addr()))
     } else {
-        257 as isize - out.offset_from(end)
+        (257usize).wrapping_sub(out.addr().wrapping_sub(end.addr()))
     }) as ::core::ffi::c_uint as crate::stdlib::uInt;
     (*state).hold = hold;
     (*state).bits = bits;
