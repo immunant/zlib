@@ -24,7 +24,7 @@ pub extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
 }
 #[export_name = "zlibVersion"]
 
-pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
+pub extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
     zlibVersion()
 }
 
@@ -49,7 +49,7 @@ pub extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
 }
 #[export_name = "zlibCompileFlags"]
 
-pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
+pub extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
     zlibCompileFlags()
 }
 pub extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
@@ -62,7 +62,7 @@ pub extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_c
 }
 #[export_name = "zError"]
 
-pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+pub extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     zError(err)
 }
 // `opaque` is deliberately ignored and every `uInt` size is valid for the
