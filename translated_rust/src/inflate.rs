@@ -238,8 +238,14 @@ fn inflate_state_is_valid(
     strm.zalloc.is_some()
         && strm.zfree.is_some()
         && points_back_to_stream
-        && state.mode >= crate::src::inflate::HEAD
-        && state.mode <= crate::src::inflate::SYNC
+        && inflate_state_mode_is_valid(state.mode)
+}
+
+// Keep the scalar state-range check separate from raw stream/state binding.
+// This makes the latter responsible only for establishing the two references
+// and their reciprocal link.
+fn inflate_state_mode_is_valid(mode: ::core::ffi::c_uint) -> bool {
+    mode >= crate::src::inflate::HEAD && mode <= crate::src::inflate::SYNC
 }
 fn inflate_reset_keep(
     strm: &mut crate::zlib_h::z_stream,
