@@ -217,6 +217,10 @@ fn gzrewind_request_is_valid(mode: ::core::ffi::c_int, err: ::core::ffi::c_int) 
     mode == crate::gzguts_h::GZ_READ && gzseek_error_allows_positioning(err)
 }
 
+fn gzrewind_seek_succeeded(result: crate::stdlib::__off64_t) -> bool {
+    result != -1 as ::core::ffi::c_int as crate::stdlib::__off64_t
+}
+
 fn gzseek_error_allows_positioning(err: ::core::ffi::c_int) -> bool {
     err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR
 }
@@ -679,7 +683,8 @@ pub unsafe extern "C" fn gzbuffer_ffi(
 
     gzbuffer_core(&mut *(file as crate::gzguts_h::gz_statep), size)
 }
-pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzrewind"]
+pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -691,12 +696,11 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
         if !gzrewind_request_is_valid(state_ref.mode, state_ref.err) {
             return -1 as ::core::ffi::c_int;
         }
-        if crate::stdlib::lseek64(
+        if !gzrewind_seek_succeeded(crate::stdlib::lseek64(
             state_ref.fd,
             state_ref.start as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_SET,
-        ) == -1 as ::core::ffi::c_int as crate::stdlib::__off64_t
-        {
+        )) {
             return -1 as ::core::ffi::c_int;
         }
         gz_reset_state(state_ref);
@@ -707,11 +711,6 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     return 0 as ::core::ffi::c_int;
-}
-#[export_name = "gzrewind"]
-
-pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzrewind(file)
 }
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
@@ -757,7 +756,7 @@ pub unsafe extern "C" fn gzseek64(
         None => return -1 as ::core::ffi::c_int as crate::stdlib::off64_t,
     };
     offset = seek_plan.offset;
-    if seek_plan.rewind && gzrewind(file) == -1 as ::core::ffi::c_int {
+    if seek_plan.rewind && gzrewind_ffi(file) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
@@ -1069,7 +1068,7 @@ mod tests {
         gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
         gzbuffer_normalized_want, gzclearerr_core, gzerror_core, gzeof_core, gzeof_result,
         gzdopen_has_valid_descriptor, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
-        gzrewind_request_is_valid,
+        gzrewind_request_is_valid, gzrewind_seek_succeeded,
         gzseek_adjust_offset, gzseek_effective_skip,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
@@ -1085,6 +1084,13 @@ mod tests {
         let mut past = 1;
         gz_clear_read_flags(&mut eof, &mut past);
         assert_eq!((eof, past), (0, 0));
+    }
+
+    #[test]
+    fn gzrewind_seek_succeeded_rejects_only_the_lseek_failure_sentinel() {
+        assert!(!gzrewind_seek_succeeded(-1));
+        assert!(gzrewind_seek_succeeded(0));
+        assert!(gzrewind_seek_succeeded(17));
     }
 
     #[test]

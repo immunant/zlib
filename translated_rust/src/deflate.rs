@@ -402,9 +402,9 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
         ::core::ptr::null_mut::<crate::src::deflate::Posf>();
     let mut wsize: crate::stdlib::uInt = (*s).w_size;
     n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.offset(n as isize) as *mut crate::src::deflate::Posf;
+    p = (*s).head.wrapping_add(n as usize);
     loop {
-        p = p.offset(-1);
+        p = p.wrapping_sub(1);
         m = *p as ::core::ffi::c_uint;
         *p = slide_hash_entry(m, wsize);
         n = n.wrapping_sub(1);
@@ -413,9 +413,9 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
         }
     }
     n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.offset(n as isize) as *mut crate::src::deflate::Posf;
+    p = (*s).prev.wrapping_add(n as usize);
     loop {
-        p = p.offset(-1);
+        p = p.wrapping_sub(1);
         m = *p as ::core::ffi::c_uint;
         *p = slide_hash_entry(m, wsize);
         n = n.wrapping_sub(1);

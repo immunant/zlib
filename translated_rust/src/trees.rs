@@ -3645,13 +3645,18 @@ fn bi_flush_core(
     }
 }
 
+fn pending_cursor_after_bytes(pending: crate::zutil_h::ulg, count: usize) -> crate::zutil_h::ulg {
+    pending.wrapping_add(count as crate::zutil_h::ulg)
+}
+
 unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
     let (count, bytes) = bi_flush_core(&mut (*s).bi_buf, &mut (*s).bi_valid);
-    for byte in bytes.into_iter().take(count) {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
+    let pending = (*s).pending;
+    for (index, byte) in bytes.into_iter().take(count).enumerate() {
+        let cursor = pending.wrapping_add(index as crate::zutil_h::ulg);
+        *(*s).pending_buf.offset(cursor as isize) = byte;
     }
+    (*s).pending = pending_cursor_after_bytes(pending, count);
 }
 
 fn bi_windup_core(
@@ -5113,7 +5118,7 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
-        dist_code_index, next_codes, MAX_BITS,
+        dist_code_index, next_codes, pending_cursor_after_bytes, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5210,5 +5215,12 @@ mod tests {
             (1, 2, [0x34, 0x12])
         );
         assert_eq!((buffer, valid), (0, 0));
+    }
+
+    #[test]
+    fn pending_cursor_advance_preserves_wrapping_byte_count() {
+        assert_eq!(pending_cursor_after_bytes(5, 0), 5);
+        assert_eq!(pending_cursor_after_bytes(5, 2), 7);
+        assert_eq!(pending_cursor_after_bytes(crate::zutil_h::ulg::MAX, 2), 1);
     }
 }

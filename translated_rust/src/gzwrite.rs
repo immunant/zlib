@@ -358,6 +358,10 @@ fn gz_comp_has_output(produced: ::core::ffi::c_uint) -> bool {
     produced != 0
 }
 
+fn gz_comp_deflate_stream_is_corrupt(ret: ::core::ffi::c_int) -> bool {
+    ret == crate::zlib_h::Z_STREAM_ERROR
+}
+
 fn gz_write_buffered_step(
     size: ::core::ffi::c_uint,
     have: ::core::ffi::c_uint,
@@ -519,7 +523,7 @@ unsafe fn gz_comp(
         }
         have = (*strm).avail_out as ::core::ffi::c_uint;
         ret = crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
-        if ret == crate::zlib_h::Z_STREAM_ERROR {
+        if gz_comp_deflate_stream_is_corrupt(ret) {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_STREAM_ERROR,
@@ -960,7 +964,8 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffer_is_initialized, gz_buffered_have, gz_comp_has_output, gz_comp_max_write_chunk,
+        gz_buffer_is_initialized, gz_buffered_have, gz_comp_deflate_stream_is_corrupt,
+        gz_comp_has_output, gz_comp_max_write_chunk,
         gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write, gz_comp_needs_reset,
         gz_comp_output_produced, gz_comp_output_write_chunk_len, gz_comp_remaining_direct_input,
         gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_skips_empty_flush,
@@ -1299,6 +1304,17 @@ mod tests {
         assert!(!gz_comp_has_output(0));
         assert!(gz_comp_has_output(1));
         assert!(gz_comp_has_output(::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn gz_comp_deflate_stream_is_corrupt_only_for_stream_errors() {
+        assert!(gz_comp_deflate_stream_is_corrupt(
+            crate::zlib_h::Z_STREAM_ERROR
+        ));
+        assert!(!gz_comp_deflate_stream_is_corrupt(crate::zlib_h::Z_OK));
+        assert!(!gz_comp_deflate_stream_is_corrupt(
+            crate::zlib_h::Z_STREAM_END
+        ));
     }
 
     #[test]
