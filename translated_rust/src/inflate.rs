@@ -584,7 +584,7 @@ fn inflate_reset2_params(
     Some((wrap, window_bits as ::core::ffi::c_uint))
 }
 
-unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }

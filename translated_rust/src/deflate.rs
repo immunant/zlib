@@ -860,6 +860,13 @@ fn deflate_state_status_valid(status: ::core::ffi::c_int) -> bool {
     )
 }
 
+fn dictionary_tail_offset(
+    dict_length: crate::stdlib::uInt,
+    window_size: crate::stdlib::uInt,
+) -> usize {
+    dict_length.wrapping_sub(window_size) as usize
+}
+
 unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
@@ -918,7 +925,7 @@ pub unsafe extern "C" fn deflateSetDictionary(
             (*s).block_start = 0 as ::core::ffi::c_long;
             (*s).insert = 0 as crate::stdlib::uInt;
         }
-        dictionary = dictionary.offset(dictLength.wrapping_sub((*s).w_size) as isize);
+        dictionary = dictionary.wrapping_add(dictionary_tail_offset(dictLength, (*s).w_size));
         dictLength = (*s).w_size;
     }
     avail = (*strm).avail_in as ::core::ffi::c_uint;
@@ -3769,12 +3776,12 @@ mod tests {
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_flush_rank, deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
         deflate_request_is_invalid, deflate_should_return_buf_error, deflate_state_status_valid,
-        deflate_version_matches, fill_window_available_space, fill_window_cursor,
-        fill_window_insert_after_slide, fill_window_zero_range, flush_pending_accounting,
-        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
-        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_available_output, stored_block_min_size,
+        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
+        fill_window_cursor, fill_window_insert_after_slide, fill_window_zero_range,
+        flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
+        gzip_header_crc_pending_range, normalize_deflate_params, pending_buffer_needs_flush,
+        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_min_size,
         stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
         DeflatePreflight,
     };
@@ -4283,6 +4290,16 @@ mod tests {
             b'1' as ::core::ffi::c_char,
             expected_size.wrapping_add(1),
         ));
+    }
+
+    #[test]
+    fn dictionary_tail_offset_preserves_window_tail_bounds() {
+        assert_eq!(dictionary_tail_offset(32, 32), 0);
+        assert_eq!(dictionary_tail_offset(33, 32), 1);
+        assert_eq!(
+            dictionary_tail_offset(crate::stdlib::uInt::MAX, 32),
+            crate::stdlib::uInt::MAX.wrapping_sub(32) as usize,
+        );
     }
 
     #[test]

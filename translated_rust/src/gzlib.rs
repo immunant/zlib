@@ -629,7 +629,7 @@ fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::
     gz_reset_state(state);
 }
 
-unsafe extern "C" fn gz_open(
+unsafe fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
