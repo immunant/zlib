@@ -586,35 +586,32 @@ pub unsafe extern "C" fn gzfread_ffi(
     };
     gzfread(state, buf, size)
 }
-pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+fn gzgetc(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    let Some(state) = state else {
+        return -1 as ::core::ffi::c_int;
+    };
+    if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
-    if (*state).x.have != 0 {
-        (*state).x.have = (*state).x.have.wrapping_sub(1);
-        (*state).x.pos += 1;
-        let c2rust_fresh2 = (*state).x.next;
-        (*state).x.next = (*state).x.next.offset(1);
-        return *c2rust_fresh2 as ::core::ffi::c_int;
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
+    if state.x.have != 0 {
+        state.x.have = state.x.have.wrapping_sub(1);
+        state.x.pos += 1;
+        let byte = unsafe {
+            let byte = *state.x.next;
+            state.x.next = state.x.next.add(1);
+            byte
+        };
+        return byte as ::core::ffi::c_int;
     }
-    return if gz_read(
-        state,
-        &mut buf,
-    ) < 1 as crate::stdlib::z_size_t
+    return if unsafe { gz_read(state, &mut buf) } < 1 as crate::stdlib::z_size_t
     {
         -1 as ::core::ffi::c_int
     } else {
@@ -624,12 +621,12 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
 #[export_name = "gzgetc"]
 
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
+    gzgetc((file as crate::gzguts_h::gz_statep).as_mut())
 }
 #[export_name = "gzgetc_"]
 
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
+    gzgetc((file as crate::gzguts_h::gz_statep).as_mut())
 }
 pub unsafe extern "C" fn gzungetc(
     mut c: ::core::ffi::c_int,
