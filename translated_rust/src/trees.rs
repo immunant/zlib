@@ -4692,32 +4692,41 @@ fn bl_tree_header_update(
     )
 }
 
-unsafe fn scan_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
+fn scan_tree(
+    bl_tree: &mut [crate::src::deflate::ct_data],
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
 ) {
-    let mut n: ::core::ffi::c_int = 0;
-    let mut curlen: ::core::ffi::c_int = 0;
-    let mut nextlen: ::core::ffi::c_int = (*tree).dl.value as ::core::ffi::c_int;
+    let Ok(max_code) = usize::try_from(max_code) else {
+        return;
+    };
+    let Some(sentinel_index) = max_code.checked_add(1) else {
+        return;
+    };
+    let Some(first) = tree.first() else {
+        return;
+    };
+    if sentinel_index >= tree.len() {
+        return;
+    }
+
+    let mut nextlen = first.dl.value as ::core::ffi::c_int;
     let (mut prevlen, mut count, mut max_count, mut min_count) = initial_tree_run_state(nextlen);
-    (*tree.wrapping_add(tree_next_cursor(max_code))).dl.value =
-        0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
-    n = 0 as ::core::ffi::c_int;
-    while n <= max_code {
-        curlen = nextlen;
-        nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.value as ::core::ffi::c_int;
+    tree[sentinel_index].dl.value = 0xffff as crate::zutil_h::ush;
+
+    for index in 0..=max_code {
+        let curlen = nextlen;
+        nextlen = tree[index + 1].dl.value as ::core::ffi::c_int;
         let (incremented_count, step) =
             tree_run_step_after_increment(count, max_count, min_count, curlen, nextlen, prevlen);
         count = incremented_count;
         if let Some(action) = step.action {
-            tally_scan_tree_action(&mut (*s).bl_tree, curlen, action);
+            tally_scan_tree_action(bl_tree, curlen, action);
         }
         count = step.count;
         prevlen = step.previous_len;
         max_count = step.max_count;
         min_count = step.min_count;
-        n += 1;
     }
 }
 
@@ -5010,26 +5019,25 @@ unsafe fn send_tree(
 }
 
 unsafe fn build_bl_tree(mut s: *mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
+    let state = &mut *s;
     scan_tree(
-        s,
-        &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
-        (*s).l_desc.max_code,
+        &mut state.bl_tree,
+        &mut state.dyn_ltree,
+        state.l_desc.max_code,
     );
     scan_tree(
-        s,
-        &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
-        (*s).d_desc.max_code,
+        &mut state.bl_tree,
+        &mut state.dyn_dtree,
+        state.d_desc.max_code,
     );
-    build_tree(&mut *s, crate::src::deflate::DynamicTree::BitLength);
+    build_tree(state, crate::src::deflate::DynamicTree::BitLength);
     let mut code_lengths = [0; BL_CODE_ORDER_LEN];
     for (index, code_length) in code_lengths.iter_mut().enumerate() {
-        *code_length = (*s).bl_tree[index].dl.value;
+        *code_length = state.bl_tree[index].dl.value;
     }
     let max_blindex = last_nonzero_bl_tree_rank(&code_lengths);
-    (*s).opt_len = bl_tree_header_cost_update((*s).opt_len, max_blindex);
-    return max_blindex;
+    state.opt_len = bl_tree_header_cost_update(state.opt_len, max_blindex);
+    max_blindex
 }
 
 unsafe fn send_all_trees(
@@ -5750,7 +5758,7 @@ mod tests {
         gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
         initial_tree_run_state, last_nonzero_bl_tree_rank, length_extra_bits, match_tree_codes,
         next_code_for_len, next_codes, pending_cursor_after_bytes, pqdownheap_child_to_promote,
-        rebalance_overflowed_bit_lengths, reset_bit_length_counts, reset_block_trees,
+        rebalance_overflowed_bit_lengths, reset_bit_length_counts, reset_block_trees, scan_tree,
         select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
@@ -6068,6 +6076,26 @@ mod tests {
         assert_eq!(bl_tree[REP_3_6 as usize].fc.value, 2);
         assert_eq!(bl_tree[REPZ_3_10 as usize].fc.value, 1);
         assert_eq!(bl_tree[REPZ_11_138 as usize].fc.value, 1);
+    }
+
+    #[test]
+    fn scan_tree_tallies_runs_and_sets_the_terminal_sentinel() {
+        let empty = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { value: 0 },
+        };
+        let mut bl_tree = [empty; crate::src::deflate::BL_CODES as usize];
+        let mut tree = [empty; 5];
+        tree[0].dl.value = 5;
+        tree[1].dl.value = 5;
+        tree[2].dl.value = 5;
+        tree[3].dl.value = 5;
+
+        scan_tree(&mut bl_tree, &mut tree, 3);
+
+        assert_eq!(bl_tree[5].fc.value, 1);
+        assert_eq!(bl_tree[REP_3_6 as usize].fc.value, 1);
+        assert_eq!(tree[4].dl.value, 0xffff);
     }
 
     #[test]
