@@ -940,60 +940,28 @@ pub unsafe extern "C" fn gzungetc_ffi(
     let output = ::core::slice::from_raw_parts_mut(state.out, state.size.wrapping_shl(1) as usize);
     gzungetc(c, state, output, plan)
 }
-// Copying a fetched chunk into the caller's already-bound destination is
-// ordinary slice work.  Return the exact amount consumed so the read loop can
-// keep its gzip-buffer bookkeeping separate from newline detection.
-fn gzgets_copy_chunk(
-    destination: &mut [::core::ffi::c_char],
-    source: &[::core::ffi::c_uchar],
-) -> (usize, bool) {
-    let newline = source.iter().position(|byte| *byte == b'\n');
-    let len = newline.map(|position| position + 1).unwrap_or(source.len());
-    for (destination, source) in destination[..len].iter_mut().zip(&source[..len]) {
-        *destination = *source as ::core::ffi::c_char;
-    }
-    (len, newline.is_some())
-}
-
-// The ABI wrapper binds the caller's writable string once.  The read loop can
-// then use a Rust slice for its cursor and terminator, leaving only the
-// already-owned gzip output buffer as a raw boundary here.
+// The ABI wrapper binds the caller's writable string once. Reuse `gz_read()`
+// for each byte, so this line reader shares the existing bounded handling of
+// gzip's owned output buffer instead of binding that raw cursor a second time.
 fn gzgets(state: &mut crate::gzguts_h::gz_state, buf: &mut [::core::ffi::c_char]) -> bool {
-    let mut left: ::core::ffi::c_uint = 0;
-    let mut n: ::core::ffi::c_uint = 0;
     let mut written = 0usize;
     if !gz_prepare_read_operation(state) {
         return false;
     }
-    left = crate::src::gzlib::gz_gets_remaining(buf.len() as ::core::ffi::c_int);
-    if left != 0 {
-        while !(state.x.have == 0 as ::core::ffi::c_uint
-            && gz_fetch(state) == -1 as ::core::ffi::c_int)
-        {
-            match crate::src::gzlib::gz_gets_plan(state.x.have, left) {
-                crate::src::gzlib::GzGetsPlan::Empty => {
-                    crate::src::gzlib::gz_gets_mark_past(state);
-                    break;
-                }
-                crate::src::gzlib::GzGetsPlan::Copy(chunk) => {
-                    n = chunk;
-                    // SAFETY: `gz_gets_plan()` bounds this view by `x.have`,
-                    // whose initialized bytes begin at `x.next`.
-                    let source = unsafe { ::core::slice::from_raw_parts(state.x.next, n as usize) };
-                    let (copied, found_eol) =
-                        gzgets_copy_chunk(&mut buf[written..written + n as usize], source);
-                    n = copied as ::core::ffi::c_uint;
-                    gz_consume(state, n as crate::stdlib::off64_t);
-                    crate::src::gzlib::gz_gets_after_copy(&mut left, n);
-                    written += n as usize;
-                    if !crate::src::gzlib::gz_gets_should_continue(left, found_eol) {
-                        break;
-                    }
-                }
-            }
+    let limit = buf.len().saturating_sub(1);
+    while written < limit {
+        let mut byte = [0u8; 1];
+        if gz_read(state, &mut byte) == 0 {
+            break;
+        }
+        buf[written] = byte[0] as ::core::ffi::c_char;
+        written += 1;
+        if byte[0] == b'\n' {
+            break;
         }
     }
-    if written == 0 {
+    // zlib returns an empty, terminated string for a one-byte destination.
+    if written == 0 && limit != 0 {
         return false;
     }
     buf[written] = 0 as ::core::ffi::c_char;
