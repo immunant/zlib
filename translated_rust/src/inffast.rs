@@ -48,7 +48,9 @@ pub use crate::zlib_h::gz_headerp;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
-pub unsafe extern "C" fn inflate_fast(
+#[export_name = "inflate_fast"]
+
+pub unsafe extern "C" fn inflate_fast_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
 ) {
@@ -414,12 +416,4 @@ pub unsafe extern "C" fn inflate_fast(
     }) as ::core::ffi::c_uint as crate::stdlib::uInt;
     (*state).hold = hold;
     (*state).bits = bits;
-}
-#[export_name = "inflate_fast"]
-
-pub unsafe extern "C" fn inflate_fast_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
-) {
-    inflate_fast(strm, start)
 }

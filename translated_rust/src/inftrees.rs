@@ -2809,7 +2809,9 @@ pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
 
 pub static inflate_copyright: [::core::ffi::c_char; 49] =
     crate::c_char_array(b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0");
-pub unsafe extern "C" fn inflate_table(
+#[export_name = "inflate_table"]
+
+pub unsafe extern "C" fn inflate_table_ffi(
     mut type_0: crate::src::inftrees::codetype,
     mut lens: *mut ::core::ffi::c_ushort,
     mut codes: ::core::ffi::c_uint,
@@ -3178,18 +3180,6 @@ pub unsafe extern "C" fn inflate_table(
     *table = (*table).offset(used as isize);
     *bits = root;
     return 0 as ::core::ffi::c_int;
-}
-#[export_name = "inflate_table"]
-
-pub unsafe extern "C" fn inflate_table_ffi(
-    mut type_0: crate::src::inftrees::codetype,
-    mut lens: *mut ::core::ffi::c_ushort,
-    mut codes: ::core::ffi::c_uint,
-    mut table: *mut *mut crate::src::inftrees::code,
-    mut bits: *mut ::core::ffi::c_uint,
-    mut work: *mut ::core::ffi::c_ushort,
-) -> ::core::ffi::c_int {
-    inflate_table(type_0, lens, codes, table, bits, work)
 }
 #[export_name = "inflate_fixed"]
 

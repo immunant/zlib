@@ -112,7 +112,7 @@ pub use crate::src::deflate::internal_state;
 pub use crate::src::inftrees::code;
 pub use crate::src::inftrees::codetype;
 pub use crate::src::inftrees::inflate_fixed_ffi;
-pub use crate::src::inftrees::inflate_table;
+pub use crate::src::inftrees::inflate_table_ffi;
 pub use crate::src::inftrees::CODES;
 pub use crate::src::inftrees::DISTS;
 pub use crate::src::inftrees::ENOUGH;
@@ -987,7 +987,7 @@ pub unsafe extern "C" fn inflate_ffi(
                 (*state).distcode = (*state).next as *const crate::src::inftrees::code;
                 (*state).lencode = (*state).distcode;
                 (*state).lenbits = 7 as ::core::ffi::c_uint;
-                ret = crate::src::inftrees::inflate_table(
+                ret = crate::src::inftrees::inflate_table_ffi(
                     crate::src::inftrees::CODES,
                     &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                     19 as ::core::ffi::c_uint,
@@ -1224,7 +1224,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                     (*state).lencode = (*state).next as *const crate::src::inftrees::code;
                     (*state).lenbits = 9 as ::core::ffi::c_uint;
-                    ret = crate::src::inftrees::inflate_table(
+                    ret = crate::src::inftrees::inflate_table_ffi(
                         crate::src::inftrees::LENS,
                         &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                         (*state).nlen,
@@ -1241,7 +1241,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     } else {
                         (*state).distcode = (*state).next as *const crate::src::inftrees::code;
                         (*state).distbits = 6 as ::core::ffi::c_uint;
-                        ret = crate::src::inftrees::inflate_table(
+                        ret = crate::src::inftrees::inflate_table_ffi(
                             crate::src::inftrees::DISTS,
                             (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
                                 .offset((*state).nlen as isize),
@@ -1448,7 +1448,10 @@ pub unsafe extern "C" fn inflate_ffi(
                     (*strm).avail_in = have as crate::stdlib::uInt;
                     (*state).hold = hold;
                     (*state).bits = bits;
-                    crate::src::inffast::inflate_fast(strm as *mut crate::zlib_h::z_stream_s, out);
+                    crate::src::inffast::inflate_fast_ffi(
+                        strm as *mut crate::zlib_h::z_stream_s,
+                        out,
+                    );
                     put = (*strm).next_out as *mut ::core::ffi::c_uchar;
                     left = (*strm).avail_out as ::core::ffi::c_uint;
                     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
@@ -2117,7 +2120,11 @@ fn syncsearch(
     }
     (got, next)
 }
-pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+#[export_name = "inflateSync"]
+
+pub unsafe extern "C" fn inflateSync_ffi(
+    mut strm: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
     let mut len: ::core::ffi::c_uint = 0;
     let mut flags: ::core::ffi::c_int = 0;
     let mut in_0: ::core::ffi::c_ulong = 0;
@@ -2190,11 +2197,6 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
         state_ref.mode = crate::src::inflate::TYPE;
     }
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateSync"]
-
-pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    inflateSync(strm)
 }
 pub fn inflateSyncPoint(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
     return (state.mode as ::core::ffi::c_uint

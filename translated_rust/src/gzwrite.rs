@@ -18,7 +18,7 @@ pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::deflate_ffi;
 pub use crate::src::deflate::deflateEnd_ffi;
-pub use crate::src::deflate::deflateInit2_;
+pub use crate::src::deflate::deflateInit2__ffi;
 pub use crate::src::deflate::deflateReset_ffi;
 pub use crate::src::deflate::internal_state;
 
@@ -78,7 +78,7 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*strm).zalloc = None;
         (*strm).zfree = None;
         (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        ret = crate::src::deflate::deflateInit2_(
+        ret = crate::src::deflate::deflateInit2__ffi(
             strm as *mut crate::zlib_h::z_stream_s,
             (*state).level,
             8 as ::core::ffi::c_int,

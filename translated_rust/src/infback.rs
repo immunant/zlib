@@ -37,7 +37,7 @@ pub use crate::src::inflate::TYPEDO;
 pub use crate::src::inftrees::code;
 pub use crate::src::inftrees::codetype;
 pub use crate::src::inftrees::inflate_fixed_ffi;
-pub use crate::src::inftrees::inflate_table;
+pub use crate::src::inftrees::inflate_table_ffi;
 pub use crate::src::inftrees::CODES;
 pub use crate::src::inftrees::DISTS;
 pub use crate::src::inftrees::LENS;
@@ -410,7 +410,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                     (*state).lencode = (*state).next as *const crate::src::inftrees::code;
                     (*state).lenbits = 7 as ::core::ffi::c_uint;
-                    ret = crate::src::inftrees::inflate_table(
+                    ret = crate::src::inftrees::inflate_table_ffi(
                         crate::src::inftrees::CODES,
                         &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                         19 as ::core::ffi::c_uint,
@@ -634,7 +634,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                 &raw mut (*state).codes as *mut crate::src::inftrees::code;
                             (*state).lencode = (*state).next as *const crate::src::inftrees::code;
                             (*state).lenbits = 9 as ::core::ffi::c_uint;
-                            ret = crate::src::inftrees::inflate_table(
+                            ret = crate::src::inftrees::inflate_table_ffi(
                                 crate::src::inftrees::LENS,
                                 &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                                 (*state).nlen,
@@ -653,7 +653,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                 (*state).distcode =
                                     (*state).next as *const crate::src::inftrees::code;
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
-                                ret = crate::src::inftrees::inflate_table(
+                                ret = crate::src::inftrees::inflate_table_ffi(
                                     crate::src::inftrees::DISTS,
                                     (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
                                         .offset((*state).nlen as isize),
@@ -698,7 +698,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
             (*strm).avail_in = have as crate::stdlib::uInt;
             (*state).hold = hold;
             (*state).bits = bits;
-            crate::src::inffast::inflate_fast(
+            crate::src::inffast::inflate_fast_ffi(
                 strm as *mut crate::zlib_h::z_stream_s,
                 (*state).wsize,
             );
