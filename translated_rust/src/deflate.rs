@@ -1822,6 +1822,14 @@ impl<'a> DeflateState<'a> {
     }
 }
 
+/// The pointer-free view of the portions of an ABI stream used by
+/// `deflatePrime`.  The exported boundary converts the raw state link once;
+/// validation remains with the codec operation below.
+struct DeflatePrimeStream<'a> {
+    allocators_present: bool,
+    state: Option<&'a mut crate::src::deflate::deflate_state>,
+}
+
 /// The parameter-update path only needs to ask the main compressor for a
 /// block boundary.  Keeping that dispatch behind this stream facade lets the
 /// parameter logic operate on its already-borrowed state without itself
@@ -1839,27 +1847,26 @@ impl DeflateParamsStream<'_> {
     }
 }
 
-pub unsafe fn deflatePrime(
-    strm: &mut crate::zlib_h::z_stream_s,
-    mut bits: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_int,
+/// Validate an already-converted stream view and apply pending bits.
+fn deflate_prime_impl(
+    stream: DeflatePrimeStream<'_>,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // Check the ABI carrier before following its raw state link.  The safe
-    // codec routine below receives only the validated state facade.
-    if !deflate_params_stream_is_valid(strm) {
+    if !stream.allocators_present {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) = strm.state.as_mut() else {
+    let Some(state) = stream.state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some(state) = DeflateState::validated(state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_prime_impl(state, bits, value)
+    deflate_prime_state(state, bits, value)
 }
 
 /// Apply pending bits to an already-validated state facade.
-fn deflate_prime_impl(
+fn deflate_prime_state(
     state: DeflateState<'_>,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
@@ -1902,10 +1909,14 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflatePrime(strm, bits, value)
+    let stream = DeflatePrimeStream {
+        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        state: unsafe { strm.state.as_mut() },
+    };
+    deflate_prime_impl(stream, bits, value)
 }
 pub unsafe fn deflateParams(
     strm: &mut crate::zlib_h::z_stream_s,
