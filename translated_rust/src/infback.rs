@@ -67,34 +67,33 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
-pub unsafe extern "C" fn inflateBackInit_(
-    mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
-    mut window: *mut ::core::ffi::c_uchar,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
+pub fn inflateBackInit_(
+    strm: &mut crate::zlib_h::z_stream,
+    windowBits: ::core::ffi::c_int,
+    window: &mut [crate::stdlib::Bytef],
+    version_first: ::core::ffi::c_char,
+    stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if version.is_null()
-        || *version.offset(0 as isize) as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
+    if version_first as ::core::ffi::c_int
+        != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null()
-        || window.is_null()
-        || windowBits < 8 as ::core::ffi::c_int
-        || windowBits > 15 as ::core::ffi::c_int
-    {
+    if windowBits < 8 as ::core::ffi::c_int || windowBits > 15 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::zlib_h::clear_stream_message(&mut *strm);
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(crate::zlib_h::default_stream_allocator());
-        (*strm).opaque = crate::zlib_h::Opaque::default();
+    let window_size = 1usize << windowBits;
+    if window.len() < window_size {
+        return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(crate::zlib_h::default_stream_allocator());
+    crate::zlib_h::clear_stream_message(strm);
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(crate::zlib_h::default_stream_allocator());
+        strm.opaque = crate::zlib_h::Opaque::default();
+    }
+    if strm.zfree.is_none() {
+        strm.zfree = Some(crate::zlib_h::default_stream_allocator());
     }
     let mut state = crate::src::inflate::inflate_state::default();
     state.dmax = 32768 as ::core::ffi::c_uint;
@@ -110,7 +109,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     owned_window.resize(state.wsize as usize, 0);
     state.window = Some(owned_window);
     state.sane = 1 as ::core::ffi::c_int;
-    (*strm).set_inflate_state(state);
+    strm.set_inflate_state(state);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackInit_"]
@@ -122,7 +121,27 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateBackInit_(strm, windowBits, window, version, stream_size)
+    let Some(version) = (unsafe { version.as_ref() }) else {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    };
+    if *version as ::core::ffi::c_int
+        != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
+        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+    {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    }
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if window.is_null()
+        || windowBits < 8 as ::core::ffi::c_int
+        || windowBits > 15 as ::core::ffi::c_int
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let window_size = 1usize << windowBits;
+    let window = unsafe { ::core::slice::from_raw_parts_mut(window, window_size) };
+    inflateBackInit_(strm, windowBits, window, *version, stream_size)
 }
 pub unsafe extern "C" fn inflateBack(
     mut strm: crate::zlib_h::z_streamp,
