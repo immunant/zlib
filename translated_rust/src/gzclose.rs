@@ -19,15 +19,21 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe fn gzclose(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+pub fn gzclose(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.mode == crate::gzguts_h::GZ_READ {
-        crate::src::gzread::gzclose_r(
-            state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile,
-        )
+        // The state reference is valid for this synchronous close operation.
+        unsafe {
+            crate::src::gzread::gzclose_r(
+                state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile,
+            )
+        }
     } else {
-        crate::src::gzwrite::gzclose_w(
-            state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile,
-        )
+        // The state reference is valid for this synchronous close operation.
+        unsafe {
+            crate::src::gzwrite::gzclose_w(
+                state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile,
+            )
+        }
     }
 }
 #[export_name = "gzclose"]
