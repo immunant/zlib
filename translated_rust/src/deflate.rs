@@ -4789,6 +4789,7 @@ fn deflate_slow(
                     (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
                 state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             };
+            let mut handled_previous_match = false;
             if has_min_match {
                 let state = &mut *s;
                 let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
@@ -4848,15 +4849,10 @@ fn deflate_slow(
                         state.match_start,
                     );
                 }
-            }
-            let use_previous_match = {
-                let state = &mut *s;
-                state.prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                    && state.match_length <= state.prev_length
-            };
-            if use_previous_match {
-                let (max_insert, len, dist) = {
-                    let state = &mut *s;
+                let use_previous_match = state.prev_length
+                    >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                    && state.match_length <= state.prev_length;
+                if use_previous_match {
                     let max_insert = state
                         .strstart
                         .wrapping_add(state.lookahead)
@@ -4867,98 +4863,57 @@ fn deflate_slow(
                         .wrapping_sub(1 as crate::src::deflate::IPos)
                         .wrapping_sub(state.prev_match)
                         as crate::zutil_h::ush;
-                    (max_insert, len, dist)
-                };
-                let state = &mut *s;
-                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                    return need_more;
-                };
-                if symbol_len != 0 && state.sym_buf.is_null() {
-                    return need_more;
-                }
-                let symbols = if symbol_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-                };
-                let Some(flush_now) = tally_symbol_state(state, symbols, dist.into(), len.into())
-                else {
-                    return need_more;
-                };
-                bflush = flush_now as ::core::ffi::c_int;
-                {
-                    let state = &mut *s;
+                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                        return need_more;
+                    };
+                    if symbol_len != 0 && state.sym_buf.is_null() {
+                        return need_more;
+                    }
+                    let symbols = if symbol_len == 0 {
+                        &mut []
+                    } else {
+                        ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                    };
+                    let Some(flush_now) =
+                        tally_symbol_state(state, symbols, dist.into(), len.into())
+                    else {
+                        return need_more;
+                    };
+                    bflush = flush_now as ::core::ffi::c_int;
                     state.lookahead = state
                         .lookahead
                         .wrapping_sub(state.prev_length.wrapping_sub(1 as crate::stdlib::uInt));
                     state.prev_length = state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
-                }
-                loop {
-                    let insert_current = {
-                        let state = &mut *s;
+                    loop {
                         state.strstart = state.strstart.wrapping_add(1);
-                        state.strstart <= max_insert
-                    };
-                    if insert_current {
-                        let state = &mut *s;
-                        let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
-                            usize::try_from(state.window_size),
-                            usize::try_from(state.hash_size),
-                            usize::try_from(state.w_size),
-                        ) else {
-                            return need_more;
-                        };
-                        if (window_len != 0 && state.window.is_null())
-                            || (head_len != 0 && state.head.is_null())
-                            || (prev_len != 0 && state.prev.is_null())
-                        {
-                            return need_more;
+                        if state.strstart <= max_insert {
+                            let Some(previous) = insert_string_state(
+                                window,
+                                head,
+                                prev,
+                                state.strstart,
+                                &mut state.ins_h,
+                                state.hash_shift,
+                                state.hash_mask,
+                                state.w_mask,
+                            ) else {
+                                return need_more;
+                            };
+                            hash_head = previous;
                         }
-                        let window = if window_len == 0 {
-                            &[]
-                        } else {
-                            ::core::slice::from_raw_parts(state.window, window_len)
-                        };
-                        let head = if head_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.head, head_len)
-                        };
-                        let prev = if prev_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                        };
-                        let Some(previous) = insert_string_state(
-                            window,
-                            head,
-                            prev,
-                            state.strstart,
-                            &mut state.ins_h,
-                            state.hash_shift,
-                            state.hash_mask,
-                            state.w_mask,
-                        ) else {
-                            return need_more;
-                        };
-                        hash_head = previous;
-                    }
-                    let previous_match_done = {
-                        let state = &mut *s;
                         state.prev_length = state.prev_length.wrapping_sub(1);
-                        state.prev_length == 0 as crate::stdlib::uInt
-                    };
-                    if previous_match_done {
-                        break;
+                        if state.prev_length == 0 as crate::stdlib::uInt {
+                            break;
+                        }
                     }
-                }
-                {
-                    let state = &mut *s;
                     state.match_available = 0 as ::core::ffi::c_int;
                     state.match_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
                         as crate::stdlib::uInt;
                     state.strstart = state.strstart.wrapping_add(1);
+                    handled_previous_match = true;
                 }
+            }
+            if handled_previous_match {
                 if bflush != 0 {
                     let (block_start, strstart, window) = {
                         let state = &mut *s;
@@ -4989,30 +4944,34 @@ fn deflate_slow(
                 let state = &mut *s;
                 state.match_available != 0
             } {
-                let state = &mut *s;
-                let Ok(window_len) = usize::try_from(state.window_size) else {
-                    return need_more;
-                };
-                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                    return need_more;
-                };
-                if (window_len != 0 && state.window.is_null())
-                    || (symbol_len != 0 && state.sym_buf.is_null())
-                {
-                    return need_more;
-                }
-                let window = if window_len == 0 {
-                    &[]
-                } else {
-                    ::core::slice::from_raw_parts(state.window, window_len)
-                };
-                let symbols = if symbol_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-                };
-                let Some(flush_now) = tally_previous_literal_state(state, window, symbols) else {
-                    return need_more;
+                let flush_now = {
+                    let state = &mut *s;
+                    let Ok(window_len) = usize::try_from(state.window_size) else {
+                        return need_more;
+                    };
+                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                        return need_more;
+                    };
+                    if (window_len != 0 && state.window.is_null())
+                        || (symbol_len != 0 && state.sym_buf.is_null())
+                    {
+                        return need_more;
+                    }
+                    let window = if window_len == 0 {
+                        &[]
+                    } else {
+                        ::core::slice::from_raw_parts(state.window, window_len)
+                    };
+                    let symbols = if symbol_len == 0 {
+                        &mut []
+                    } else {
+                        ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                    };
+                    let Some(flush_now) = tally_previous_literal_state(state, window, symbols)
+                    else {
+                        return need_more;
+                    };
+                    flush_now
                 };
                 bflush = flush_now as ::core::ffi::c_int;
                 let avail_out = if bflush != 0 {
