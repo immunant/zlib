@@ -1157,41 +1157,42 @@ pub unsafe extern "C" fn gz_error(
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    let previous_message = (*state).msg;
+    let state = &mut *state;
+    let previous_message = state.msg;
     let plan = gz_error_plan(
         !previous_message.is_null(),
-        (*state).err,
+        state.err,
         err,
-        (*state).again,
+        state.again,
         !msg.is_null(),
     );
     if !previous_message.is_null() {
         if plan.free_previous_message {
             crate::stdlib::free(previous_message as *mut ::core::ffi::c_void);
         }
-        (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     if plan.clear_buffer {
-        (*state).x.have = 0 as ::core::ffi::c_uint;
+        state.x.have = 0 as ::core::ffi::c_uint;
     }
-    (*state).err = plan.err;
+    state.err = plan.err;
     if !plan.allocate_message {
         return;
     }
     let message_allocation_len = gz_error_message_allocation_len(
-        crate::stdlib::strlen((*state).path),
+        crate::stdlib::strlen(state.path),
         crate::stdlib::strlen(msg),
     );
-    (*state).msg = crate::stdlib::malloc(message_allocation_len) as *mut ::core::ffi::c_char;
-    if (*state).msg.is_null() {
-        (*state).err = crate::zlib_h::Z_MEM_ERROR;
+    state.msg = crate::stdlib::malloc(message_allocation_len) as *mut ::core::ffi::c_char;
+    if state.msg.is_null() {
+        state.err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
     crate::stdlib::snprintf(
-        (*state).msg,
+        state.msg,
         message_allocation_len,
         b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
-        (*state).path,
+        state.path,
         b": \0".as_ptr() as *const ::core::ffi::c_char,
         msg,
     );

@@ -2573,6 +2573,30 @@ fn inflate_match_copy_plan(
     }
 }
 
+fn inflate_copy_match_from_output(
+    output: &mut [::core::ffi::c_uchar],
+    output_written: usize,
+    distance: usize,
+    count: usize,
+) -> bool {
+    let Some(destination_end) = output_written.checked_add(count) else {
+        return false;
+    };
+    if output_written > output.len()
+        || distance == 0
+        || distance > output_written
+        || destination_end > output.len()
+    {
+        return false;
+    }
+
+    for destination_index in output_written..destination_end {
+        let source_index = destination_index - distance;
+        output[destination_index] = output[source_index];
+    }
+    true
+}
+
 fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
     let mut got = *have;
     let mut next = 0_usize;
@@ -2918,9 +2942,10 @@ mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts, gzip_extra_copy_bounds, inflateSyncPoint_ffi, inflate_block_header,
-        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_progress,
-        inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_get_dictionary_result, inflate_gzip_header_has_extra, inflate_header_crc_enabled,
+        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
+        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
+        inflate_dictionary_is_allowed, inflate_get_dictionary_result,
+        inflate_gzip_header_has_extra, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
         inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
@@ -3034,6 +3059,66 @@ mod tests {
                 remaining_length: 0,
             }
         );
+    }
+
+    #[test]
+    fn inflate_output_match_copy_handles_nonoverlapping_matches() {
+        let mut output = *b"abc___";
+
+        assert!(inflate_copy_match_from_output(&mut output, 3, 3, 3));
+        assert_eq!(output, *b"abcabc");
+    }
+
+    #[test]
+    fn inflate_output_match_copy_preserves_forward_overlap_semantics() {
+        let mut output = *b"abcd_____";
+
+        assert!(inflate_copy_match_from_output(&mut output, 4, 3, 5));
+        assert_eq!(output, *b"abcdbcdbc");
+    }
+
+    #[test]
+    fn inflate_output_match_copy_repeats_distance_one() {
+        let mut output = *b"a_____";
+
+        assert!(inflate_copy_match_from_output(&mut output, 1, 1, 5));
+        assert_eq!(output, *b"aaaaaa");
+    }
+
+    #[test]
+    fn inflate_output_match_copy_rejects_zero_distance_without_mutation() {
+        let mut output = *b"abc___";
+        let original = output;
+
+        assert!(!inflate_copy_match_from_output(&mut output, 3, 0, 3));
+        assert_eq!(output, original);
+    }
+
+    #[test]
+    fn inflate_output_match_copy_rejects_too_far_distance_without_mutation() {
+        let mut output = *b"abc___";
+        let original = output;
+
+        assert!(!inflate_copy_match_from_output(&mut output, 3, 4, 1));
+        assert_eq!(output, original);
+    }
+
+    #[test]
+    fn inflate_output_match_copy_rejects_short_tail_without_mutation() {
+        let mut output = *b"abc__";
+        let original = output;
+
+        assert!(!inflate_copy_match_from_output(&mut output, 3, 3, 3));
+        assert_eq!(output, original);
+    }
+
+    #[test]
+    fn inflate_output_match_copy_allows_zero_count_without_mutation() {
+        let mut output = *b"abc";
+        let original = output;
+
+        assert!(inflate_copy_match_from_output(&mut output, 3, 1, 0));
+        assert_eq!(output, original);
     }
 
     #[test]
