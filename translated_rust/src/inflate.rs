@@ -64,7 +64,6 @@ pub const BAD: crate::src::inflate::inflate_mode = 16209;
 pub const MEM: crate::src::inflate::inflate_mode = 16210;
 
 pub const SYNC: crate::src::inflate::inflate_mode = 16211;
-#[derive(Copy, Clone)]
 #[repr(C)]
 
 pub struct inflate_state {
