@@ -1025,12 +1025,11 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 }
 
 unsafe fn gz_write(
-    mut state: crate::gzguts_h::gz_statep,
+    state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidpc,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let put: crate::stdlib::z_size_t = len;
-    let state = &mut *state;
     match gz_write_preparation(len, state.size, state.skip) {
         GzWritePreparation::Empty => return 0 as crate::stdlib::z_size_t,
         GzWritePreparation::Initialize => {
@@ -1166,7 +1165,8 @@ pub unsafe extern "C" fn gzwrite(
         return 0 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *state;
+    if !gz_write_state_is_usable(state.mode, state.err, state.again) {
         return 0 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -1205,7 +1205,8 @@ pub unsafe extern "C" fn gzfwrite(
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *state;
+    if !gz_write_state_is_usable(state.mode, state.err, state.again) {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_error(
@@ -1244,7 +1245,8 @@ pub unsafe extern "C" fn gzputc(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *state;
+    if !gz_write_state_is_usable(state.mode, state.err, state.again) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -1283,7 +1285,8 @@ pub unsafe extern "C" fn gzputs(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *state;
+    if !gz_write_state_is_usable(state.mode, state.err, state.again) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
