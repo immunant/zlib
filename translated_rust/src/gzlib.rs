@@ -63,6 +63,11 @@ pub use crate::zlib_h::Z_RLE;
 
 use std::os::fd::FromRawFd;
 
+struct GzDopenPreparation {
+    state: crate::gzguts_h::gz_state,
+    oflag: ::core::ffi::c_int,
+}
+
 fn gz_reset(
     have: &mut crate::stdlib::uInt,
     mode: ::core::ffi::c_int,
@@ -213,6 +218,95 @@ fn gz_open_file(
         .map(Into::into)
 }
 
+/// Parse the mode and build all state that does not require owning the caller's
+/// descriptor.  Keeping this before the raw-descriptor conversion is
+/// important: an invalid mode must not consume the descriptor passed to
+/// `gzdopen`.
+fn gzdopen_prepare(
+    fd: ::core::ffi::c_int,
+    mode: &::core::ffi::CStr,
+) -> Option<GzDopenPreparation> {
+    if fd < 0 {
+        return None;
+    }
+    let (mut state, mut oflag, exclusive) = gz_open_state(mode)?;
+    let mut path_bytes = b"<fd:".to_vec();
+    path_bytes.extend_from_slice(fd.to_string().as_bytes());
+    path_bytes.push(b'>');
+    let path = std::ffi::CString::new(path_bytes)
+        .expect("a formatted file descriptor cannot contain a NUL byte");
+    state.path = path;
+    oflag |= crate::stdlib::O_LARGEFILE
+        | (if state.mode == crate::gzguts_h::GZ_READ {
+            crate::stdlib::O_RDONLY
+        } else {
+            crate::stdlib::O_WRONLY
+                | crate::stdlib::O_CREAT
+                | (if exclusive != 0 {
+                    crate::stdlib::O_EXCL
+                } else {
+                    0
+                })
+                | (if state.mode == crate::gzguts_h::GZ_WRITE {
+                    crate::stdlib::O_TRUNC
+                } else {
+                    crate::stdlib::O_APPEND
+                })
+        });
+    Some(GzDopenPreparation { state, oflag })
+}
+
+/// Finish opening a gzip state around an already-owned descriptor.  All
+/// descriptor configuration uses checked Rust APIs; the raw descriptor is
+/// adopted exactly once by the FFI wrapper before reaching this function.
+fn gzdopen_impl(
+    mut prepared: GzDopenPreparation,
+    fd: std::os::fd::OwnedFd,
+) -> Box<crate::gzguts_h::gz_state> {
+    if prepared.oflag & crate::stdlib::O_NONBLOCK != 0 {
+        if let Ok(flags) = rustix::fs::fcntl_getfl(&fd) {
+            let _ = rustix::fs::fcntl_setfl(&fd, flags | rustix::fs::OFlags::NONBLOCK);
+        }
+    }
+    if prepared.oflag & crate::stdlib::O_CLOEXEC != 0 {
+        if let Ok(flags) = rustix::io::fcntl_getfd(&fd) {
+            let _ = rustix::io::fcntl_setfd(&fd, flags | rustix::io::FdFlags::CLOEXEC);
+        }
+    }
+    prepared.state.fd = Some(fd);
+    let fd = prepared
+        .state
+        .fd
+        .as_ref()
+        .expect("the descriptor was just stored in the gzip state");
+    if prepared.state.mode == crate::gzguts_h::GZ_APPEND {
+        let _ = rustix::fs::seek(fd, rustix::fs::SeekFrom::End(0));
+        prepared.state.mode = crate::gzguts_h::GZ_WRITE;
+    }
+    if prepared.state.mode == crate::gzguts_h::GZ_READ {
+        prepared.state.start = rustix::fs::seek(fd, rustix::fs::SeekFrom::Current(0))
+            .ok()
+            .and_then(|offset| crate::stdlib::off64_t::try_from(offset).ok())
+            .unwrap_or(0);
+    }
+    gz_reset(
+        &mut prepared.state.x.have,
+        prepared.state.mode,
+        &mut prepared.state.eof,
+        &mut prepared.state.past,
+        &mut prepared.state.how,
+        &mut prepared.state.junk,
+        &mut prepared.state.reset,
+        &mut prepared.state.again,
+        &mut prepared.state.skip,
+        &mut prepared.state.err,
+        &mut prepared.state.msg,
+        &mut prepared.state.x.pos,
+        &mut prepared.state.strm.avail_in,
+    );
+    Box::new(prepared.state)
+}
+
 unsafe extern "C" fn gz_open(
     path: *const ::core::ffi::c_void,
     fd: ::core::ffi::c_int,
@@ -330,24 +424,24 @@ pub unsafe extern "C" fn gzopen64_ffi(
 ) -> crate::zlib_h::gzFile {
     gzopen64(path, mode)
 }
-pub unsafe extern "C" fn gzdopen(
-    mut fd: ::core::ffi::c_int,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    if fd == -1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    let path = std::ffi::CString::new(format!("<fd:{fd}>"))
-        .expect("a formatted file descriptor cannot contain a NUL byte");
-    gz_open(path.as_ptr().cast(), fd, mode)
-}
 #[export_name = "gzdopen"]
 
 pub unsafe extern "C" fn gzdopen_ffi(
-    mut fd: ::core::ffi::c_int,
-    mut mode: *const ::core::ffi::c_char,
+    fd: ::core::ffi::c_int,
+    mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzdopen(fd, mode)
+    if mode.is_null() {
+        return ::core::ptr::null_mut();
+    }
+    let mode = ::core::ffi::CStr::from_ptr(mode);
+    let Some(prepared) = gzdopen_prepare(fd, mode) else {
+        return ::core::ptr::null_mut();
+    };
+    // `gzdopen` transfers ownership of a valid caller descriptor.  The
+    // preparation above rejects invalid descriptor numbers and invalid modes
+    // before this one unavoidable boundary conversion.
+    let fd = std::os::fd::OwnedFd::from_raw_fd(fd);
+    Box::into_raw(gzdopen_impl(prepared, fd)) as crate::zlib_h::gzFile
 }
 fn gzbuffer_state(
     mode: ::core::ffi::c_int,
