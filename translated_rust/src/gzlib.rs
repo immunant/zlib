@@ -1940,14 +1940,17 @@ pub fn gz_error(
     if !gz_error_needs_message_allocation(true, err) {
         return;
     }
+    // SAFETY: `path` is an owned, NUL-terminated string in every initialized
+    // gzip state. Bind it once so both allocation and formatting use the same
+    // length without a second raw C-string traversal.
+    let path_len = unsafe { ::core::ffi::CStr::from_ptr(state.path).to_bytes().len() };
     // SAFETY: `path` is owned by this initialized gzip state and `msg` is a
     // nul-terminated slice supplied by either a fixed zlib message or a
     // checked C string at an FFI boundary. This is the sole allocation and
     // formatting boundary for the owned error record.
     unsafe {
         state.msg = crate::stdlib::malloc(
-            crate::stdlib::strlen(state.path)
-                .wrapping_add(msg.len().wrapping_add(2)),
+            path_len.wrapping_add(msg.len().wrapping_add(2)),
         ) as *mut ::core::ffi::c_char;
     }
     if state.msg.is_null() {
@@ -1957,8 +1960,7 @@ pub fn gz_error(
     unsafe {
         crate::stdlib::snprintf(
             state.msg,
-            crate::stdlib::strlen(state.path)
-                .wrapping_add(msg.len().wrapping_add(2)),
+            path_len.wrapping_add(msg.len().wrapping_add(2)),
             b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
             state.path,
             b": \0".as_ptr() as *const ::core::ffi::c_char,
