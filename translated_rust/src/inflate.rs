@@ -68,6 +68,62 @@ pub const SYNC: crate::src::inflate::inflate_mode = 16211;
 const CODE_LENGTH_ORDER: [::core::ffi::c_ushort; 19] = [
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
 ];
+
+// Decode tables are either one of the immutable fixed tables or a range in
+// `inflate_state::codes`.  Keep that identity as an index-sized value instead
+// of a rebased pointer: the state is copied byte-for-byte by `inflateCopy`, so
+// an index remains valid in the destination state as well.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct DecodeTableLocation(usize);
+
+impl DecodeTableLocation {
+    const FIXED_LENS: Self = Self(usize::MAX);
+    const FIXED_DISTS: Self = Self(usize::MAX - 1);
+
+    pub(crate) const fn dynamic(start: usize) -> Self {
+        Self(start)
+    }
+
+    pub(crate) const fn fixed_lens() -> Self {
+        Self::FIXED_LENS
+    }
+
+    pub(crate) const fn fixed_dists() -> Self {
+        Self::FIXED_DISTS
+    }
+
+    const fn dynamic_start(self) -> Option<usize> {
+        match self {
+            Self::FIXED_LENS | Self::FIXED_DISTS => None,
+            Self(start) => Some(start),
+        }
+    }
+}
+
+pub(crate) const INVALID_DECODE_CODE: crate::src::inftrees::code = crate::src::inftrees::code {
+    op: 64,
+    bits: 0,
+    val: 0,
+};
+
+pub(crate) fn inflate_decode_table_entry(
+    state: &inflate_state,
+    location: DecodeTableLocation,
+    index: usize,
+) -> crate::src::inftrees::code {
+    match location {
+        DecodeTableLocation::FIXED_LENS => crate::src::inftrees::fixed_len_code(index),
+        DecodeTableLocation::FIXED_DISTS => crate::src::inftrees::fixed_dist_code(index),
+        location => location
+            .dynamic_start()
+            .and_then(|start| start.checked_add(index))
+            .and_then(|offset| state.codes.get(offset))
+            .copied()
+            .unwrap_or(INVALID_DECODE_CODE),
+    }
+}
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 
@@ -92,8 +148,8 @@ pub struct inflate_state {
     pub length: ::core::ffi::c_uint,
     pub offset: ::core::ffi::c_uint,
     pub extra: ::core::ffi::c_uint,
-    pub lencode: *const crate::src::inftrees::code,
-    pub distcode: *const crate::src::inftrees::code,
+    pub lencode: DecodeTableLocation,
+    pub distcode: DecodeTableLocation,
     pub lenbits: ::core::ffi::c_uint,
     pub distbits: ::core::ffi::c_uint,
     pub ncode: ::core::ffi::c_uint,
@@ -913,8 +969,8 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     inflate_reset_keep_core(strm, state);
     state.next = 0;
-    state.distcode = state.codes.as_ptr();
-    state.lencode = state.distcode;
+    state.distcode = DecodeTableLocation::dynamic(0);
+    state.lencode = DecodeTableLocation::dynamic(0);
     return crate::zlib_h::Z_OK;
 }
 pub use inflateReset_ffi as inflateReset;
@@ -929,8 +985,8 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     inflate_reset_core(strm, state);
     state.next = 0;
-    state.distcode = state.codes.as_ptr();
-    state.lencode = state.distcode;
+    state.distcode = DecodeTableLocation::dynamic(0);
+    state.lencode = DecodeTableLocation::dynamic(0);
     crate::zlib_h::Z_OK
 }
 pub use inflateReset2_ffi as inflateReset2;
@@ -1705,8 +1761,8 @@ pub unsafe extern "C" fn inflate(
                 let state = &mut *state;
                 let mut table_cursor = 0usize;
                 state.next = 0;
-                state.distcode = state.codes.as_ptr();
-                state.lencode = state.distcode;
+                state.distcode = DecodeTableLocation::dynamic(0);
+                state.lencode = DecodeTableLocation::dynamic(0);
                 state.lenbits = 7 as ::core::ffi::c_uint;
                 ret = crate::src::inftrees::inflate_table_safe(
                     crate::src::inftrees::CODES,
@@ -1781,7 +1837,9 @@ pub unsafe extern "C" fn inflate(
             12883017672845564788 => {
                 while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
                     loop {
-                        here = *(*state).lencode.wrapping_add(
+                        here = inflate_decode_table_entry(
+                            &*state,
+                            (*state).lencode,
                             (hold as ::core::ffi::c_uint
                                 & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
                                     .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -1887,7 +1945,7 @@ pub unsafe extern "C" fn inflate(
                     let state = &mut *state;
                     let mut table_cursor = 0usize;
                     state.next = 0;
-                    state.lencode = state.codes.as_ptr();
+                    state.lencode = DecodeTableLocation::dynamic(0);
                     state.lenbits = 9 as ::core::ffi::c_uint;
                     ret = crate::src::inftrees::inflate_table_safe(
                         crate::src::inftrees::LENS,
@@ -1907,7 +1965,7 @@ pub unsafe extern "C" fn inflate(
                         (*state).mode = crate::src::inflate::BAD;
                         continue;
                     } else {
-                        state.distcode = state.codes.as_ptr().wrapping_add(state.next);
+                        state.distcode = DecodeTableLocation::dynamic(state.next);
                         state.distbits = 6 as ::core::ffi::c_uint;
                         ret = crate::src::inftrees::inflate_table_safe(
                             crate::src::inftrees::DISTS,
@@ -2107,7 +2165,9 @@ pub unsafe extern "C" fn inflate(
                 } else {
                     (*state).back = 0 as ::core::ffi::c_int;
                     loop {
-                        here = *(*state).lencode.wrapping_add(
+                        here = inflate_decode_table_entry(
+                            &*state,
+                            (*state).lencode,
                             (hold as ::core::ffi::c_uint
                                 & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
                                     .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -2131,7 +2191,9 @@ pub unsafe extern "C" fn inflate(
                     {
                         last = here;
                         loop {
-                            here = *(*state).lencode.wrapping_add(
+                            here = inflate_decode_table_entry(
+                                &*state,
+                                (*state).lencode,
                                 (last.val as ::core::ffi::c_uint).wrapping_add(
                                     (hold as ::core::ffi::c_uint
                                         & ((1 as ::core::ffi::c_uint)
@@ -2300,7 +2362,9 @@ pub unsafe extern "C" fn inflate(
         match c2rust_current_block {
             14619999244790055076 => {
                 loop {
-                    here = *(*state).distcode.wrapping_add(
+                    here = inflate_decode_table_entry(
+                        &*state,
+                        (*state).distcode,
                         (hold as ::core::ffi::c_uint
                             & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                 .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -2323,7 +2387,9 @@ pub unsafe extern "C" fn inflate(
                 {
                     last = here;
                     loop {
-                        here = *(*state).distcode.wrapping_add(
+                        here = inflate_decode_table_entry(
+                            &*state,
+                            (*state).distcode,
                             (last.val as ::core::ffi::c_uint).wrapping_add(
                                 (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint)
@@ -3263,28 +3329,6 @@ pub unsafe extern "C" fn inflateCopy(
             as crate::__stddef_size_t_h::size_t,
     );
     (*copy).strm = dest;
-    if (*state).lencode
-        >= &raw mut (*state).codes as *mut crate::src::inftrees::code
-            as *const crate::src::inftrees::code
-        && (*state).lencode
-            <= (&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                .wrapping_add(crate::src::inftrees::ENOUGH.wrapping_sub(1) as usize)
-                as *const crate::src::inftrees::code
-    {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(
-            (*state)
-                .lencode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as usize,
-        );
-        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code)
-            .wrapping_add(
-                (*state)
-                    .distcode
-                    .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                    as usize,
-            );
-    }
     (*copy).next = (*state).next;
     if !window.is_null() {
         crate::stdlib::memcpy(
@@ -5031,8 +5075,8 @@ mod tests {
             length: 0,
             offset: 0,
             extra: 0,
-            lencode: ::core::ptr::null(),
-            distcode: ::core::ptr::null(),
+            lencode: super::DecodeTableLocation::dynamic(0),
+            distcode: super::DecodeTableLocation::dynamic(0),
             lenbits: 0,
             distbits: 0,
             ncode: 0,
@@ -5052,6 +5096,39 @@ mod tests {
             was: 0,
         };
         let mut window = [0; 8];
+
+        state.codes[2] = crate::src::inftrees::code {
+            op: 7,
+            bits: 3,
+            val: 42,
+        };
+        assert_eq!(
+            super::inflate_decode_table_entry(
+                &state,
+                super::DecodeTableLocation::dynamic(2),
+                0,
+            )
+            .val,
+            42
+        );
+        assert_eq!(
+            super::inflate_decode_table_entry(
+                &state,
+                super::DecodeTableLocation::dynamic(1444),
+                0,
+            )
+            .op,
+            super::INVALID_DECODE_CODE.op
+        );
+        crate::src::inftrees::inflate_fixed(&mut state);
+        assert_eq!(
+            super::inflate_decode_table_entry(&state, state.lencode, 0).val,
+            crate::src::inftrees::fixed_len_code(0).val
+        );
+        assert_eq!(
+            super::inflate_decode_table_entry(&state, state.distcode, 0).val,
+            crate::src::inftrees::fixed_dist_code(0).val
+        );
 
         super::update_window_state_core(&mut state, &mut window, b"xyz");
 

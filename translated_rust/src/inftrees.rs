@@ -2790,6 +2790,16 @@ pub use crate::src::inflate::TYPE;
 pub use crate::src::inflate::TYPEDO;
 pub use crate::src::inftrees::inffixed_h::distfix;
 pub use crate::src::inftrees::inffixed_h::lenfix;
+pub(crate) fn fixed_len_code(index: usize) -> crate::src::inftrees::code {
+    lenfix.get(index).copied().unwrap_or(crate::src::inflate::INVALID_DECODE_CODE)
+}
+
+pub(crate) fn fixed_dist_code(index: usize) -> crate::src::inftrees::code {
+    distfix
+        .get(index)
+        .copied()
+        .unwrap_or(crate::src::inflate::INVALID_DECODE_CODE)
+}
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
@@ -3408,9 +3418,9 @@ pub unsafe extern "C" fn inflate_table_ffi(
 
 pub use inflate_table_ffi as inflate_table;
 pub(crate) fn inflate_fixed(state: &mut crate::src::inflate::inflate_state) {
-    state.lencode = lenfix.as_ptr();
+    state.lencode = crate::src::inflate::DecodeTableLocation::fixed_lens();
     state.lenbits = 9;
-    state.distcode = distfix.as_ptr();
+    state.distcode = crate::src::inflate::DecodeTableLocation::fixed_dists();
     state.distbits = 5;
 }
 #[export_name = "inflate_fixed"]

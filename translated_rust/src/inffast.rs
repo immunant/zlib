@@ -522,14 +522,11 @@ pub unsafe extern "C" fn inflate_fast(
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
-    let mut lcode: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
-    let mut dcode: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
+    let mut lcode = crate::src::inflate::DecodeTableLocation::dynamic(0);
+    let mut dcode = crate::src::inflate::DecodeTableLocation::dynamic(0);
     let mut lmask: ::core::ffi::c_uint = 0;
     let mut dmask: ::core::ffi::c_uint = 0;
-    let mut here: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
+    let mut here = crate::src::inflate::INVALID_DECODE_CODE;
     let mut op: ::core::ffi::c_uint = 0;
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
@@ -560,9 +557,13 @@ pub unsafe extern "C" fn inflate_fast(
             (hold, bits, input_remaining) =
                 refill_input_byte(hold, bits, input_remaining, *input_byte);
         }
-        here = lcode.wrapping_add(table_index(hold, lmask));
+        here = crate::src::inflate::inflate_decode_table_entry(
+            state,
+            lcode,
+            table_index(hold, lmask),
+        );
         loop {
-            let entry = fast_code_entry(*here);
+            let entry = fast_code_entry(here);
             op = entry.bits;
             (hold, bits) = consume_bits(hold, bits, op);
             op = entry.op;
@@ -593,12 +594,20 @@ pub unsafe extern "C" fn inflate_fast(
                         (hold, bits, input_remaining) =
                             refill_input_byte(hold, bits, input_remaining, *input_byte);
                     }
-                    here = dcode.wrapping_add(table_index(hold, dmask));
+                    here = crate::src::inflate::inflate_decode_table_entry(
+                        state,
+                        dcode,
+                        table_index(hold, dmask),
+                    );
                     c2rust_current_block_141 = 3217834059723038609;
                     break;
                 }
                 FastLitLenAction::Subtable => {
-                    here = lcode.wrapping_add(subtable_index(entry, hold));
+                    here = crate::src::inflate::inflate_decode_table_entry(
+                        state,
+                        lcode,
+                        subtable_index(entry, hold),
+                    );
                 }
                 FastLitLenAction::End => {
                     c2rust_current_block_141 = 13505557363059842426;
@@ -613,7 +622,7 @@ pub unsafe extern "C" fn inflate_fast(
         match c2rust_current_block_141 {
             3217834059723038609 => {
                 loop {
-                    let entry = fast_code_entry(*here);
+                    let entry = fast_code_entry(here);
                     op = entry.bits;
                     (hold, bits) = consume_bits(hold, bits, op);
                     op = entry.op;
@@ -640,7 +649,11 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                         }
                         FastDistAction::Subtable => {
-                            here = dcode.wrapping_add(subtable_index(entry, hold));
+                            here = crate::src::inflate::inflate_decode_table_entry(
+                                state,
+                                dcode,
+                                subtable_index(entry, hold),
+                            );
                         }
                         FastDistAction::Invalid => {
                             pending_failure =

@@ -729,7 +729,7 @@ pub unsafe extern "C" fn inflateBack(
                     let state = &mut *state;
                     let mut table_cursor = 0usize;
                     state.next = 0;
-                    state.lencode = state.codes.as_ptr();
+                    state.lencode = crate::src::inflate::DecodeTableLocation::dynamic(0);
                     state.lenbits = 7 as ::core::ffi::c_uint;
                     ret = crate::src::inftrees::inflate_table_safe(
                         crate::src::inftrees::CODES,
@@ -752,7 +752,9 @@ pub unsafe extern "C" fn inflateBack(
                         (*state).have = 0 as ::core::ffi::c_uint;
                         while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
                             loop {
-                                here = *(*state).lencode.wrapping_add(
+                                here = crate::src::inflate::inflate_decode_table_entry(
+                                    &*state,
+                                    (*state).lencode,
                                     inflate_back_root_table_index(hold, (*state).lenbits),
                                 );
                                 if here.bits as ::core::ffi::c_uint <= bits {
@@ -868,7 +870,7 @@ pub unsafe extern "C" fn inflateBack(
                             let state = &mut *state;
                             let mut table_cursor = 0usize;
                             state.next = 0;
-                            state.lencode = state.codes.as_ptr();
+                            state.lencode = crate::src::inflate::DecodeTableLocation::dynamic(0);
                             state.lenbits = 9 as ::core::ffi::c_uint;
                             ret = crate::src::inftrees::inflate_table_safe(
                                 crate::src::inftrees::LENS,
@@ -888,7 +890,8 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
-                                state.distcode = state.codes.as_ptr().wrapping_add(state.next);
+                                state.distcode =
+                                    crate::src::inflate::DecodeTableLocation::dynamic(state.next);
                                 state.distbits = 6 as ::core::ffi::c_uint;
                                 ret = crate::src::inftrees::inflate_table_safe(
                                     crate::src::inftrees::DISTS,
@@ -949,9 +952,11 @@ pub unsafe extern "C" fn inflateBack(
             bits = (*state).bits;
         } else {
             loop {
-                here = *(*state)
-                    .lencode
-                    .wrapping_add(inflate_back_root_table_index(hold, (*state).lenbits));
+                here = crate::src::inflate::inflate_decode_table_entry(
+                    &*state,
+                    (*state).lencode,
+                    inflate_back_root_table_index(hold, (*state).lenbits),
+                );
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
                 }
@@ -973,9 +978,11 @@ pub unsafe extern "C" fn inflateBack(
             {
                 last = here;
                 loop {
-                    here = *(*state).lencode.wrapping_add(inflate_back_subtable_index(
-                        hold, last.val, last.bits, last.op,
-                    ));
+                    here = crate::src::inflate::inflate_decode_table_entry(
+                        &*state,
+                        (*state).lencode,
+                        inflate_back_subtable_index(hold, last.val, last.bits, last.op),
+                    );
                     if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                         as ::core::ffi::c_uint
                         <= bits
@@ -1053,9 +1060,11 @@ pub unsafe extern "C" fn inflateBack(
                         bits = remaining_bits;
                     }
                     loop {
-                        here = *(*state)
-                            .distcode
-                            .wrapping_add(inflate_back_root_table_index(hold, (*state).distbits));
+                        here = crate::src::inflate::inflate_decode_table_entry(
+                            &*state,
+                            (*state).distcode,
+                            inflate_back_root_table_index(hold, (*state).distbits),
+                        );
                         if here.bits as ::core::ffi::c_uint <= bits {
                             break;
                         }
@@ -1077,9 +1086,11 @@ pub unsafe extern "C" fn inflateBack(
                     {
                         last = here;
                         loop {
-                            here = *(*state).distcode.wrapping_add(inflate_back_subtable_index(
-                                hold, last.val, last.bits, last.op,
-                            ));
+                            here = crate::src::inflate::inflate_decode_table_entry(
+                                &*state,
+                                (*state).distcode,
+                                inflate_back_subtable_index(hold, last.val, last.bits, last.op),
+                            );
                             if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                                 as ::core::ffi::c_uint
                                 <= bits
