@@ -176,13 +176,16 @@ fn gzseek_request_is_valid(
     whence: ::core::ffi::c_int,
 ) -> bool {
     gz_is_read_or_write_mode(mode)
-        && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR)
+        && gzseek_error_allows_positioning(err)
         && (whence == crate::stdlib::SEEK_SET || whence == crate::stdlib::SEEK_CUR)
 }
 
 fn gzrewind_request_is_valid(mode: ::core::ffi::c_int, err: ::core::ffi::c_int) -> bool {
-    mode == crate::gzguts_h::GZ_READ
-        && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR)
+    mode == crate::gzguts_h::GZ_READ && gzseek_error_allows_positioning(err)
+}
+
+fn gzseek_error_allows_positioning(err: ::core::ffi::c_int) -> bool {
+    err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR
 }
 
 fn gzseek_adjust_offset(
@@ -213,6 +216,38 @@ fn gzseek_can_fast_forward(
     mode == crate::gzguts_h::GZ_READ
         && how == crate::gzguts_h::COPY
         && position + offset >= 0 as crate::stdlib::off64_t
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GzSeekOffsetPlan {
+    offset: crate::stdlib::off64_t,
+    rewind: bool,
+}
+
+fn gzseek_plan_remaining_offset(
+    mode: ::core::ffi::c_int,
+    position: crate::stdlib::off64_t,
+    offset: crate::stdlib::off64_t,
+) -> Option<GzSeekOffsetPlan> {
+    if offset >= 0 {
+        return Some(GzSeekOffsetPlan {
+            offset,
+            rewind: false,
+        });
+    }
+    if mode != crate::gzguts_h::GZ_READ {
+        return None;
+    }
+
+    let offset = offset + position;
+    if offset < 0 {
+        return None;
+    }
+
+    Some(GzSeekOffsetPlan {
+        offset,
+        rewind: true,
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -640,17 +675,13 @@ pub unsafe extern "C" fn gzseek64(
         (*state).x.pos += offset;
         return (*state).x.pos;
     }
-    if offset < 0 as crate::stdlib::off64_t {
-        if (*state).mode != crate::gzguts_h::GZ_READ {
-            return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
-        }
-        offset += (*state).x.pos;
-        if offset < 0 as crate::stdlib::off64_t {
-            return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
-        }
-        if gzrewind(file) == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
-        }
+    let seek_plan = match gzseek_plan_remaining_offset((*state).mode, (*state).x.pos, offset) {
+        Some(plan) => plan,
+        None => return -1 as ::core::ffi::c_int as crate::stdlib::off64_t,
+    };
+    offset = seek_plan.offset;
+    if seek_plan.rewind && gzrewind(file) == -1 as ::core::ffi::c_int {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
         n = gzseek_read_buffer_consumed(
@@ -947,8 +978,9 @@ mod tests {
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
         gz_prepare_open, gz_reset_core, gzclearerr_core, gzerror_core,
         gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_read_buffer_consumed, gzseek_request_is_valid,
-        gztell64_core, GzErrorMessage, GzResetFields,
+        gzseek_can_fast_forward, gzseek_error_allows_positioning, gzseek_plan_remaining_offset,
+        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
+        GzResetFields, GzSeekOffsetPlan,
     };
 
     #[test]
@@ -1145,6 +1177,13 @@ mod tests {
     }
 
     #[test]
+    fn gzseek_positioning_errors_match_rewind_and_seek_requirements() {
+        assert!(gzseek_error_allows_positioning(crate::zlib_h::Z_OK));
+        assert!(gzseek_error_allows_positioning(crate::zlib_h::Z_BUF_ERROR));
+        assert!(!gzseek_error_allows_positioning(crate::zlib_h::Z_MEM_ERROR));
+    }
+
+    #[test]
     fn gzrewind_request_validation_requires_read_mode_and_recoverable_error() {
         assert!(gzrewind_request_is_valid(
             crate::gzguts_h::GZ_READ,
@@ -1162,6 +1201,40 @@ mod tests {
             crate::gzguts_h::GZ_READ,
             crate::zlib_h::Z_MEM_ERROR
         ));
+    }
+
+    #[test]
+    fn gzseek_remaining_offset_plan_keeps_nonnegative_offsets_in_place() {
+        assert_eq!(
+            gzseek_plan_remaining_offset(crate::gzguts_h::GZ_WRITE, 12, 5),
+            Some(GzSeekOffsetPlan {
+                offset: 5,
+                rewind: false,
+            })
+        );
+    }
+
+    #[test]
+    fn gzseek_remaining_offset_plan_rewinds_reads_for_valid_negative_targets() {
+        assert_eq!(
+            gzseek_plan_remaining_offset(crate::gzguts_h::GZ_READ, 12, -5),
+            Some(GzSeekOffsetPlan {
+                offset: 7,
+                rewind: true,
+            })
+        );
+    }
+
+    #[test]
+    fn gzseek_remaining_offset_plan_rejects_invalid_negative_targets() {
+        assert_eq!(
+            gzseek_plan_remaining_offset(crate::gzguts_h::GZ_WRITE, 12, -1),
+            None
+        );
+        assert_eq!(
+            gzseek_plan_remaining_offset(crate::gzguts_h::GZ_READ, 12, -13),
+            None
+        );
     }
 
     #[test]
