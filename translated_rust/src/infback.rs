@@ -1033,9 +1033,8 @@ unsafe fn inflate_back_end_boundary(
     };
     let end = inflate_back_end_impl(state);
     if end != crate::zlib_h::Z_STREAM_ERROR {
-        // The state was created by this callback pair, so destruction and
-        // deallocation must stay paired at the ABI boundary.
-        core::ptr::drop_in_place(state_allocation);
+        // Safe cleanup released the state's only owned member.  This callback
+        // owns and frees the allocation itself.
         zfree(strm.opaque, state_allocation.cast());
         strm.state = core::ptr::null_mut();
     }
