@@ -4652,7 +4652,7 @@ pub mod crc32_h {
         ],
     ];
 
-    pub static mut x2n_table: [crate::stdlib::z_crc_t; 32] = [
+    pub static x2n_table: [crate::stdlib::z_crc_t; 32] = [
         0x40000000 as ::core::ffi::c_int as crate::stdlib::z_crc_t,
         0x20000000 as ::core::ffi::c_int as crate::stdlib::z_crc_t,
         0x8000000 as ::core::ffi::c_int as crate::stdlib::z_crc_t,
@@ -4715,7 +4715,7 @@ pub const N: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
 
 pub const W: ::core::ffi::c_int = 8 as ::core::ffi::c_int;
 
-unsafe extern "C" fn byte_swap(mut word: z_word_t) -> z_word_t {
+fn byte_swap(word: z_word_t) -> z_word_t {
     return (word & 0xff00000000000000 as z_word_t) >> 56 as ::core::ffi::c_int
         | (word & 0xff000000000000 as ::core::ffi::c_long as z_word_t) >> 40 as ::core::ffi::c_int
         | (word & 0xff0000000000 as ::core::ffi::c_long as z_word_t) >> 24 as ::core::ffi::c_int
@@ -4728,8 +4728,8 @@ unsafe extern "C" fn byte_swap(mut word: z_word_t) -> z_word_t {
 
 pub const POLY: ::core::ffi::c_uint = 0xedb88320 as ::core::ffi::c_uint;
 
-unsafe extern "C" fn multmodp(
-    mut a: crate::stdlib::uLong,
+fn multmodp(
+    a: crate::stdlib::uLong,
     mut b: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
     let mut m: crate::stdlib::uLong = 0;
@@ -4753,7 +4753,7 @@ unsafe extern "C" fn multmodp(
     return p;
 }
 
-unsafe extern "C" fn x2nmodp(
+fn x2nmodp(
     mut n: crate::stdlib::off64_t,
     mut k: ::core::ffi::c_uint,
 ) -> crate::stdlib::uLong {
@@ -5051,9 +5051,7 @@ pub unsafe extern "C" fn crc32_ffi(
 ) -> crate::stdlib::uLong {
     crc32(crc, buf, len)
 }
-pub unsafe extern "C" fn crc32_combine_gen64(
-    mut len2: crate::stdlib::off64_t,
-) -> crate::stdlib::uLong {
+pub fn crc32_combine_gen64(len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
     if len2 < 0 as crate::stdlib::off64_t {
         return 0 as crate::stdlib::uLong;
     }
@@ -5066,7 +5064,7 @@ pub unsafe extern "C" fn crc32_combine_gen64_ffi(
 ) -> crate::stdlib::uLong {
     crc32_combine_gen64(len2)
 }
-pub unsafe extern "C" fn crc32_combine_gen(mut len2: crate::stdlib::off_t) -> crate::stdlib::uLong {
+pub fn crc32_combine_gen(len2: crate::stdlib::off_t) -> crate::stdlib::uLong {
     return crc32_combine_gen64(len2);
 }
 #[export_name = "crc32_combine_gen"]
@@ -5076,10 +5074,10 @@ pub unsafe extern "C" fn crc32_combine_gen_ffi(
 ) -> crate::stdlib::uLong {
     crc32_combine_gen(len2)
 }
-pub unsafe extern "C" fn crc32_combine_op(
-    mut crc1: crate::stdlib::uLong,
-    mut crc2: crate::stdlib::uLong,
-    mut op: crate::stdlib::uLong,
+pub fn crc32_combine_op(
+    crc1: crate::stdlib::uLong,
+    crc2: crate::stdlib::uLong,
+    op: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
     if op == 0 as crate::stdlib::uLong {
         return 0 as crate::stdlib::uLong;
@@ -5096,10 +5094,10 @@ pub unsafe extern "C" fn crc32_combine_op_ffi(
 ) -> crate::stdlib::uLong {
     crc32_combine_op(crc1, crc2, op)
 }
-pub unsafe extern "C" fn crc32_combine64(
-    mut crc1: crate::stdlib::uLong,
-    mut crc2: crate::stdlib::uLong,
-    mut len2: crate::stdlib::off64_t,
+pub fn crc32_combine64(
+    crc1: crate::stdlib::uLong,
+    crc2: crate::stdlib::uLong,
+    len2: crate::stdlib::off64_t,
 ) -> crate::stdlib::uLong {
     return crc32_combine_op(crc1, crc2, crc32_combine_gen64(len2));
 }
@@ -5112,10 +5110,10 @@ pub unsafe extern "C" fn crc32_combine64_ffi(
 ) -> crate::stdlib::uLong {
     crc32_combine64(crc1, crc2, len2)
 }
-pub unsafe extern "C" fn crc32_combine(
-    mut crc1: crate::stdlib::uLong,
-    mut crc2: crate::stdlib::uLong,
-    mut len2: crate::stdlib::off_t,
+pub fn crc32_combine(
+    crc1: crate::stdlib::uLong,
+    crc2: crate::stdlib::uLong,
+    len2: crate::stdlib::off_t,
 ) -> crate::stdlib::uLong {
     return crc32_combine64(crc1, crc2, len2);
 }
