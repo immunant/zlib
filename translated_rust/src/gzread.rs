@@ -595,11 +595,12 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         return -1 as ::core::ffi::c_int;
     }
     let header = if (*strm).avail_in > 3 as crate::stdlib::uInt {
+        let next_in = (*strm).next_in;
         Some([
-            *(*strm).next_in.offset(0 as ::core::ffi::c_int as isize),
-            *(*strm).next_in.offset(1 as ::core::ffi::c_int as isize),
-            *(*strm).next_in.offset(2 as ::core::ffi::c_int as isize),
-            *(*strm).next_in.offset(3 as ::core::ffi::c_int as isize),
+            *next_in,
+            *next_in.wrapping_add(1),
+            *next_in.wrapping_add(2),
+            *next_in.wrapping_add(3),
         ])
     } else {
         None
