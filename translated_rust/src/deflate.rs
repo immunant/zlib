@@ -2706,6 +2706,64 @@ struct DeflateOwnedStorage {
     pending: Box<[crate::stdlib::Bytef]>,
 }
 
+// The owner-backed copy path must not need to know whether its storage came
+// from a Rust allocation or a callback-pairing broker.  Keep the copy kernel
+// on typed slice views; the broker alone will establish those views from its
+// owned allocations after preserving the callback-visible allocation order.
+struct DeflateCopySourceViews<'a> {
+    window: &'a [crate::stdlib::Bytef],
+    prev: &'a [crate::src::deflate::Posf],
+    head: &'a [crate::src::deflate::Posf],
+    pending: &'a [crate::stdlib::Bytef],
+}
+
+struct DeflateCopyDestinationViews<'a> {
+    window: &'a mut [crate::stdlib::Bytef],
+    prev: &'a mut [crate::src::deflate::Posf],
+    head: &'a mut [crate::src::deflate::Posf],
+    pending: &'a mut [crate::stdlib::Bytef],
+}
+
+impl DeflateOwnedStorage {
+    fn destination_views(&mut self) -> DeflateCopyDestinationViews<'_> {
+        DeflateCopyDestinationViews {
+            window: self.window.as_mut(),
+            prev: self.prev.as_mut(),
+            head: self.head.as_mut(),
+            pending: self.pending.as_mut(),
+        }
+    }
+}
+
+// Copy exactly the initialized logical ranges of a deflate state.  Both
+// source and destination are already bounded typed views, so this remains
+// usable by the eventual custom-allocation owner without raw projections.
+fn copy_deflate_storage_views(
+    source: DeflateCopySourceViews<'_>,
+    destination: DeflateCopyDestinationViews<'_>,
+    layout: &DeflateCopyLayout,
+) -> bool {
+    if layout.window_bytes > source.window.len()
+        || layout.window_bytes > destination.window.len()
+        || layout.prev_entries > source.prev.len()
+        || layout.prev_entries > destination.prev.len()
+        || layout.head_entries > source.head.len()
+        || layout.head_entries > destination.head.len()
+        || layout.pending.as_ref().is_some_and(|regions| {
+            !regions.fits_within(source.pending.len())
+                || !regions.fits_within(destination.pending.len())
+        })
+    {
+        return false;
+    }
+    destination.window[..layout.window_bytes]
+        .copy_from_slice(&source.window[..layout.window_bytes]);
+    destination.prev[..layout.prev_entries].copy_from_slice(&source.prev[..layout.prev_entries]);
+    destination.head[..layout.head_entries].copy_from_slice(&source.head[..layout.head_entries]);
+    copy_pending_regions(source.pending, destination.pending, layout.pending.as_ref());
+    true
+}
+
 impl DeflateStorageLayout {
     fn allocate_owned(&self) -> Option<DeflateOwnedStorage> {
         fn allocate_zeroed<T: Clone>(len: usize, value: T) -> Option<Box<[T]>> {
@@ -2983,7 +3041,7 @@ impl PendingRegions {
 fn copy_pending_regions(
     source: &[crate::stdlib::Bytef],
     destination: &mut [crate::stdlib::Bytef],
-    regions: Option<PendingRegions>,
+    regions: Option<&PendingRegions>,
 ) {
     let Some(regions) = regions else {
         return;
@@ -3989,7 +4047,7 @@ pub unsafe extern "C" fn deflateCopy(
         ds.pending_buf.expect("initialized pending buffer").as_ptr(),
         ds.pending_buf_size as usize,
     );
-    copy_pending_regions(source_pending, destination_pending, copy_layout.pending);
+    copy_pending_regions(source_pending, destination_pending, copy_layout.pending.as_ref());
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
