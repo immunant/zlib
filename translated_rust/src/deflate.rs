@@ -52,9 +52,8 @@ pub struct C2Rust_Unnamed_1 {
 #[derive(Copy, Clone)]
 #[repr(C)]
 
-pub union C2Rust_Unnamed_0 {
-    pub dad: crate::zutil_h::ush,
-    pub len: crate::zutil_h::ush,
+pub struct C2Rust_Unnamed_0 {
+    pub value: crate::zutil_h::ush,
 }
 
 pub type static_tree_desc = crate::src::deflate::static_tree_desc_s;
