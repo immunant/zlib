@@ -1035,7 +1035,56 @@ pub unsafe extern "C" fn deflateInit2_(
     state.level = layout.level;
     state.strategy = strategy;
     state.method = method as crate::stdlib::Byte;
-    return deflateReset(strm);
+    // The state is already installed and all four callback allocations have
+    // succeeded.  Apply the ordinary reset policy directly through the
+    // pointer-free reset core instead of re-entering the raw stream API.
+    // The one remaining projection is bounded by the exact head allocation
+    // request in `storage`.
+    stream.total_out = 0;
+    stream.total_in = 0;
+    stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    stream.data_type = crate::zlib_h::Z_UNKNOWN;
+    stream.adler = reset_keep_core(
+        &mut state.pending,
+        &mut state.pending_out,
+        &mut state.wrap,
+        &mut state.status,
+        &mut state.last_flush,
+        &mut state.dyn_ltree,
+        &mut state.dyn_dtree,
+        &mut state.bl_tree,
+        &mut state.l_desc,
+        &mut state.d_desc,
+        &mut state.bl_desc,
+        &mut state.static_len,
+        &mut state.opt_len,
+        &mut state.matches,
+        &mut state.sym_next,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &mut state.bi_used,
+    );
+    state.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
+        .wrapping_mul(state.w_size as crate::zutil_h::ulg);
+    let head = ::core::slice::from_raw_parts_mut(
+        state.head.expect("initialized head table").as_ptr(),
+        state.hash_size as usize,
+    );
+    clear_hash_table(head);
+    state.slid = 0;
+    state.max_lazy_match = configuration_table[state.level as usize].max_lazy as crate::stdlib::uInt;
+    state.good_match = configuration_table[state.level as usize].good_length as crate::stdlib::uInt;
+    state.nice_match = configuration_table[state.level as usize].nice_length as ::core::ffi::c_int;
+    state.max_chain_length = configuration_table[state.level as usize].max_chain as crate::stdlib::uInt;
+    state.strstart = 0;
+    state.block_start = 0;
+    state.lookahead = 0;
+    state.insert = 0;
+    state.prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    state.match_length = state.prev_length;
+    state.match_available = 0;
+    state.ins_h = 0;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateInit2_"]
 
