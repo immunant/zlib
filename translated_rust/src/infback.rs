@@ -342,6 +342,16 @@ fn inflate_back_begin_decode(
     state.wsize
 }
 
+// `inflateBack()` treats a null initial cursor as an empty initial input
+// buffer, irrespective of the accompanying count.  The general inflater
+// correctly rejects that pair for its public API, so normalize the callback
+// API's distinct convention before dispatching to it.
+fn inflate_back_normalize_initial_input(stream: &mut crate::zlib_h::z_stream) {
+    if stream.next_in.is_null() {
+        stream.avail_in = 0;
+    }
+}
+
 // `next_in` itself remains a raw cursor owned by the decoder.  Once it has
 // established whether that cursor is present, deriving the accompanying
 // available-byte count is ordinary stream bookkeeping.
@@ -1147,6 +1157,7 @@ pub(crate) fn inflateBack(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_back_begin_decode(strm, state);
+    inflate_back_normalize_initial_input(strm);
     let callback_window = state.window;
     let window_size = state.wsize as usize;
     let saved_next_out = strm.next_out;
