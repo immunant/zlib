@@ -1584,6 +1584,14 @@ enum DeflateStorageProjection<'request> {
         dictionary: &'request [crate::stdlib::Bytef],
         result: &'request mut ::core::ffi::c_int,
     },
+    // A dictionary query shares the same callback-owned window projection as
+    // installation, but its copy and length publication remain in the
+    // pointer-free dictionary owner below this boundary.
+    DictionaryQuery {
+        dictionary: Option<&'request mut [crate::stdlib::Bytef]>,
+        dict_length: Option<&'request mut crate::stdlib::uInt>,
+        result: &'request mut ::core::ffi::c_int,
+    },
 }
 
 // The caller first checks and borrows the ABI stream, then this short-lived
@@ -1644,7 +1652,8 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             pending: None,
         },
         DeflateStorageProjection::Dictionary
-        | DeflateStorageProjection::DictionaryInstall { .. } => DeflateCallbackStorage {
+        | DeflateStorageProjection::DictionaryInstall { .. }
+        | DeflateStorageProjection::DictionaryQuery { .. } => DeflateCallbackStorage {
             window: Some(::core::slice::from_raw_parts_mut(
                 state.window.expect("initialized window").as_ptr(),
                 storage_layout
@@ -1744,6 +1753,32 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                 pending: None,
             },
         ));
+    }
+    if let DeflateStorageProjection::DictionaryQuery {
+        dictionary,
+        dict_length,
+        result,
+    } = projection
+    {
+        let Some(window) = storage.window.as_deref() else {
+            return Some((strm, state, storage));
+        };
+        let mut len = state.strstart.wrapping_add(state.lookahead);
+        if len > state.w_size {
+            len = state.w_size;
+        }
+        let len = len as usize;
+        let end = state.strstart.wrapping_add(state.lookahead) as usize;
+        *result = deflate_get_dictionary(
+            DeflateDictionaryRequest {
+                window,
+                start: end - len,
+                len,
+            },
+            dictionary,
+            dict_length,
+        );
+        return Some((strm, state, storage));
     }
     Some((strm, state, storage))
 }
@@ -2058,40 +2093,6 @@ impl DeflateDictionaryRequest<'_> {
     }
 }
 
-// The ABI stream is the only place that carries the opaque state and its
-// callback-owned window.  The export has already formed zlib's fixed maximum
-// output view, so this boundary only selects the live history prefix before
-// dispatching to the raw-pointer-free copy core.
-unsafe fn deflateGetDictionary(
-    strm: &mut crate::zlib_h::z_stream_s,
-    dictionary: Option<&mut [crate::stdlib::Bytef]>,
-    dict_length: Option<&mut crate::stdlib::uInt>,
-) -> ::core::ffi::c_int {
-    let (_strm, state, storage) =
-        match deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary) {
-            Some(projection) => projection,
-            None => return crate::zlib_h::Z_STREAM_ERROR,
-        };
-    let mut len = state.strstart.wrapping_add(state.lookahead);
-    if len > state.w_size {
-        len = state.w_size;
-    }
-    let len = len as usize;
-    let end = state.strstart.wrapping_add(state.lookahead) as usize;
-    // `Dictionary` establishes the bounded callback window together with the
-    // state projection.  Reuse that view instead of rebuilding it here.
-    let window: &[crate::stdlib::Bytef] = storage.window.expect("dictionary window projection");
-    deflate_get_dictionary(
-        DeflateDictionaryRequest {
-            window,
-            start: end - len,
-            len,
-        },
-        dictionary,
-        dict_length,
-    )
-}
-
 fn deflate_get_dictionary(
     request: DeflateDictionaryRequest<'_>,
     dictionary: Option<&mut [crate::stdlib::Bytef]>,
@@ -2127,7 +2128,16 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
             1usize << crate::stdlib::MAX_WBITS,
         ))
     };
-    deflateGetDictionary(strm, dictionary, dictLength.as_mut())
+    let mut result = crate::zlib_h::Z_STREAM_ERROR;
+    let _ = deflate_stream_and_state(
+        strm,
+        DeflateStorageProjection::DictionaryQuery {
+            dictionary,
+            dict_length: dictLength.as_mut(),
+            result: &mut result,
+        },
+    );
+    result
 }
 // Reset state that contains no allocation handles or stream backlinks.  The
 // ABI-facing caller projects these fields once, leaving reset policy and tree
