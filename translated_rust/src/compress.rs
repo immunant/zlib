@@ -221,7 +221,7 @@ pub unsafe extern "C" fn compressBound_z_ffi(
 ) -> crate::stdlib::z_size_t {
     compressBound_z(sourceLen)
 }
-pub unsafe extern "C" fn compressBound(
+pub extern "C" fn compressBound(
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
     let mut bound: crate::stdlib::z_size_t = compressBound_z(sourceLen as crate::stdlib::z_size_t);
