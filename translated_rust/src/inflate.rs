@@ -695,18 +695,20 @@ fn inflate_code_index(code_start: usize, code_len: usize, cursor: usize) -> Opti
 /// Fixed tables have stable static storage; dynamic tables live in `codes`.
 /// The codec boundary uses this only to lend the safe fast decoder its table
 /// views, never to dereference either raw compatibility cursor directly.
-fn inflate_fast_tables(
-    state: &inflate_state,
+pub(crate) fn inflate_fast_tables(
+    codes: &[crate::src::inftrees::code],
+    lencode: usize,
+    distcode: usize,
 ) -> Option<(&[crate::src::inftrees::code], &[crate::src::inftrees::code])> {
-    let lcode = if state.lencode == crate::src::inftrees::inffixed_h::lenfix.as_ptr() {
+    let lcode = if lencode == crate::src::inftrees::inffixed_h::lenfix.as_ptr() as usize {
         Some(&crate::src::inftrees::inffixed_h::lenfix[..])
     } else {
-        inflate_fast_dynamic_table(&state.codes, state.lencode as usize)
+        inflate_fast_dynamic_table(codes, lencode)
     };
-    let dcode = if state.distcode == crate::src::inftrees::inffixed_h::distfix.as_ptr() {
+    let dcode = if distcode == crate::src::inftrees::inffixed_h::distfix.as_ptr() as usize {
         Some(&crate::src::inftrees::inffixed_h::distfix[..])
     } else {
-        inflate_fast_dynamic_table(&state.codes, state.distcode as usize)
+        inflate_fast_dynamic_table(codes, distcode)
     };
     Some((lcode?, dcode?))
 }
@@ -2040,9 +2042,14 @@ pub unsafe fn inflate(
                                                         wsize,
                                                     ))
                                                 };
-                                                if let (Some(window), Some((lcode, dcode))) =
-                                                    (window, inflate_fast_tables(state_ref))
-                                                {
+                                                if let (Some(window), Some((lcode, dcode))) = (
+                                                    window,
+                                                    inflate_fast_tables(
+                                                        &state_ref.codes,
+                                                        state_ref.lencode as usize,
+                                                        state_ref.distcode as usize,
+                                                    ),
+                                                ) {
                                                     let input = ::core::slice::from_raw_parts(
                                                         next,
                                                         have as usize,

@@ -782,27 +782,13 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     let output_start = (put as usize)
                         .checked_sub(state_ref.window as usize)
                         .filter(|offset| *offset <= wsize);
-                    let lcode =
-                        if state_ref.lencode == crate::src::inftrees::inffixed_h::lenfix.as_ptr() {
-                            Some(&crate::src::inftrees::inffixed_h::lenfix[..])
-                        } else {
-                            crate::src::inflate::inflate_fast_dynamic_table(
-                                &state_ref.codes,
-                                state_ref.lencode as usize,
-                            )
-                        };
-                    let dcode = if state_ref.distcode
-                        == crate::src::inftrees::inffixed_h::distfix.as_ptr()
-                    {
-                        Some(&crate::src::inftrees::inffixed_h::distfix[..])
-                    } else {
-                        crate::src::inflate::inflate_fast_dynamic_table(
-                            &state_ref.codes,
-                            state_ref.distcode as usize,
-                        )
-                    };
-                    match (output_start, lcode, dcode) {
-                        (Some(output_start), Some(lcode), Some(dcode))
+                    let tables = crate::src::inflate::inflate_fast_tables(
+                        &state_ref.codes,
+                        state_ref.lencode as usize,
+                        state_ref.distcode as usize,
+                    );
+                    match (output_start, tables) {
+                        (Some(output_start), Some((lcode, dcode)))
                             if !next.is_null() && !state_ref.window.is_null() =>
                         {
                             let input = ::core::slice::from_raw_parts(next, have as usize);
