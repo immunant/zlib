@@ -99,6 +99,25 @@ enum InflateBackCodeLengthRepeat {
     Zero,
 }
 
+#[derive(Copy, Clone)]
+enum InflateBackLengthCode {
+    Literal,
+    End,
+    Invalid,
+    Match {
+        extra: ::core::ffi::c_uint,
+    },
+}
+
+#[derive(Copy, Clone)]
+enum InflateBackDistanceCode {
+    Invalid,
+    Distance {
+        offset: ::core::ffi::c_uint,
+        extra: ::core::ffi::c_uint,
+    },
+}
+
 fn inflate_back_state_config(window_bits: ::core::ffi::c_int) -> InflateBackStateConfig {
     InflateBackStateConfig {
         dmax: 32768 as ::core::ffi::c_uint,
@@ -149,6 +168,42 @@ fn inflate_back_code_length_repeat(
         17 => (InflateBackCodeLengthRepeat::Zero, 3, 3),
         _ => (InflateBackCodeLengthRepeat::Zero, 11, 7),
     }
+}
+
+fn inflate_back_length_code(code: crate::src::inftrees::code) -> InflateBackLengthCode {
+    let op = code.op as ::core::ffi::c_uint;
+    if op == 0 {
+        InflateBackLengthCode::Literal
+    } else if op & 32 != 0 {
+        InflateBackLengthCode::End
+    } else if op & 64 != 0 {
+        InflateBackLengthCode::Invalid
+    } else {
+        InflateBackLengthCode::Match {
+            extra: op & 15,
+        }
+    }
+}
+
+fn inflate_back_distance_code(code: crate::src::inftrees::code) -> InflateBackDistanceCode {
+    let op = code.op as ::core::ffi::c_uint;
+    if op & 64 != 0 {
+        InflateBackDistanceCode::Invalid
+    } else {
+        InflateBackDistanceCode::Distance {
+            offset: code.val as ::core::ffi::c_uint,
+            extra: op & 15,
+        }
+    }
+}
+
+fn inflate_back_length_code_needs_subtable(code: crate::src::inftrees::code) -> bool {
+    let op = code.op as ::core::ffi::c_uint;
+    op != 0 && op & 0xf0 == 0
+}
+
+fn inflate_back_distance_code_needs_subtable(code: crate::src::inftrees::code) -> bool {
+    (code.op as ::core::ffi::c_uint) & 0xf0 == 0
 }
 
 fn inflate_back_low_bits(
@@ -824,10 +879,7 @@ pub unsafe extern "C" fn inflateBack(
                 hold = hold.wrapping_add((*c2rust_fresh13 as ::core::ffi::c_ulong) << bits);
                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
             }
-            if here.op as ::core::ffi::c_int != 0
-                && here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
-                    == 0 as ::core::ffi::c_int
-            {
+            if inflate_back_length_code_needs_subtable(here) {
                 last = here;
                 loop {
                     here = *(*state)
@@ -865,7 +917,8 @@ pub unsafe extern "C" fn inflateBack(
                 here.bits as ::core::ffi::c_uint,
             );
             (*state).length = here.val as ::core::ffi::c_uint;
-            if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+            match inflate_back_length_code(here) {
+                InflateBackLengthCode::Literal => {
                 if left == 0 as ::core::ffi::c_uint {
                     put = (*state).window;
                     left = (*state).wsize;
@@ -880,15 +933,18 @@ pub unsafe extern "C" fn inflateBack(
                 *c2rust_fresh15 = (*state).length as ::core::ffi::c_uchar;
                 left = left.wrapping_sub(1);
                 (*state).mode = crate::src::inflate::LEN;
-            } else if here.op as ::core::ffi::c_int & 32 as ::core::ffi::c_int != 0 {
+                }
+                InflateBackLengthCode::End => {
                 (*state).mode = crate::src::inflate::TYPE;
-            } else if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
+                }
+                InflateBackLengthCode::Invalid => {
                 (*strm).msg = b"invalid literal/length code\0".as_ptr()
                     as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
                 (*state).mode = crate::src::inflate::BAD;
-            } else {
-                (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
+                }
+                InflateBackLengthCode::Match { extra } => {
+                (*state).extra = extra;
                 if (*state).extra != 0 as ::core::ffi::c_uint {
                     while bits < (*state).extra {
                         if have == 0 as ::core::ffi::c_uint {
@@ -932,9 +988,7 @@ pub unsafe extern "C" fn inflateBack(
                     hold = hold.wrapping_add((*c2rust_fresh17 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
-                    == 0 as ::core::ffi::c_int
-                {
+                if inflate_back_distance_code_needs_subtable(here) {
                     last = here;
                     loop {
                         here = *(*state)
@@ -971,13 +1025,15 @@ pub unsafe extern "C" fn inflateBack(
                     &mut bits,
                     here.bits as ::core::ffi::c_uint,
                 );
-                if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
+                match inflate_back_distance_code(here) {
+                    InflateBackDistanceCode::Invalid => {
                     (*strm).msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     (*state).mode = crate::src::inflate::BAD;
-                } else {
-                    (*state).offset = here.val as ::core::ffi::c_uint;
-                    (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
+                    }
+                    InflateBackDistanceCode::Distance { offset, extra } => {
+                    (*state).offset = offset;
+                    (*state).extra = extra;
                     if (*state).extra != 0 as ::core::ffi::c_uint {
                         while bits < (*state).extra {
                             if have == 0 as ::core::ffi::c_uint {
@@ -1052,6 +1108,8 @@ pub unsafe extern "C" fn inflateBack(
                             }
                         }
                     }
+                    }
+                }
                 }
             }
         }
