@@ -1630,35 +1630,13 @@ fn deflate_dictionary_len(
     strstart.wrapping_add(lookahead).min(w_size)
 }
 
-pub unsafe extern "C" fn deflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut len: crate::stdlib::uInt = 0;
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
+fn deflate_get_dictionary_core(
+    dictionary_source: &[crate::stdlib::Bytef],
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+) {
+    if let Some(dictionary) = dictionary {
+        dictionary.copy_from_slice(dictionary_source);
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    let (strstart, lookahead, w_size, window) =
-        ((*s).strstart, (*s).lookahead, (*s).w_size, (*s).window);
-    len = deflate_dictionary_len(strstart, lookahead, w_size);
-    if !dictionary.is_null() && len != 0 {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            window
-                .offset(strstart as isize)
-                .offset(lookahead as isize)
-                .offset(-(len as isize)) as *const ::core::ffi::c_void,
-            len as crate::__stddef_size_t_h::size_t,
-        );
-    }
-    if !dictLength.is_null() {
-        *dictLength = len;
-    }
-    return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateGetDictionary"]
 
@@ -1667,7 +1645,25 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateGetDictionary(strm, dictionary, dictLength)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+
+    let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let len = deflate_dictionary_len(state.strstart, state.lookahead, state.w_size);
+    if !dictionary.is_null() && len != 0 {
+        let start = state
+            .strstart
+            .wrapping_add(state.lookahead)
+            .wrapping_sub(len) as usize;
+        let dictionary_source = core::slice::from_raw_parts(state.window.add(start), len as usize);
+        let dictionary = core::slice::from_raw_parts_mut(dictionary, len as usize);
+        deflate_get_dictionary_core(dictionary_source, Some(dictionary));
+    }
+    if !dictLength.is_null() {
+        *dictLength = len;
+    }
+    crate::zlib_h::Z_OK
 }
 
 fn deflate_reset_keep_state(
