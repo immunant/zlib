@@ -4071,24 +4071,6 @@ fn build_tree_impl(
     gen_codes(&mut tree[..elems as usize], max_code, workspace.bl_count);
 }
 
-// The deflater stores its dynamic trees behind C-compatible pointers. Bind
-// those pointers exactly once here; the construction algorithm above has no
-// raw-pointer operations.
-unsafe fn build_tree(
-    s: *mut crate::src::deflate::deflate_state,
-    desc: *mut crate::src::deflate::tree_desc,
-) {
-    let state = &mut *s;
-    let desc = &mut *desc;
-    let stat_desc = &*desc.stat_desc;
-    let tree = ::core::slice::from_raw_parts_mut(
-        desc.dyn_tree,
-        (stat_desc.elems * 2 + 1) as usize,
-    );
-    let mut workspace = tree_build_workspace(state);
-    build_tree_impl(&mut workspace, desc, tree, stat_desc);
-}
-
 fn scan_tree_impl(
     bl_tree: &mut [crate::src::deflate::ct_data],
     tree: &mut [crate::src::deflate::ct_data],
@@ -4150,18 +4132,6 @@ fn scan_tree_impl(
     }
 }
 
-// The dynamic trees are stored behind C-compatible pointers. Bind the exact
-// run plus its sentinel once; scanning itself is ordinary slice indexing.
-unsafe fn scan_tree(
-    s: *mut crate::src::deflate::deflate_state,
-    tree: *mut crate::src::deflate::ct_data,
-    max_code: ::core::ffi::c_int,
-) {
-    let state = &mut *s;
-    let tree = ::core::slice::from_raw_parts_mut(tree, (max_code + 2) as usize);
-    scan_tree_impl(&mut state.bl_tree, tree, max_code);
-}
-
 fn send_tree_code(
     state: &mut crate::src::deflate::deflate_state,
     pending: &mut [crate::zutil_h::uch],
@@ -4219,21 +4189,6 @@ fn send_tree_impl(
             (7, 4)
         };
     }
-}
-
-// The dynamic tree includes a sentinel at `max_code + 1`, set by
-// `scan_tree()`. Bind that run and the pending allocation once, then leave
-// code emission to checked slice operations.
-unsafe fn send_tree(
-    s: *mut crate::src::deflate::deflate_state,
-    tree: *mut crate::src::deflate::ct_data,
-    max_code: ::core::ffi::c_int,
-) {
-    let state = &mut *s;
-    let tree = ::core::slice::from_raw_parts(tree, (max_code + 2) as usize);
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    send_tree_impl(state, tree, max_code, pending);
 }
 
 // Scanning the literal and distance trees and constructing their bit-length
@@ -4315,12 +4270,6 @@ fn build_bl_tree_from_inline(
     )
 }
 
-// The raw adapter is retained for internal C-compatible callers.  The tree
-// construction itself is reference- and slice-based in the helper above.
-unsafe fn build_bl_tree(s: *mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
-    build_bl_tree_from_inline(&mut *s)
-}
-
 // Dynamic-header construction uses only bounded inline trees and the pending
 // allocation already owned by the deflater. Copying the two source arrays
 // makes their immutable traversal disjoint from bit-buffer updates on state.
@@ -4345,20 +4294,6 @@ fn send_all_trees_impl(
     send_tree_impl(state, &dtree[..dcodes as usize + 1], dcodes - 1, pending);
 }
 
-// The deflater stores its pending output behind a C-compatible pointer. Bind
-// it once here; all dynamic-header policy and traversal stay in the safe
-// implementation above.
-unsafe fn send_all_trees(
-    s: *mut crate::src::deflate::deflate_state,
-    lcodes: ::core::ffi::c_int,
-    dcodes: ::core::ffi::c_int,
-    blcodes: ::core::ffi::c_int,
-) {
-    let state = &mut *s;
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    send_all_trees_impl(state, pending, lcodes, dcodes, blcodes);
-}
 // Once the deflater's allocation and source range are bound, emitting a
 // stored block is ordinary bit-buffer and slice work. Keeping it here avoids
 // repeating raw pending-buffer writes in deflate's internal callers.
@@ -4459,22 +4394,6 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     _tr_align(s)
 }
-unsafe fn compress_block(
-    s: *mut crate::src::deflate::deflate_state,
-    ltree: *const crate::src::deflate::ct_data,
-    dtree: *const crate::src::deflate::ct_data,
-) {
-    // This internal dispatcher owns all raw bindings. The emitter below sees
-    // only bounded Rust slices.
-    let state = &mut *s;
-    let ltree = ::core::slice::from_raw_parts(ltree, crate::src::deflate::L_CODES as usize);
-    let dtree = ::core::slice::from_raw_parts(dtree, crate::src::deflate::D_CODES as usize);
-    let symbols = ::core::slice::from_raw_parts(state.sym_buf, state.sym_next as usize);
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    compress_block_impl(state, ltree, dtree, symbols, pending);
-}
-
 fn send_compressed_tree_code(
     state: &mut crate::src::deflate::deflate_state,
     pending: &mut [crate::zutil_h::uch],
