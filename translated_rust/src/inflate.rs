@@ -1001,9 +1001,14 @@ pub unsafe extern "C" fn inflate(
                                                                                                     if left == 0 as ::core::ffi::c_uint {
                                                                                                         break '_inf_leave;
                                                                                                     }
-                                                                                                    let c2rust_fresh32 = put;
-                                                                                                    put = put.offset(1);
-                                                                                                    *c2rust_fresh32 = (*state).length as ::core::ffi::c_uchar;
+                                                                                                    let destination = ::core::slice::from_raw_parts_mut(
+                                                                                                        put, 1,
+                                                                                                    );
+                                                                                                    destination[0] = (*state).length
+                                                                                                        as ::core::ffi::c_uchar;
+                                                                                                    put = destination
+                                                                                                        .as_mut_ptr()
+                                                                                                        .wrapping_add(1);
                                                                                                     left = left.wrapping_sub(1);
                                                                                                     (*state).mode = crate::src::inflate::LEN;
                                                                                                     continue '_inf_leave;
@@ -1519,19 +1524,31 @@ pub unsafe extern "C" fn inflate(
                                                                         // This is the translated C `memcpy` path.
                                                                         // Input and output are distinct non-overlapping
                                                                         // caller ranges by inflate's existing contract.
-                                                                        ::core::ptr::copy_nonoverlapping(
-                                                                            next,
+                                                                        let input_start = in_0
+                                                                            .wrapping_sub(have)
+                                                                            as usize;
+                                                                        let copy_len =
+                                                                            copy as usize;
+                                                                        let destination = ::core::slice::from_raw_parts_mut(
                                                                             put,
-                                                                            copy as usize,
+                                                                            copy_len,
                                                                         );
+                                                                        destination
+                                                                            .copy_from_slice(
+                                                                                &input[input_start
+                                                                                    ..input_start
+                                                                                        + copy_len],
+                                                                            );
                                                                         have =
                                                                             have.wrapping_sub(copy);
-                                                                        next = next
-                                                                            .offset(copy as isize);
+                                                                        next = input[in_0.wrapping_sub(have) as usize..]
+                                                                            .as_ptr()
+                                                                            as *mut ::core::ffi::c_uchar;
                                                                         left =
                                                                             left.wrapping_sub(copy);
-                                                                        put = put
-                                                                            .offset(copy as isize);
+                                                                        put = destination
+                                                                            .as_mut_ptr()
+                                                                            .wrapping_add(copy_len);
                                                                         (*state).length = (*state)
                                                                             .length
                                                                             .wrapping_sub(copy);
@@ -1545,22 +1562,17 @@ pub unsafe extern "C" fn inflate(
                                                                     < 16 as ::core::ffi::c_int
                                                                         as ::core::ffi::c_uint
                                                                 {
-                                                                    if have
-                                                                        == 0 as ::core::ffi::c_uint
-                                                                    {
+                                                                    if !inflate_pull_byte(
+                                                                        input, in_0, &mut have,
+                                                                        &mut hold, &mut bits,
+                                                                    ) {
                                                                         break '_inf_leave;
                                                                     }
-                                                                    have = have.wrapping_sub(1);
-                                                                    let c2rust_fresh3 = next;
-                                                                    next = next.offset(1);
-                                                                    hold = hold.wrapping_add(
-                                                                        (*c2rust_fresh3
-                                                                            as ::core::ffi::c_ulong)
-                                                                            << bits,
-                                                                    );
-                                                                    bits = bits.wrapping_add(
-                                                                        8 as ::core::ffi::c_uint,
-                                                                    );
+                                                                    next = input[in_0
+                                                                        .wrapping_sub(have)
+                                                                        as usize..]
+                                                                        .as_ptr()
+                                                                        as *mut ::core::ffi::c_uchar;
                                                                 }
                                                                 if let Some(mut head) =
                                                                     (*state).head
@@ -1620,20 +1632,16 @@ pub unsafe extern "C" fn inflate(
                                                             < 3 as ::core::ffi::c_int
                                                                 as ::core::ffi::c_uint
                                                         {
-                                                            if have == 0 as ::core::ffi::c_uint {
+                                                            if !inflate_pull_byte(
+                                                                input, in_0, &mut have, &mut hold,
+                                                                &mut bits,
+                                                            ) {
                                                                 break '_inf_leave;
                                                             }
-                                                            have = have.wrapping_sub(1);
-                                                            let c2rust_fresh11 = next;
-                                                            next = next.offset(1);
-                                                            hold = hold.wrapping_add(
-                                                                (*c2rust_fresh11
-                                                                    as ::core::ffi::c_ulong)
-                                                                    << bits,
-                                                            );
-                                                            bits = bits.wrapping_add(
-                                                                8 as ::core::ffi::c_uint,
-                                                            );
+                                                            next = input
+                                                                [in_0.wrapping_sub(have) as usize..]
+                                                                .as_ptr()
+                                                                as *mut ::core::ffi::c_uchar;
                                                         }
                                                         (*state).last = (hold
                                                             as ::core::ffi::c_uint
@@ -1706,19 +1714,16 @@ pub unsafe extern "C" fn inflate(
                                                         < 16 as ::core::ffi::c_int
                                                             as ::core::ffi::c_uint
                                                     {
-                                                        if have == 0 as ::core::ffi::c_uint {
+                                                        if !inflate_pull_byte(
+                                                            input, in_0, &mut have, &mut hold,
+                                                            &mut bits,
+                                                        ) {
                                                             break '_inf_leave;
                                                         }
-                                                        have = have.wrapping_sub(1);
-                                                        let c2rust_fresh4 = next;
-                                                        next = next.offset(1);
-                                                        hold = hold.wrapping_add(
-                                                            (*c2rust_fresh4
-                                                                as ::core::ffi::c_ulong)
-                                                                << bits,
-                                                        );
-                                                        bits = bits
-                                                            .wrapping_add(8 as ::core::ffi::c_uint);
+                                                        next = input
+                                                            [in_0.wrapping_sub(have) as usize..]
+                                                            .as_ptr()
+                                                            as *mut ::core::ffi::c_uchar;
                                                     }
                                                     (*state).length = hold as ::core::ffi::c_uint;
                                                     if let Some(head) = (*state).head {
@@ -1799,17 +1804,14 @@ pub unsafe extern "C" fn inflate(
                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                     break;
                                                 }
-                                                if have == 0 as ::core::ffi::c_uint {
+                                                if !inflate_pull_byte(
+                                                    input, in_0, &mut have, &mut hold, &mut bits,
+                                                ) {
                                                     break '_inf_leave;
                                                 }
-                                                have = have.wrapping_sub(1);
-                                                let c2rust_fresh24 = next;
-                                                next = next.offset(1);
-                                                hold = hold.wrapping_add(
-                                                    (*c2rust_fresh24 as ::core::ffi::c_ulong)
-                                                        << bits,
-                                                );
-                                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                                next = input[in_0.wrapping_sub(have) as usize..]
+                                                    .as_ptr()
+                                                    as *mut ::core::ffi::c_uchar;
                                             }
                                             if here.op as ::core::ffi::c_int != 0
                                                 && here.op as ::core::ffi::c_int
@@ -1842,18 +1844,15 @@ pub unsafe extern "C" fn inflate(
                                                     {
                                                         break;
                                                     }
-                                                    if have == 0 as ::core::ffi::c_uint {
+                                                    if !inflate_pull_byte(
+                                                        input, in_0, &mut have, &mut hold,
+                                                        &mut bits,
+                                                    ) {
                                                         break '_inf_leave;
                                                     }
-                                                    have = have.wrapping_sub(1);
-                                                    let c2rust_fresh25 = next;
-                                                    next = next.offset(1);
-                                                    hold = hold.wrapping_add(
-                                                        (*c2rust_fresh25 as ::core::ffi::c_ulong)
-                                                            << bits,
-                                                    );
-                                                    bits =
-                                                        bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                                    next = input[in_0.wrapping_sub(have) as usize..]
+                                                        .as_ptr()
+                                                        as *mut ::core::ffi::c_uchar;
                                                 }
                                                 hold >>= last.bits as ::core::ffi::c_int;
                                                 bits = bits
@@ -1910,18 +1909,26 @@ pub unsafe extern "C" fn inflate(
                                                     // The caller input and the separately registered
                                                     // header-extra buffer have the original C memcpy
                                                     // non-overlap contract.
-                                                    ::core::ptr::copy_nonoverlapping(
-                                                        next,
-                                                        head.extra.add(len as usize),
-                                                        (if len.wrapping_add(copy) > head.extra_max
-                                                        {
-                                                            (head.extra_max as ::core::ffi::c_uint)
-                                                                .wrapping_sub(len)
-                                                        } else {
-                                                            copy
-                                                        })
-                                                            as usize,
+                                                    let input_start =
+                                                        in_0.wrapping_sub(have) as usize;
+                                                    let extra = ::core::slice::from_raw_parts_mut(
+                                                        head.extra,
+                                                        head.extra_max as usize,
                                                     );
+                                                    let copy_len = (if len.wrapping_add(copy)
+                                                        > head.extra_max
+                                                    {
+                                                        (head.extra_max as ::core::ffi::c_uint)
+                                                            .wrapping_sub(len)
+                                                    } else {
+                                                        copy
+                                                    })
+                                                        as usize;
+                                                    extra[len as usize..len as usize + copy_len]
+                                                        .copy_from_slice(
+                                                            &input[input_start
+                                                                ..input_start + copy_len],
+                                                        );
                                                 }
                                             }
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -1929,15 +1936,20 @@ pub unsafe extern "C" fn inflate(
                                             {
                                                 (*state).check = crate::src::crc32::crc32_z(
                                                     (*state).check as crate::stdlib::uLong,
-                                                    Some(::core::slice::from_raw_parts(
-                                                        next,
-                                                        copy as usize,
-                                                    )),
+                                                    Some(
+                                                        &input[in_0.wrapping_sub(have) as usize
+                                                            ..in_0
+                                                                .wrapping_sub(have)
+                                                                .wrapping_add(copy)
+                                                                as usize],
+                                                    ),
                                                 )
                                                     as ::core::ffi::c_ulong;
                                             }
                                             have = have.wrapping_sub(copy);
-                                            next = next.offset(copy as isize);
+                                            next = input[in_0.wrapping_sub(have) as usize..]
+                                                .as_ptr()
+                                                as *mut ::core::ffi::c_uchar;
                                             (*state).length = (*state).length.wrapping_sub(copy);
                                         }
                                         if (*state).length != 0 {
