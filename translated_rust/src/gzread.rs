@@ -60,6 +60,13 @@ fn gzread_state_is_valid(
         && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR || again != 0)
 }
 
+/// Reconcile an ABI cursor address with one owned buffer.  Callers convert
+/// raw cursors to scalar addresses at their boundary; this core rejects
+/// cursors before the allocation or past its end without creating a slice.
+fn gz_owned_buffer_index(base: usize, len: usize, cursor: usize) -> Option<usize> {
+    cursor.checked_sub(base).filter(|index| *index <= len)
+}
+
 /// Move unconsumed compressed input back to the beginning of its owned
 /// buffer before a refill.  The gzip adapter converts its ABI cursor to the
 /// `next_index` boundary value; this core therefore needs no raw pointers or
@@ -210,10 +217,11 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             };
             if state.strm.avail_in != 0 {
                 let input = buffers.input.as_mut_ptr();
-                let Some(next_index) = (state.strm.next_in as usize)
-                    .checked_sub(input as usize)
-                    .filter(|index| *index <= buffers.input.len())
-                else {
+                let Some(next_index) = gz_owned_buffer_index(
+                    input as usize,
+                    buffers.input.len(),
+                    state.strm.next_in as usize,
+                ) else {
                     return -1;
                 };
                 if gz_avail_retain_input(&mut buffers.input, next_index, state.strm.avail_in)
@@ -313,10 +321,11 @@ unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_i
             let Some(buffers) = state_ref.buffers.as_ref() else {
                 return -1;
             };
-            let Some(next_index) = (state_ref.strm.next_in as usize)
-                .checked_sub(buffers.input.as_ptr() as usize)
-                .filter(|index| *index <= buffers.input.len())
-            else {
+            let Some(next_index) = gz_owned_buffer_index(
+                buffers.input.as_ptr() as usize,
+                buffers.input.len(),
+                state_ref.strm.next_in as usize,
+            ) else {
                 return -1;
             };
             let Some(is_gzip) =
@@ -338,10 +347,11 @@ unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_i
     let Some(buffers) = state_ref.buffers.as_mut() else {
         return -1;
     };
-    let Some(next_index) = (state_ref.strm.next_in as usize)
-        .checked_sub(buffers.input.as_ptr() as usize)
-        .filter(|index| *index <= buffers.input.len())
-    else {
+    let Some(next_index) = gz_owned_buffer_index(
+        buffers.input.as_ptr() as usize,
+        buffers.input.len(),
+        state_ref.strm.next_in as usize,
+    ) else {
         return -1;
     };
     let Some(output) = buffers.output.as_mut() else {
@@ -847,10 +857,11 @@ unsafe fn gz_read(
                 else {
                     return got;
                 };
-                let Some(next_index) = (state_ref.x.next as usize)
-                    .checked_sub(buffered.as_ptr() as usize)
-                    .filter(|index| *index <= buffered.len())
-                else {
+                let Some(next_index) = gz_owned_buffer_index(
+                    buffered.as_ptr() as usize,
+                    buffered.len(),
+                    state_ref.x.next as usize,
+                ) else {
                     return got;
                 };
                 let Some(destination) = destination
@@ -1032,10 +1043,11 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
             else {
                 return -1;
             };
-            let Some(next_index) = (state.x.next as usize)
-                .checked_sub(output.as_ptr() as usize)
-                .filter(|index| *index <= output.len())
-            else {
+            let Some(next_index) = gz_owned_buffer_index(
+                output.as_ptr() as usize,
+                output.len(),
+                state.x.next as usize,
+            ) else {
                 return -1;
             };
             gzgetc_buffered_take(output, next_index, state.x.have)
@@ -1083,10 +1095,11 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
             else {
                 return -1;
             };
-            let Some(next_index) = (state.x.next as usize)
-                .checked_sub(output.as_ptr() as usize)
-                .filter(|index| *index <= output.len())
-            else {
+            let Some(next_index) = gz_owned_buffer_index(
+                output.as_ptr() as usize,
+                output.len(),
+                state.x.next as usize,
+            ) else {
                 return -1;
             };
             gzgetc_buffered_take(output, next_index, state.x.have)
@@ -1289,13 +1302,13 @@ pub unsafe extern "C" fn gzungetc_ffi(
         else {
             return -1;
         };
-        let start = output.as_ptr() as usize;
-        let Some(index) = (state.x.next as usize).checked_sub(start) else {
+        let Some(index) = gz_owned_buffer_index(
+            output.as_ptr() as usize,
+            output.len(),
+            state.x.next as usize,
+        ) else {
             return -1;
         };
-        if index > output.len() {
-            return -1;
-        }
         index
     };
     let have = state.x.have;
@@ -1383,10 +1396,11 @@ pub unsafe extern "C" fn gzgets_ffi(
             else {
                 return ::core::ptr::null_mut();
             };
-            let Some(next_index) = (state.x.next as usize)
-                .checked_sub(output.as_ptr() as usize)
-                .filter(|index| *index <= output.len())
-            else {
+            let Some(next_index) = gz_owned_buffer_index(
+                output.as_ptr() as usize,
+                output.len(),
+                state.x.next as usize,
+            ) else {
                 return ::core::ptr::null_mut();
             };
             let Some(available) = output.get(next_index..) else {
