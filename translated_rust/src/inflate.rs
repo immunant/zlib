@@ -2576,6 +2576,23 @@ fn syncsearch_bytes(
     *have = got;
     next as ::core::ffi::c_uint
 }
+
+// The stream input range is already bound by `inflateSync()`. Publish a
+// consumed prefix through its slice tail so cursor movement does not require
+// raw-pointer arithmetic. A zero-byte search must leave a possibly-null C
+// cursor unchanged.
+fn inflate_sync_consume_input(
+    strm: &mut crate::zlib_h::z_stream,
+    input: &[crate::stdlib::Bytef],
+    consumed: ::core::ffi::c_uint,
+) {
+    strm.avail_in = strm.avail_in.wrapping_sub(consumed);
+    if consumed != 0 {
+        strm.next_in = input[consumed as usize..].as_ptr() as *mut crate::stdlib::Bytef;
+    }
+    strm.total_in = strm.total_in.wrapping_add(consumed as crate::stdlib::uLong);
+}
+
 pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -2618,9 +2635,7 @@ fn inflate_sync(
         syncsearch_bytes(&mut state.have, &buf[..len as usize]);
     }
     len = syncsearch_bytes(&mut state.have, input);
-    strm.avail_in = strm.avail_in.wrapping_sub(len);
-    strm.next_in = strm.next_in.wrapping_add(len as usize);
-    strm.total_in = strm.total_in.wrapping_add(len as crate::stdlib::uLong);
+    inflate_sync_consume_input(strm, input, len);
     if state.have != 4 as ::core::ffi::c_uint {
         return crate::zlib_h::Z_DATA_ERROR;
     }
