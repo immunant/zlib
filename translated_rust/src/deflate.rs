@@ -2581,6 +2581,49 @@ fn gzip_default_header_bytes(
     [31, 139, 8, 0, 0, 0, 0, 0, gzip_default_xfl(level, strategy), 3]
 }
 
+fn gzip_custom_header_bytes(
+    text: ::core::ffi::c_int,
+    hcrc: ::core::ffi::c_int,
+    has_extra: bool,
+    has_name: bool,
+    has_comment: bool,
+    time: crate::stdlib::uLong,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    os: ::core::ffi::c_int,
+    extra_len: crate::stdlib::uInt,
+) -> ([crate::stdlib::Bytef; 9], usize) {
+    let flags = (if text != 0 { 1 } else { 0 })
+        + (if hcrc != 0 { 2 } else { 0 })
+        + (if has_extra { 4 } else { 0 })
+        + (if has_name { 8 } else { 0 })
+        + (if has_comment { 16 } else { 0 });
+    let mut header = [
+        flags as crate::stdlib::Bytef,
+        time as crate::stdlib::Byte,
+        (time >> 8) as crate::stdlib::Byte,
+        (time >> 16) as crate::stdlib::Byte,
+        (time >> 24) as crate::stdlib::Byte,
+        gzip_default_xfl(level, strategy),
+        os as crate::stdlib::Bytef,
+        0,
+        0,
+    ];
+    let len = if has_extra {
+        header[7] = extra_len as crate::stdlib::Bytef;
+        header[8] = (extra_len >> 8) as crate::stdlib::Bytef;
+        9
+    } else {
+        7
+    };
+
+    (header, len)
+}
+
+fn gzip_header_crc_bytes(crc: crate::stdlib::uLong) -> [crate::stdlib::Bytef; 2] {
+    [crc as crate::stdlib::Byte, (crc >> 8) as crate::stdlib::Byte]
+}
+
 fn gzip_trailer_bytes(
     adler: crate::stdlib::uLong,
     total_in: crate::stdlib::uLong,
@@ -2782,76 +2825,29 @@ pub unsafe extern "C" fn deflate(
             }
         } else {
             let gzhead = &*(*s).gzhead;
-            let c2rust_fresh10 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh10 as isize) = ((if gzhead.text != 0 {
-                1 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            }) + (if gzhead.hcrc != 0 {
-                2 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            }) + (if gzhead.extra.is_null() {
-                0 as ::core::ffi::c_int
-            } else {
-                4 as ::core::ffi::c_int
-            }) + (if gzhead.name.is_null() {
-                0 as ::core::ffi::c_int
-            } else {
-                8 as ::core::ffi::c_int
-            }) + (if gzhead.comment.is_null() {
-                0 as ::core::ffi::c_int
-            } else {
-                16 as ::core::ffi::c_int
-            }))
-                as crate::stdlib::Bytef;
-            let c2rust_fresh11 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh11 as isize) =
-                (gzhead.time & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-            let c2rust_fresh12 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh12 as isize) =
-                (gzhead.time >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
-            let c2rust_fresh13 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh13 as isize) =
-                (gzhead.time >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
-            let c2rust_fresh14 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh14 as isize) =
-                (gzhead.time >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
-            let c2rust_fresh15 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh15 as isize) =
-                (if (*s).level == 9 as ::core::ffi::c_int {
-                    2 as ::core::ffi::c_int
-                } else if (*s).strategy >= 2 as ::core::ffi::c_int
-                    || (*s).level < 2 as ::core::ffi::c_int
-                {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) as crate::stdlib::Bytef;
-            let c2rust_fresh16 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh16 as isize) =
-                (gzhead.os & 0xff as ::core::ffi::c_int) as crate::stdlib::Bytef;
-            if !gzhead.extra.is_null() {
-                let c2rust_fresh17 = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh17 as isize) =
-                    (gzhead.extra_len & 0xff as crate::stdlib::uInt) as crate::stdlib::Bytef;
-                let c2rust_fresh18 = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh18 as isize) =
-                    (gzhead.extra_len >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uInt)
-                        as crate::stdlib::Bytef;
-            }
+            let (header, header_len) = gzip_custom_header_bytes(
+                gzhead.text,
+                gzhead.hcrc,
+                !gzhead.extra.is_null(),
+                !gzhead.name.is_null(),
+                !gzhead.comment.is_null(),
+                gzhead.time,
+                (*s).level,
+                (*s).strategy,
+                gzhead.os,
+                gzhead.extra_len,
+            );
+            let pending_buffer = core::slice::from_raw_parts_mut(
+                (*s).pending_buf,
+                (*s).pending_buf_size as usize,
+            );
+            let layout = pending_storage_layout((*s).lit_bufsize);
+            let mut pending = (*s).pending;
+            assert!(with_pending_storage(pending_buffer, layout, |storage| {
+                storage.append_pending(&mut pending, &header[..header_len])
+            })
+            .expect("pending storage layout matches its allocation"));
+            (*s).pending = pending;
             if gzhead.hcrc != 0 {
                 (*strm).adler = gzip_header_crc(
                     (*strm).adler,
@@ -3015,15 +3011,18 @@ pub unsafe extern "C" fn deflate(
                     return crate::zlib_h::Z_OK;
                 }
             }
-            let c2rust_fresh23 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh23 as isize) =
-                ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-            let c2rust_fresh24 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh24 as isize) =
-                ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
+            let pending_buffer = core::slice::from_raw_parts_mut(
+                (*s).pending_buf,
+                (*s).pending_buf_size as usize,
+            );
+            let layout = pending_storage_layout((*s).lit_bufsize);
+            let header_crc = gzip_header_crc_bytes((*strm).adler);
+            let mut pending = (*s).pending;
+            assert!(with_pending_storage(pending_buffer, layout, |storage| {
+                storage.append_pending(&mut pending, &header_crc)
+            })
+            .expect("pending storage layout matches its allocation"));
+            (*s).pending = pending;
             (*strm).adler = 0 as crate::stdlib::uLong;
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
@@ -4621,7 +4620,8 @@ mod tests {
         fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
         fill_window_state_after_slide, fill_window_zero_range, flush_pending_core,
         gzip_default_header_bytes, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, gzip_trailer_bytes,
+        gzip_header_crc_bytes, gzip_header_crc_pending_range, gzip_custom_header_bytes,
+        gzip_trailer_bytes,
         lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
@@ -5549,6 +5549,23 @@ mod tests {
             gzip_default_header_bytes(9, crate::zlib_h::Z_DEFAULT_STRATEGY),
             [31, 139, 8, 0, 0, 0, 0, 0, 2, 3]
         );
+    }
+
+    #[test]
+    fn gzip_custom_header_bytes_include_flags_timestamp_xfl_and_optional_extra_length() {
+        assert_eq!(
+            gzip_custom_header_bytes(1, 1, true, true, true, 0x1234_5678, 9, 0, 3, 0xabcd),
+            ([0x1f, 0x78, 0x56, 0x34, 0x12, 2, 3, 0xcd, 0xab], 9)
+        );
+        assert_eq!(
+            gzip_custom_header_bytes(0, 0, false, false, false, 0, 1, 0, 255, 0),
+            ([0, 0, 0, 0, 0, 4, 255, 0, 0], 7)
+        );
+    }
+
+    #[test]
+    fn gzip_header_crc_bytes_are_little_endian() {
+        assert_eq!(gzip_header_crc_bytes(0x1234_5678), [0x78, 0x56]);
     }
 
     #[test]
