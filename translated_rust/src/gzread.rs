@@ -136,7 +136,10 @@ fn gz_load(file: &mut ::std::fs::File, buf: &mut [u8]) -> GzLoad {
     let max = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2).wrapping_add(1) as usize;
     let mut have = 0usize;
     loop {
-        let get = (buf.len() - have).min(max);
+        let Some(remaining) = buf.len().checked_sub(have) else {
+            return GzLoad::Error(0);
+        };
+        let get = remaining.min(max);
         if get == 0 {
             return GzLoad::Loaded {
                 have: have as ::core::ffi::c_uint,
@@ -159,7 +162,13 @@ fn gz_load(file: &mut ::std::fs::File, buf: &mut [u8]) -> GzLoad {
                 };
             }
             Ok(read) => {
-                have += read;
+                let Some(next_have) = have.checked_add(read) else {
+                    return GzLoad::Error(0);
+                };
+                if next_have > buf.len() {
+                    return GzLoad::Error(0);
+                }
+                have = next_have;
                 if have == buf.len() {
                     return GzLoad::Loaded {
                         have: have as ::core::ffi::c_uint,
