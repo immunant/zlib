@@ -249,10 +249,10 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         let output_len = match (state_ref.want as usize).checked_mul(2) {
             Some(len) => len,
             None => {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
+                crate::src::gzlib::gz_error_static(
+                    state_ref,
                     crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"out of memory\0",
                 );
                 return -1;
             }
@@ -260,10 +260,10 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         let Some(buffers) =
             crate::gzguts_h::gz_buffers::new(state_ref.want as usize, Some(output_len))
         else {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+            crate::src::gzlib::gz_error_static(
+                state_ref,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                b"out of memory\0",
             );
             return -1;
         };
@@ -283,10 +283,10 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         {
             state_ref.buffers = None;
             (*state).size = 0 as ::core::ffi::c_uint;
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+            crate::src::gzlib::gz_error_static(
+                state_ref,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                b"out of memory\0",
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -489,10 +489,10 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 }
             }
             _ => {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
+                crate::src::gzlib::gz_error_static(
+                    state_ref,
                     crate::zlib_h::Z_STREAM_ERROR,
-                    b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"state corrupt\0",
                 );
                 return -1 as ::core::ffi::c_int;
             }

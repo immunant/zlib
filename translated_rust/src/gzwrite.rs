@@ -164,11 +164,7 @@ pub(crate) unsafe fn gz_comp(
                     {
                         state_ref.again = 1 as ::core::ffi::c_int;
                     }
-                    crate::src::gzlib::gz_error(
-                        state_ref,
-                        crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(*crate::stdlib::__errno_location()),
-                    );
+                    crate::src::gzlib::gz_error_io(state_ref, *crate::stdlib::__errno_location());
                     return -1 as ::core::ffi::c_int;
                 }
                 state_ref.x.next = state_ref.x.next.offset(writ as isize);
@@ -189,10 +185,10 @@ pub(crate) unsafe fn gz_comp(
         have = (*strm).avail_out as ::core::ffi::c_uint;
         ret = crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
-            crate::src::gzlib::gz_error(
+            crate::src::gzlib::gz_error_static(
                 state_ref,
                 crate::zlib_h::Z_STREAM_ERROR,
-                b"internal error: deflate stream corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+                b"internal error: deflate stream corrupt\0",
             );
             return -1 as ::core::ffi::c_int;
         }
