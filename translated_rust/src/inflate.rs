@@ -997,19 +997,22 @@ pub fn inflate(
     next = strm.next_in as *mut ::core::ffi::c_uchar;
     have = strm.avail_in as ::core::ffi::c_uint;
     // Most callers already own a checked input view and hand it to this core.
-    // `inflateBack()` is the remaining callback-driven exception: its input
-    // cursor is supplied afresh by each foreign callback, so it retains the
-    // established narrow binding until that callback API has its own safe
-    // ownership bridge.
-    let input = match input_storage {
-        Some(input) => input,
-        None if have == 0 => &[],
-        None => {
-            // SAFETY: the entry guard established the non-null input cursor
-            // whenever bytes are available.
-            unsafe { ::core::slice::from_raw_parts(next, have as usize) }
-        }
+    // `inflateBack()` is callback-driven, so its input cursor is transient.
+    // Snapshot it at this existing narrow binding boundary before entering the
+    // decoder. The decoder can then use the same verified slice path as every
+    // other caller, while `next` continues to publish the original callback
+    // cursor (rather than this short-lived owned allocation).
+    let callback_input = if input_storage.is_none() && have != 0 {
+        // SAFETY: the entry guard established the non-null input cursor
+        // whenever bytes are available. This is the sole callback-cursor
+        // binding; the decoder below sees only the owned snapshot.
+        Some(unsafe { ::core::slice::from_raw_parts(next, have as usize) }.to_vec())
+    } else {
+        None
     };
+    let input = input_storage
+        .or(callback_input.as_deref())
+        .unwrap_or(&[]);
     // `inflateGetHeader()` retains this optional caller-owned structure for
     // the duration of inflate. Bind it once for this decode call, so gzip
     // header publication below does not repeatedly dereference the same raw
@@ -2135,6 +2138,8 @@ pub fn inflate(
                                             state.bits = bits;
                                             let input_start = in_0.wrapping_sub(have) as usize;
                                             let output_start = output_capacity - out as usize;
+                                            let fast_next = next;
+                                            let fast_have = have;
                                             crate::src::inffast::inflate_fast_bound_cursors(
                                                 strm,
                                                 state,
@@ -2144,8 +2149,15 @@ pub fn inflate(
                                             );
                                             put = strm.next_out as *mut ::core::ffi::c_uchar;
                                             left = strm.avail_out as ::core::ffi::c_uint;
-                                            next = strm.next_in as *mut ::core::ffi::c_uchar;
                                             have = strm.avail_in as ::core::ffi::c_uint;
+                                            // `inflate_fast` receives a slice that may be an
+                                            // owned callback snapshot. Preserve the externally
+                                            // visible cursor as an offset into the original
+                                            // caller-provided range instead of retaining the
+                                            // slice's temporary backing pointer.
+                                            next = fast_next.wrapping_add(
+                                                fast_have.wrapping_sub(have) as usize,
+                                            );
                                             hold = state.hold;
                                             bits = state.bits;
                                             if state.mode as ::core::ffi::c_uint
