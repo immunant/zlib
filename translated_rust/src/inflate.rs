@@ -86,7 +86,9 @@ pub struct inflate_state {
     pub dmax: ::core::ffi::c_uint,
     pub check: ::core::ffi::c_ulong,
     pub total: ::core::ffi::c_ulong,
-    pub head: crate::zlib_h::gz_headerp,
+    /// The caller-retained gzip header is optional.  It stays opaque to the
+    /// decoder, which only borrows it at the ABI boundaries for one call.
+    pub head: Option<::core::ptr::NonNull<crate::zlib_h::gz_header>>,
     pub wbits: ::core::ffi::c_uint,
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
@@ -141,7 +143,7 @@ pub(crate) fn inflate_initial_state() -> inflate_state {
         dmax: 0,
         check: 0,
         total: 0,
-        head: ::core::ptr::null_mut::<crate::zlib_h::gz_header>(),
+        head: None,
         wbits: 0,
         wsize: 0,
         whave: 0,
@@ -1119,7 +1121,7 @@ macro_rules! inflate_reset_keep_at_boundary {
             state_ref.havedict = 0 as ::core::ffi::c_int;
             state_ref.flags = -1 as ::core::ffi::c_int;
             state_ref.dmax = 32768 as ::core::ffi::c_uint;
-            state_ref.head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+            state_ref.head = None;
             state_ref.hold = 0 as ::core::ffi::c_ulong;
             state_ref.bits = 0 as ::core::ffi::c_uint;
             state_ref.next = 0;
@@ -4134,10 +4136,9 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(state_ref) = state.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let gzip_header = if state_ref.head.is_null() {
-        None
-    } else {
-        Some(&mut *state_ref.head)
+    let gzip_header = match state_ref.head {
+        Some(head) => Some(&mut *head.as_ptr()),
+        None => None,
     };
     let Some(buffers) = inflate_buffers_at_boundary!(strm_ref, state_ref) else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -4447,7 +4448,7 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     if head.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state.head = head;
+    state.head = ::core::ptr::NonNull::new(head);
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }

@@ -519,10 +519,9 @@ macro_rules! gz_decomp_at_boundary {
                 ret = if inflate_state.is_null() {
                     crate::zlib_h::Z_STREAM_ERROR
                 } else {
-                    let gzip_header = if (*inflate_state).head.is_null() {
-                        None
-                    } else {
-                        Some(&mut *(*inflate_state).head)
+                    let gzip_header = match (*inflate_state).head {
+                        Some(head) => Some(&mut *head.as_ptr()),
+                        None => None,
                     };
                     match crate::src::inflate::inflate_buffers_at_boundary!(
                         &mut state.strm,
