@@ -334,6 +334,21 @@ pub(crate) fn pending_storage_layout_from_metadata(
     Some(layout)
 }
 
+/// Read the pending/symbol allocation geometry from an established deflate
+/// state.  Exported boundaries use this before forming a raw slice, so the
+/// slice length always comes from the checked callback-allocation plan rather
+/// than a separately mutable size field.
+pub(crate) fn pending_storage_layout_for_state(
+    state: &internal_state,
+) -> Option<PendingStorageLayout> {
+    pending_storage_layout_from_metadata(
+        state.lit_bufsize,
+        state.pending_buf_size,
+        state.sym_buf_offset,
+        state.sym_end,
+    )
+}
+
 pub(crate) struct PendingStorageView<'a> {
     bytes: &'a mut [crate::stdlib::Bytef],
     layout: PendingStorageLayout,
@@ -2956,14 +2971,13 @@ fn drain_pending(
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let stream = &mut *strm;
     let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
-    let pending_storage = core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("validated pending storage")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    let layout = pending_storage_layout(state.lit_bufsize);
+    let Some(layout) = pending_storage_layout_for_state(state) else {
+        return;
+    };
+    let Some(pending_buf) = state.pending_buf else {
+        return;
+    };
+    let pending_storage = core::slice::from_raw_parts_mut(pending_buf.as_ptr(), layout.total_len);
     assert!(with_pending_storage(pending_storage, layout, |storage| {
         crate::src::trees::tr_flush_bits_core(
             storage,
@@ -5363,19 +5377,19 @@ mod tests {
         longest_match_clamp_length, longest_match_core, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors,
-        pending_storage_copy_plan, pending_storage_layout, pending_storage_layout_from_metadata,
-        put_short_msb_core, read_buf_checksum, read_buf_core, read_buf_input_progress_after_copy,
-        read_buf_len, read_buf_total_in_after_copy, short_msb_bytes, slide_hash_core,
-        slide_hash_entry, stored_block_available_output, stored_block_buffered_len,
-        stored_block_can_emit, stored_block_copy_lengths, stored_block_header_bytes,
-        stored_block_is_last, stored_block_length_bytes, stored_block_min_size,
-        stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
-        symbol_buffer_is_full, symbol_triplet_cursors, take_pending_header_len_override,
-        zlib_header, DeflateBoundGzipHeader, DeflateBoundState, DeflateFastMatchProgress,
-        DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
-        DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, LongestMatchResult,
-        PendingDrainState, PendingStorageReadView, PendingStorageView, ReadBufChecksum,
-        ReadBufResult,
+        pending_storage_copy_plan, pending_storage_layout, pending_storage_layout_for_state,
+        pending_storage_layout_from_metadata, put_short_msb_core, read_buf_checksum, read_buf_core,
+        read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
+        stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
+        stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
+        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
+        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors,
+        take_pending_header_len_override, zlib_header, DeflateBoundGzipHeader, DeflateBoundState,
+        DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult,
+        LongestMatchResult, PendingDrainState, PendingStorageReadView, PendingStorageView,
+        ReadBufChecksum, ReadBufResult,
     };
 
     #[test]
@@ -6724,6 +6738,21 @@ mod tests {
             pending_storage_layout_from_metadata(crate::stdlib::uInt::MAX, 0, 0, 0),
             None
         );
+    }
+
+    #[test]
+    fn pending_storage_state_layout_uses_only_checked_metadata() {
+        let mut state = super::internal_state::newly_allocated();
+        let layout = pending_storage_layout(16);
+        state.lit_bufsize = 16;
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        state.sym_buf_offset = layout.symbol_offset;
+        state.sym_end = layout.symbol_flush_threshold;
+
+        assert_eq!(pending_storage_layout_for_state(&state), Some(layout));
+
+        state.pending_buf_size = state.pending_buf_size.wrapping_sub(1);
+        assert_eq!(pending_storage_layout_for_state(&state), None);
     }
 
     #[test]

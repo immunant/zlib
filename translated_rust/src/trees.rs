@@ -5086,14 +5086,13 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut last: ::core::ffi::c_int,
 ) {
     let state = &mut *s;
-    let pending_buffer = core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("validated pending storage")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
+    let Some(layout) = crate::src::deflate::pending_storage_layout_for_state(state) else {
+        return;
+    };
+    let Some(pending_buf) = state.pending_buf else {
+        return;
+    };
+    let pending_buffer = core::slice::from_raw_parts_mut(pending_buf.as_ptr(), layout.total_len);
     let stored_data = if stored_len == 0 {
         &[]
     } else {
@@ -5121,14 +5120,13 @@ pub use _tr_stored_block_ffi as _tr_stored_block;
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
-    let pending_buffer = core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("validated pending storage")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
+    let Some(layout) = crate::src::deflate::pending_storage_layout_for_state(state) else {
+        return;
+    };
+    let Some(pending_buf) = state.pending_buf else {
+        return;
+    };
+    let pending_buffer = core::slice::from_raw_parts_mut(pending_buf.as_ptr(), layout.total_len);
     crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
         assert!(tr_flush_bits_core(
             storage,
@@ -5170,14 +5168,13 @@ fn tr_align_core(
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
-    let pending_buffer = core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("validated pending storage")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
+    let Some(layout) = crate::src::deflate::pending_storage_layout_for_state(state) else {
+        return;
+    };
+    let Some(pending_buf) = state.pending_buf else {
+        return;
+    };
+    let pending_buffer = core::slice::from_raw_parts_mut(pending_buf.as_ptr(), layout.total_len);
     crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
         let _ = tr_align_core(
             storage,
@@ -5397,14 +5394,13 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     } else {
         None
     };
-    let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
-    let pending_buffer = core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("validated pending storage")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
+    let Some(layout) = crate::src::deflate::pending_storage_layout_for_state(state) else {
+        return;
+    };
+    let Some(pending_buf) = state.pending_buf else {
+        return;
+    };
+    let pending_buffer = core::slice::from_raw_parts_mut(pending_buf.as_ptr(), layout.total_len);
     let stored_data = if buf.is_null() {
         None
     } else if stored_len == 0 {
@@ -5459,14 +5455,14 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let state = &mut *s;
-    let pending_layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
-    let pending_buffer = core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("validated pending storage")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
+    let Some(pending_layout) = crate::src::deflate::pending_storage_layout_for_state(state) else {
+        return 0;
+    };
+    let Some(pending_buf) = state.pending_buf else {
+        return 0;
+    };
+    let pending_buffer =
+        core::slice::from_raw_parts_mut(pending_buf.as_ptr(), pending_layout.total_len);
     crate::src::deflate::with_pending_storage(pending_buffer, pending_layout, |storage| {
         tr_tally_core(
             storage,
