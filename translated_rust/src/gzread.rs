@@ -810,19 +810,17 @@ pub unsafe extern "C" fn gzgets_ffi(
     gzgets(file, buf, len)
 }
 pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode == crate::gzguts_h::GZ_READ
-        && (*state).how == crate::gzguts_h::LOOK
-        && (*state).x.have == 0 as ::core::ffi::c_uint
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode == crate::gzguts_h::GZ_READ
+        && state.how == crate::gzguts_h::LOOK
+        && state.x.have == 0 as ::core::ffi::c_uint
     {
         gz_look(state);
     }
-    return ((*state).direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
+    return (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
 }
 #[export_name = "gzdirect"]
 
