@@ -3627,10 +3627,7 @@ fn dist_code_index(dist: ::core::ffi::c_uint) -> usize {
 fn symbol_triplet_cursors(
     start: ::core::ffi::c_uint,
 ) -> ([::core::ffi::c_uint; 3], ::core::ffi::c_uint) {
-    (
-        [start, start.wrapping_add(1), start.wrapping_add(2)],
-        start.wrapping_add(3),
-    )
+    crate::src::deflate::symbol_triplet_cursors(start)
 }
 
 fn symbol_buffer_is_full(next: crate::stdlib::uInt, end: crate::stdlib::uInt) -> bool {

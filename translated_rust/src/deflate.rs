@@ -395,7 +395,7 @@ fn clamped_copy_len(
     available.min(requested) as ::core::ffi::c_uint
 }
 
-fn symbol_triplet_cursors(
+pub(crate) fn symbol_triplet_cursors(
     start: crate::stdlib::uInt,
 ) -> ([crate::stdlib::uInt; 3], crate::stdlib::uInt) {
     let second = start.wrapping_add(1);
@@ -3948,6 +3948,18 @@ mod tests {
                 (::core::ffi::c_uint::MAX - 1) as crate::zutil_h::ulg,
             ),
             ::core::ffi::c_uint::MAX - 1,
+        );
+    }
+
+    #[test]
+    fn symbol_triplet_cursors_preserve_order_and_wrapping() {
+        assert_eq!(symbol_triplet_cursors(4), ([4, 5, 6], 7));
+        assert_eq!(
+            symbol_triplet_cursors(::core::ffi::c_uint::MAX - 1),
+            (
+                [::core::ffi::c_uint::MAX - 1, ::core::ffi::c_uint::MAX, 0],
+                1
+            )
         );
     }
 

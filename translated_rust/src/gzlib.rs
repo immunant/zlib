@@ -939,7 +939,7 @@ fn gzoffset64_adjust_for_buffered_read(
     avail_in: crate::stdlib::uInt,
 ) -> crate::stdlib::off64_t {
     if mode == crate::gzguts_h::GZ_READ {
-        offset - avail_in as crate::stdlib::off64_t
+        offset.wrapping_sub(avail_in as crate::stdlib::off64_t)
     } else {
         offset
     }
@@ -1503,6 +1503,18 @@ mod tests {
         assert_eq!(
             gzoffset64_adjust_for_buffered_read(42, crate::gzguts_h::GZ_READ, 7),
             35
+        );
+    }
+
+    #[test]
+    fn gzoffset64_buffered_read_adjustment_wraps_at_signed_minimum() {
+        assert_eq!(
+            gzoffset64_adjust_for_buffered_read(
+                crate::stdlib::off64_t::MIN,
+                crate::gzguts_h::GZ_READ,
+                1,
+            ),
+            crate::stdlib::off64_t::MAX,
         );
     }
 
