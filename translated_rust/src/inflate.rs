@@ -690,6 +690,15 @@ pub(crate) enum InflateCallbackInitRequest {
     },
 }
 
+// Version observation belongs to the named initialization implementation,
+// while version/size acceptance remains coupled to callback allocation and
+// publication below.  The distinction lets that transaction operate on a
+// pointer-free byte without changing its validation precedence.
+pub(crate) enum InflateAbiVersion<'a> {
+    Unchecked,
+    Observed(Option<&'a ::core::ffi::c_char>),
+}
+
 enum InflateCallbackInitUpdate {
     Normal(InflateResetUpdate),
     Back,
@@ -739,7 +748,7 @@ impl InflateCallbackInitRequest {
 pub(crate) unsafe fn inflate_publish_callback_owner(
     strm: Option<&mut crate::zlib_h::z_stream_s>,
     request: Option<InflateCallbackInitRequest>,
-    version: Option<*const ::core::ffi::c_char>,
+    version: InflateAbiVersion<'_>,
     stream_size: ::core::ffi::c_int,
     copy_source: Option<&inflate_state>,
     destination_identity: usize,
@@ -748,14 +757,14 @@ pub(crate) unsafe fn inflate_publish_callback_owner(
     // Version/size validation belongs to the callback allocation seam.  It
     // deliberately precedes nullable-stream selection, matching zlib's
     // Z_VERSION_ERROR-before-Z_STREAM_ERROR behavior.
-    if version.is_some_and(|version| {
-        version.is_null()
-            || *version as ::core::ffi::c_int
-                != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
-            || stream_size
-                != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-    }) {
-        return crate::zlib_h::Z_VERSION_ERROR;
+    if let InflateAbiVersion::Observed(version) = version {
+        if version.is_none_or(|version| {
+            *version as ::core::ffi::c_int != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
+        }) || stream_size
+            != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+        {
+            return crate::zlib_h::Z_VERSION_ERROR;
+        }
     }
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -1051,12 +1060,15 @@ pub unsafe extern "C" fn inflateInit2_(
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut copied_state = None;
+    // Observe only the leading ABI version byte before the allocation seam;
+    // that seam retains the comparison and its version/size precedence.
+    let version = InflateAbiVersion::Observed(version.as_ref());
     inflate_publish_callback_owner(
         strm,
         Some(InflateCallbackInitRequest::Normal {
             window_bits: windowBits,
         }),
-        Some(version),
+        version,
         stream_size,
         None,
         0,
@@ -3436,7 +3448,7 @@ pub(crate) unsafe fn inflate_from_stream(
         return InflateStreamResult::Status(inflate_publish_callback_owner(
             Some(strm),
             None,
-            None,
+            InflateAbiVersion::Unchecked,
             0,
             Some(state),
             destination_identity,

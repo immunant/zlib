@@ -130,7 +130,7 @@ pub unsafe extern "C" fn inflateBackInit_(
             wbits: plan.wbits,
             wsize: plan.wsize,
         }),
-        None,
+        crate::src::inflate::InflateAbiVersion::Unchecked,
         0,
         None,
         0,
