@@ -1,9 +1,9 @@
 pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
+pub use crate::src::deflate::deflate_from_stream as deflate;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
