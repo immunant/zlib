@@ -43,61 +43,42 @@ pub use crate::zlib_h::Z_NULL;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+use std::os::fd::BorrowedFd;
 
-unsafe extern "C" fn gz_load(
-    mut state: crate::gzguts_h::gz_statep,
-    mut buf: *mut ::core::ffi::c_uchar,
-    mut len: ::core::ffi::c_uint,
-    mut have: *mut ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut get: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
-    (*state).again = 0 as ::core::ffi::c_int;
-    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-    *have = 0 as ::core::ffi::c_uint;
-    loop {
-        get = len.wrapping_sub(*have);
-        if get > max {
-            get = max;
-        }
-        ret = crate::stdlib::read(
-            (*state).fd,
-            buf.offset(*have as isize) as *mut ::core::ffi::c_void,
-            get as crate::__stddef_size_t_h::size_t,
-        ) as ::core::ffi::c_int;
-        if ret <= 0 as ::core::ffi::c_int {
-            break;
-        }
-        *have = (*have).wrapping_add(ret as ::core::ffi::c_uint);
-        if *have >= len {
-            break;
-        }
-    }
-    if ret < 0 as ::core::ffi::c_int {
-        if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-            || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-        {
-            (*state).again = 1 as ::core::ffi::c_int;
-            if *have != 0 as ::core::ffi::c_uint {
-                return 0 as ::core::ffi::c_int;
+fn gz_load_error(state: &mut crate::gzguts_h::gz_state, error: rustix::io::Errno) {
+    let message = ::std::ffi::CString::new(::std::io::Error::from(error).to_string()).ok();
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_ERRNO, message.as_deref());
+}
+
+fn gz_load(
+    state: &mut crate::gzguts_h::gz_state,
+    fd: BorrowedFd<'_>,
+    buf: &mut [u8],
+) -> Result<usize, usize> {
+    let mut have = 0usize;
+    let max = ((-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2) + 1) as usize;
+    state.again = 0;
+    while have != buf.len() {
+        let get = (buf.len() - have).min(max);
+        match rustix::io::read(fd, &mut buf[have..have + get]) {
+            Ok(0) => {
+                state.eof = 1;
+                break;
+            }
+            Ok(read) => have += read,
+            Err(error) => {
+                if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::WOULDBLOCK {
+                    state.again = 1;
+                    if have != 0 {
+                        return Ok(have);
+                    }
+                }
+                gz_load_error(state, error);
+                return Err(have);
             }
         }
-        crate::src::gzlib::gz_error_state(
-            &mut *state,
-            crate::zlib_h::Z_ERRNO,
-            Some(::std::ffi::CStr::from_ptr(crate::stdlib::strerror(
-                *crate::stdlib::__errno_location(),
-            ))),
-        );
-        return -1 as ::core::ffi::c_int;
     }
-    if ret == 0 as ::core::ffi::c_int {
-        (*state).eof = 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
+    Ok(have)
 }
 
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
@@ -125,17 +106,27 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 }
             }
         }
-        if gz_load(
-            state,
-            (*state).in_0.offset((*strm).avail_in as isize),
-            (*state)
-                .size
-                .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
-            &raw mut got,
-        ) == -1 as ::core::ffi::c_int
-        {
+        let fd = if (*state).fd < 0 {
+            gz_load_error(&mut *state, rustix::io::Errno::BADF);
             return -1 as ::core::ffi::c_int;
-        }
+        } else {
+            BorrowedFd::borrow_raw((*state).fd)
+        };
+        let available = (*strm).avail_in as usize;
+        let input = ::core::slice::from_raw_parts_mut((*state).in_0, (*state).size as usize);
+        let Some(input) = input.get_mut(available..) else {
+            crate::src::gzlib::gz_static_error(
+                &mut *state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal read buffer corrupt\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        };
+        let read = match gz_load(&mut *state, fd, input) {
+            Ok(read) => read,
+            Err(_) => return -1 as ::core::ffi::c_int,
+        };
+        got = read as ::core::ffi::c_uint;
         (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
         (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
     }
@@ -323,15 +314,21 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 }
             }
             crate::gzguts_h::COPY => {
-                if gz_load(
-                    state,
-                    (*state).out,
-                    (*state).size << 1 as ::core::ffi::c_int,
-                    &raw mut (*state).x.have,
-                ) == -1 as ::core::ffi::c_int
-                {
+                let fd = if (*state).fd < 0 {
+                    gz_load_error(&mut *state, rustix::io::Errno::BADF);
                     return -1 as ::core::ffi::c_int;
-                }
+                } else {
+                    BorrowedFd::borrow_raw((*state).fd)
+                };
+                let output = ::core::slice::from_raw_parts_mut(
+                    (*state).out,
+                    ((*state).size << 1) as usize,
+                );
+                let read = match gz_load(&mut *state, fd, output) {
+                    Ok(read) => read,
+                    Err(_) => return -1 as ::core::ffi::c_int,
+                };
+                (*state).x.have = read as ::core::ffi::c_uint;
                 (*state).x.next = (*state).out;
                 return 0 as ::core::ffi::c_int;
             }
@@ -442,7 +439,20 @@ unsafe fn gz_read(
                     }
                     break 's_28;
                 } else if (*state).how == crate::gzguts_h::COPY {
-                    err = gz_load(state, buf.as_mut_ptr(), n, &raw mut n);
+                    if (*state).fd < 0 {
+                        gz_load_error(&mut *state, rustix::io::Errno::BADF);
+                        err = -1;
+                        n = 0;
+                    } else {
+                        let fd = BorrowedFd::borrow_raw((*state).fd);
+                        match gz_load(&mut *state, fd, &mut buf[..n as usize]) {
+                            Ok(read) => n = read as ::core::ffi::c_uint,
+                            Err(read) => {
+                                err = -1;
+                                n = read as ::core::ffi::c_uint;
+                            }
+                        }
+                    }
                 } else {
                     (*state).strm.avail_out = n as crate::stdlib::uInt;
                     (*state).strm.next_out = buf.as_mut_ptr();
