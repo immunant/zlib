@@ -382,6 +382,13 @@ fn reset_gz_target(mode: ::core::ffi::c_int, target: GzResetTarget<'_>) {
         pos: *target.pos,
         avail_in: *target.avail_in,
     });
+    store_gz_reset_target(target, reset);
+}
+
+// Apply a pointer-free reset projection back to the ABI state fields.  The
+// cursor itself deliberately stays outside this projection: callers can only
+// publish a new cursor after validating the owned buffer it refers to.
+fn store_gz_reset_target(target: GzResetTarget<'_>, reset: GzResetState) {
     *target.have = reset.have;
     *target.eof = reset.eof;
     *target.past = reset.past;
@@ -743,6 +750,100 @@ fn gzrewind(state: GzRewindState<'_>) -> ::core::ffi::c_int {
     reset_gz_target(state.mode, state.reset);
     return 0 as ::core::ffi::c_int;
 }
+
+// This is the complete pointer-free state required by gzip seeking.  The
+// ABI-facing adapter validates and projects its buffered cursor separately,
+// leaving this transition independent of raw state or cursor pointers.
+struct GzSeekState<'a> {
+    reset: GzResetState,
+    fd: Option<&'a rustix::fd::OwnedFd>,
+    start: crate::stdlib::off64_t,
+}
+
+fn gzseek64_state<'a>(
+    mut state: GzSeekState<'a>,
+    buffered: Option<&[u8]>,
+    mut offset: crate::stdlib::off64_t,
+    whence: ::core::ffi::c_int,
+) -> (crate::stdlib::off64_t, GzSeekState<'a>, usize) {
+    let plan = gzseek_plan(
+        state.reset.mode,
+        state.reset.err,
+        state.reset.pos,
+        state.reset.past,
+        state.reset.skip,
+        state.reset.how,
+        state.reset.have,
+        offset,
+        whence,
+    );
+    let Some(plan) = plan else {
+        return (-1, state, 0);
+    };
+    if plan.clear_skip {
+        state.reset.skip = 0;
+    }
+    offset = match plan.action {
+        GzSeekAction::Direct { seek_by, position } => {
+            let Some(fd) = state.fd else {
+                return (-1, state, 0);
+            };
+            if rustix::fs::seek(fd, rustix::fs::SeekFrom::Current(seek_by as i64)).is_err() {
+                return (-1, state, 0);
+            }
+            state.reset.have = 0;
+            state.reset.eof = 0;
+            state.reset.past = 0;
+            state.reset.skip = 0;
+            gz_clear_error(&mut state.reset.msg, &mut state.reset.err);
+            state.reset.avail_in = 0;
+            state.reset.pos = position;
+            return (state.reset.pos, state, 0);
+        }
+        GzSeekAction::Rewind { offset } => {
+            let Some(fd) = state.fd else {
+                return (-1, state, 0);
+            };
+            if rustix::fs::seek(fd, rustix::fs::SeekFrom::Start(state.start as u64)).is_err() {
+                return (-1, state, 0);
+            }
+            state.reset.apply_reset();
+            offset
+        }
+        GzSeekAction::Skip { offset } => offset,
+        GzSeekAction::Reject => return (-1, state, 0),
+    };
+    let mut consumed = 0;
+    if state.reset.mode == crate::gzguts_h::GZ_READ {
+        let n = if ::core::mem::size_of::<::core::ffi::c_int>()
+            == ::core::mem::size_of::<crate::stdlib::off64_t>()
+            && state.reset.have > gz_intmax()
+            || state.reset.have as crate::stdlib::off64_t > offset
+        {
+            offset as ::core::ffi::c_uint
+        } else {
+            state.reset.have
+        };
+        if n != 0 {
+            // The boundary constructs `buffered` only after checking that the
+            // ABI cursor and advertised length lie within the owned output
+            // allocation.  Keep the same proof here before consuming it.
+            let Some(buffered) = buffered else {
+                return (-1, state, 0);
+            };
+            if buffered.get(..n as usize).is_none() {
+                return (-1, state, 0);
+            }
+        }
+        state.reset.have = state.reset.have.wrapping_sub(n);
+        state.reset.pos += n as crate::stdlib::off64_t;
+        offset -= n as crate::stdlib::off64_t;
+        consumed = n as usize;
+    }
+    state.reset.skip = offset;
+    (state.reset.pos + offset, state, consumed)
+}
+
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -779,89 +880,73 @@ pub unsafe extern "C" fn gzseek64(
         return -1 as crate::stdlib::off64_t;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let plan = gzseek_plan(
-        state.mode,
-        state.err,
-        state.x.pos,
-        state.past,
-        state.skip,
-        state.how,
-        state.x.have,
+    // `x.next` is an ABI cursor, not owned storage.  When data is buffered,
+    // prove both the cursor's provenance and its advertised remaining length
+    // against the owned output allocation before handing a slice to the safe
+    // seek transition.
+    let buffered = if state.x.have == 0 {
+        None
+    } else {
+        let cursor = state.x.next;
+        let Some(buffer) = state.out.as_deref() else {
+            return -1 as crate::stdlib::off64_t;
+        };
+        let Some(start) = cursor.addr().checked_sub(buffer.as_ptr().addr()) else {
+            return -1 as crate::stdlib::off64_t;
+        };
+        let Some(end) = start.checked_add(state.x.have as usize) else {
+            return -1 as crate::stdlib::off64_t;
+        };
+        let Some(buffered) = buffer.get(start..end) else {
+            return -1 as crate::stdlib::off64_t;
+        };
+        Some(buffered)
+    };
+    let (result, reset, consumed) = gzseek64_state(
+        GzSeekState {
+            reset: GzResetState {
+                mode: state.mode,
+                have: state.x.have,
+                eof: state.eof,
+                past: state.past,
+                how: state.how,
+                junk: state.junk,
+                reset: state.reset,
+                again: state.again,
+                skip: state.skip,
+                err: state.err,
+                msg: state.msg.take(),
+                pos: state.x.pos,
+                avail_in: state.strm.avail_in,
+            },
+            fd: state.fd.as_ref(),
+            start: state.start,
+        },
+        buffered,
         offset,
         whence,
     );
-    let Some(plan) = plan else {
-        return -1 as crate::stdlib::off64_t;
-    };
-    if plan.clear_skip {
-        state.skip = 0 as crate::stdlib::off64_t;
+    store_gz_reset_target(
+        GzResetTarget {
+            have: &mut state.x.have,
+            eof: &mut state.eof,
+            past: &mut state.past,
+            how: &mut state.how,
+            junk: &mut state.junk,
+            reset: &mut state.reset,
+            again: &mut state.again,
+            skip: &mut state.skip,
+            err: &mut state.err,
+            msg: &mut state.msg,
+            pos: &mut state.x.pos,
+            avail_in: &mut state.strm.avail_in,
+        },
+        reset.reset,
+    );
+    if consumed != 0 {
+        state.x.next = state.x.next.wrapping_add(consumed);
     }
-    offset = match plan.action {
-        GzSeekAction::Direct { seek_by, position } => {
-            if rustix::fs::seek(
-                state.fd.as_ref().unwrap(),
-                rustix::fs::SeekFrom::Current(seek_by as i64),
-            )
-            .is_err()
-            {
-                return -1 as crate::stdlib::off64_t;
-            }
-            state.x.have = 0 as ::core::ffi::c_uint;
-            state.eof = 0 as ::core::ffi::c_int;
-            state.past = 0 as ::core::ffi::c_int;
-            state.skip = 0 as crate::stdlib::off64_t;
-            gz_clear_error(&mut state.msg, &mut state.err);
-            state.strm.avail_in = 0 as crate::stdlib::uInt;
-            state.x.pos = position;
-            return state.x.pos;
-        }
-        GzSeekAction::Rewind { offset } => {
-            if gzrewind(GzRewindState {
-                mode: state.mode,
-                err: state.err,
-                start: state.start,
-                fd: state.fd.as_ref().unwrap(),
-                reset: GzResetTarget {
-                    have: &mut state.x.have,
-                    eof: &mut state.eof,
-                    past: &mut state.past,
-                    how: &mut state.how,
-                    junk: &mut state.junk,
-                    reset: &mut state.reset,
-                    again: &mut state.again,
-                    skip: &mut state.skip,
-                    err: &mut state.err,
-                    msg: &mut state.msg,
-                    pos: &mut state.x.pos,
-                    avail_in: &mut state.strm.avail_in,
-                },
-            }) == -1 as ::core::ffi::c_int
-            {
-                return -1 as crate::stdlib::off64_t;
-            }
-            offset
-        }
-        GzSeekAction::Skip { offset } => offset,
-        GzSeekAction::Reject => return -1 as crate::stdlib::off64_t,
-    };
-    let mut n: ::core::ffi::c_uint = 0;
-    if state.mode == crate::gzguts_h::GZ_READ {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>()
-            == ::core::mem::size_of::<crate::stdlib::off64_t>()
-            && state.x.have > gz_intmax()
-            || state.x.have as crate::stdlib::off64_t > offset
-        {
-            offset as ::core::ffi::c_uint
-        } else {
-            state.x.have
-        };
-        state.x.have = state.x.have.wrapping_sub(n);
-        state.x.next = state.x.next.wrapping_add(n as usize);
-        state.x.pos += n as crate::stdlib::off64_t;
-        offset -= n as crate::stdlib::off64_t;
-    }
-    state.skip = offset;
-    state.x.pos + offset
+    result
 }
 #[export_name = "gzseek64"]
 
