@@ -31,20 +31,42 @@ fn chunk_len(remaining: usize) -> usize {
     remaining.min(MAX_CHUNK)
 }
 
-fn compress2_buffers_are_valid(
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct CompressBufferPlan {
+    source_len: usize,
+    dest_capacity: usize,
+}
+
+fn plan_compress2_buffers(
     source_len: crate::stdlib::z_size_t,
     dest_capacity: crate::stdlib::z_size_t,
     source_is_null: bool,
     dest_is_null: bool,
-) -> bool {
-    !(source_len > 0 && source_is_null || dest_capacity > 0 && dest_is_null)
+) -> Result<CompressBufferPlan, ::core::ffi::c_int> {
+    if source_len > 0 && source_is_null || dest_capacity > 0 && dest_is_null {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    }
+
+    Ok(CompressBufferPlan {
+        source_len,
+        dest_capacity,
+    })
 }
 
-fn normalize_compress_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    if status == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else {
-        status
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct CompressResult {
+    status: ::core::ffi::c_int,
+    dest_len: usize,
+}
+
+fn finish_compress(status: ::core::ffi::c_int, dest_len: usize) -> CompressResult {
+    CompressResult {
+        status: if status == crate::zlib_h::Z_STREAM_END {
+            crate::zlib_h::Z_OK
+        } else {
+            status
+        },
+        dest_len,
     }
 }
 
@@ -168,20 +190,20 @@ pub unsafe extern "C" fn compress2_z_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
-    let dest_capacity = *destLen;
-    if !compress2_buffers_are_valid(sourceLen, dest_capacity, source.is_null(), dest.is_null()) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    let plan = match plan_compress2_buffers(sourceLen, *destLen, source.is_null(), dest.is_null()) {
+        Ok(plan) => plan,
+        Err(status) => return status,
+    };
 
-    let source_slice = if sourceLen == 0 {
+    let source_slice = if plan.source_len == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(source, sourceLen)
+        ::core::slice::from_raw_parts(source, plan.source_len)
     };
-    let dest_slice = if dest_capacity == 0 {
+    let dest_slice = if plan.dest_capacity == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(dest, dest_capacity)
+        ::core::slice::from_raw_parts_mut(dest, plan.dest_capacity)
     };
     *destLen = 0;
 
@@ -249,9 +271,10 @@ pub unsafe extern "C" fn compress2_z_ffi(
         }
     };
 
-    *destLen = dest_progress.used;
+    let result = finish_compress(status, dest_progress.used);
+    *destLen = result.dest_len;
     crate::src::deflate::deflateEnd(&mut stream);
-    normalize_compress_status(status)
+    result.status
 }
 
 #[export_name = "compress2"]
@@ -327,31 +350,56 @@ pub unsafe extern "C" fn compressBound_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        compress2_buffers_are_valid, compress_bound, compress_bound_z_impl, next_compress_chunk,
-        next_compress_chunk_slices, normalize_compress_status, CompressProgress, MAX_CHUNK,
+        compress_bound, compress_bound_z_impl, finish_compress, next_compress_chunk,
+        next_compress_chunk_slices, plan_compress2_buffers, CompressBufferPlan, CompressProgress,
+        MAX_CHUNK,
     };
 
     #[test]
     fn compress2_buffer_validation_allows_null_for_empty_buffers() {
-        assert!(compress2_buffers_are_valid(0, 0, true, true));
-        assert!(compress2_buffers_are_valid(0, 0, false, false));
+        assert_eq!(
+            plan_compress2_buffers(0, 0, true, true),
+            Ok(CompressBufferPlan {
+                source_len: 0,
+                dest_capacity: 0,
+            })
+        );
+        assert!(plan_compress2_buffers(0, 0, false, false).is_ok());
     }
 
     #[test]
     fn compress2_buffer_validation_rejects_null_nonempty_source() {
-        assert!(!compress2_buffers_are_valid(1, 0, true, false));
-        assert!(!compress2_buffers_are_valid(1, 0, true, true));
+        assert_eq!(
+            plan_compress2_buffers(1, 0, true, false),
+            Err(crate::zlib_h::Z_STREAM_ERROR)
+        );
+        assert_eq!(
+            plan_compress2_buffers(1, 0, true, true),
+            Err(crate::zlib_h::Z_STREAM_ERROR)
+        );
     }
 
     #[test]
     fn compress2_buffer_validation_rejects_null_nonempty_destination() {
-        assert!(!compress2_buffers_are_valid(0, 1, false, true));
-        assert!(!compress2_buffers_are_valid(0, 1, true, true));
+        assert_eq!(
+            plan_compress2_buffers(0, 1, false, true),
+            Err(crate::zlib_h::Z_STREAM_ERROR)
+        );
+        assert_eq!(
+            plan_compress2_buffers(0, 1, true, true),
+            Err(crate::zlib_h::Z_STREAM_ERROR)
+        );
     }
 
     #[test]
     fn compress2_buffer_validation_accepts_present_nonempty_buffers() {
-        assert!(compress2_buffers_are_valid(1, 1, false, false));
+        assert_eq!(
+            plan_compress2_buffers(1, 1, false, false),
+            Ok(CompressBufferPlan {
+                source_len: 1,
+                dest_capacity: 1,
+            })
+        );
     }
 
     #[test]
@@ -456,14 +504,20 @@ mod tests {
     }
 
     #[test]
-    fn compress_status_normalization_maps_only_stream_end_to_ok() {
+    fn compress_result_normalizes_only_stream_end_and_preserves_length() {
         assert_eq!(
-            normalize_compress_status(crate::zlib_h::Z_STREAM_END),
-            crate::zlib_h::Z_OK
+            finish_compress(crate::zlib_h::Z_STREAM_END, 7),
+            super::CompressResult {
+                status: crate::zlib_h::Z_OK,
+                dest_len: 7,
+            }
         );
         assert_eq!(
-            normalize_compress_status(crate::zlib_h::Z_STREAM_ERROR),
-            crate::zlib_h::Z_STREAM_ERROR
+            finish_compress(crate::zlib_h::Z_STREAM_ERROR, 3),
+            super::CompressResult {
+                status: crate::zlib_h::Z_STREAM_ERROR,
+                dest_len: 3,
+            }
         );
     }
 

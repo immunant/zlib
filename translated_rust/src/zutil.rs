@@ -32,6 +32,52 @@ static INCOMPATIBLE_VERSION: [::core::ffi::c_char; 21] = c_chars(*b"incompatible
 const ERROR_MESSAGE_COUNT: usize = 10;
 const FALLBACK_ERROR_MESSAGE_INDEX: usize = ERROR_MESSAGE_COUNT - 1;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ErrorMessageKind {
+    NeedDictionary,
+    StreamEnd,
+    Empty,
+    FileError,
+    StreamError,
+    DataError,
+    InsufficientMemory,
+    BufferError,
+    IncompatibleVersion,
+    Fallback,
+}
+
+impl ErrorMessageKind {
+    fn for_error(err: ::core::ffi::c_int) -> Self {
+        match err {
+            2 => Self::NeedDictionary,
+            1 => Self::StreamEnd,
+            0 => Self::Empty,
+            -1 => Self::FileError,
+            -2 => Self::StreamError,
+            -3 => Self::DataError,
+            -4 => Self::InsufficientMemory,
+            -5 => Self::BufferError,
+            -6 => Self::IncompatibleVersion,
+            _ => Self::Fallback,
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::NeedDictionary => 0,
+            Self::StreamEnd => 1,
+            Self::Empty => 2,
+            Self::FileError => 3,
+            Self::StreamError => 4,
+            Self::DataError => 5,
+            Self::InsufficientMemory => 6,
+            Self::BufferError => 7,
+            Self::IncompatibleVersion => 8,
+            Self::Fallback => FALLBACK_ERROR_MESSAGE_INDEX,
+        }
+    }
+}
+
 static ERROR_MESSAGES: [&[::core::ffi::c_char]; ERROR_MESSAGE_COUNT] = [
     &NEED_DICTIONARY,
     &STREAM_END,
@@ -108,14 +154,11 @@ pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
 }
 
 fn has_error_message_index(err: ::core::ffi::c_int) -> bool {
-    (-6..=2).contains(&err)
+    ErrorMessageKind::for_error(err) != ErrorMessageKind::Fallback
 }
 
 fn error_message_index(err: ::core::ffi::c_int) -> usize {
-    match err {
-        -6..=2 => (2 - err) as usize,
-        _ => FALLBACK_ERROR_MESSAGE_INDEX,
-    }
+    ErrorMessageKind::for_error(err).index()
 }
 
 fn error_message(err: ::core::ffi::c_int) -> &'static [::core::ffi::c_char] {
@@ -186,7 +229,7 @@ mod tests {
         allocation_byte_count, allocation_request, allocation_request_for_uint_size,
         allocation_uses_malloc, compile_flags_for_sizes, error_message, error_message_index,
         has_error_message_index, size_class, size_flag, size_t, z_errmsg, z_errmsg_index,
-        zlib_compile_flags, zlib_version, AllocationRequest, EMPTY_ERROR,
+        zlib_compile_flags, zlib_version, AllocationRequest, ErrorMessageKind, EMPTY_ERROR,
     };
 
     #[test]
@@ -204,6 +247,31 @@ mod tests {
         assert_eq!(error_message_index(-6), 8);
         assert_eq!(error_message_index(-7), 9);
         assert_eq!(error_message_index(3), 9);
+    }
+
+    #[test]
+    fn error_message_kind_classifies_each_zlib_error_code() {
+        assert_eq!(ErrorMessageKind::for_error(2), ErrorMessageKind::NeedDictionary);
+        assert_eq!(ErrorMessageKind::for_error(1), ErrorMessageKind::StreamEnd);
+        assert_eq!(ErrorMessageKind::for_error(0), ErrorMessageKind::Empty);
+        assert_eq!(ErrorMessageKind::for_error(-1), ErrorMessageKind::FileError);
+        assert_eq!(ErrorMessageKind::for_error(-2), ErrorMessageKind::StreamError);
+        assert_eq!(ErrorMessageKind::for_error(-3), ErrorMessageKind::DataError);
+        assert_eq!(
+            ErrorMessageKind::for_error(-4),
+            ErrorMessageKind::InsufficientMemory
+        );
+        assert_eq!(ErrorMessageKind::for_error(-5), ErrorMessageKind::BufferError);
+        assert_eq!(
+            ErrorMessageKind::for_error(-6),
+            ErrorMessageKind::IncompatibleVersion
+        );
+    }
+
+    #[test]
+    fn error_message_kind_uses_the_fallback_outside_zlib_error_codes() {
+        assert_eq!(ErrorMessageKind::for_error(-7), ErrorMessageKind::Fallback);
+        assert_eq!(ErrorMessageKind::for_error(3), ErrorMessageKind::Fallback);
     }
 
     #[test]

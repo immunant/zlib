@@ -4793,22 +4793,45 @@ pub fn crc32(crc: crate::stdlib::uLong, buf: &[u8]) -> crate::stdlib::uLong {
     crc32_z(crc, buf)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FfiInputKind {
+    Null,
+    Empty,
+    NonEmpty,
+}
+
+impl FfiInputKind {
+    fn checksum(self, crc: crate::stdlib::uLong, input: &[u8]) -> crate::stdlib::uLong {
+        match self {
+            Self::Null => 0,
+            Self::Empty | Self::NonEmpty => crc32_z(crc, input),
+        }
+    }
+}
+
+fn classify_ffi_input(buf_is_null: bool, len: usize) -> FfiInputKind {
+    if buf_is_null {
+        FfiInputKind::Null
+    } else if len == 0 {
+        FfiInputKind::Empty
+    } else {
+        FfiInputKind::NonEmpty
+    }
+}
+
 #[export_name = "crc32_z"]
 pub unsafe extern "C" fn crc32_z_ffi(
     crc: crate::stdlib::uLong,
     buf: *const ::core::ffi::c_uchar,
     len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return 0;
-    }
-
-    let bytes = if len == 0 {
-        &[]
-    } else {
-        unsafe { core::slice::from_raw_parts(buf, len) }
+    let input_kind = classify_ffi_input(buf.is_null(), len);
+    let input = match input_kind {
+        FfiInputKind::Null | FfiInputKind::Empty => &[],
+        FfiInputKind::NonEmpty => unsafe { core::slice::from_raw_parts(buf, len) },
     };
-    crc32_z(crc, bytes)
+
+    input_kind.checksum(crc, input)
 }
 
 #[export_name = "crc32"]
@@ -4817,16 +4840,14 @@ pub unsafe extern "C" fn crc32_ffi(
     buf: *const ::core::ffi::c_uchar,
     len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return 0;
-    }
-
-    let bytes = if len == 0 {
-        &[]
-    } else {
-        unsafe { core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t) }
+    let len = len as crate::stdlib::z_size_t;
+    let input_kind = classify_ffi_input(buf.is_null(), len);
+    let input = match input_kind {
+        FfiInputKind::Null | FfiInputKind::Empty => &[],
+        FfiInputKind::NonEmpty => unsafe { core::slice::from_raw_parts(buf, len) },
     };
-    crc32(crc, bytes)
+
+    input_kind.checksum(crc, input)
 }
 fn crc32_combine_operator(len2: crate::stdlib::off64_t) -> Option<crate::stdlib::uLong> {
     if len2 < 0 {
@@ -4915,7 +4936,7 @@ mod tests {
         crc32, crc32_combine, crc32_combine64, crc32_combine_gen64, crc32_combine_op,
         crc32_combine_operator, crc32_from_state, crc32_initial_state, crc32_update_byte,
         crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term, x2n_table, x2nmodp,
-        CRC32_INITIAL, CRC32_MASK, POLY,
+        classify_ffi_input, FfiInputKind, CRC32_INITIAL, CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -4956,6 +4977,30 @@ mod tests {
 
         assert_eq!(unsafe { super::crc32_z_ffi(seed, core::ptr::null(), 1) }, 0);
         assert_eq!(unsafe { super::crc32_ffi(seed, core::ptr::null(), 1) }, 0);
+    }
+
+    #[test]
+    fn classifies_ffi_input_before_creating_a_raw_slice() {
+        assert_eq!(classify_ffi_input(true, 0), FfiInputKind::Null);
+        assert_eq!(classify_ffi_input(true, 1), FfiInputKind::Null);
+        assert_eq!(classify_ffi_input(false, 0), FfiInputKind::Empty);
+        assert_eq!(classify_ffi_input(false, 1), FfiInputKind::NonEmpty);
+    }
+
+    #[test]
+    fn ffi_input_kind_preserves_null_and_slice_results() {
+        let seed = 0x1234_5678;
+        let input = b"input";
+
+        assert_eq!(FfiInputKind::Null.checksum(seed, &[]), 0);
+        assert_eq!(
+            FfiInputKind::Empty.checksum(seed, &[]),
+            crc32_z(seed, &[])
+        );
+        assert_eq!(
+            FfiInputKind::NonEmpty.checksum(seed, input),
+            crc32_z(seed, input)
+        );
     }
 
     #[test]
