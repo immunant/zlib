@@ -750,7 +750,7 @@ pub unsafe extern "C" fn deflateInit2_(
     state.level = level;
     state.strategy = strategy;
     state.method = method as crate::stdlib::Byte;
-    return deflateReset(stream);
+    return deflate_reset_bound(stream, state, true);
 }
 #[export_name = "deflateInit2_"]
 
@@ -1071,6 +1071,17 @@ pub fn deflateResetKeep(
     let Some((strm, state)) = deflateStateCheck(strm as *mut _) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    deflate_reset_bound(strm, state, initialize_matcher)
+}
+
+// Initialization and reset both already have the same validated stream/state
+// pair. Keep their common reset transition reference-bound so initialization
+// does not need to route through the public dispatcher and bind it again.
+fn deflate_reset_bound(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    initialize_matcher: bool,
+) -> ::core::ffi::c_int {
     let result = deflate_reset_keep(strm, state);
     crate::src::trees::_tr_init(state);
     if result == crate::zlib_h::Z_OK && initialize_matcher {
