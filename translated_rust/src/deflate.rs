@@ -1483,20 +1483,40 @@ fn fill_window_reinsert(
     true
 }
 
-unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    // The callback allocation has exactly `window_size` bytes.  All window
-    // movement, initialization, and byte reads below use this one bounded
-    // view; only `read_buf()` still crosses the stream input boundary.
-    let window = &mut *::core::ptr::slice_from_raw_parts_mut(
-        state.window,
-        state.window_size as usize,
-    );
-    // The raw hash-table storage belongs to the callback-allocated deflate
-    // state.  This boundary creates short-lived bounded views, then delegates
-    // the retained-byte hash rebuild to `fill_window_reinsert()`.
-    let head = &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FillWindowInputProgress {
+    avail_in: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    consumed: usize,
+}
+
+/// Refill the deflate window through established input and callback-storage
+/// views.  The FFI-facing caller is responsible only for constructing those
+/// short-lived views and committing the input pointer after this safe core
+/// has updated the scalar stream progress.
+fn fill_window_core(
+    state: &mut crate::src::deflate::deflate_state,
+    input: &[crate::stdlib::Bytef],
+    avail_in: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+) -> FillWindowInputProgress {
+    let mut progress = FillWindowInputProgress {
+        avail_in,
+        total_in,
+        adler,
+        consumed: 0,
+    };
+    let Ok(expected_input_len) = usize::try_from(avail_in) else {
+        return progress;
+    };
+    if input.len() < expected_input_len {
+        return progress;
+    }
     let mut more: ::core::ffi::c_uint;
     let wsize = state.w_size;
     loop {
@@ -1509,7 +1529,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         );
         if fill_window_should_slide(state.strstart, wsize) {
             if !fill_window_slide(window, wsize, more) {
-                return;
+                return progress;
             }
             (
                 state.match_start,
@@ -1527,25 +1547,43 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             state.slid = 1;
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
-        if (*state.strm).avail_in == 0 {
+        if progress.avail_in == 0 {
             break;
         }
         let Ok(cursor) = usize::try_from(fill_window_cursor(state.strstart, state.lookahead))
         else {
-            return;
+            return progress;
         };
         let Some(output) = window.get_mut(cursor..) else {
-            return;
+            return progress;
         };
         if output.len() < more as usize {
-            return;
+            return progress;
         }
-        let copied = read_buf(state.strm, output.as_mut_ptr(), more);
-        state.lookahead = fill_window_lookahead_after_read(state.lookahead, copied);
+        let Some(remaining_input) = input.get(progress.consumed..) else {
+            return progress;
+        };
+        let result = read_buf_core(
+            remaining_input,
+            output,
+            progress.avail_in,
+            more,
+            progress.total_in,
+            progress.adler,
+            state.wrap,
+        );
+        progress.avail_in = result.avail_in;
+        progress.total_in = result.total_in;
+        progress.adler = result.adler;
+        let Some(consumed) = progress.consumed.checked_add(result.copied as usize) else {
+            return progress;
+        };
+        progress.consumed = consumed;
+        state.lookahead = fill_window_lookahead_after_read(state.lookahead, result.copied);
         if !fill_window_reinsert(state, window, head, prev) {
-            return;
+            return progress;
         }
-        if !fill_window_should_refill(state.lookahead, (*state.strm).avail_in) {
+        if !fill_window_should_refill(state.lookahead, progress.avail_in) {
             break;
         }
     }
@@ -1556,10 +1594,46 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         state.lookahead,
     ) {
         if !fill_window_zero(window, start, len) {
-            return;
+            return progress;
         }
         state.high_water = fill_window_high_water_after_zero(start, len);
     }
+    progress
+}
+
+unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+    let state = &mut *s;
+    let stream = &mut *state.strm;
+    if stream.avail_in != 0 && stream.next_in.is_null() {
+        return;
+    }
+    // The callback allocation has exactly these lengths.  This boundary
+    // creates short-lived views; the refill algorithm itself is slice-based.
+    let window = &mut *::core::ptr::slice_from_raw_parts_mut(
+        state.window,
+        state.window_size as usize,
+    );
+    let head = &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
+    let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
+    let input = if stream.avail_in == 0 {
+        &[]
+    } else {
+        core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+    };
+    let progress = fill_window_core(
+        state,
+        input,
+        stream.avail_in,
+        stream.total_in,
+        stream.adler,
+        window,
+        head,
+        prev,
+    );
+    stream.avail_in = progress.avail_in;
+    stream.total_in = progress.total_in;
+    stream.adler = progress.adler;
+    stream.next_in = stream.next_in.wrapping_add(progress.consumed);
 }
 #[export_name = "deflateInit_"]
 
@@ -7143,6 +7217,81 @@ mod tests {
         let before = window;
         assert!(!fill_window_zero(&mut window, 15, 2));
         assert_eq!(window, before);
+    }
+
+    #[test]
+    fn fill_window_core_updates_only_established_slice_views() {
+        let mut state = super::internal_state::newly_allocated();
+        state.w_size = 8;
+        state.w_mask = 7;
+        state.window_size = 16;
+        state.hash_size = 1;
+        state.wrap = 1;
+        let input = *b"abc";
+        let mut window = [0xff; 16];
+        let mut head = [0; 1];
+        let mut prev = [0; 8];
+
+        let progress = super::fill_window_core(
+            &mut state,
+            &input,
+            input.len() as crate::stdlib::uInt,
+            5,
+            1,
+            &mut window,
+            &mut head,
+            &mut prev,
+        );
+
+        assert_eq!(
+            progress,
+            super::FillWindowInputProgress {
+                avail_in: 0,
+                total_in: 8,
+                adler: crate::src::adler32::adler32_z(1, &input),
+                consumed: input.len(),
+            }
+        );
+        assert_eq!(&window[..3], &input);
+        assert!(window[3..].iter().all(|byte| *byte == 0));
+        assert_eq!(state.lookahead, input.len() as crate::stdlib::uInt);
+        assert_eq!(state.high_water, 16);
+    }
+
+    #[test]
+    fn fill_window_core_rejects_a_short_input_view_before_mutation() {
+        let mut state = super::internal_state::newly_allocated();
+        state.w_size = 8;
+        state.window_size = 16;
+        let original = state;
+        let input = *b"abc";
+        let mut window = [0xff; 16];
+        let mut head = [0; 1];
+        let mut prev = [0; 8];
+
+        let progress = super::fill_window_core(
+            &mut state,
+            &input,
+            4,
+            5,
+            1,
+            &mut window,
+            &mut head,
+            &mut prev,
+        );
+
+        assert_eq!(
+            progress,
+            super::FillWindowInputProgress {
+                avail_in: 4,
+                total_in: 5,
+                adler: 1,
+                consumed: 0,
+            }
+        );
+        assert_eq!(state.lookahead, original.lookahead);
+        assert_eq!(state.high_water, original.high_water);
+        assert_eq!(window, [0xff; 16]);
     }
 
     #[test]
