@@ -552,124 +552,6 @@ impl GzZeroStep {
     }
 }
 
-unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let Some(buffers) = crate::gzguts_h::GzBuffers::allocate_write(state.want, state.direct) else {
-        crate::src::gzlib::GzErrorState {
-            message: &mut state.msg,
-            error: &mut state.err,
-            buffered: &mut state.x.have,
-            again: state.again,
-            path: state.path.as_deref(),
-        }
-        .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-        return -1 as ::core::ffi::c_int;
-    };
-    state.buffers = buffers;
-    // The write-side input allocation is owned storage.  Retain its empty
-    // cursor as an index/count now, so later buffered writes need not recover
-    // it from the embedded stream's temporary `next_in` projection.
-    state.buffers.write_owner = Some(crate::src::gzlib::GzWriteOwner::new());
-    if state.direct == 0 {
-        state.strm.zalloc = None;
-        state.strm.zfree = None;
-        state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        ret = crate::src::deflate::deflateInit2_(
-            Some(&mut state.strm),
-            state.level,
-            8 as ::core::ffi::c_int,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            8 as ::core::ffi::c_int,
-            state.strategy,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        );
-        if ret != crate::zlib_h::Z_OK {
-            state.buffers.clear();
-            crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
-                again: state.again,
-                path: state.path.as_deref(),
-            }
-            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-            return -1 as ::core::ffi::c_int;
-        }
-        // Successful initialization, rather than buffer allocation or
-        // compressed mode, is the lifecycle proof needed by close.  Install
-        // the pointer-free owner before any later setup can publish cursors.
-        state.buffers.write_owner.as_mut().unwrap().set_deflater(
-            crate::src::gzlib::GzEmbeddedDeflateState::new(
-                0,
-                0,
-                state.strm.total_in,
-                state.strm.total_out,
-            ),
-        );
-        state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    }
-    if state.direct == 0 {
-        // The allocation owner proves that this is the bounded compressed
-        // output buffer before its address is published to the ABI stream.
-        // Keep the view separate from `gz_state` so an embedded-deflate owner
-        // can replace this one cursor projection without changing setup.
-        let Some(mut buffers) = state.buffers.write_output_view() else {
-            state.buffers.clear();
-            crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
-                again: state.again,
-                path: state.path.as_deref(),
-            }
-            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-            return -1;
-        };
-        let Some(setup) =
-            crate::src::gzlib::GzEmbeddedDeflateSetup::from_write_buffers(&mut buffers)
-        else {
-            state.buffers.clear();
-            crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
-                again: state.again,
-                path: state.path.as_deref(),
-            }
-            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-            return -1;
-        };
-        // Initialization has no input, but use the complete bounded request
-        // shape already.  Later `gz_comp()` dispatches can use the same owner
-        // for non-empty input without rebuilding a cursor from gzip state.
-        let Some(mut call) = setup.call(&[], 0) else {
-            state.buffers.clear();
-            crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
-                again: state.again,
-                path: state.path.as_deref(),
-            }
-            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-            return -1;
-        };
-        state.strm.avail_out = call.output_available();
-        state.strm.next_out = call.output_mut().as_mut_ptr();
-        state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
-        state.buffers.write_owner.as_mut().unwrap().set_deflater(
-            crate::src::gzlib::GzEmbeddedDeflateState::new(
-                0,
-                state.strm.avail_out,
-                state.strm.total_in,
-                state.strm.total_out,
-            ),
-        );
-    }
-    return 0 as ::core::ffi::c_int;
-}
-
 // Zero-fill can either complete a deferred seek by itself or precede a normal
 // compressor request.  Keep that distinction in the existing compressor
 // boundary so callers do not need a second unsafe state adapter just to stage
@@ -678,6 +560,7 @@ enum GzSkipMaterialization {
     None,
     Continue,
     Only,
+    InitializeOnly,
 }
 
 // One staged compressor pass carries only caller input and scalar transition
@@ -833,6 +716,7 @@ unsafe fn gz_comp(
     mut close: Option<GzWriteCloseCodec<'_>>,
     skip_materialization: GzSkipMaterialization,
 ) -> ::core::ffi::c_int {
+    let initialize_only = matches!(skip_materialization, GzSkipMaterialization::InitializeOnly);
     let zero_only = matches!(skip_materialization, GzSkipMaterialization::Only);
     let mut materializing = zero_only
         || (state.skip != 0
@@ -884,14 +768,136 @@ unsafe fn gz_comp(
                 (flush, external_input, retune.take(), close.take())
             };
         let uses_external_input = request_input.is_some();
-        // Initialization owns the callback-backed gzip allocation transaction.
-        // Once it has completed, the compressor request sees only bounded
-        // buffers, checked indices, and scalar state.
-        if state.buffers.size == 0 && gz_init(state) == -1 {
+        // Initialization is part of this established compressor boundary:
+        // allocation, embedded-deflater setup, and cursor publication are one
+        // callback-backed lifecycle transaction.  Keeping it here removes a
+        // second unsafe state adapter while all later requests see only
+        // bounded buffers, checked indices, and scalar state.
+        let initialization_failed = if state.buffers.size != 0 {
+            false
+        } else {
+            'initialize: {
+                let Some(buffers) =
+                    crate::gzguts_h::GzBuffers::allocate_write(state.want, state.direct)
+                else {
+                    crate::src::gzlib::GzErrorState {
+                        message: &mut state.msg,
+                        error: &mut state.err,
+                        buffered: &mut state.x.have,
+                        again: state.again,
+                        path: state.path.as_deref(),
+                    }
+                    .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+                    break 'initialize true;
+                };
+                state.buffers = buffers;
+                // The write-side input allocation is owned storage. Retain its
+                // empty cursor as an index/count rather than recovering it
+                // from the embedded stream's temporary `next_in` projection.
+                state.buffers.write_owner = Some(crate::src::gzlib::GzWriteOwner::new());
+                if state.direct == 0 {
+                    state.strm.zalloc = None;
+                    state.strm.zfree = None;
+                    state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+                    let ret = crate::src::deflate::deflateInit2_(
+                        Some(&mut state.strm),
+                        state.level,
+                        8 as ::core::ffi::c_int,
+                        15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                        8 as ::core::ffi::c_int,
+                        state.strategy,
+                        crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                        ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                    );
+                    if ret != crate::zlib_h::Z_OK {
+                        state.buffers.clear();
+                        crate::src::gzlib::GzErrorState {
+                            message: &mut state.msg,
+                            error: &mut state.err,
+                            buffered: &mut state.x.have,
+                            again: state.again,
+                            path: state.path.as_deref(),
+                        }
+                        .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+                        break 'initialize true;
+                    }
+                    // Successful setup, rather than buffer allocation alone,
+                    // is close's lifecycle proof.
+                    state.buffers.write_owner.as_mut().unwrap().set_deflater(
+                        crate::src::gzlib::GzEmbeddedDeflateState::new(
+                            0,
+                            0,
+                            state.strm.total_in,
+                            state.strm.total_out,
+                        ),
+                    );
+                    state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                }
+                if state.direct == 0 {
+                    let Some(mut buffers) = state.buffers.write_output_view() else {
+                        state.buffers.clear();
+                        crate::src::gzlib::GzErrorState {
+                            message: &mut state.msg,
+                            error: &mut state.err,
+                            buffered: &mut state.x.have,
+                            again: state.again,
+                            path: state.path.as_deref(),
+                        }
+                        .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+                        break 'initialize true;
+                    };
+                    let Some(setup) =
+                        crate::src::gzlib::GzEmbeddedDeflateSetup::from_write_buffers(&mut buffers)
+                    else {
+                        state.buffers.clear();
+                        crate::src::gzlib::GzErrorState {
+                            message: &mut state.msg,
+                            error: &mut state.err,
+                            buffered: &mut state.x.have,
+                            again: state.again,
+                            path: state.path.as_deref(),
+                        }
+                        .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+                        break 'initialize true;
+                    };
+                    // Initialization has no input, but its output publication
+                    // uses the same complete bounded request shape as later
+                    // `gz_comp()` dispatches.
+                    let Some(mut call) = setup.call(&[], 0) else {
+                        state.buffers.clear();
+                        crate::src::gzlib::GzErrorState {
+                            message: &mut state.msg,
+                            error: &mut state.err,
+                            buffered: &mut state.x.have,
+                            again: state.again,
+                            path: state.path.as_deref(),
+                        }
+                        .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+                        break 'initialize true;
+                    };
+                    state.strm.avail_out = call.output_available();
+                    state.strm.next_out = call.output_mut().as_mut_ptr();
+                    state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
+                    state.buffers.write_owner.as_mut().unwrap().set_deflater(
+                        crate::src::gzlib::GzEmbeddedDeflateState::new(
+                            0,
+                            state.strm.avail_out,
+                            state.strm.total_in,
+                            state.strm.total_out,
+                        ),
+                    );
+                }
+                false
+            }
+        };
+        if initialization_failed {
             if let Some(close) = close.as_mut() {
                 close.result.record_codec_result(-1, state.err);
             }
             return -1;
+        }
+        if initialize_only {
+            return 0;
         }
         let input_cursor = if state.direct != 0 && state.strm.avail_in != 0 {
             state
@@ -1204,9 +1210,10 @@ fn gz_comp_request<'request>(
             // staged fresh input since the last pass. Totals persist with the
             // paired gzip buffers so later write policy need not trust ABI
             // counters between calls.
-            // `gz_init()` installs this tag immediately after `deflateInit2_()`
-            // succeeds.  Do not recreate it from allocation state here: that
-            // would allow a failed setup to masquerade as an initialized codec.
+            // Initialization installs this tag immediately after
+            // `deflateInit2_()` succeeds. Do not recreate it from allocation
+            // state here: that would allow failed setup to masquerade as an
+            // initialized codec.
             let Some(persisted) = owner
                 .buffers
                 .write_owner
@@ -1466,7 +1473,15 @@ pub(crate) unsafe fn gzip_write_state_adapter(
     };
     let mut request = transaction.request;
     let mut ret: ::core::ffi::c_int = 0;
-    if state.buffers.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
+    if state.buffers.size == 0 as ::core::ffi::c_uint
+        && gz_comp(
+            state,
+            crate::zlib_h::Z_NO_FLUSH,
+            None,
+            None,
+            None,
+            GzSkipMaterialization::InitializeOnly,
+        ) == -1 as ::core::ffi::c_int
     {
         return result.finish(0);
     }
