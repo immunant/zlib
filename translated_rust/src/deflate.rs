@@ -778,6 +778,22 @@ fn fill_window_space_state(
     (more, slide)
 }
 
+/// Select the exact writable window tail used for one input refill.  Keeping
+/// this arithmetic slice-based ensures the transitional `read_buf` adapter
+/// never receives a cursor formed past the callback-owned window allocation.
+fn fill_window_write_span(
+    window_len: usize,
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    requested: ::core::ffi::c_uint,
+) -> Option<core::ops::Range<usize>> {
+    let start = usize::try_from(strstart)
+        .ok()?
+        .checked_add(usize::try_from(lookahead).ok()?)?;
+    let end = start.checked_add(usize::try_from(requested).ok()?)?;
+    (end <= window_len).then_some(start..end)
+}
+
 unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
@@ -846,15 +862,15 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         // `read_buf()` consumes at most this exact available-input snapshot.
         // Retain it so the loop need not dereference the compatibility stream
         // again merely to decide whether more input remains.
-        let progress = read_buf(
-            state.strm,
-            state
-                .window
-                .wrapping_add(state.strstart as usize)
-                .wrapping_add(state.lookahead as usize),
-            more,
-            state.wrap,
-        );
+        let Some(write_span) =
+            fill_window_write_span(window.len(), state.strstart, state.lookahead, more)
+        else {
+            return;
+        };
+        let Some(output) = window.get_mut(write_span) else {
+            return;
+        };
+        let progress = read_buf(state.strm, output.as_mut_ptr(), more, state.wrap);
         n = progress.copied;
         state.lookahead = state.lookahead.wrapping_add(n);
         if state.lookahead.wrapping_add(state.insert)
