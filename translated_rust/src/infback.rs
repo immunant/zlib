@@ -886,6 +886,32 @@ fn inflate_back_copy_match_window(
     }
 }
 
+// Literal output follows the same configured-window path as match output.
+// The raw `put` cursor still belongs to callback flow, but the actual byte
+// store is bounded by the active window rather than dereferencing that cursor
+// in the decoder loop.
+fn inflate_back_write_literal(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    left: ::core::ffi::c_uint,
+    byte: crate::stdlib::Bytef,
+) {
+    let write_index = state
+        .wsize
+        .checked_sub(left)
+        .expect("active inflateBack output space fits its window") as usize;
+    crate::src::inflate::updatewindow(
+        strm,
+        state,
+        crate::src::inflate::InflateWindowAccess::Existing,
+        |_, window| {
+            let window = window.expect("inflateBack has a configured output window");
+            window[write_index] = byte;
+        },
+    )
+    .expect("inflateBack existing window access cannot fail");
+}
+
 fn inflate_back_stored_copy_count(
     length: ::core::ffi::c_uint,
     have: ::core::ffi::c_uint,
@@ -1537,9 +1563,13 @@ pub unsafe extern "C" fn inflateBack(
                             break;
                         }
                     }
-                    let c2rust_fresh15 = put;
+                    inflate_back_write_literal(
+                        strm,
+                        state_ref,
+                        left,
+                        inflate_back_literal_byte(state_ref),
+                    );
                     put = put.wrapping_add(1);
-                    *c2rust_fresh15 = inflate_back_literal_byte(state_ref);
                     inflate_back_commit_literal(state_ref, &mut left);
                 }
                 InflateBackLengthCode::End => {
