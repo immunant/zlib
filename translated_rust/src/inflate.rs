@@ -322,6 +322,22 @@ fn initial_inflate_normal_state() -> InflateNormalState {
 // this owner directly.
 pub(crate) struct InflateGzipOwner {
     normal: InflateNormalState,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    data_type: ::core::ffi::c_int,
+}
+
+// Gzip owns its inflater for the lifetime of the opaque gzip handle, so it
+// never needs the public `z_stream` cursor or a registered header.  Expose
+// exactly the bounded-call completion that gzip needs to retain that owner.
+pub(crate) struct InflateGzipResult {
+    pub(crate) status: ::core::ffi::c_int,
+    pub(crate) input_remaining: crate::stdlib::uInt,
+    pub(crate) output_remaining: crate::stdlib::uInt,
+    pub(crate) total_in: crate::stdlib::uLong,
+    pub(crate) total_out: crate::stdlib::uLong,
+    pub(crate) data_error_message: Option<&'static [u8]>,
 }
 
 impl InflateGzipOwner {
@@ -330,16 +346,63 @@ impl InflateGzipOwner {
         // `inflateInit2_(..., 15 + 16, ...)` selects gzip wrapping and then
         // runs the normal reset policy.  Keep that policy shared so moving
         // gzip off the temporary ABI stream cannot change its initial state.
-        let _ = inflate_reset2_normal(&mut normal, 15 + 16).expect("gzip window bits are valid");
-        Self { normal }
+        let reset = inflate_reset2_normal(&mut normal, 15 + 16)
+            .expect("gzip window bits are valid");
+        Self {
+            normal,
+            total_in: 0,
+            total_out: 0,
+            adler: reset.adler.unwrap_or(0),
+            data_type: 0,
+        }
     }
 
     pub(crate) fn reset(&mut self) {
-        let _ = inflate_reset_core(&mut self.normal);
+        let reset = inflate_reset_core(&mut self.normal);
+        self.total_in = 0;
+        self.total_out = 0;
+        self.data_type = 0;
+        if let Some(adler) = reset.adler {
+            self.adler = adler;
+        }
     }
 
-    pub(crate) fn normal_mut(&mut self) -> &mut InflateNormalState {
-        &mut self.normal
+    pub(crate) fn inflate(&mut self, input: &[u8], output: &mut [u8]) -> InflateGzipResult {
+        let mut stream = InflateDecoderStream {
+            total_in: self.total_in,
+            total_out: self.total_out,
+            adler: self.adler,
+            data_type: self.data_type,
+            message: None,
+        };
+        let result = InflateStreamOwner {
+            normal: &mut self.normal,
+            input,
+            output,
+            header: None,
+            stream: &mut stream,
+            flush: crate::zlib_h::Z_NO_FLUSH,
+        }
+        .run();
+        self.total_in = stream.total_in;
+        self.total_out = stream.total_out;
+        self.adler = stream.adler;
+        self.data_type = stream.data_type;
+        InflateGzipResult {
+            status: result.status,
+            input_remaining: result.cursor.input_remaining,
+            output_remaining: result.cursor.output_remaining,
+            total_in: self.total_in,
+            total_out: self.total_out,
+            data_error_message: stream.message.and_then(|message| match message {
+                InflateMessage::Error(index) => Some(&INFLATE_ERROR_MESSAGES[index]
+                    [..INFLATE_ERROR_MESSAGES[index].len() - 1]),
+                // The former gzip adapter recognized only the stable table
+                // entries above; retain its generic gzip diagnostic for this
+                // non-table stream message.
+                InflateMessage::InvalidCode => None,
+            }),
+        }
     }
 }
 

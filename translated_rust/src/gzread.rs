@@ -15,10 +15,6 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflateEnd;
-pub use crate::src::inflate::inflateInit2_;
-pub use crate::src::inflate::inflateReset;
-use crate::src::inflate::inflate_from_stream;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidp;
@@ -46,7 +42,7 @@ pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
 use crate::src::gzlib::{
-    GzCodecInput, GzCodecResult, GzEmbeddedInflateCall, GzEmbeddedInflateDispatch,
+    GzCodecInput, GzCodecResult, GzEmbeddedInflateCall,
 };
 
 fn is_gzip_header(input: &[u8]) -> bool {
@@ -237,6 +233,69 @@ struct GzFetchState {
     have: ::core::ffi::c_uint,
     eof: ::core::ffi::c_int,
     avail_in: crate::stdlib::uInt,
+}
+
+// This is the complete pointer-free projection needed by LOOK, COPY, and
+// GZIP fetches.  The public gzip handle and its ABI cursor remain at the
+// callers that construct this view; the fetch loop itself cannot reach the
+// embedded `z_stream` or `gzFile_s::next`.
+struct GzFetchOwner<'a> {
+    buffers: &'a mut crate::gzguts_h::GzBuffers,
+    want: ::core::ffi::c_uint,
+    direct: &'a mut ::core::ffi::c_int,
+    junk: &'a mut ::core::ffi::c_int,
+    how: &'a mut ::core::ffi::c_int,
+    again: &'a mut ::core::ffi::c_int,
+    eof: &'a mut ::core::ffi::c_int,
+    err: &'a mut ::core::ffi::c_int,
+    message: &'a mut Option<Box<[u8]>>,
+    have: &'a mut ::core::ffi::c_uint,
+    fd: &'a rustix::fd::OwnedFd,
+    path: Option<&'a [u8]>,
+    codec_available_input: &'a mut crate::stdlib::uInt,
+    codec_available_output: &'a mut crate::stdlib::uInt,
+    codec_total_in: &'a mut crate::stdlib::uLong,
+    codec_total_out: &'a mut crate::stdlib::uLong,
+}
+
+impl<'a> GzFetchOwner<'a> {
+    fn new(
+        buffers: &'a mut crate::gzguts_h::GzBuffers,
+        want: ::core::ffi::c_uint,
+        direct: &'a mut ::core::ffi::c_int,
+        junk: &'a mut ::core::ffi::c_int,
+        how: &'a mut ::core::ffi::c_int,
+        again: &'a mut ::core::ffi::c_int,
+        eof: &'a mut ::core::ffi::c_int,
+        err: &'a mut ::core::ffi::c_int,
+        message: &'a mut Option<Box<[u8]>>,
+        have: &'a mut ::core::ffi::c_uint,
+        fd: &'a rustix::fd::OwnedFd,
+        path: Option<&'a [u8]>,
+        codec_available_input: &'a mut crate::stdlib::uInt,
+        codec_available_output: &'a mut crate::stdlib::uInt,
+        codec_total_in: &'a mut crate::stdlib::uLong,
+        codec_total_out: &'a mut crate::stdlib::uLong,
+    ) -> Self {
+        Self {
+            buffers,
+            want,
+            direct,
+            junk,
+            how,
+            again,
+            eof,
+            err,
+            message,
+            have,
+            fd,
+            path,
+            codec_available_input,
+            codec_available_output,
+            codec_total_in,
+            codec_total_out,
+        }
+    }
 }
 
 enum GzFetchAction {
@@ -715,49 +774,27 @@ fn gz_decomp_loop(
     decomp.finish(result)
 }
 
-unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state.buffers.size == 0 as ::core::ffi::c_uint {
-        let Some(buffers) = crate::gzguts_h::GzBuffers::allocate_read(state.want) else {
+fn gz_look(owner: &mut GzFetchOwner<'_>) -> ::core::ffi::c_int {
+    if owner.buffers.size == 0 as ::core::ffi::c_uint {
+        let Some(buffers) = crate::gzguts_h::GzBuffers::allocate_read(owner.want) else {
             crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
-                again: state.again,
-                path: state.path.as_deref(),
+                message: owner.message,
+                error: owner.err,
+                buffered: owner.have,
+                again: *owner.again,
+                path: owner.path,
             }
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1 as ::core::ffi::c_int;
         };
-        state.buffers = buffers;
-        state.strm.zalloc = None;
-        state.strm.zfree = None;
-        state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        state.strm.avail_in = 0 as crate::stdlib::uInt;
-        state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        if crate::src::inflate::inflateInit2_(
-            Some(&mut state.strm),
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        ) != crate::zlib_h::Z_OK
-        {
-            state.buffers.clear();
-            crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
-                again: state.again,
-                path: state.path.as_deref(),
-            }
-            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-            return -1 as ::core::ffi::c_int;
-        }
-        state.buffers.inflate_state = Some(
+        *owner.buffers = buffers;
+        *owner.codec_available_input = 0;
+        owner.buffers.inflate_state = Some(
             crate::src::gzlib::GzEmbeddedInflateState::from_stream_fields(
-                state.strm.avail_in,
-                state.strm.avail_out,
-                state.strm.total_in,
-                state.strm.total_out,
+                0,
+                0,
+                0,
+                0,
             ),
         );
     }
@@ -766,12 +803,12 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     // codec before it attempts any file I/O.  Both this path and a detected
     // gzip header perform the exact same reset, so carry the action to one
     // dispatch site below rather than duplicating the codec boundary.
-    let action = if state.direct == -1 || state.junk == 0 {
+    let action = if *owner.direct == -1 || *owner.junk == 0 {
         let action = gz_look_step(GzLookState {
-            direct: &mut state.direct,
-            junk: &mut state.junk,
-            how: &mut state.how,
-            again: state.again,
+            direct: owner.direct,
+            junk: owner.junk,
+            how: owner.how,
+            again: *owner.again,
             input: &[],
             output: None,
         });
@@ -780,32 +817,31 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         action
     } else {
-        let Some(mut input_cursor) = state.buffers.input_cursor.take() else {
+        let Some(mut input_cursor) = owner.buffers.input_cursor.take() else {
             return -1 as ::core::ffi::c_int;
         };
         let refill = gz_avail(GzAvailState {
-            err: &mut state.err,
-            eof: &mut state.eof,
+            err: owner.err,
+            eof: owner.eof,
             input_cursor: &mut input_cursor,
-            size: state.buffers.size as usize,
-            input: &mut state.buffers.input,
-            fd: state.fd.as_ref().expect("gzip state has an open file"),
-            again: &mut state.again,
-            message: &mut state.msg,
-            buffered: &mut state.x.have,
-            path: state.path.as_deref(),
+            size: owner.buffers.size as usize,
+            input: &mut owner.buffers.input,
+            fd: owner.fd,
+            again: owner.again,
+            message: owner.message,
+            buffered: owner.have,
+            path: owner.path,
         });
-        state.buffers.input_cursor = Some(input_cursor);
+        owner.buffers.input_cursor = Some(input_cursor);
         if refill.is_none() {
             return -1 as ::core::ffi::c_int;
         }
-        let input_cursor = state.buffers.input_cursor.as_ref().unwrap();
-        state.strm.next_in = state.buffers.input.as_deref_mut().unwrap().as_mut_ptr();
-        state.strm.avail_in = input_cursor.available();
+        let input_cursor = owner.buffers.input_cursor.as_ref().unwrap();
+        *owner.codec_available_input = input_cursor.available();
         // The successful refill above leaves a checked owner cursor.  Retain that
         // index through copy detection instead of rebuilding a view from the ABI
         // stream pointer that is published only for the subsequent codec call.
-        let Some(input) = state
+        let Some(input) = owner
             .buffers
             .input
             .as_deref()
@@ -814,30 +850,35 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         };
         gz_look_step(GzLookState {
-            direct: &mut state.direct,
-            junk: &mut state.junk,
-            how: &mut state.how,
-            again: state.again,
+            direct: owner.direct,
+            junk: owner.junk,
+            how: owner.how,
+            again: *owner.again,
             input,
-            output: state.buffers.output.as_deref_mut(),
+            output: owner.buffers.output.as_deref_mut(),
         })
     };
     match action {
         Ok(GzLookAction::ResetGzip) => {
-            crate::src::inflate::inflateReset(&mut state.strm);
-            if let Some(inflate) = state.buffers.inflate_state.as_mut() {
+            if let Some(inflate) = owner.buffers.inflate_state.as_mut() {
                 inflate.update(crate::src::gzlib::GzCodecCounters::from_stream_fields(
-                    state.strm.avail_in,
-                    state.strm.avail_out,
-                    state.strm.total_in,
-                    state.strm.total_out,
+                    *owner.codec_available_input,
+                    *owner.codec_available_output,
+                    *owner.codec_total_in,
+                    *owner.codec_total_out,
                 ));
+                inflate.reset();
+                let counters = inflate.counters();
+                *owner.codec_available_input = counters.available_input();
+                *owner.codec_available_output = counters.available_output();
+                *owner.codec_total_in = counters.total_in();
+                *owner.codec_total_out = counters.total_out();
             }
             0
         }
         Ok(GzLookAction::NeedInput) => 0,
         Ok(GzLookAction::Copy { have }) => {
-            let Some(output) = state.buffers.output.as_deref_mut() else {
+            let Some(output) = owner.buffers.output.as_deref_mut() else {
                 return -1;
             };
             let Some(cursor) = crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(
@@ -847,163 +888,125 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ) else {
                 return -1;
             };
-            state.x.next = output.as_mut_ptr();
-            state.x.have = have as ::core::ffi::c_uint;
-            state.buffers.set_output_cursor(cursor);
-            state.strm.avail_in = 0;
-            state.buffers.input_cursor = Some(GzCodecInput::empty());
+            *owner.have = have as ::core::ffi::c_uint;
+            owner.buffers.set_output_cursor(cursor);
+            *owner.codec_available_input = 0;
+            owner.buffers.input_cursor = Some(GzCodecInput::empty());
             0
         }
         Err(()) => -1,
     }
 }
 
-unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let output_len = (state.buffers.size << 1 as ::core::ffi::c_int) as usize;
+fn gz_decomp(owner: &mut GzFetchOwner<'_>) -> ::core::ffi::c_int {
+    let output_len = (owner.buffers.size << 1 as ::core::ffi::c_int) as usize;
     // The loop receives the owned output allocation itself.  Each embedded
     // request narrows it to the checked prefix available to this inflate
     // pass, so this boundary no longer publishes an output cursor before a
     // request exists.
-    let Some(output) = state.buffers.output.as_deref_mut() else {
+    let Some(output) = owner.buffers.output.as_deref_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    let Some(input) = state.buffers.input_cursor.as_ref() else {
+    let Some(input) = owner.buffers.input_cursor.as_ref() else {
         return -1 as ::core::ffi::c_int;
     };
     let Some(mut decomp) = crate::src::gzlib::GzDecompState::new(
         output_len,
         input,
-        state
+        owner
             .buffers
             .inflate_state
             .as_ref()
             .map(crate::src::gzlib::GzEmbeddedInflateState::counters)
-            .unwrap_or_else(|| {
-                crate::src::gzlib::GzCodecCounters::from_stream_fields(
-                    state.strm.avail_in,
-                    state.strm.avail_out,
-                    state.strm.total_in,
-                    state.strm.total_out,
-                )
-            }),
-        state.junk,
-        state.eof,
-        state.how,
+            .unwrap_or_else(|| crate::src::gzlib::GzCodecCounters::from_stream_fields(
+                *owner.codec_available_input,
+                *owner.codec_available_output,
+                *owner.codec_total_in,
+                *owner.codec_total_out,
+            )),
+        *owner.junk,
+        *owner.eof,
+        *owner.how,
     ) else {
         return -1 as ::core::ffi::c_int;
     };
     let finish = {
-        // The stream itself is embedded in the state we already exclusively
-        // own. Its cursor projection and the unsafe codec call stay in this
-        // small closure; the loop around it is pointer-free.
-        let strm = &mut state.strm;
         let mut loop_state = GzDecompLoopState {
-            err: &mut state.err,
-            eof: &mut state.eof,
-            size: state.buffers.size as usize,
-            input: &mut state.buffers.input,
-            fd: state.fd.as_ref().expect("gzip state has an open file"),
-            again: &mut state.again,
-            message: &mut state.msg,
-            buffered: &mut state.x.have,
-            path: state.path.as_deref(),
+            err: owner.err,
+            eof: owner.eof,
+            size: owner.buffers.size as usize,
+            input: &mut owner.buffers.input,
+            fd: owner.fd,
+            again: owner.again,
+            message: owner.message,
+            buffered: owner.have,
+            path: owner.path,
         };
-        gz_decomp_loop(decomp, &mut loop_state, output, |call| {
-            // The ABI stream projection consumes only this bounded codec
-            // request owner.  Cursor accounting remains with that owner, so
-            // a future embedded codec can replace this projection without
-            // changing the gzip decompression state machine.
-            let mut dispatch = GzEmbeddedInflateDispatch::new(call);
-            strm.next_in = dispatch.input().as_ptr().cast_mut();
-            strm.avail_in = dispatch.input_available();
-            strm.avail_out = dispatch.output_available();
-            strm.next_out = dispatch.output_mut().as_mut_ptr();
-            let result = inflate_from_stream(strm, crate::zlib_h::Z_NO_FLUSH);
-            // Snapshot the ABI projection immediately.  The gzip state
-            // machine handles the resulting checked cursors and diagnostics
-            // through the pointer-free embedded-codec result facade.
-            let snapshot = crate::src::gzlib::GzEmbeddedInflateResult::from_stream_fields(
-                result,
-                strm.avail_in,
-                strm.avail_out,
-                strm.total_in,
-                strm.total_out,
-                (result == crate::zlib_h::Z_DATA_ERROR).then(|| strm.msg.addr()),
-            );
-            dispatch.finish(snapshot)
-        })
+        let Some(inflate) = owner.buffers.inflate_state.as_mut() else {
+            return -1;
+        };
+        gz_decomp_loop(decomp, &mut loop_state, output, |call| inflate.inflate(call))
     };
     // The core transition returns the checked start of its owned output span,
     // not the ABI cursor that `inflate()` advanced. Rebuild that cursor only
     // while publishing the completed result back to the handle.
-    let output_start_index = finish.output.start();
     let output_have = finish.output.have();
-    let Some(output_start) = state.buffers.output.as_deref_mut().and_then(|buffer| {
-        buffer
-            .get_mut(output_start_index..)
-            .map(|output| output.as_mut_ptr())
-    }) else {
-        return -1 as ::core::ffi::c_int;
-    };
     // Keep the completed, bounds-checked cursor with the output allocation.
     // `x.next` is still the ABI publication for current callers; later read
     // transitions can consume this owned cursor instead of revalidating it
     // from that raw pointer.
-    state.buffers.set_output_cursor(finish.output);
-    state.x.have = output_have;
-    state.x.next = output_start;
-    state.buffers.input_cursor = Some(finish.input);
-    let Some(buffer) = state.buffers.input.as_deref_mut() else {
-        return -1 as ::core::ffi::c_int;
-    };
-    let input_cursor = state.buffers.input_cursor.as_ref().unwrap();
-    state.strm.next_in = buffer.as_mut_ptr().wrapping_add(input_cursor.cursor());
-    state.strm.avail_in = finish.codec.available_input();
-    state.strm.avail_out = finish.codec.available_output();
-    state.strm.total_in = finish.codec.total_in();
-    state.strm.total_out = finish.codec.total_out();
-    if let Some(inflate) = state.buffers.inflate_state.as_mut() {
+    owner.buffers.set_output_cursor(finish.output);
+    *owner.have = output_have;
+    owner.buffers.input_cursor = Some(finish.input);
+    *owner.codec_available_input = finish.codec.available_input();
+    *owner.codec_available_output = finish.codec.available_output();
+    *owner.codec_total_in = finish.codec.total_in();
+    *owner.codec_total_out = finish.codec.total_out();
+    if let Some(inflate) = owner.buffers.inflate_state.as_mut() {
         inflate.update(finish.codec);
     }
-    state.junk = finish.junk;
-    state.eof = finish.eof;
-    state.how = finish.how;
+    *owner.junk = finish.junk;
+    *owner.eof = finish.eof;
+    *owner.how = finish.how;
     finish.result
 }
 
-unsafe fn gz_fetch_from_state(
-    state: &mut crate::gzguts_h::gz_state,
-) -> ::core::ffi::c_int {
+fn gz_fetch_from_state(owner: &mut GzFetchOwner<'_>) -> ::core::ffi::c_int {
     let result = gz_fetch(
-        GzFetchState::new(state.how, state.x.have, state.eof, state.strm.avail_in),
+        GzFetchState::new(
+            *owner.how,
+            *owner.have,
+            *owner.eof,
+            *owner.codec_available_input,
+        ),
         |action| {
             match action {
                 GzFetchAction::Look => {
-                    if gz_look(state) == -1 as ::core::ffi::c_int {
+                    if gz_look(owner) == -1 as ::core::ffi::c_int {
                         return Err(());
                     }
                 }
                 GzFetchAction::Copy => {
                     let (ret, have) = match gz_copy_load(GzCopyLoadState {
-                        output: &mut state.buffers.output,
-                        fd: state.fd.as_ref().unwrap(),
+                        output: &mut owner.buffers.output,
+                        fd: owner.fd,
                         target: GzLoadTarget {
-                            again: &mut state.again,
-                            eof: &mut state.eof,
-                            message: &mut state.msg,
-                            error: &mut state.err,
-                            buffered: &mut state.x.have,
-                            path: state.path.as_deref(),
+                            again: owner.again,
+                            eof: owner.eof,
+                            message: owner.message,
+                            error: owner.err,
+                            buffered: owner.have,
+                            path: owner.path,
                         },
                     }) {
                         Ok(have) => (0, have),
                         Err(have) => (-1, have),
                     };
-                    state.x.have = have;
+                    *owner.have = have;
                     if ret == -1 as ::core::ffi::c_int {
                         return Err(());
                     }
-                    let Some(output) = state.buffers.output.as_deref_mut() else {
+                    let Some(output) = owner.buffers.output.as_deref_mut() else {
                         return Err(());
                     };
                     let Some(cursor) =
@@ -1011,21 +1014,20 @@ unsafe fn gz_fetch_from_state(
                     else {
                         return Err(());
                     };
-                    state.x.next = output.as_mut_ptr();
-                    state.buffers.set_output_cursor(cursor);
+                    owner.buffers.set_output_cursor(cursor);
                 }
                 GzFetchAction::Gzip => {
-                    if gz_decomp(state) == -1 as ::core::ffi::c_int {
+                    if gz_decomp(owner) == -1 as ::core::ffi::c_int {
                         return Err(());
                     }
                 }
                 GzFetchAction::Corrupt => {
                     crate::src::gzlib::gz_set_error(
-                        &mut state.msg,
-                        &mut state.err,
-                        &mut state.x.have,
-                        state.again,
-                        state.path.as_deref(),
+                        owner.message,
+                        owner.err,
+                        owner.have,
+                        *owner.again,
+                        owner.path,
                         crate::zlib_h::Z_STREAM_ERROR,
                         Some(b"state corrupt"),
                     );
@@ -1033,10 +1035,10 @@ unsafe fn gz_fetch_from_state(
                 }
             }
             Ok(GzFetchState::new(
-                state.how,
-                state.x.have,
-                state.eof,
-                state.strm.avail_in,
+                *owner.how,
+                *owner.have,
+                *owner.eof,
+                *owner.codec_available_input,
             ))
         },
     );
@@ -1271,7 +1273,24 @@ unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::
             match action {
                 GzReadAction::Fetch => GzReadStep {
                     count: 0,
-                    failed: gz_fetch_from_state(state) == -1,
+                    failed: gz_fetch_from_state(&mut GzFetchOwner::new(
+                        &mut state.buffers,
+                        state.want,
+                        &mut state.direct,
+                        &mut state.junk,
+                        &mut state.how,
+                        &mut state.again,
+                        &mut state.eof,
+                        &mut state.err,
+                        &mut state.msg,
+                        &mut state.x.have,
+                        state.fd.as_ref().expect("gzip state has an open file"),
+                        state.path.as_deref(),
+                        &mut state.strm.avail_in,
+                        &mut state.strm.avail_out,
+                        &mut state.strm.total_in,
+                        &mut state.strm.total_out,
+                    )) == -1,
                 },
                 GzReadAction::Copy => match gz_copy_load_into(
                     state.fd.as_ref().expect("gzip state has an open file"),
@@ -1295,11 +1314,26 @@ unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::
                     },
                 },
                 GzReadAction::Decompress => {
-                    state.strm.avail_out = destination.len() as crate::stdlib::uInt;
-                    state.strm.next_out = destination.as_mut_ptr();
                     GzReadStep {
                         count: state.x.have,
-                        failed: gz_decomp(state) == -1,
+                        failed: gz_decomp(&mut GzFetchOwner::new(
+                            &mut state.buffers,
+                            state.want,
+                            &mut state.direct,
+                            &mut state.junk,
+                            &mut state.how,
+                            &mut state.again,
+                            &mut state.eof,
+                            &mut state.err,
+                            &mut state.msg,
+                            &mut state.x.have,
+                            state.fd.as_ref().expect("gzip state has an open file"),
+                            state.path.as_deref(),
+                            &mut state.strm.avail_in,
+                            &mut state.strm.avail_out,
+                            &mut state.strm.total_in,
+                            &mut state.strm.total_out,
+                        )) == -1,
                     }
                 }
             }
@@ -1492,7 +1526,24 @@ unsafe fn gzungetc(
         return -1 as ::core::ffi::c_int;
     }
     if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
-        gz_look(state);
+        gz_look(&mut GzFetchOwner::new(
+            &mut state.buffers,
+            state.want,
+            &mut state.direct,
+            &mut state.junk,
+            &mut state.how,
+            &mut state.again,
+            &mut state.eof,
+            &mut state.err,
+            &mut state.msg,
+            &mut state.x.have,
+            state.fd.as_ref().expect("gzip state has an open file"),
+            state.path.as_deref(),
+            &mut state.strm.avail_in,
+            &mut state.strm.avail_out,
+            &mut state.strm.total_in,
+            &mut state.strm.total_out,
+        ));
     }
     let request = GzReadRequest::new(state.mode, state.err, state.again);
     let mut error = crate::src::gzlib::GzErrorState {
@@ -1528,7 +1579,24 @@ unsafe fn gzungetc(
             };
             match gz_skip_step(&mut skip) {
                 Ok(GzSkipStep::Fetch) => {
-                    if gz_fetch_from_state(state) == -1 as ::core::ffi::c_int {
+                    if gz_fetch_from_state(&mut GzFetchOwner::new(
+                        &mut state.buffers,
+                        state.want,
+                        &mut state.direct,
+                        &mut state.junk,
+                        &mut state.how,
+                        &mut state.again,
+                        &mut state.eof,
+                        &mut state.err,
+                        &mut state.msg,
+                        &mut state.x.have,
+                        state.fd.as_ref().expect("gzip state has an open file"),
+                        state.path.as_deref(),
+                        &mut state.strm.avail_in,
+                        &mut state.strm.avail_out,
+                        &mut state.strm.total_in,
+                        &mut state.strm.total_out,
+                    )) == -1 as ::core::ffi::c_int {
                         return -1;
                     }
                 }
@@ -1812,7 +1880,24 @@ unsafe fn gzgets_from_state(
                 return Err(());
             }
         }
-        let fetched = gz_fetch_from_state(state);
+        let fetched = gz_fetch_from_state(&mut GzFetchOwner::new(
+            &mut state.buffers,
+            state.want,
+            &mut state.direct,
+            &mut state.junk,
+            &mut state.how,
+            &mut state.again,
+            &mut state.eof,
+            &mut state.err,
+            &mut state.msg,
+            &mut state.x.have,
+            state.fd.as_ref().expect("gzip state has an open file"),
+            state.path.as_deref(),
+            &mut state.strm.avail_in,
+            &mut state.strm.avail_out,
+            &mut state.strm.total_in,
+            &mut state.strm.total_out,
+        ));
         read.buffers =
             ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
         read.have = state.x.have;
@@ -1889,7 +1974,24 @@ unsafe fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
         }),
         GzDirectAction::Look
     ) {
-        let _ = gz_look(state);
+        let _ = gz_look(&mut GzFetchOwner::new(
+            &mut state.buffers,
+            state.want,
+            &mut state.direct,
+            &mut state.junk,
+            &mut state.how,
+            &mut state.again,
+            &mut state.eof,
+            &mut state.err,
+            &mut state.msg,
+            &mut state.x.have,
+            state.fd.as_ref().expect("gzip state has an open file"),
+            state.path.as_deref(),
+            &mut state.strm.avail_in,
+            &mut state.strm.avail_out,
+            &mut state.strm.total_in,
+            &mut state.strm.total_out,
+        ));
     }
     gz_direct_result(state.direct)
 }
@@ -1908,7 +2010,10 @@ pub unsafe fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if state.buffers.size != 0 {
-        crate::src::inflate::inflateEnd(&mut state.strm);
+        // The read-side inflater is owned by `GzBuffers`; dropping that
+        // pointer-free owner is its complete teardown.  It was never
+        // published through the embedded ABI stream.
+        state.buffers.inflate_state = None;
         state.buffers.output = None;
         state.buffers.input = None;
     }

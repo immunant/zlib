@@ -1187,6 +1187,7 @@ pub(crate) struct GzCodecCounters {
 // stream as the persistent source of codec progress.
 pub(crate) struct GzEmbeddedInflateState {
     counters: GzCodecCounters,
+    owner: crate::src::inflate::InflateGzipOwner,
 }
 
 impl GzEmbeddedInflateState {
@@ -1203,6 +1204,7 @@ impl GzEmbeddedInflateState {
                 total_in,
                 total_out,
             ),
+            owner: crate::src::inflate::InflateGzipOwner::new(),
         }
     }
 
@@ -1212,6 +1214,54 @@ impl GzEmbeddedInflateState {
 
     pub(crate) fn update(&mut self, counters: GzCodecCounters) {
         self.counters = counters;
+    }
+
+    // Reset both halves of the embedded codec together.  The bounded gzip
+    // owner holds the decoder state, while the counters are the scalar view
+    // consumed by the surrounding read state machine.
+    pub(crate) fn reset(&mut self) {
+        self.owner.reset();
+        // `inflateReset()` clears cumulative accounting but deliberately
+        // retains the current bounded input/output requests.  A LOOK pass
+        // may have already filled and classified the final file chunk, so
+        // losing `available_input` here would make fetch stop at EOF before
+        // the gzip member is dispatched.
+        self.counters = GzCodecCounters::from_stream_fields(
+            self.counters.available_input(),
+            self.counters.available_output(),
+            0,
+            0,
+        );
+    }
+
+    // Consume one bounded gzip codec request without projecting it through
+    // an ABI `z_stream`.  The request's checked input cursor remains the
+    // source of post-call progress, and the owner returns only scalar result
+    // data and a stable diagnostic slice.
+    pub(crate) fn inflate(
+        &mut self,
+        mut call: GzEmbeddedInflateCall<'_, '_>,
+    ) -> Option<GzCodecResult> {
+        let result = {
+            let input = call.input();
+            let output = call.output_mut();
+            self.owner.inflate(input, output)
+        };
+        let input = call.input_cursor.after_codec(result.input_remaining)?;
+        self.counters = GzCodecCounters::from_stream_fields(
+            input.available(),
+            result.output_remaining,
+            result.total_in,
+            result.total_out,
+        );
+        Some(GzCodecResult {
+            result: result.status,
+            input,
+            output_available: result.output_remaining,
+            total_in: result.total_in,
+            total_out: result.total_out,
+            data_error_message: result.data_error_message,
+        })
     }
 }
 
