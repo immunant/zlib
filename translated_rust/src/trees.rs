@@ -4134,300 +4134,81 @@ unsafe fn scan_tree(
     scan_tree_impl(state, tree, max_code);
 }
 
-unsafe fn send_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
+fn send_tree_code(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    code: usize,
 ) {
-    let mut n: ::core::ffi::c_int = 0;
-    let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
-    let mut curlen: ::core::ffi::c_int = 0;
-    let mut nextlen: ::core::ffi::c_int =
-        (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.dad as ::core::ffi::c_int;
-    let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
-    let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-    if nextlen == 0 as ::core::ffi::c_int {
-        max_count = 138 as ::core::ffi::c_int;
-        min_count = 3 as ::core::ffi::c_int;
-    }
-    n = 0 as ::core::ffi::c_int;
-    while n <= max_code {
-        curlen = nextlen;
-        nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize))
-            .dl
-            .dad as ::core::ffi::c_int;
+    let value = state.bl_tree[code].fc.freq;
+    let len = state.bl_tree[code].dl.dad as ::core::ffi::c_int;
+    bi_send_bits(state, pending, value, len);
+}
+
+fn send_tree_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    tree: &[crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    pending: &mut [crate::zutil_h::uch],
+) {
+    let mut prevlen = -1;
+    let mut nextlen = tree[0].dl.dad as ::core::ffi::c_int;
+    let mut count = 0;
+    let (mut max_count, mut min_count) = if nextlen == 0 { (138, 3) } else { (7, 4) };
+
+    for n in 0..=max_code as usize {
+        let curlen = nextlen;
+        nextlen = tree[n + 1].dl.dad as ::core::ffi::c_int;
         count += 1;
-        if !(count < max_count && curlen == nextlen) {
-            if count < min_count {
-                loop {
-                    let mut len: ::core::ffi::c_int =
-                        (*s).bl_tree[curlen as usize].dl.dad as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len {
-                        let mut val: ::core::ffi::c_int =
-                            (*s).bl_tree[curlen as usize].fc.freq as ::core::ffi::c_int;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh33 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh33 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh34 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh34 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[curlen as usize].fc.freq as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len;
-                    }
-                    count -= 1;
-                    if count == 0 as ::core::ffi::c_int {
-                        break;
-                    }
-                }
-            } else if curlen != 0 as ::core::ffi::c_int {
-                if curlen != prevlen {
-                    let mut len_0: ::core::ffi::c_int =
-                        (*s).bl_tree[curlen as usize].dl.dad as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
-                        let mut val_0: ::core::ffi::c_int =
-                            (*s).bl_tree[curlen as usize].fc.freq as ::core::ffi::c_int;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh35 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh35 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh36 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh36 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val_0 as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[curlen as usize].fc.freq as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_0;
-                    }
-                    count -= 1;
-                }
-                let mut len_1: ::core::ffi::c_int =
-                    (*s).bl_tree[16 as ::core::ffi::c_int as usize].dl.dad as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len_1 {
-                    let mut val_1: ::core::ffi::c_int =
-                        (*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.freq
-                            as ::core::ffi::c_int;
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | (val_1 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    let c2rust_fresh37 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh37 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh38 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh38 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    (*s).bi_buf = (val_1 as crate::zutil_h::ush as ::core::ffi::c_int
-                        >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_1 - crate::src::deflate::Buf_size;
-                } else {
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.freq
-                            as ::core::ffi::c_int)
-                            << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_1;
-                }
-                let mut len_2: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
-                    let mut val_2: ::core::ffi::c_int = count - 3 as ::core::ffi::c_int;
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    let c2rust_fresh39 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh39 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh40 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh40 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    (*s).bi_buf = (val_2 as crate::zutil_h::ush as ::core::ffi::c_int
-                        >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_2 - crate::src::deflate::Buf_size;
-                } else {
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((count - 3 as ::core::ffi::c_int) as crate::zutil_h::ush
-                            as ::core::ffi::c_int)
-                            << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_2;
-                }
-            } else if count <= 10 as ::core::ffi::c_int {
-                let mut len_3: ::core::ffi::c_int =
-                    (*s).bl_tree[17 as ::core::ffi::c_int as usize].dl.dad as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len_3 {
-                    let mut val_3: ::core::ffi::c_int =
-                        (*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.freq
-                            as ::core::ffi::c_int;
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | (val_3 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    let c2rust_fresh41 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh41 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh42 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh42 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    (*s).bi_buf = (val_3 as crate::zutil_h::ush as ::core::ffi::c_int
-                        >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_3 - crate::src::deflate::Buf_size;
-                } else {
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.freq
-                            as ::core::ffi::c_int)
-                            << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_3;
-                }
-                let mut len_4: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len_4 {
-                    let mut val_4: ::core::ffi::c_int = count - 3 as ::core::ffi::c_int;
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | (val_4 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    let c2rust_fresh43 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh43 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh44 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh44 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    (*s).bi_buf = (val_4 as crate::zutil_h::ush as ::core::ffi::c_int
-                        >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_4 - crate::src::deflate::Buf_size;
-                } else {
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((count - 3 as ::core::ffi::c_int) as crate::zutil_h::ush
-                            as ::core::ffi::c_int)
-                            << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_4;
-                }
-            } else {
-                let mut len_5: ::core::ffi::c_int =
-                    (*s).bl_tree[18 as ::core::ffi::c_int as usize].dl.dad as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len_5 {
-                    let mut val_5: ::core::ffi::c_int =
-                        (*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.freq
-                            as ::core::ffi::c_int;
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | (val_5 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    let c2rust_fresh45 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh45 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh46 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh46 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    (*s).bi_buf = (val_5 as crate::zutil_h::ush as ::core::ffi::c_int
-                        >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_5 - crate::src::deflate::Buf_size;
-                } else {
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.freq
-                            as ::core::ffi::c_int)
-                            << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_5;
-                }
-                let mut len_6: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len_6 {
-                    let mut val_6: ::core::ffi::c_int = count - 11 as ::core::ffi::c_int;
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | (val_6 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    let c2rust_fresh47 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh47 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh48 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh48 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    (*s).bi_buf = (val_6 as crate::zutil_h::ush as ::core::ffi::c_int
-                        >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_6 - crate::src::deflate::Buf_size;
-                } else {
-                    (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((count - 11 as ::core::ffi::c_int) as crate::zutil_h::ush
-                            as ::core::ffi::c_int)
-                            << (*s).bi_valid)
-                        as crate::zutil_h::ush;
-                    (*s).bi_valid += len_6;
-                }
-            }
-            count = 0 as ::core::ffi::c_int;
-            prevlen = curlen;
-            if nextlen == 0 as ::core::ffi::c_int {
-                max_count = 138 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else if curlen == nextlen {
-                max_count = 6 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else {
-                max_count = 7 as ::core::ffi::c_int;
-                min_count = 4 as ::core::ffi::c_int;
-            }
+        if count < max_count && curlen == nextlen {
+            continue;
         }
-        n += 1;
+        if count < min_count {
+            while count != 0 {
+                send_tree_code(state, pending, curlen as usize);
+                count -= 1;
+            }
+        } else if curlen != 0 {
+            if curlen != prevlen {
+                send_tree_code(state, pending, curlen as usize);
+                count -= 1;
+            }
+            send_tree_code(state, pending, REP_3_6 as usize);
+            bi_send_bits(state, pending, (count - 3) as crate::zutil_h::ush, 2);
+        } else if count <= 10 {
+            send_tree_code(state, pending, REPZ_3_10 as usize);
+            bi_send_bits(state, pending, (count - 3) as crate::zutil_h::ush, 3);
+        } else {
+            send_tree_code(state, pending, REPZ_11_138 as usize);
+            bi_send_bits(state, pending, (count - 11) as crate::zutil_h::ush, 7);
+        }
+        count = 0;
+        prevlen = curlen;
+        (max_count, min_count) = if nextlen == 0 {
+            (138, 3)
+        } else if curlen == nextlen {
+            (6, 3)
+        } else {
+            (7, 4)
+        };
     }
 }
 
-unsafe fn build_bl_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
+// The dynamic tree includes a sentinel at `max_code + 1`, set by
+// `scan_tree()`. Bind that run and the pending allocation once, then leave
+// code emission to checked slice operations.
+unsafe fn send_tree(
+    s: *mut crate::src::deflate::deflate_state,
+    tree: *mut crate::src::deflate::ct_data,
+    max_code: ::core::ffi::c_int,
+) {
+    let state = &mut *s;
+    let tree = ::core::slice::from_raw_parts(tree, (max_code + 2) as usize);
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    send_tree_impl(state, tree, max_code, pending);
+}
+
+unsafe fn build_bl_tree(mut s: *mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     let mut max_blindex: ::core::ffi::c_int = 0;
     scan_tree(
         s,
