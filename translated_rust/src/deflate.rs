@@ -2431,6 +2431,73 @@ struct DeflateCopyLayout {
     pending: Option<PendingRegions>,
 }
 
+// The tree bookkeeping is independent of the callback-owned state and buffer
+// allocations.  Keep its deep-copy operation in a pointer-free value so the
+// copy path can eventually hand only the allocation handles to the boundary
+// owner.  In particular, do not derive `Clone` for `internal_state`: that
+// would silently duplicate its callback-owned allocations.
+struct DeflateTreeCopy {
+    dyn_ltree: [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: [crate::src::deflate::ct_data_s; 61],
+    bl_tree: [crate::src::deflate::ct_data_s; 39],
+    l_desc: crate::src::deflate::tree_desc_s,
+    d_desc: crate::src::deflate::tree_desc_s,
+    bl_desc: crate::src::deflate::tree_desc_s,
+    bl_count: [crate::zutil_h::ush; 16],
+    heap: [::core::ffi::c_int; 573],
+    heap_len: ::core::ffi::c_int,
+    heap_max: ::core::ffi::c_int,
+    depth: [crate::zutil_h::uch; 573],
+}
+
+fn copy_tree_desc(desc: &crate::src::deflate::tree_desc_s) -> crate::src::deflate::tree_desc_s {
+    crate::src::deflate::tree_desc_s {
+        kind: match &desc.kind {
+            crate::src::deflate::TreeKind::LitLen => crate::src::deflate::TreeKind::LitLen,
+            crate::src::deflate::TreeKind::Dist => crate::src::deflate::TreeKind::Dist,
+            crate::src::deflate::TreeKind::BitLen => crate::src::deflate::TreeKind::BitLen,
+        },
+        max_code: desc.max_code,
+    }
+}
+
+fn copy_deflate_tree_state(
+    dyn_ltree: &[crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &[crate::src::deflate::ct_data_s; 61],
+    bl_tree: &[crate::src::deflate::ct_data_s; 39],
+    l_desc: &crate::src::deflate::tree_desc_s,
+    d_desc: &crate::src::deflate::tree_desc_s,
+    bl_desc: &crate::src::deflate::tree_desc_s,
+    bl_count: &[crate::zutil_h::ush; 16],
+    heap: &[::core::ffi::c_int; 573],
+    heap_len: ::core::ffi::c_int,
+    heap_max: ::core::ffi::c_int,
+    depth: &[crate::zutil_h::uch; 573],
+) -> DeflateTreeCopy {
+    DeflateTreeCopy {
+        dyn_ltree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
+            fc: dyn_ltree[index].fc,
+            dl: dyn_ltree[index].dl,
+        }),
+        dyn_dtree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
+            fc: dyn_dtree[index].fc,
+            dl: dyn_dtree[index].dl,
+        }),
+        bl_tree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
+            fc: bl_tree[index].fc,
+            dl: bl_tree[index].dl,
+        }),
+        l_desc: copy_tree_desc(l_desc),
+        d_desc: copy_tree_desc(d_desc),
+        bl_desc: copy_tree_desc(bl_desc),
+        bl_count: *bl_count,
+        heap: *heap,
+        heap_len,
+        heap_max,
+        depth: *depth,
+    }
+}
+
 fn deflate_copy_layout(
     high_water: crate::zutil_h::ulg,
     slid: ::core::ffi::c_int,
@@ -3259,6 +3326,19 @@ pub unsafe extern "C" fn deflateCopy(
     let source = &*source;
     let dest = &mut *dest;
     let ss = &*(source.state as *const crate::src::deflate::deflate_state);
+    let tree_copy = copy_deflate_tree_state(
+        &ss.dyn_ltree,
+        &ss.dyn_dtree,
+        &ss.bl_tree,
+        &ss.l_desc,
+        &ss.d_desc,
+        &ss.bl_desc,
+        &ss.bl_count,
+        &ss.heap,
+        ss.heap_len,
+        ss.heap_max,
+        &ss.depth,
+    );
 
     // Do not byte-copy the ABI stream: that made this boundary depend on the
     // layout of a caller-visible owner and obscured which fields are retained
@@ -3336,47 +3416,17 @@ pub unsafe extern "C" fn deflateCopy(
             strategy: ss.strategy,
             good_match: ss.good_match,
             nice_match: ss.nice_match,
-            dyn_ltree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
-                fc: ss.dyn_ltree[index].fc,
-                dl: ss.dyn_ltree[index].dl,
-            }),
-            dyn_dtree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
-                fc: ss.dyn_dtree[index].fc,
-                dl: ss.dyn_dtree[index].dl,
-            }),
-            bl_tree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
-                fc: ss.bl_tree[index].fc,
-                dl: ss.bl_tree[index].dl,
-            }),
-            l_desc: crate::src::deflate::tree_desc_s {
-                kind: match &ss.l_desc.kind {
-                    crate::src::deflate::TreeKind::LitLen => crate::src::deflate::TreeKind::LitLen,
-                    crate::src::deflate::TreeKind::Dist => crate::src::deflate::TreeKind::Dist,
-                    crate::src::deflate::TreeKind::BitLen => crate::src::deflate::TreeKind::BitLen,
-                },
-                max_code: ss.l_desc.max_code,
-            },
-            d_desc: crate::src::deflate::tree_desc_s {
-                kind: match &ss.d_desc.kind {
-                    crate::src::deflate::TreeKind::LitLen => crate::src::deflate::TreeKind::LitLen,
-                    crate::src::deflate::TreeKind::Dist => crate::src::deflate::TreeKind::Dist,
-                    crate::src::deflate::TreeKind::BitLen => crate::src::deflate::TreeKind::BitLen,
-                },
-                max_code: ss.d_desc.max_code,
-            },
-            bl_desc: crate::src::deflate::tree_desc_s {
-                kind: match &ss.bl_desc.kind {
-                    crate::src::deflate::TreeKind::LitLen => crate::src::deflate::TreeKind::LitLen,
-                    crate::src::deflate::TreeKind::Dist => crate::src::deflate::TreeKind::Dist,
-                    crate::src::deflate::TreeKind::BitLen => crate::src::deflate::TreeKind::BitLen,
-                },
-                max_code: ss.bl_desc.max_code,
-            },
-            bl_count: ss.bl_count,
-            heap: ss.heap,
-            heap_len: ss.heap_len,
-            heap_max: ss.heap_max,
-            depth: ss.depth,
+            dyn_ltree: tree_copy.dyn_ltree,
+            dyn_dtree: tree_copy.dyn_dtree,
+            bl_tree: tree_copy.bl_tree,
+            l_desc: tree_copy.l_desc,
+            d_desc: tree_copy.d_desc,
+            bl_desc: tree_copy.bl_desc,
+            bl_count: tree_copy.bl_count,
+            heap: tree_copy.heap,
+            heap_len: tree_copy.heap_len,
+            heap_max: tree_copy.heap_max,
+            depth: tree_copy.depth,
             sym_buf_start: ss.sym_buf_start,
             lit_bufsize: ss.lit_bufsize,
             sym_next: ss.sym_next,
