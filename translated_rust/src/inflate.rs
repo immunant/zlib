@@ -74,7 +74,10 @@ pub enum InflateCodeTable {
 
 #[derive(Copy, Clone)]
 pub struct inflate_state {
-    pub strm: crate::zlib_h::z_streamp,
+    /// The stream that owns this opaque state is an identity token only. It is
+    /// never converted back to a pointer or dereferenced; ABI boundaries adopt
+    /// the caller stream independently for each call.
+    pub stream_token: usize,
     pub mode: crate::src::inflate::inflate_mode,
     pub last: ::core::ffi::c_int,
     pub wrap: ::core::ffi::c_int,
@@ -126,7 +129,7 @@ pub(crate) fn inflate_initial_state() -> inflate_state {
         val: 0,
     };
     inflate_state {
-        strm: ::core::ptr::null_mut(),
+        stream_token: 0,
         mode: crate::src::inflate::HEAD,
         last: 0,
         wrap: 0,
@@ -1027,7 +1030,7 @@ macro_rules! inflate_state_check_at_boundary {
                 (!crate::src::inflate::inflate_state_values_are_valid(
                     strm_ref.zalloc.is_some(),
                     strm_ref.zfree.is_some(),
-                    state.strm == strm,
+                    state.stream_token == strm as usize,
                     state.mode,
                 )) as ::core::ffi::c_int
             }
@@ -1200,7 +1203,7 @@ macro_rules! inflate_init2_at_boundary {
                         let strm_ref = &mut *strm;
                         let state_ref = &mut *state;
                         strm_ref.state = state as *mut crate::src::deflate::internal_state;
-                        state_ref.strm = strm;
+                        state_ref.stream_token = strm as usize;
                     }
                     let ret = crate::src::inflate::inflate_reset2_at_boundary!(strm, window_bits);
                     if ret != crate::zlib_h::Z_OK {
@@ -1820,7 +1823,7 @@ pub fn inflate(
         let Some(entry_mode) = inflate_entry_mode(
             strm_ref.zalloc.is_some(),
             strm_ref.zfree.is_some(),
-            state_ref.strm == strm,
+            state_ref.stream_token == strm as usize,
             state_ref.mode,
             !strm_ref.next_out.is_null(),
             !strm_ref.next_in.is_null() || strm_ref.avail_in == 0 as crate::stdlib::uInt,
@@ -4330,7 +4333,7 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     let copy_ref = &mut *copy;
     *dest_ref = *source_ref;
     *copy_ref = *state_ref;
-    copy_ref.strm = dest;
+    copy_ref.stream_token = dest as usize;
     // Decode tables are now described by fixed-table selectors or indices
     // into the owned `codes` array, so the ordinary record copy above keeps
     // both table sources valid without address rebasing.
