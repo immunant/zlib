@@ -1290,6 +1290,31 @@ pub unsafe fn deflateInit2_(
         deflate_reset_state(strm, s)
     }
 }
+
+/// Initialize a stream for the gzip writer's fixed deflate configuration.
+///
+/// Gzip owns its staging buffers, but the deflate stream still uses the ABI
+/// state allocation until its ownership migration is complete.  Keep that
+/// legacy crossing in deflate instead of making gzip's writer state machine
+/// perform an unsafe initialization call itself.
+pub(crate) fn deflate_initialize_gzip(
+    strm: &mut crate::zlib_h::z_stream_s,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    unsafe {
+        deflateInit2_(
+            Some(strm),
+            level,
+            crate::zlib_h::Z_DEFLATED,
+            crate::stdlib::MAX_WBITS + 16,
+            crate::zutil_h::DEF_MEM_LEVEL,
+            strategy,
+            Some(crate::zlib_h::ZLIB_VERSION[0]),
+            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+        )
+    }
+}
 #[export_name = "deflateInit2_"]
 
 pub unsafe extern "C" fn deflateInit2__ffi(

@@ -116,18 +116,7 @@ impl GzDeflater<'_> {
         level: ::core::ffi::c_int,
         strategy: ::core::ffi::c_int,
     ) -> ::core::ffi::c_int {
-        unsafe {
-            crate::src::deflate::deflateInit2_(
-                Some(self.stream),
-                level,
-                8 as ::core::ffi::c_int,
-                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-                8 as ::core::ffi::c_int,
-                strategy,
-                Some(crate::zlib_h::ZLIB_VERSION[0]),
-                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-            )
-        }
+        crate::src::deflate::deflate_initialize_gzip(self.stream, level, strategy)
     }
 
     fn reset(&mut self) -> ::core::ffi::c_int {
