@@ -102,6 +102,20 @@ fn fast_input_available(input_remaining: crate::stdlib::uInt) -> bool {
     input_remaining > 5 as crate::stdlib::uInt
 }
 
+fn fast_output_available(output_remaining: crate::stdlib::uInt) -> bool {
+    output_remaining > 257 as crate::stdlib::uInt
+}
+
+fn output_cursor_after_write(
+    output_produced: crate::stdlib::uInt,
+    output_remaining: crate::stdlib::uInt,
+) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
+    (
+        output_produced.wrapping_add(1),
+        output_remaining.wrapping_sub(1),
+    )
+}
+
 fn input_remaining_after_unread(
     input_remaining: crate::stdlib::uInt,
     unread_bytes: ::core::ffi::c_uint,
@@ -162,8 +176,8 @@ pub unsafe extern "C" fn inflate_fast(
     let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut input_remaining: crate::stdlib::uInt = 0;
     let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut beg: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut end: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut output_produced: crate::stdlib::uInt = 0;
+    let mut output_remaining: crate::stdlib::uInt = 0;
     let mut wsize: ::core::ffi::c_uint = 0;
     let mut whave: ::core::ffi::c_uint = 0;
     let mut wnext: ::core::ffi::c_uint = 0;
@@ -186,8 +200,8 @@ pub unsafe extern "C" fn inflate_fast(
     in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
     input_remaining = (*strm).avail_in;
     out = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as isize));
-    end = out.offset((*strm).avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
+    output_produced = (start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out);
+    output_remaining = (*strm).avail_out;
     wsize = (*state).wsize;
     whave = (*state).whave;
     wnext = (*state).wnext;
@@ -219,6 +233,8 @@ pub unsafe extern "C" fn inflate_fast(
                 FastLitLenAction::Literal => {
                     let c2rust_fresh2 = out;
                     out = out.offset(1);
+                    (output_produced, output_remaining) =
+                        output_cursor_after_write(output_produced, output_remaining);
                     *c2rust_fresh2 = (*here).val as ::core::ffi::c_uchar;
                     c2rust_current_block_141 = 5689001924483802034;
                     break;
@@ -285,7 +301,7 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                             dist = dist.wrapping_add(low_bits(hold, extra_bits));
                             (hold, bits) = consume_bits(hold, bits, extra_bits);
-                            op = out.offset_from(beg) as ::core::ffi::c_long as ::core::ffi::c_uint;
+                            op = output_produced;
                             if dist > op {
                                 c2rust_current_block_141 = 5235537862154438448;
                                 break;
@@ -314,16 +330,22 @@ pub unsafe extern "C" fn inflate_fast(
                             from = from.offset(1);
                             let c2rust_fresh27 = out;
                             out = out.offset(1);
+                            (output_produced, output_remaining) =
+                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh27 = *c2rust_fresh26;
                             let c2rust_fresh28 = from;
                             from = from.offset(1);
                             let c2rust_fresh29 = out;
                             out = out.offset(1);
+                            (output_produced, output_remaining) =
+                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh29 = *c2rust_fresh28;
                             let c2rust_fresh30 = from;
                             from = from.offset(1);
                             let c2rust_fresh31 = out;
                             out = out.offset(1);
+                            (output_produced, output_remaining) =
+                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh31 = *c2rust_fresh30;
                             len = len.wrapping_sub(3 as ::core::ffi::c_uint);
                             if !(len > 2 as ::core::ffi::c_uint) {
@@ -335,12 +357,16 @@ pub unsafe extern "C" fn inflate_fast(
                             from = from.offset(1);
                             let c2rust_fresh33 = out;
                             out = out.offset(1);
+                            (output_produced, output_remaining) =
+                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh33 = *c2rust_fresh32;
                             if len > 1 as ::core::ffi::c_uint {
                                 let c2rust_fresh34 = from;
                                 from = from.offset(1);
                                 let c2rust_fresh35 = out;
                                 out = out.offset(1);
+                                (output_produced, output_remaining) =
+                                    output_cursor_after_write(output_produced, output_remaining);
                                 *c2rust_fresh35 = *c2rust_fresh34;
                             }
                         }
@@ -366,6 +392,10 @@ pub unsafe extern "C" fn inflate_fast(
                                     from = from.offset(1);
                                     let c2rust_fresh9 = out;
                                     out = out.offset(1);
+                                    (output_produced, output_remaining) = output_cursor_after_write(
+                                        output_produced,
+                                        output_remaining,
+                                    );
                                     *c2rust_fresh9 = *c2rust_fresh8;
                                     op = op.wrapping_sub(1);
                                     if !(op != 0) {
@@ -384,6 +414,10 @@ pub unsafe extern "C" fn inflate_fast(
                                     from = from.offset(1);
                                     let c2rust_fresh11 = out;
                                     out = out.offset(1);
+                                    (output_produced, output_remaining) = output_cursor_after_write(
+                                        output_produced,
+                                        output_remaining,
+                                    );
                                     *c2rust_fresh11 = *c2rust_fresh10;
                                     op = op.wrapping_sub(1);
                                     if !(op != 0) {
@@ -399,6 +433,11 @@ pub unsafe extern "C" fn inflate_fast(
                                         from = from.offset(1);
                                         let c2rust_fresh13 = out;
                                         out = out.offset(1);
+                                        (output_produced, output_remaining) =
+                                            output_cursor_after_write(
+                                                output_produced,
+                                                output_remaining,
+                                            );
                                         *c2rust_fresh13 = *c2rust_fresh12;
                                         op = op.wrapping_sub(1);
                                         if !(op != 0) {
@@ -417,6 +456,10 @@ pub unsafe extern "C" fn inflate_fast(
                                     from = from.offset(1);
                                     let c2rust_fresh15 = out;
                                     out = out.offset(1);
+                                    (output_produced, output_remaining) = output_cursor_after_write(
+                                        output_produced,
+                                        output_remaining,
+                                    );
                                     *c2rust_fresh15 = *c2rust_fresh14;
                                     op = op.wrapping_sub(1);
                                     if !(op != 0) {
@@ -431,16 +474,22 @@ pub unsafe extern "C" fn inflate_fast(
                             from = from.offset(1);
                             let c2rust_fresh17 = out;
                             out = out.offset(1);
+                            (output_produced, output_remaining) =
+                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh17 = *c2rust_fresh16;
                             let c2rust_fresh18 = from;
                             from = from.offset(1);
                             let c2rust_fresh19 = out;
                             out = out.offset(1);
+                            (output_produced, output_remaining) =
+                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh19 = *c2rust_fresh18;
                             let c2rust_fresh20 = from;
                             from = from.offset(1);
                             let c2rust_fresh21 = out;
                             out = out.offset(1);
+                            (output_produced, output_remaining) =
+                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh21 = *c2rust_fresh20;
                             len = len.wrapping_sub(3 as ::core::ffi::c_uint);
                         }
@@ -449,12 +498,16 @@ pub unsafe extern "C" fn inflate_fast(
                             from = from.offset(1);
                             let c2rust_fresh23 = out;
                             out = out.offset(1);
+                            (output_produced, output_remaining) =
+                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh23 = *c2rust_fresh22;
                             if len > 1 as ::core::ffi::c_uint {
                                 let c2rust_fresh24 = from;
                                 from = from.offset(1);
                                 let c2rust_fresh25 = out;
                                 out = out.offset(1);
+                                (output_produced, output_remaining) =
+                                    output_cursor_after_write(output_produced, output_remaining);
                                 *c2rust_fresh25 = *c2rust_fresh24;
                             }
                         }
@@ -474,7 +527,7 @@ pub unsafe extern "C" fn inflate_fast(
             }
             _ => {}
         }
-        if !(fast_input_available(input_remaining) && out < end) {
+        if !(fast_input_available(input_remaining) && fast_output_available(output_remaining)) {
             break;
         }
     }
@@ -483,11 +536,7 @@ pub unsafe extern "C" fn inflate_fast(
     (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
     (*strm).avail_in = input_remaining_after_unread(input_remaining, len);
-    (*strm).avail_out = (if out < end {
-        257 as ::core::ffi::c_long + end.offset_from(out) as ::core::ffi::c_long
-    } else {
-        257 as ::core::ffi::c_long - out.offset_from(end) as ::core::ffi::c_long
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
+    (*strm).avail_out = output_remaining;
     (*state).hold = hold;
     (*state).bits = bits;
 }
@@ -504,8 +553,9 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         append_input_byte, bit_mask, code, consume_bits, fast_dist_action, fast_input_available,
-        fast_litlen_action, input_remaining_after_unread, low_bits, subtable_offset,
-        unread_bit_state, FastDistAction, FastLitLenAction,
+        fast_litlen_action, fast_output_available, input_remaining_after_unread, low_bits,
+        output_cursor_after_write, subtable_offset, unread_bit_state, FastDistAction,
+        FastLitLenAction,
     };
 
     #[test]
@@ -613,5 +663,16 @@ mod tests {
         assert!(fast_input_available(6));
         assert_eq!(input_remaining_after_unread(4, 2), 6);
         assert_eq!(input_remaining_after_unread(::core::ffi::c_uint::MAX, 1), 0);
+    }
+
+    #[test]
+    fn fast_output_cursor_reserves_match_space_and_tracks_writes() {
+        assert!(!fast_output_available(257));
+        assert!(fast_output_available(258));
+        assert_eq!(output_cursor_after_write(4, 3), (5, 2));
+        assert_eq!(
+            output_cursor_after_write(::core::ffi::c_uint::MAX, 0),
+            (0, ::core::ffi::c_uint::MAX),
+        );
     }
 }

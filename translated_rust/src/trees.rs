@@ -4063,6 +4063,10 @@ fn tree_run_limits(
     }
 }
 
+fn tree_next_cursor(index: ::core::ffi::c_int) -> usize {
+    index.wrapping_add(1) as usize
+}
+
 unsafe extern "C" fn scan_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
@@ -4071,19 +4075,15 @@ unsafe extern "C" fn scan_tree(
     let mut n: ::core::ffi::c_int = 0;
     let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
-    let mut nextlen: ::core::ffi::c_int =
-        (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
+    let mut nextlen: ::core::ffi::c_int = (*tree).dl.len as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let (mut max_count, mut min_count) = tree_run_limits(0, nextlen);
-    (*tree.offset((max_code + 1 as ::core::ffi::c_int) as isize))
-        .dl
-        .len = 0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
+    (*tree.wrapping_add(tree_next_cursor(max_code))).dl.len =
+        0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
-        nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize))
-            .dl
-            .len as ::core::ffi::c_int;
+        nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
@@ -4121,16 +4121,13 @@ unsafe extern "C" fn send_tree(
     let mut n: ::core::ffi::c_int = 0;
     let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
-    let mut nextlen: ::core::ffi::c_int =
-        (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
+    let mut nextlen: ::core::ffi::c_int = (*tree).dl.len as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let (mut max_count, mut min_count) = tree_run_limits(0, nextlen);
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
-        nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize))
-            .dl
-            .len as ::core::ffi::c_int;
+        nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
@@ -5138,7 +5135,7 @@ mod tests {
         dist_code_index, heap_node_precedes, next_code_for_len, next_codes,
         pending_cursor_after_bytes, reset_block_trees, static_bl_desc, static_d_desc,
         static_l_desc, symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes,
-        tree_run_limits, END_BLOCK, MAX_BITS,
+        tree_next_cursor, tree_run_limits, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5218,6 +5215,16 @@ mod tests {
         assert_eq!(tree_run_limits(7, 7), (6, 3));
         assert_eq!(tree_run_limits(7, 8), (7, 4));
         assert_eq!(tree_run_limits(0, 1), (7, 4));
+    }
+
+    #[test]
+    fn tree_next_cursor_advances_tree_indices_with_wrapping() {
+        assert_eq!(tree_next_cursor(0), 1);
+        assert_eq!(tree_next_cursor(286), 287);
+        assert_eq!(
+            tree_next_cursor(::core::ffi::c_int::MAX),
+            ::core::ffi::c_int::MIN as usize
+        );
     }
 
     #[test]

@@ -363,6 +363,10 @@ fn gzgets_remaining_capacity(len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     (len as ::core::ffi::c_uint).wrapping_sub(1)
 }
 
+fn gzgets_copied_any(initial_left: ::core::ffi::c_uint, left: ::core::ffi::c_uint) -> bool {
+    initial_left != left
+}
+
 #[derive(Debug, Eq, PartialEq)]
 enum GzgetsPostFetchDecision {
     Stop,
@@ -1941,6 +1945,13 @@ mod tests {
     }
 
     #[test]
+    fn gzgets_copied_any_tracks_remaining_capacity_cursor() {
+        assert!(!gzgets_copied_any(8, 8));
+        assert!(gzgets_copied_any(8, 7));
+        assert!(gzgets_copied_any(::core::ffi::c_uint::MAX, 0));
+    }
+
+    #[test]
     fn gz_read_marks_past_eof_only_for_unfilled_eof_requests() {
         assert!(gz_read_marks_past_eof(1, 1));
         assert!(!gz_read_marks_past_eof(0, 1));
@@ -2280,6 +2291,7 @@ pub unsafe extern "C" fn gzgets(
     mut len: ::core::ffi::c_int,
 ) -> *mut ::core::ffi::c_char {
     let mut left: ::core::ffi::c_uint = 0;
+    let initial_left: ::core::ffi::c_uint;
     let mut n: ::core::ffi::c_uint = 0;
     let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
     let mut eol: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -2301,7 +2313,8 @@ pub unsafe extern "C" fn gzgets(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
-    left = gzgets_remaining_capacity(len);
+    initial_left = gzgets_remaining_capacity(len);
+    left = initial_left;
     if left != 0 {
         loop {
             let fetch = if (*state).x.have == 0 {
@@ -2344,10 +2357,10 @@ pub unsafe extern "C" fn gzgets(
             }
         }
     }
-    if buf == str {
+    if !gzgets_copied_any(initial_left, left) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    *buf.offset(0 as ::core::ffi::c_int as isize) = 0 as ::core::ffi::c_char;
+    *buf = 0 as ::core::ffi::c_char;
     return str;
 }
 #[export_name = "gzgets"]
