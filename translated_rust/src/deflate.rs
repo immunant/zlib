@@ -1791,6 +1791,40 @@ fn put_short_msb_state(
     true
 }
 
+/// Append the eight-byte gzip trailer in its on-the-wire little-endian order.
+///
+/// The pending buffer is callback-owned in the legacy state, so callers lend it
+/// only for this operation.  Keep the range check before either the bytes or
+/// the cursor are changed: a malformed internal state must not leave a partial
+/// trailer behind.
+fn append_gzip_trailer_state(
+    pending_buf: &mut [crate::stdlib::Byte],
+    pending: &mut crate::zutil_h::ulg,
+    adler: crate::stdlib::uLong,
+    total_in: crate::stdlib::uLong,
+) -> bool {
+    let Ok(start) = usize::try_from(*pending) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(8) else {
+        return false;
+    };
+    let Some(bytes) = pending_buf.get_mut(start..end) else {
+        return false;
+    };
+
+    bytes[0] = adler as crate::stdlib::Byte;
+    bytes[1] = (adler >> 8) as crate::stdlib::Byte;
+    bytes[2] = (adler >> 16) as crate::stdlib::Byte;
+    bytes[3] = (adler >> 24) as crate::stdlib::Byte;
+    bytes[4] = total_in as crate::stdlib::Byte;
+    bytes[5] = (total_in >> 8) as crate::stdlib::Byte;
+    bytes[6] = (total_in >> 16) as crate::stdlib::Byte;
+    bytes[7] = (total_in >> 24) as crate::stdlib::Byte;
+    *pending = pending.wrapping_add(8);
+    true
+}
+
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,
     mut b: crate::stdlib::uInt,
@@ -2427,44 +2461,25 @@ pub unsafe extern "C" fn deflate(
         return crate::zlib_h::Z_STREAM_END;
     }
     if (*s).wrap == 2 as ::core::ffi::c_int {
-        let c2rust_fresh25 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh25 as isize) =
-            ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh26 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh26 as isize) =
-            ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh27 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh27 as isize) =
-            ((*strm).adler >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh28 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh28 as isize) =
-            ((*strm).adler >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh29 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh29 as isize) =
-            ((*strm).total_in & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh30 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh30 as isize) =
-            ((*strm).total_in >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh31 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh31 as isize) =
-            ((*strm).total_in >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh32 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh32 as isize) =
-            ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
+        let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if pending_len != 0 && (*s).pending_buf.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let pending_buf = if pending_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+        };
+        if !append_gzip_trailer_state(
+            pending_buf,
+            &mut (*s).pending,
+            (*strm).adler,
+            (*strm).total_in,
+        ) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
     } else {
         putShortMSB(
             s,
