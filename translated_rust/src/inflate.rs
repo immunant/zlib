@@ -173,7 +173,7 @@ impl InflateWindowLayout {
 /// state slot.  This replaces byte-wise zeroing of a Rust value (whose table
 /// selector is an enum) with ordinary Rust initialization before reset fills
 /// in the stream-specific fields.
-fn empty_inflate_state() -> inflate_state {
+pub(crate) fn empty_inflate_state() -> inflate_state {
     inflate_state {
         strm: 0,
         mode: crate::src::inflate::HEAD,

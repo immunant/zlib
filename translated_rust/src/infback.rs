@@ -104,8 +104,8 @@ pub fn inflateBackInit_(
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     crate::src::zutil::install_default_allocators(strm);
     // The ABI allocator remains the only unsafe boundary in this named
-    // initializer. Its returned allocation is validated before being made
-    // into the initialized state reference below.
+    // initializer. Its returned allocation is initialized to a valid Rust
+    // value before the inflateBack-specific fields are configured below.
     let state = unsafe {
         Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
@@ -119,6 +119,7 @@ pub fn inflateBackInit_(
     }
     strm.state = state as *mut crate::src::deflate::internal_state;
     let state = unsafe { &mut *state };
+    *state = crate::src::inflate::empty_inflate_state();
     initialize_inflate_back_state(state, windowBits);
     state.window = window.as_mut_ptr();
     return crate::zlib_h::Z_OK;
