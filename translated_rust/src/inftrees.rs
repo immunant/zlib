@@ -2923,8 +2923,7 @@ pub unsafe extern "C" fn inflate_table(
         bits: 0,
         val: 0,
     };
-    let mut next: *mut crate::src::inftrees::code =
-        ::core::ptr::null_mut::<crate::src::inftrees::code>();
+    let mut next: usize = 0;
     let mut base: &[::core::ffi::c_ushort] = &[];
     let mut extra: &[::core::ffi::c_ushort] = &[];
     let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
@@ -3064,6 +3063,8 @@ pub unsafe extern "C" fn inflate_table(
         64 as ::core::ffi::c_ushort,
         64 as ::core::ffi::c_ushort,
     ];
+    let lens = ::core::slice::from_raw_parts(lens, codes as usize);
+    let work = ::core::slice::from_raw_parts_mut(work, codes as usize);
     len = 0 as ::core::ffi::c_uint;
     while len <= MAXBITS as ::core::ffi::c_uint {
         count[len as usize] = 0 as ::core::ffi::c_ushort;
@@ -3071,8 +3072,7 @@ pub unsafe extern "C" fn inflate_table(
     }
     sym = 0 as ::core::ffi::c_uint;
     while sym < codes {
-        count[*lens.offset(sym as isize) as usize] =
-            count[*lens.offset(sym as isize) as usize].wrapping_add(1);
+        count[lens[sym as usize] as usize] = count[lens[sym as usize] as usize].wrapping_add(1);
         sym = sym.wrapping_add(1);
     }
     root = *bits;
@@ -3081,12 +3081,11 @@ pub unsafe extern "C" fn inflate_table(
             here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-            let c2rust_fresh0 = *table;
-            *table = (*table).offset(1);
-            *c2rust_fresh0 = here;
-            let c2rust_fresh1 = *table;
-            *table = (*table).offset(1);
-            *c2rust_fresh1 = here;
+            let table_start = *table;
+            let table_entries = ::core::slice::from_raw_parts_mut(table_start, 2);
+            table_entries[0] = here;
+            table_entries[1] = here;
+            *table = table_start.wrapping_add(2);
             *bits = 1 as ::core::ffi::c_uint;
             return 0 as ::core::ffi::c_int;
         }
@@ -3111,11 +3110,11 @@ pub unsafe extern "C" fn inflate_table(
     }
     sym = 0 as ::core::ffi::c_uint;
     while sym < codes {
-        if *lens.offset(sym as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            let c2rust_fresh2 = offs[*lens.offset(sym as isize) as usize];
-            offs[*lens.offset(sym as isize) as usize] =
-                offs[*lens.offset(sym as isize) as usize].wrapping_add(1);
-            *work.offset(c2rust_fresh2 as isize) = sym as ::core::ffi::c_ushort;
+        if lens[sym as usize] as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+            let c2rust_fresh2 = offs[lens[sym as usize] as usize];
+            offs[lens[sym as usize] as usize] =
+                offs[lens[sym as usize] as usize].wrapping_add(1);
+            work[c2rust_fresh2 as usize] = sym as ::core::ffi::c_ushort;
         }
         sym = sym.wrapping_add(1);
     }
@@ -3137,7 +3136,14 @@ pub unsafe extern "C" fn inflate_table(
     huff = 0 as ::core::ffi::c_uint;
     sym = 0 as ::core::ffi::c_uint;
     len = min;
-    next = *table;
+    let table_start = *table;
+    let table_len = match type_0 {
+        LENS => ENOUGH_LENS as usize,
+        DISTS => ENOUGH_DISTS as usize,
+        _ => (1usize) << root,
+    };
+    let table_entries = ::core::slice::from_raw_parts_mut(table_start, table_len);
+    next = 0;
     curr = root;
     drop_0 = 0 as ::core::ffi::c_uint;
     low = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
@@ -3154,7 +3160,7 @@ pub unsafe extern "C" fn inflate_table(
     }
     loop {
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
-        let entry = inflate_table_entry(*work.offset(sym as isize), match_0, base, extra);
+        let entry = inflate_table_entry(work[sym as usize], match_0, base, extra);
         here.op = entry.op;
         here.val = entry.val;
         incr = (1 as ::core::ffi::c_uint) << len.wrapping_sub(drop_0);
@@ -3162,7 +3168,7 @@ pub unsafe extern "C" fn inflate_table(
         min = fill;
         loop {
             fill = fill.wrapping_sub(incr);
-            *next.offset((huff >> drop_0).wrapping_add(fill) as isize) = here;
+            table_entries[next + (huff >> drop_0).wrapping_add(fill) as usize] = here;
             if fill == 0 as ::core::ffi::c_uint {
                 break;
             }
@@ -3183,13 +3189,13 @@ pub unsafe extern "C" fn inflate_table(
             if len == max {
                 break;
             }
-            len = *lens.offset(*work.offset(sym as isize) as isize) as ::core::ffi::c_uint;
+            len = lens[work[sym as usize] as usize] as ::core::ffi::c_uint;
         }
         if len > root && huff & mask != low {
             if drop_0 == 0 as ::core::ffi::c_uint {
                 drop_0 = root;
             }
-            next = next.offset(min as isize);
+            next += min as usize;
             curr = len.wrapping_sub(drop_0);
             left = (1 as ::core::ffi::c_int) << curr;
             while curr.wrapping_add(drop_0) < max {
@@ -3211,19 +3217,18 @@ pub unsafe extern "C" fn inflate_table(
                 return 1 as ::core::ffi::c_int;
             }
             low = huff & mask;
-            (*(*table).offset(low as isize)).op = curr as ::core::ffi::c_uchar;
-            (*(*table).offset(low as isize)).bits = root as ::core::ffi::c_uchar;
-            (*(*table).offset(low as isize)).val =
-                next.offset_from(*table) as ::core::ffi::c_ushort;
+            table_entries[low as usize].op = curr as ::core::ffi::c_uchar;
+            table_entries[low as usize].bits = root as ::core::ffi::c_uchar;
+            table_entries[low as usize].val = next as ::core::ffi::c_ushort;
         }
     }
     if huff != 0 as ::core::ffi::c_uint {
         here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
         here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-        *next.offset(huff as isize) = here;
+        table_entries[next + huff as usize] = here;
     }
-    *table = (*table).offset(used as isize);
+    *table = table_start.wrapping_add(used as usize);
     *bits = root;
     return 0 as ::core::ffi::c_int;
 }
