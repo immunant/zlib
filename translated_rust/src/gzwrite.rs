@@ -771,45 +771,38 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut strm: crate::zlib_h::z_streamp = ::core::ptr::null_mut::<crate::zlib_h::z_stream>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if !gz_write_params_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_write_params_ready(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_error(
-        &mut *state,
+        state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if gzsetparams_unchanged(&*state, level, strategy) {
+    if gzsetparams_unchanged(state, level, strategy) {
         return crate::zlib_h::Z_OK;
     }
-    {
-        let state_ref = &mut *state;
-        if state_ref.skip != 0 && gz_zero(state_ref) == -1 as ::core::ffi::c_int {
-            return state_ref.err;
-        }
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+        return state.err;
     }
-    if (*state).size != 0 {
-        if (*strm).avail_in != 0
-            && gz_comp(&mut *state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
+    if state.size != 0 {
+        if state.strm.avail_in != 0
+            && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
-            return (*state).err;
+            return state.err;
         }
         crate::src::deflate::deflateParams_ffi(
-            strm as *mut crate::zlib_h::z_stream_s,
+            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             level,
             strategy,
         );
     }
-    (*state).level = level;
-    (*state).strategy = strategy;
+    state.level = level;
+    state.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "gzclose_w"]

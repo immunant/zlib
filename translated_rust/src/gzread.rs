@@ -776,6 +776,27 @@ fn gzclose_r_final_status(
     }
 }
 
+fn gzgetc_impl(
+    state: &mut crate::gzguts_h::gz_state,
+    buffered: Option<crate::stdlib::Bytef>,
+    buf: &mut [crate::stdlib::Bytef; 1],
+) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_error(
+        state,
+        crate::zlib_h::Z_OK,
+        ::core::ptr::null::<::core::ffi::c_char>(),
+    );
+    if let Some(c) = buffered {
+        gz_note_buffered_read(state, 1 as ::core::ffi::c_uint);
+        return c as ::core::ffi::c_int;
+    }
+    if gz_read(state, buf) < 1 as crate::stdlib::z_size_t {
+        -1 as ::core::ffi::c_int
+    } else {
+        buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
+    }
+}
+
 macro_rules! gzgetc_body {
     ($file:expr) => {{
         let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
@@ -788,21 +809,12 @@ macro_rules! gzgetc_body {
         if !gz_read_state_ready(&*state) {
             return -1 as ::core::ffi::c_int;
         }
-        crate::src::gzlib::gz_error(
-            &mut *state,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
-        if (*state).x.have != 0 {
-            let c = *(*state).x.next;
-            gz_note_buffered_read(&mut *state, 1 as ::core::ffi::c_uint);
-            return c as ::core::ffi::c_int;
-        }
-        if gz_read(&mut *state, &mut buf) < 1 as crate::stdlib::z_size_t {
-            -1 as ::core::ffi::c_int
+        let buffered = if (*state).x.have != 0 {
+            Some(*(*state).x.next)
         } else {
-            buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-        }
+            None
+        };
+        gzgetc_impl(&mut *state, buffered, &mut buf)
     }};
 }
 
