@@ -1059,56 +1059,23 @@ fn copy_history_dictionary(output: &mut [u8], window: &[u8], wnext: usize, whave
     output[first..whave].copy_from_slice(&window[..wnext]);
 }
 
-// A read-only, pointer-free view of the history state used by
-// inflateGetDictionary().  Keeping the history borrow and its ring metadata
-// together lets the ABI wrapper turn its optional output pointer into a
-// bounded slice before it dispatches to the copy core.
-struct InflateDictionaryRequest<'window> {
-    window: &'window [crate::stdlib::Bytef],
-    wnext: usize,
-    whave: usize,
-}
-
-impl InflateDictionaryRequest<'_> {
-    fn dictionary_len(&self) -> usize {
-        self.whave
-    }
-}
-
-// The ABI stream carries the opaque state pointer.  Project it once and keep
-// all of the resulting data in the pointer-free request consumed below.
-unsafe fn inflateGetDictionary<'stream>(
-    stream: &'stream mut crate::zlib_h::z_stream_s,
-) -> Option<InflateDictionaryRequest<'stream>> {
-    let (_, state) = inflate_stream_and_state(stream)?;
-    let whave = state.decoder.normal.whave as usize;
-    let window = if whave == 0 {
-        &[]
-    } else {
-        state
-            .decoder
-            .normal
-            .owned_window
-            .as_deref()
-            .expect("normal inflate owns its history window")
-    };
-    Some(InflateDictionaryRequest {
-        window,
-        wnext: state.decoder.normal.wnext as usize,
-        whave,
-    })
-}
-
 fn inflate_get_dictionary(
-    request: InflateDictionaryRequest<'_>,
+    normal: &InflateNormalState,
     dictionary: Option<&mut [crate::stdlib::Bytef]>,
     dict_length: Option<&mut crate::stdlib::uInt>,
 ) -> ::core::ffi::c_int {
+    let whave = normal.whave as usize;
     if let Some(output) = dictionary {
-        copy_history_dictionary(output, request.window, request.wnext, request.whave);
+        if whave != 0 {
+            let window = normal
+                .owned_window
+                .as_deref()
+                .expect("normal inflate owns its history window");
+            copy_history_dictionary(output, window, normal.wnext as usize, whave);
+        }
     }
     if let Some(dict_length) = dict_length {
-        *dict_length = request.whave as crate::stdlib::uInt;
+        *dict_length = normal.whave;
     }
     crate::zlib_h::Z_OK
 }
@@ -1362,12 +1329,15 @@ struct InflateDecoderResult {
 // Both the public bounded decoder and the exported fast-path symbol need the
 // same stream/state association.  Keep their selector pointer-free so that
 // all ABI cursor construction and publication remains at this one adapter.
-#[derive(Clone, Copy)]
-pub(crate) enum InflateStreamRequest {
+pub(crate) enum InflateStreamRequest<'request> {
     Decode(::core::ffi::c_int),
     Fast(::core::ffi::c_uint),
     Sync,
     Scalar(InflateNormalScalarAction),
+    Dictionary {
+        dictionary: Option<&'request mut [crate::stdlib::Bytef]>,
+        dict_length: Option<&'request mut crate::stdlib::uInt>,
+    },
 }
 
 // The ABI adapter can service both streaming and scalar normal-inflate
@@ -3105,7 +3075,7 @@ fn inflate(request: InflateStreamOwner<'_, '_, '_, '_, '_>) -> InflateDecoderRes
 // adapter republishes ABI state.
 pub(crate) unsafe fn inflate_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
-    request: InflateStreamRequest,
+    request: InflateStreamRequest<'_>,
 ) -> InflateStreamResult {
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return match request {
@@ -3114,13 +3084,27 @@ pub(crate) unsafe fn inflate_from_stream(
             }
             InflateStreamRequest::Decode(_)
             | InflateStreamRequest::Fast(_)
-            | InflateStreamRequest::Sync => InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR),
+            | InflateStreamRequest::Sync
+            | InflateStreamRequest::Dictionary { .. } => {
+                InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR)
+            }
         };
     };
     if let InflateStreamRequest::Scalar(action) = request {
         let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
         return InflateStreamResult::Scalar(inflate_normal_scalar(&mut owner, action));
     };
+    if let InflateStreamRequest::Dictionary {
+        dictionary,
+        dict_length,
+    } = request
+    {
+        return InflateStreamResult::Status(inflate_get_dictionary(
+            &state.decoder.normal,
+            dictionary,
+            dict_length,
+        ));
+    }
     if strm.avail_in != 0 && strm.next_in.is_null() {
         return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
     }
@@ -3400,22 +3384,25 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     let Some(stream) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(request) = inflateGetDictionary(stream) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // C defines the dictionary output only when history exists.  Convert the
-    // raw optional output at this boundary, using the bounded request's
-    // length, so the implementation receives no raw output pointer.
-    let dictionary = if dictionary.is_null() || request.dictionary_len() == 0 {
+    // zlib documents that 32768 bytes always suffice.  Form this bounded
+    // caller view before dispatch, leaving the normal-state owner to select
+    // the current history length and perform the copy.
+    let dictionary = if dictionary.is_null() {
         None
     } else {
         Some(::core::slice::from_raw_parts_mut(
             dictionary,
-            request.dictionary_len(),
+            1usize << crate::stdlib::MAX_WBITS,
         ))
     };
-    let dict_length = dictLength.as_mut();
-    inflate_get_dictionary(request, dictionary, dict_length)
+    inflate_from_stream(
+        stream,
+        InflateStreamRequest::Dictionary {
+            dictionary,
+            dict_length: dictLength.as_mut(),
+        },
+    )
+    .status()
 }
 // Dictionary installation is entirely a normal-decoder-state transition.
 // Keeping it on the pointer-free owner lets embedded callers reuse the same
