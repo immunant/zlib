@@ -3295,6 +3295,26 @@ fn tr_stored_block_impl(
     append_pending_bytes(pending_buf, &mut state.pending, &len_bytes);
     append_pending_bytes(pending_buf, &mut state.pending, stored);
 }
+
+pub(crate) fn tr_flush_bits_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) {
+    let flush = bi_flush_state(state.bi_buf, state.bi_valid);
+    append_pending_bytes(pending_buf, &mut state.pending, &flush.bytes[..flush.len]);
+    state.bi_buf = flush.bi_buf;
+    state.bi_valid = flush.bi_valid;
+}
+
+pub(crate) fn tr_align_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) {
+    let bits = tr_align_bits(state.bi_buf, state.bi_valid);
+    append_pending_bytes(pending_buf, &mut state.pending, &bits.bytes[..bits.len]);
+    state.bi_buf = bits.bi_buf;
+    state.bi_valid = bits.bi_valid;
+}
 #[export_name = "_tr_stored_block"]
 
 pub unsafe extern "C" fn _tr_stored_block_ffi(
@@ -3317,43 +3337,36 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
-    let flush = bi_flush_state(state.bi_buf, state.bi_valid);
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    append_pending_bytes(pending_buf, &mut state.pending, &flush.bytes[..flush.len]);
-    state.bi_buf = flush.bi_buf;
-    state.bi_valid = flush.bi_valid;
+    tr_flush_bits_impl(state, pending_buf);
 }
 #[export_name = "_tr_align"]
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
-    let bits = tr_align_bits(state.bi_buf, state.bi_valid);
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    append_pending_bytes(pending_buf, &mut state.pending, &bits.bytes[..bits.len]);
-    state.bi_buf = bits.bi_buf;
-    state.bi_valid = bits.bi_valid;
+    tr_align_impl(state, pending_buf);
 }
 fn compress_block(
-    sym_start: usize,
-    sym_next: crate::stdlib::uInt,
+    symbols: ::core::ops::Range<usize>,
     ltree: &[crate::src::deflate::ct_data],
     dtree: &[crate::src::deflate::ct_data],
     sink: &mut PendingBitSink<'_>,
 ) {
-    let mut sx = 0usize;
-    while sx < sym_next as usize {
-        let mut dist = (sink.pending_buf[sym_start + sx] as ::core::ffi::c_int
-            & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint;
+    let mut sx = symbols.start;
+    while sx < symbols.end {
+        let mut dist = (sink.pending_buf[sx] as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+            as ::core::ffi::c_uint;
         sx += 1;
         dist = dist.wrapping_add(
-            ((sink.pending_buf[sym_start + sx] as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+            ((sink.pending_buf[sx] as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
                 as ::core::ffi::c_uint)
                 << 8 as ::core::ffi::c_int,
         );
         sx += 1;
-        let mut lc = sink.pending_buf[sym_start + sx] as ::core::ffi::c_int;
+        let mut lc = sink.pending_buf[sx] as ::core::ffi::c_int;
         sx += 1;
 
         if dist == 0 as ::core::ffi::c_uint {
@@ -3546,6 +3559,8 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
                     state.pending_buf,
                     state.pending_buf_size as usize,
                 );
+                let symbols_start = state.lit_bufsize as usize;
+                let symbols_end = symbols_start + state.sym_next as usize;
                 let mut sink = PendingBitSink {
                     pending_buf,
                     pending: &mut state.pending,
@@ -3553,8 +3568,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
                     bi_valid: &mut state.bi_valid,
                 };
                 compress_block(
-                    state.lit_bufsize as usize,
-                    state.sym_next,
+                    symbols_start..symbols_end,
                     &static_ltree,
                     &static_dtree,
                     &mut sink,
@@ -3595,6 +3609,8 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
                     state.pending_buf,
                     state.pending_buf_size as usize,
                 );
+                let symbols_start = state.lit_bufsize as usize;
+                let symbols_end = symbols_start + state.sym_next as usize;
                 let mut sink = PendingBitSink {
                     pending_buf,
                     pending: &mut state.pending,
@@ -3602,8 +3618,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
                     bi_valid: &mut state.bi_valid,
                 };
                 compress_block(
-                    state.lit_bufsize as usize,
-                    state.sym_next,
+                    symbols_start..symbols_end,
                     &state.dyn_ltree,
                     &state.dyn_dtree,
                     &mut sink,
