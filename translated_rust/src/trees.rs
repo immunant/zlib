@@ -3625,47 +3625,53 @@ fn bi_reverse(
     return res >> 1 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
-    if (*s).bi_valid == 16 as ::core::ffi::c_int {
-        let c2rust_fresh58 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh58 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let c2rust_fresh59 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh59 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        (*s).bi_buf = 0 as crate::zutil_h::ush;
-        (*s).bi_valid = 0 as ::core::ffi::c_int;
-    } else if (*s).bi_valid >= 8 as ::core::ffi::c_int {
-        let c2rust_fresh60 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh60 as isize) = (*s).bi_buf as crate::stdlib::Byte;
-        (*s).bi_buf =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::ush;
-        (*s).bi_valid -= 8 as ::core::ffi::c_int;
+fn bi_flush(
+    s: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Byte],
+) {
+    if s.bi_valid == 16 as ::core::ffi::c_int {
+        let pending = s.pending as usize;
+        s.pending = s.pending.wrapping_add(1);
+        pending_buf[pending] =
+            (s.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
+        let pending = s.pending as usize;
+        s.pending = s.pending.wrapping_add(1);
+        pending_buf[pending] =
+            (s.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
+        s.bi_buf = 0 as crate::zutil_h::ush;
+        s.bi_valid = 0 as ::core::ffi::c_int;
+    } else if s.bi_valid >= 8 as ::core::ffi::c_int {
+        let pending = s.pending as usize;
+        s.pending = s.pending.wrapping_add(1);
+        pending_buf[pending] = s.bi_buf as crate::stdlib::Byte;
+        s.bi_buf =
+            (s.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::ush;
+        s.bi_valid -= 8 as ::core::ffi::c_int;
     }
 }
 
-unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
-    if (*s).bi_valid > 8 as ::core::ffi::c_int {
-        let c2rust_fresh7 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh7 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let c2rust_fresh8 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh8 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
-    } else if (*s).bi_valid > 0 as ::core::ffi::c_int {
-        let c2rust_fresh9 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh9 as isize) = (*s).bi_buf as crate::stdlib::Byte;
+fn bi_windup(
+    s: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Byte],
+) {
+    if s.bi_valid > 8 as ::core::ffi::c_int {
+        let pending = s.pending as usize;
+        s.pending = s.pending.wrapping_add(1);
+        pending_buf[pending] =
+            (s.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
+        let pending = s.pending as usize;
+        s.pending = s.pending.wrapping_add(1);
+        pending_buf[pending] =
+            (s.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
+    } else if s.bi_valid > 0 as ::core::ffi::c_int {
+        let pending = s.pending as usize;
+        s.pending = s.pending.wrapping_add(1);
+        pending_buf[pending] = s.bi_buf as crate::stdlib::Byte;
     }
-    (*s).bi_used = ((*s).bi_valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int)
-        + 1 as ::core::ffi::c_int;
-    (*s).bi_buf = 0 as crate::zutil_h::ush;
-    (*s).bi_valid = 0 as ::core::ffi::c_int;
+    s.bi_used =
+        (s.bi_valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int) + 1 as ::core::ffi::c_int;
+    s.bi_buf = 0 as crate::zutil_h::ush;
+    s.bi_valid = 0 as ::core::ffi::c_int;
 }
 
 fn gen_codes(
@@ -4528,7 +4534,10 @@ pub unsafe extern "C" fn _tr_stored_block(
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len;
     }
-    bi_windup(s);
+    let pending_buf = unsafe {
+        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize)
+    };
+    bi_windup(&mut *s, pending_buf);
     let c2rust_fresh51 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
     *(*s).pending_buf.offset(c2rust_fresh51 as isize) =
@@ -4569,7 +4578,10 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     _tr_stored_block(s, buf, stored_len, last)
 }
 pub unsafe extern "C" fn _tr_flush_bits(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s);
+    let pending_buf = unsafe {
+        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize)
+    };
+    bi_flush(&mut *s, pending_buf);
 }
 #[export_name = "_tr_flush_bits"]
 
@@ -4628,7 +4640,10 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len_0;
     }
-    bi_flush(s);
+    let pending_buf = unsafe {
+        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize)
+    };
+    bi_flush(&mut *s, pending_buf);
 }
 #[export_name = "_tr_align"]
 
@@ -5022,7 +5037,10 @@ pub unsafe extern "C" fn _tr_flush_block(
     }
     init_block(&mut *s);
     if last != 0 {
-        bi_windup(s);
+        let pending_buf = unsafe {
+            ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize)
+        };
+        bi_windup(&mut *s, pending_buf);
     }
 }
 #[export_name = "_tr_flush_block"]
