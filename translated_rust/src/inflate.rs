@@ -504,7 +504,7 @@ pub unsafe extern "C" fn inflate(
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
-    static mut order: [::core::ffi::c_ushort; 19] = [
+    static order: [::core::ffi::c_ushort; 19] = [
         16 as ::core::ffi::c_ushort,
         17 as ::core::ffi::c_ushort,
         18 as ::core::ffi::c_ushort,
