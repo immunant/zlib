@@ -93,6 +93,8 @@ pub struct internal_state {
     pub w_size: crate::stdlib::uInt,
     pub w_bits: crate::stdlib::uInt,
     pub w_mask: crate::stdlib::uInt,
+    // Transitional alias for the Rust-owned window.  Remaining match paths
+    // still use it; `fill_window` no longer does.
     pub window: *mut crate::stdlib::Bytef,
     pub window_size: crate::zutil_h::ulg,
     pub ins_h: crate::stdlib::uInt,
@@ -532,6 +534,7 @@ unsafe extern "C" fn read_buf(
 }
 
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+    let s = &mut *s;
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
     let mut wsize: crate::stdlib::uInt = (*s).w_size;
@@ -558,8 +561,8 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             )
         {
             crate::stdlib::memcpy(
-                (*s).window as *mut ::core::ffi::c_void,
-                (*s).window.offset(wsize as isize) as *const ::core::ffi::c_void,
+                s.buffers_mut().window.as_mut_ptr() as *mut ::core::ffi::c_void,
+                s.buffers().window.as_ptr().wrapping_add(wsize as usize) as *const ::core::ffi::c_void,
                 wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
             );
             (*s).match_start = (*s).match_start.wrapping_sub(wsize);
@@ -576,9 +579,9 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         }
         n = read_buf(
             (*s).strm,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize),
+            s.buffers_mut().window.as_mut_ptr().wrapping_add(
+                s.strstart.wrapping_add(s.lookahead) as usize,
+            ),
             more,
         );
         (*s).lookahead = (*s).lookahead.wrapping_add(n);
@@ -586,22 +589,16 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
             let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
-            (*s).ins_h = *(*s).window.offset(str as isize) as crate::stdlib::uInt;
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s)
-                    .window
-                    .offset(str.wrapping_add(1 as crate::stdlib::uInt) as isize)
+            s.ins_h = s.buffers().window[str as usize] as crate::stdlib::uInt;
+            s.ins_h = (s.ins_h << s.hash_shift
+                ^ s.buffers().window[str.wrapping_add(1) as usize]
                     as crate::stdlib::uInt)
-                & (*s).hash_mask;
+                & s.hash_mask;
             while (*s).insert != 0 {
-                (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                    ^ *(*s).window.offset(
-                        str.wrapping_add(3 as crate::stdlib::uInt)
-                            .wrapping_sub(1 as crate::stdlib::uInt)
-                            as isize,
-                    ) as crate::stdlib::uInt)
-                    & (*s).hash_mask;
-                (&mut *s).insert_hash_at(str);
+                s.ins_h = (s.ins_h << s.hash_shift
+                    ^ s.buffers().window[str.wrapping_add(2) as usize] as crate::stdlib::uInt)
+                    & s.hash_mask;
+                s.insert_hash_at(str);
                 str = str.wrapping_add(1);
                 (*s).insert = (*s).insert.wrapping_sub(1);
                 if (*s).lookahead.wrapping_add((*s).insert)
@@ -627,7 +624,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                 init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
             }
             crate::stdlib::memset(
-                (*s).window.offset(curr as isize) as *mut ::core::ffi::c_void,
+                s.buffers_mut().window.as_mut_ptr().wrapping_add(curr as usize) as *mut ::core::ffi::c_void,
                 0 as ::core::ffi::c_int,
                 init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
             );
@@ -642,7 +639,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                 init = (*s).window_size.wrapping_sub((*s).high_water);
             }
             crate::stdlib::memset(
-                (*s).window.offset((*s).high_water as isize) as *mut ::core::ffi::c_void,
+                s.buffers_mut().window.as_mut_ptr().wrapping_add(s.high_water as usize) as *mut ::core::ffi::c_void,
                 0 as ::core::ffi::c_int,
                 init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
             );
@@ -1017,8 +1014,6 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 fn lm_init(s: &mut crate::src::deflate::deflate_state) {
     s.pending_buf_size = s.buffers().pending.len() as crate::zutil_h::ulg;
     s.pending_out = 0;
-    // The window alias is still used by the remaining match-finder paths.
-    // Keep it refreshed until that separate migration has replaced every use.
     s.window = s.buffers_mut().window.as_mut_ptr();
     s.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul(s.w_size as crate::zutil_h::ulg);
