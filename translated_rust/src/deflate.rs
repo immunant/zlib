@@ -2022,8 +2022,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
             strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
                 .as_ptr()
-                .cast_mut()
-                .cast();
+                .cast_mut();
             return None;
         }
         let input = if strm.avail_in == 0 {
@@ -5834,8 +5833,7 @@ pub(crate) unsafe fn deflate_scalar_from_abi_stream(
             if let Some(message) = message {
                 strm.msg = crate::src::zutil::zError(message)
                     .as_ptr()
-                    .cast_mut()
-                    .cast();
+                    .cast_mut();
             }
             state.status = status;
             state.pending_out = pending_out;

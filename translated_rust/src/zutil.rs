@@ -15,31 +15,33 @@ use std::sync::Mutex;
 // max-alignment needed by the supported zlib state records while keeping the
 // storage uninitialized, matching this target's malloc branch.
 static ZCALLOC_ALLOCATIONS: Mutex<Vec<(usize, Box<[MaybeUninit<u128>]>)>> = Mutex::new(Vec::new());
-static Z_ERROR_MESSAGES: [&[u8]; 10] = [
-    b"need dictionary\0",
-    b"stream end\0",
-    b"\0",
-    b"file error\0",
-    b"stream error\0",
-    b"data error\0",
-    b"insufficient memory\0",
-    b"buffer error\0",
-    b"incompatible version\0",
-    b"\0",
+// These messages are C strings at their source.  Keeping that representation
+// avoids a pointer-element cast each time the exported lookup publishes one.
+static Z_ERROR_MESSAGES: [&::core::ffi::CStr; 10] = [
+    c"need dictionary",
+    c"stream end",
+    c"",
+    c"file error",
+    c"stream error",
+    c"data error",
+    c"insufficient memory",
+    c"buffer error",
+    c"incompatible version",
+    c"",
 ];
 
 #[no_mangle]
 pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; 10] = [
-    AtomicPtr::new(Z_ERROR_MESSAGES[0].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[1].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[2].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[3].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[4].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[5].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[6].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[7].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[8].as_ptr() as *mut ::core::ffi::c_char),
-    AtomicPtr::new(Z_ERROR_MESSAGES[9].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[0].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[1].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[2].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[3].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[4].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[5].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[6].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[7].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[8].as_ptr().cast_mut()),
+    AtomicPtr::new(Z_ERROR_MESSAGES[9].as_ptr().cast_mut()),
 ];
 pub fn zlibVersion() -> &'static [::core::ffi::c_char; 15] {
     &crate::zlib_h::ZLIB_VERSION
@@ -125,7 +127,7 @@ fn zlib_compile_flags() -> crate::stdlib::uLong {
 pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
     zlib_compile_flags()
 }
-pub fn zError(mut err: ::core::ffi::c_int) -> &'static [u8] {
+pub fn zError(mut err: ::core::ffi::c_int) -> &'static ::core::ffi::CStr {
     &Z_ERROR_MESSAGES[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
         9 as ::core::ffi::c_int
     } else {
@@ -135,7 +137,7 @@ pub fn zError(mut err: ::core::ffi::c_int) -> &'static [u8] {
 #[export_name = "zError"]
 
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    zError(err).as_ptr().cast()
+    zError(err).as_ptr()
 }
 // The allocator broker keeps ownership bookkeeping pointer-free.  The FFI
 // callback below is the only place an allocation is published as a C pointer.
