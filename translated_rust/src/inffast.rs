@@ -61,6 +61,23 @@ fn consume_bits(
     (hold >> bit_count, bits.wrapping_sub(bit_count))
 }
 
+fn unread_bit_state(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+) -> (
+    ::core::ffi::c_ulong,
+    ::core::ffi::c_uint,
+    ::core::ffi::c_uint,
+) {
+    let unread_bytes = bits >> 3 as ::core::ffi::c_int;
+    let unread_bits = bits.wrapping_sub(unread_bytes << 3 as ::core::ffi::c_int);
+    (
+        hold & bit_mask(unread_bits) as ::core::ffi::c_ulong,
+        unread_bits,
+        unread_bytes,
+    )
+}
+
 pub unsafe extern "C" fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -384,10 +401,8 @@ pub unsafe extern "C" fn inflate_fast(
             break;
         }
     }
-    len = bits >> 3 as ::core::ffi::c_int;
+    (hold, bits, len) = unread_bit_state(hold, bits);
     in_0 = in_0.offset(-(len as isize));
-    bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
-    hold &= bit_mask(bits) as ::core::ffi::c_ulong;
     (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
     (*strm).avail_in = (if in_0 < last {
@@ -414,7 +429,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{bit_mask, consume_bits};
+    use super::{bit_mask, consume_bits, unread_bit_state};
 
     #[test]
     fn bit_mask_selects_requested_low_bits() {
@@ -433,5 +448,16 @@ mod tests {
     fn consume_bits_preserves_zero_count_and_wrapping_subtraction() {
         assert_eq!(consume_bits(0xfeed, 9, 0), (0xfeed, 9));
         assert_eq!(consume_bits(1, 0, 1), (0, ::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn unread_bit_state_rewinds_full_bytes_and_retains_remaining_bits() {
+        assert_eq!(unread_bit_state(0xdead_beef, 21), (0x0f, 5, 2));
+    }
+
+    #[test]
+    fn unread_bit_state_clears_aligned_and_preserves_sub_byte_buffers() {
+        assert_eq!(unread_bit_state(0xfeed, 16), (0, 0, 2));
+        assert_eq!(unread_bit_state(0xff, 7), (0x7f, 7, 0));
     }
 }

@@ -325,6 +325,10 @@ fn gz_ungetc_next_have(have: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     have.wrapping_add(1)
 }
 
+fn gz_ungetc_accepts_byte(c: ::core::ffi::c_int) -> bool {
+    c >= 0
+}
+
 fn gz_ungetc_progress(
     have: ::core::ffi::c_uint,
     pos: crate::stdlib::off64_t,
@@ -1401,19 +1405,23 @@ mod tests {
     #[test]
     fn gz_ungetc_next_have_wraps_buffered_count() {
         assert_eq!(gz_ungetc_next_have(0), 1);
-        assert_eq!(
-            gz_ungetc_next_have(::core::ffi::c_uint::MAX),
-            0
-        );
+        assert_eq!(gz_ungetc_next_have(::core::ffi::c_uint::MAX), 0);
+    }
+
+    #[test]
+    fn gz_ungetc_accepts_only_nonnegative_input_bytes() {
+        assert!(!gz_ungetc_accepts_byte(::core::ffi::c_int::MIN));
+        assert!(!gz_ungetc_accepts_byte(-1));
+        assert!(gz_ungetc_accepts_byte(0));
+        assert!(gz_ungetc_accepts_byte(
+            ::core::ffi::c_uchar::MAX as ::core::ffi::c_int
+        ));
     }
 
     #[test]
     fn gz_ungetc_progress_updates_buffer_position_and_past() {
         assert_eq!(gz_ungetc_progress(4, 42), (5, 41, 0));
-        assert_eq!(
-            gz_ungetc_progress(::core::ffi::c_uint::MAX, 0),
-            (0, -1, 0)
-        );
+        assert_eq!(gz_ungetc_progress(::core::ffi::c_uint::MAX, 0), (0, -1, 0));
     }
 
     #[test]
@@ -1900,7 +1908,7 @@ pub unsafe extern "C" fn gzungetc(
     if gz_read_has_pending_skip((*state).skip) && gz_skip(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if c < 0 as ::core::ffi::c_int {
+    if !gz_ungetc_accepts_byte(c) {
         return -1 as ::core::ffi::c_int;
     }
     match gz_ungetc_buffer_state((*state).x.have, (*state).size) {

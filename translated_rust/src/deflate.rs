@@ -2466,18 +2466,25 @@ unsafe extern "C" fn longest_match(
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
+fn stored_block_min_size(
+    pending_buf_size: crate::zutil_h::ulg,
+    window_size: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    (if pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
+        > window_size as crate::zutil_h::ulg
+    {
+        window_size as crate::zutil_h::ulg
+    } else {
+        pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
+    }) as ::core::ffi::c_uint
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut min_block: ::core::ffi::c_uint =
-        (if (*s).pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
-            > (*s).w_size as crate::zutil_h::ulg
-        {
-            (*s).w_size as crate::zutil_h::ulg
-        } else {
-            (*s).pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
-        }) as ::core::ffi::c_uint;
+        stored_block_min_size((*s).pending_buf_size, (*s).w_size);
     let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut len: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
@@ -3608,7 +3615,7 @@ mod tests {
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_prime_bits_valid,
         deflate_version_matches, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
-        slide_hash_entry, zlib_header,
+        slide_hash_entry, stored_block_min_size, zlib_header,
     };
 
     #[test]
@@ -3754,6 +3761,19 @@ mod tests {
         let max = crate::stdlib::z_size_t::MAX;
 
         assert_eq!(deflate_bound_lengths(max), (max, max));
+    }
+
+    #[test]
+    fn stored_block_min_size_caps_pending_capacity_at_window_size() {
+        assert_eq!(stored_block_min_size(21, 32), 16);
+        assert_eq!(stored_block_min_size(37, 32), 32);
+        assert_eq!(stored_block_min_size(1024, 32), 32);
+    }
+
+    #[test]
+    fn stored_block_min_size_preserves_wrapping_underflow_behavior() {
+        assert_eq!(stored_block_min_size(4, 32), 32);
+        assert_eq!(stored_block_min_size(0, 32), 32);
     }
 
     #[test]
