@@ -3028,7 +3028,8 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     }
     gzdirect_result((*state).direct)
 }
-pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzclose_r"]
+pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let stream_err: ::core::ffi::c_int;
     let mut state: crate::gzguts_h::gz_statep =
@@ -3057,9 +3058,4 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
     ret = crate::stdlib::close((*state).fd);
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
     return gzclose_r_result(stream_err, ret);
-}
-#[export_name = "gzclose_r"]
-
-pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_r(file)
 }
