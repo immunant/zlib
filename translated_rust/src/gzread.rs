@@ -1070,14 +1070,9 @@ pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let release_buffers = matches!(&cleanup, crate::src::gzlib::GzReadCloseCleanup::Inflater);
     match cleanup {
         crate::src::gzlib::GzReadCloseCleanup::None => {}
-        crate::src::gzlib::GzReadCloseCleanup::Inflater => unsafe {
-            // SAFETY: this close path owns the initialized inflater and gzip
-            // buffers. The dispatcher bound `file` to this state, and no
-            // allocation escapes after it is released.
-            crate::src::inflate::inflateEnd(
-                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
-        },
+        crate::src::gzlib::GzReadCloseCleanup::Inflater => {
+            crate::src::inflate::inflate_end_default_bound(&mut state.strm);
+        }
     }
     if release_buffers {
         // `gz_look` allocated these through zlib's default allocator.

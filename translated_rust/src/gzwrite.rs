@@ -863,11 +863,7 @@ pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let cleanup = crate::src::gzlib::gz_write_close_cleanup(state);
     match cleanup {
         crate::src::gzlib::GzWriteCloseCleanup::DeflaterAndBuffers => {
-            // SAFETY: `gz_init` initialized this deflater before a write
-            // state with buffers can reach the close path.
-            unsafe {
-                crate::src::deflate::deflateEnd(&mut state.strm as *mut crate::zlib_h::z_stream_s);
-            }
+            crate::src::deflate::deflate_end_default_bound(&mut state.strm);
             crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
         }
         crate::src::gzlib::GzWriteCloseCleanup::None

@@ -2443,6 +2443,26 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     crate::zlib_h::Z_OK
 }
 
+// Gzip initializes its private inflater with zlib's default callbacks.  Its
+// close path can therefore release that private state without crossing the
+// user-callback boundary used by the public `inflateEnd()` ABI.  Keep the
+// validation in the existing raw-state adapter, then snapshot everything
+// needed before either allocation is released.
+pub(crate) fn inflate_end_default_bound(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    let (window, state_ptr) = {
+        let Some((bound_strm, state)) = inflateStateCheck(strm as *mut _) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        (state.window, bound_strm.state)
+    };
+    if !window.is_null() {
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), window as crate::stdlib::voidpf);
+    }
+    crate::src::zutil::zcfree(::core::ptr::null_mut(), state_ptr as crate::stdlib::voidpf);
+    clear_inflate_state(strm);
+    crate::zlib_h::Z_OK
+}
+
 fn clear_inflate_state(strm: &mut crate::zlib_h::z_stream) {
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
 }

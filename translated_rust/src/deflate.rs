@@ -2418,6 +2418,45 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     deflate_end_complete(&mut *strm, status)
 }
 
+// Gzip creates its private deflater with the default zlib callbacks.  For
+// that internal close path, release the captured allocations directly after
+// validation instead of routing through the public callback-based ABI.  The
+// release plan is fully copied before the state allocation is freed.
+pub(crate) fn deflate_end_default_bound(
+    stream: &mut crate::zlib_h::z_stream,
+) -> ::core::ffi::c_int {
+    let (status, pending_buf, head, prev, window, state_ptr) = {
+        let Some((bound_stream, state)) = deflateStateCheck(stream as *mut _) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        (
+            state.status,
+            state.pending_buf,
+            state.head,
+            state.prev,
+            state.window,
+            bound_stream.state,
+        )
+    };
+    if !pending_buf.is_null() {
+        crate::src::zutil::zcfree(
+            ::core::ptr::null_mut(),
+            pending_buf as crate::stdlib::voidpf,
+        );
+    }
+    if !head.is_null() {
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), head as crate::stdlib::voidpf);
+    }
+    if !prev.is_null() {
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), prev as crate::stdlib::voidpf);
+    }
+    if !window.is_null() {
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), window as crate::stdlib::voidpf);
+    }
+    crate::src::zutil::zcfree(::core::ptr::null_mut(), state_ptr as crate::stdlib::voidpf);
+    deflate_end_complete(stream, status)
+}
+
 fn deflate_end_complete(
     stream: &mut crate::zlib_h::z_stream,
     status: ::core::ffi::c_int,
