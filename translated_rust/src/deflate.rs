@@ -2477,7 +2477,32 @@ pub unsafe fn deflate(
         bstate = (if (*s).level == 0 as ::core::ffi::c_int {
             deflate_stored(s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(&mut *s, flush) as ::core::ffi::c_uint
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+            let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+            let input = if strm.avail_in == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+            };
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+            deflate_huff(
+                state,
+                strm,
+                window,
+                head,
+                prev,
+                input,
+                pending_buf,
+                output,
+                flush,
+            ) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, flush) as ::core::ffi::c_uint
         } else {
@@ -3942,26 +3967,17 @@ fn flush_huff_pending(
     flush_pending_impl(strm, state, pending_buf, pending_start, output)
 }
 
-unsafe fn deflate_huff(
+fn deflate_huff(
     state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    input: &[crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    // The translated dispatcher still owns the raw state storage. Convert
-    // each allocation once here, then keep the strategy loop slice-based.
-    let strm = &mut *state.strm;
-    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-    let input = if strm.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-    };
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
-    let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
     deflate_huff_impl(
         state,
         strm,
