@@ -2270,7 +2270,8 @@ fn deflate_apply_init_storage(state: &mut internal_state, plan: DeflateInitPlan)
         && state.pending_buf.is_some()
 }
 
-pub unsafe extern "C" fn deflateInit2_(
+#[export_name = "deflateInit2_"]
+pub unsafe extern "C" fn deflateInit2__ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
     mut method: ::core::ffi::c_int,
@@ -2363,29 +2364,10 @@ pub unsafe extern "C" fn deflateInit2_(
     }
     return deflateReset_ffi(strm);
 }
-#[export_name = "deflateInit2_"]
 
-pub unsafe extern "C" fn deflateInit2__ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut level: ::core::ffi::c_int,
-    mut method: ::core::ffi::c_int,
-    mut windowBits: ::core::ffi::c_int,
-    mut memLevel: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    deflateInit2_(
-        strm,
-        level,
-        method,
-        windowBits,
-        memLevel,
-        strategy,
-        version,
-        stream_size,
-    )
-}
+// Internal translated callers retain the historical Rust item name, while
+// the sole raw-pointer implementation is the exported ABI boundary above.
+pub use deflateInit2__ffi as deflateInit2_;
 fn deflate_state_status_valid(status: ::core::ffi::c_int) -> bool {
     matches!(
         status,
