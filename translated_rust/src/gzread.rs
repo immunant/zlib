@@ -114,8 +114,12 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 );
                 return -1 as ::core::ffi::c_int;
             }
-            let offset = state.strm.next_in.offset_from(input.as_ptr());
-            let Ok(offset) = usize::try_from(offset) else {
+            let Some(offset) = state
+                .strm
+                .next_in
+                .addr()
+                .checked_sub(input.as_ptr().addr())
+            else {
                 crate::src::gzlib::gz_static_error(
                     state,
                     crate::zlib_h::Z_STREAM_ERROR,
