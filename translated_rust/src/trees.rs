@@ -4677,19 +4677,15 @@ pub(crate) fn tally_bound(
     full as ::core::ffi::c_int
 }
 
-// This adapter is the sole raw binding boundary for the tree tally path. The
-// implementation above receives only the validated deflater state and the
-// allocation-sized symbol slice.
-pub unsafe extern "C" fn _tr_tally(
-    mut s: *mut crate::src::deflate::deflate_state,
+// Once the deflater state and its symbol allocation are bound, tallying is
+// ordinary reference- and slice-based bookkeeping. Keep that implementation
+// safe so only the exported C adapter owns the raw boundary.
+pub(crate) fn tr_tally(
+    state: &mut crate::src::deflate::deflate_state,
+    sym_buf: &mut [crate::zutil_h::uchf],
     mut dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let state = &mut *s;
-    let sym_buf = ::core::slice::from_raw_parts_mut(
-        state.sym_buf,
-        state.lit_bufsize.wrapping_mul(3) as usize,
-    );
     tally_bound(state, sym_buf, dist, lc)
 }
 #[export_name = "_tr_tally"]
@@ -4699,5 +4695,13 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    _tr_tally(s, dist, lc)
+    // SAFETY: the C entry point supplies an initialized deflater and its
+    // allocation-backed three-byte symbol records. Bind both ranges once;
+    // the implementation below only receives checked Rust references.
+    let state = &mut *s;
+    let sym_buf = ::core::slice::from_raw_parts_mut(
+        state.sym_buf,
+        state.lit_bufsize.wrapping_mul(3) as usize,
+    );
+    tr_tally(state, sym_buf, dist, lc)
 }
