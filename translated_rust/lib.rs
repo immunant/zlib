@@ -287,7 +287,11 @@ pub mod stdlib {
 
         pub fn strlen(__s: *const ::core::ffi::c_char) -> crate::__stddef_size_t_h::size_t;
 
-        pub fn strerror(__errnum: ::core::ffi::c_int) -> *mut ::core::ffi::c_char;
+        // `strerror()` takes only an error number. libc handles unknown values
+        // by returning a diagnostic string, so it has no Rust-memory or
+        // lifetime precondition for the call itself. Consumers still bind the
+        // returned pointer only where their surrounding operation permits it.
+        pub safe fn strerror(__errnum: ::core::ffi::c_int) -> *mut ::core::ffi::c_char;
         // Seeking an arbitrary descriptor and closing an arbitrary descriptor
         // are defined by libc to report errors, not invoke undefined behavior.
         // Neither operation accepts a Rust reference or memory range.
