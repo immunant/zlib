@@ -2846,7 +2846,11 @@ pub unsafe fn inflate(
                             break 'c_2422;
                         }
                     }
-                    if (*state).flags & 0x1000 as ::core::ffi::c_int != 0 {
+                    // COMMENT consumes only the current input cursor and retained
+                    // header destination. Keep its scalar state updates on one
+                    // adopted decoder-state borrow, matching the NAME transition.
+                    let state_ref = &mut *state;
+                    if state_ref.flags & 0x1000 as ::core::ffi::c_int != 0 {
                         if have == 0 as ::core::ffi::c_uint {
                             break '_inf_leave;
                         }
@@ -2855,13 +2859,13 @@ pub unsafe fn inflate(
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
                             len = *next.wrapping_add(c2rust_fresh7 as usize) as ::core::ffi::c_uint;
-                            if !(*state).head.is_null()
-                                && !(*(*state).head).comment.is_null()
-                                && (*state).length < (*(*state).head).comm_max
+                            if !state_ref.head.is_null()
+                                && !(*state_ref.head).comment.is_null()
+                                && state_ref.length < (*state_ref.head).comm_max
                             {
-                                let c2rust_fresh8 = (*state).length;
-                                (*state).length = (*state).length.wrapping_add(1);
-                                *(*(*state).head)
+                                let c2rust_fresh8 = state_ref.length;
+                                state_ref.length = state_ref.length.wrapping_add(1);
+                                *(*state_ref.head)
                                     .comment
                                     .wrapping_add(c2rust_fresh8 as usize) =
                                     len as crate::stdlib::Bytef;
@@ -2870,11 +2874,11 @@ pub unsafe fn inflate(
                                 break;
                             }
                         }
-                        if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                            && (*state).wrap & 4 as ::core::ffi::c_int != 0
+                        if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
+                            && state_ref.wrap & 4 as ::core::ffi::c_int != 0
                         {
-                            (*state).check = inflate_header_crc_update(
-                                (*state).check,
+                            state_ref.check = inflate_header_crc_update(
+                                state_ref.check,
                                 core::slice::from_raw_parts(next, copy as usize),
                             );
                         }
@@ -2883,10 +2887,10 @@ pub unsafe fn inflate(
                         if len != 0 {
                             break '_inf_leave;
                         }
-                    } else if !(*state).head.is_null() {
-                        (*(*state).head).comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                    } else if !state_ref.head.is_null() {
+                        (*state_ref.head).comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                     }
-                    (*state).mode = crate::src::inflate::HCRC;
+                    state_ref.mode = crate::src::inflate::HCRC;
                     break 'c_2327;
                 }
                 if (*state).extra != 0 {
