@@ -1594,6 +1594,227 @@ fn gzread_with_dispatch(
     len as ::core::ffi::c_uint
 }
 
+enum GzReadOwnerResult {
+    Bytes {
+        len: ::core::ffi::c_uint,
+        publish: bool,
+    },
+    Gets {
+        result: bool,
+        publish: bool,
+    },
+    Unget(GzUngetOutcome),
+    Items(GzFreadOutcome),
+}
+
+impl GzReadOwner {
+    fn begin_read(&mut self) -> bool {
+        let request = GzReadRequest::new(self.mode, self.err, self.again);
+        let mut error = crate::src::gzlib::GzErrorState {
+            message: &mut self.message,
+            error: &mut self.err,
+            buffered: &mut self.have,
+            again: self.again,
+            path: self.path.as_deref(),
+        };
+        request.begin(&mut error)
+    }
+
+    fn read_state(&mut self) -> GzReadState {
+        GzReadState {
+            buffers: ::core::mem::replace(&mut self.buffers, crate::gzguts_h::GzBuffers::empty()),
+            have: self.have,
+            pos: self.pos,
+            skip: self.skip,
+            how: self.how,
+            eof: self.eof,
+            past: self.past,
+            err: self.err,
+            avail_in: self.avail_in,
+        }
+    }
+
+    fn dispatch(&mut self) -> GzReadDispatch<'_> {
+        GzReadDispatch {
+            buffers: &mut self.buffers,
+            have: &mut self.have,
+            pos: &mut self.pos,
+            skip: &mut self.skip,
+            how: &mut self.how,
+            eof: &mut self.eof,
+            past: &mut self.past,
+            err: &mut self.err,
+            want: self.want,
+            direct: &mut self.direct,
+            junk: &mut self.junk,
+            again: &mut self.again,
+            message: &mut self.message,
+            fd: Some(&self.fd),
+            path: self.path.as_deref(),
+            avail_in: &mut self.avail_in,
+            avail_out: &mut self.avail_out,
+            total_in: &mut self.total_in,
+            total_out: &mut self.total_out,
+        }
+    }
+}
+
+fn gzgets_owner(owner: &mut GzReadOwner, output: &mut [u8]) -> bool {
+    let mut read = owner.read_state();
+    let result = {
+        let mut dispatch = owner.dispatch();
+        let result = gzgets(&mut read, output, |read| {
+            if dispatch.dispatch(GzReadAction::Fetch, read, &mut []).failed {
+                Err(())
+            } else {
+                Ok(())
+            }
+        });
+        dispatch.project_from_read(&mut read);
+        result
+    };
+    result
+}
+
+fn gzungetc_owner(owner: &mut GzReadOwner, c: ::core::ffi::c_int) -> GzUngetOutcome {
+    let mode = owner.mode;
+    let again = owner.again;
+    let mut read = owner.read_state();
+    let outcome = {
+        let mut dispatch = owner.dispatch();
+        let outcome = match gzungetc_begin(&mut read, mode, again, |action, read| {
+            !dispatch.dispatch(action, read, &mut []).failed
+        }) {
+            Some(request) if dispatch.begin(&request, &mut read) => {
+                gzungetc(c, &mut read, |action, read| {
+                    !dispatch.dispatch(action, read, &mut []).failed
+                })
+            }
+            Some(_) | None => GzUngetOutcome::Result(-1),
+        };
+        dispatch.project_from_read(&mut read);
+        outcome
+    };
+    outcome
+}
+
+fn gzread_owner_request(
+    owner: &mut GzReadOwner,
+    output: &mut [u8],
+    request: GzReadAbiRequest,
+) -> GzReadOwnerResult {
+    match request {
+        GzReadAbiRequest::Items { size, nitems } => {
+            GzReadOwnerResult::Items(gzfread(owner, output, size, nitems))
+        }
+        GzReadAbiRequest::Unget(c) => GzReadOwnerResult::Unget(gzungetc_owner(owner, c)),
+        GzReadAbiRequest::Gets if output.is_empty() || !owner.begin_read() => {
+            GzReadOwnerResult::Gets {
+                result: false,
+                publish: false,
+            }
+        }
+        GzReadAbiRequest::Gets => GzReadOwnerResult::Gets {
+            result: gzgets_owner(owner, output),
+            publish: true,
+        },
+        GzReadAbiRequest::Bytes if !owner.begin_read() => GzReadOwnerResult::Bytes {
+            len: ::core::ffi::c_uint::MAX,
+            publish: false,
+        },
+        GzReadAbiRequest::Bytes => {
+            if (output.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 {
+                crate::src::gzlib::gz_set_error(
+                    &mut owner.message,
+                    &mut owner.err,
+                    &mut owner.have,
+                    owner.again,
+                    owner.path.as_deref(),
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(b"request does not fit in an int"),
+                );
+                GzReadOwnerResult::Bytes {
+                    len: ::core::ffi::c_uint::MAX,
+                    publish: false,
+                }
+            } else {
+                GzReadOwnerResult::Bytes {
+                    len: gzread_owner(owner, output),
+                    publish: true,
+                }
+            }
+        }
+    }
+}
+
+impl GzReadOwnerResult {
+    fn needs_cursor_publication(&self) -> bool {
+        match self {
+            Self::Bytes { publish, .. } | Self::Gets { publish, .. } => *publish,
+            Self::Unget(_) | Self::Items(GzFreadOutcome::PublishThenFinish { .. }) => true,
+            Self::Items(GzFreadOutcome::Complete(_)) => false,
+        }
+    }
+
+    fn finish(self, owner: &mut GzReadOwner, published: bool) -> GzReadAbiResult {
+        match self {
+            Self::Items(GzFreadOutcome::Complete(result)) => GzReadAbiResult::Items(result),
+            Self::Items(GzFreadOutcome::PublishThenFinish { read_len, size }) => {
+                GzReadAbiResult::Items(if published {
+                    gzfread_finish(owner, read_len, size)
+                } else {
+                    0
+                })
+            }
+            Self::Gets { result, .. } => GzReadAbiResult::Gets(result && published),
+            Self::Unget(GzUngetOutcome::Result(result)) => {
+                GzReadAbiResult::Unget(if published { result } else { -1 })
+            }
+            Self::Unget(GzUngetOutcome::OutOfRoom) => {
+                if published {
+                    crate::src::gzlib::gz_set_error(
+                        &mut owner.message,
+                        &mut owner.err,
+                        &mut owner.have,
+                        owner.again,
+                        owner.path.as_deref(),
+                        crate::zlib_h::Z_DATA_ERROR,
+                        Some(b"out of room to push characters"),
+                    );
+                }
+                GzReadAbiResult::Unget(-1)
+            }
+            Self::Bytes { len, .. } if !published => {
+                if len == ::core::ffi::c_uint::MAX {
+                    GzReadAbiResult::Bytes(-1)
+                } else {
+                    GzReadAbiResult::Bytes(0)
+                }
+            }
+            Self::Bytes { len, .. } if len == 0 => {
+                if owner.err != crate::zlib_h::Z_OK && owner.err != crate::zlib_h::Z_BUF_ERROR {
+                    return GzReadAbiResult::Bytes(-1);
+                }
+                if owner.again != 0 {
+                    let message = errno::Errno(errno::errno().0).to_string();
+                    crate::src::gzlib::gz_set_error(
+                        &mut owner.message,
+                        &mut owner.err,
+                        &mut owner.have,
+                        owner.again,
+                        owner.path.as_deref(),
+                        crate::zlib_h::Z_ERRNO,
+                        Some(message.as_bytes()),
+                    );
+                    return GzReadAbiResult::Bytes(-1);
+                }
+                GzReadAbiResult::Bytes(0)
+            }
+            Self::Bytes { len, .. } => GzReadAbiResult::Bytes(len as ::core::ffi::c_int),
+        }
+    }
+}
+
 // The ABI-shaped state is projected exactly once for either exported read
 // request.  Keep that projection under this established adapter; `gzread()`
 // and `gzfread()` themselves are pointer-free owner loops once it completes.
@@ -1602,6 +1823,78 @@ unsafe fn gzread_from_state(
     output: &mut [u8],
     request: GzReadAbiRequest,
 ) -> GzReadAbiResult {
+    if matches!(request, GzReadAbiRequest::Items { .. }) && state.fd.is_none() {
+        return GzReadAbiResult::Items(0);
+    }
+    let mut owner = GzReadOwnerSnapshot {
+        mode: state.mode,
+        fd: state.fd.take().expect("gzip state has an open file"),
+        path: state.path.take(),
+        want: state.want,
+        buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+        direct: state.direct,
+        junk: state.junk,
+        how: state.how,
+        again: state.again,
+        eof: state.eof,
+        past: state.past,
+        skip: state.skip,
+        err: state.err,
+        message: state.msg.take(),
+        have: state.x.have,
+        pos: state.x.pos,
+        avail_in: state.strm.avail_in,
+        avail_out: state.strm.avail_out,
+        total_in: state.strm.total_in,
+        total_out: state.strm.total_out,
+    }
+    .into_owner();
+    let result = gzread_owner_request(&mut owner, output, request);
+    let published = if result.needs_cursor_publication() {
+        match owner
+            .buffers
+            .output_cursor()
+            .map(|cursor| (cursor.start(), cursor.have()))
+        {
+            Some((start, have)) if have == owner.have => owner
+                .buffers
+                .output
+                .as_deref_mut()
+                .and_then(|buffer| buffer.get_mut(start..))
+                .map(|buffer| state.x.next = buffer.as_mut_ptr())
+                .is_some(),
+            None if owner.have == 0 => {
+                state.x.next = ::core::ptr::null_mut();
+                true
+            }
+            _ => false,
+        }
+    } else {
+        true
+    };
+    let result = result.finish(&mut owner, published);
+    state.mode = owner.mode;
+    state.fd = Some(owner.fd);
+    state.path = owner.path;
+    state.want = owner.want;
+    state.buffers = owner.buffers;
+    state.direct = owner.direct;
+    state.junk = owner.junk;
+    state.how = owner.how;
+    state.again = owner.again;
+    state.eof = owner.eof;
+    state.past = owner.past;
+    state.skip = owner.skip;
+    state.err = owner.err;
+    state.msg = owner.message;
+    state.x.have = owner.have;
+    state.x.pos = owner.pos;
+    state.strm.avail_in = owner.avail_in;
+    state.strm.avail_out = owner.avail_out;
+    state.strm.total_in = owner.total_in;
+    state.strm.total_out = owner.total_out;
+    return result;
+
     if let GzReadAbiRequest::Items { size, nitems } = request {
         let Some(fd) = state.fd.take() else {
             return GzReadAbiResult::Items(0);

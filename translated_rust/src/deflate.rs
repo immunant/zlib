@@ -2304,8 +2304,7 @@ pub(crate) unsafe fn deflate_reset_keep_from_stream(
         DeflateResetKind::Keep => DeflateStorageProjection::None,
         DeflateResetKind::Full => DeflateStorageProjection::Hash,
     };
-    let Some((strm, state, mut storage)) = deflate_stream_and_state(strm, projection)
-    else {
+    let Some((strm, state, mut storage)) = deflate_stream_and_state(strm, projection) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let adler = deflateResetKeep(DeflateResetKeepOwner {
@@ -2871,15 +2870,13 @@ unsafe fn deflateTune(
     strm: &mut crate::zlib_h::z_stream_s,
     action: DeflateScalarAction<'_>,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, s, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    let Some((_strm, s, _storage)) = deflate_stream_and_state(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     match action {
         DeflateScalarAction::Pending { pending, bits } => {
-            let (pending_value, bits_value, status) =
-                deflate_pending_impl(s.pending, s.bi_valid);
+            let (pending_value, bits_value, status) = deflate_pending_impl(s.pending, s.bi_valid);
             if let Some(bits) = bits {
                 *bits = bits_value;
             }
