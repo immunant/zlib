@@ -67,8 +67,6 @@ pub unsafe extern "C" fn inflate_fast(
     let mut bits: ::core::ffi::c_uint = 0;
     let mut lcode: *const crate::src::inftrees::code =
         ::core::ptr::null::<crate::src::inftrees::code>();
-    let mut dcode: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
     let mut lmask: ::core::ffi::c_uint = 0;
     let mut dmask: ::core::ffi::c_uint = 0;
     let mut here: *const crate::src::inftrees::code =
@@ -90,7 +88,6 @@ pub unsafe extern "C" fn inflate_fast(
     hold = (*state).hold;
     bits = (*state).bits;
     lcode = (*state).lencode;
-    dcode = (*state).distcode;
     lmask = ((1 as ::core::ffi::c_uint) << (*state).lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
     dmask =
         ((1 as ::core::ffi::c_uint) << (*state).distbits).wrapping_sub(1 as ::core::ffi::c_uint);
@@ -144,14 +141,17 @@ pub unsafe extern "C" fn inflate_fast(
                     hold = hold.wrapping_add((*c2rust_fresh5 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                here = dcode.offset((hold & dmask as ::core::ffi::c_ulong) as isize);
+                let mut dist_here = (*state).distcode.entry(
+                    &(*state).codes,
+                    (hold & dmask as ::core::ffi::c_ulong) as usize,
+                );
                 loop {
-                    op = (*here).bits as ::core::ffi::c_uint;
+                    op = dist_here.bits as ::core::ffi::c_uint;
                     hold >>= op;
                     bits = bits.wrapping_sub(op);
-                    op = (*here).op as ::core::ffi::c_uint;
+                    op = dist_here.op as ::core::ffi::c_uint;
                     if op & 16 as ::core::ffi::c_uint != 0 {
-                        dist = (*here).val as ::core::ffi::c_uint;
+                        dist = dist_here.val as ::core::ffi::c_uint;
                         op &= 15 as ::core::ffi::c_uint;
                         if bits < op {
                             let c2rust_fresh6 = in_0;
@@ -330,15 +330,16 @@ pub unsafe extern "C" fn inflate_fast(
                             break 's_92;
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                        here = dcode
-                            .offset((*here).val as ::core::ffi::c_int as isize)
-                            .offset(
+                        dist_here = (*state).distcode.entry(
+                            &(*state).codes,
+                            (dist_here.val as ::core::ffi::c_uint).wrapping_add(
                                 (hold
                                     & ((1 as ::core::ffi::c_uint) << op)
                                         .wrapping_sub(1 as ::core::ffi::c_uint)
                                         as ::core::ffi::c_ulong)
-                                    as isize,
-                            );
+                                    as ::core::ffi::c_uint,
+                            ) as usize,
+                        );
                     } else {
                         (*strm).msg = b"invalid distance code\0".as_ptr()
                             as *const ::core::ffi::c_char

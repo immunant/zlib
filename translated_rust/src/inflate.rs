@@ -64,6 +64,41 @@ pub const BAD: crate::src::inflate::inflate_mode = 16209;
 pub const MEM: crate::src::inflate::inflate_mode = 16210;
 
 pub const SYNC: crate::src::inflate::inflate_mode = 16211;
+
+/// Identifies the distance decode table without retaining a pointer into the
+/// state-owned arena.  A dynamic table starts at an entry in `codes`; fixed
+/// distance tables are immutable module data.
+#[derive(Copy, Clone)]
+pub enum distance_table {
+    Fixed,
+    Dynamic(usize),
+}
+
+impl distance_table {
+    pub fn entry(
+        self,
+        codes: &[crate::src::inftrees::code; 1444],
+        index: usize,
+    ) -> crate::src::inftrees::code {
+        const INVALID: crate::src::inftrees::code = crate::src::inftrees::code {
+            op: 64,
+            bits: 0,
+            val: 0,
+        };
+
+        match self {
+            distance_table::Fixed => crate::src::inftrees::distfix
+                .get(index)
+                .copied()
+                .unwrap_or(INVALID),
+            distance_table::Dynamic(start) => start
+                .checked_add(index)
+                .and_then(|entry| codes.get(entry))
+                .copied()
+                .unwrap_or(INVALID),
+        }
+    }
+}
 #[derive(Copy, Clone)]
 #[repr(C)]
 
@@ -89,7 +124,7 @@ pub struct inflate_state {
     pub offset: ::core::ffi::c_uint,
     pub extra: ::core::ffi::c_uint,
     pub lencode: *const crate::src::inftrees::code,
-    pub distcode: *const crate::src::inftrees::code,
+    pub distcode: crate::src::inflate::distance_table,
     pub lenbits: ::core::ffi::c_uint,
     pub distbits: ::core::ffi::c_uint,
     pub ncode: ::core::ffi::c_uint,
@@ -197,8 +232,8 @@ pub unsafe extern "C" fn inflateResetKeep(
     (*state).hold = 0 as ::core::ffi::c_ulong;
     (*state).bits = 0 as ::core::ffi::c_uint;
     (*state).next = 0;
-    (*state).distcode = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-    (*state).lencode = (*state).distcode;
+    (*state).distcode = crate::src::inflate::distance_table::Dynamic(0);
+    (*state).lencode = &raw mut (*state).codes as *mut crate::src::inftrees::code;
     (*state).sane = 1 as ::core::ffi::c_int;
     (*state).back = -1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
@@ -1081,8 +1116,8 @@ pub unsafe extern "C" fn inflate(
                                                                                         }
                                                                                         (*state).next = 0;
                                                                                         let mut table = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                                                                                        (*state).distcode = table as *const crate::src::inftrees::code;
-                                                                                        (*state).lencode = (*state).distcode;
+                                                                                        (*state).distcode = crate::src::inflate::distance_table::Dynamic(0);
+                                                                                        (*state).lencode = table as *const crate::src::inftrees::code;
                                                                                         (*state).lenbits = 7 as ::core::ffi::c_uint;
                                                                                         ret = crate::src::inftrees::inflate_table(
                                                                                             crate::src::inftrees::CODES,
@@ -1381,7 +1416,7 @@ pub unsafe extern "C" fn inflate(
                                                                                 (*state).mode = crate::src::inflate::BAD;
                                                                                 continue '_inf_leave;
                                                                             } else {
-                                                                                (*state).distcode = table as *const crate::src::inftrees::code;
+                                                                                (*state).distcode = crate::src::inflate::distance_table::Dynamic((*state).next);
                                                                                 (*state).distbits = 6 as ::core::ffi::c_uint;
                                                                                 ret = crate::src::inftrees::inflate_table(
                                                                                     crate::src::inftrees::DISTS,
@@ -1914,11 +1949,12 @@ pub unsafe extern "C" fn inflate(
                             break 'c_2325;
                         }
                         loop {
-                            here = *(*state).distcode.offset(
+                            here = (*state).distcode.entry(
+                                &(*state).codes,
                                 (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    as isize,
+                                    as usize,
                             );
                             if here.bits as ::core::ffi::c_uint <= bits {
                                 break;
@@ -1938,7 +1974,8 @@ pub unsafe extern "C" fn inflate(
                         {
                             last = here;
                             loop {
-                                here = *(*state).distcode.offset(
+                                here = (*state).distcode.entry(
+                                    &(*state).codes,
                                     (last.val as ::core::ffi::c_uint).wrapping_add(
                                         (hold as ::core::ffi::c_uint
                                             & ((1 as ::core::ffi::c_uint)
@@ -1946,7 +1983,7 @@ pub unsafe extern "C" fn inflate(
                                                     + last.op as ::core::ffi::c_int)
                                                 .wrapping_sub(1 as ::core::ffi::c_uint))
                                             >> last.bits as ::core::ffi::c_int,
-                                    ) as isize,
+                                    ) as usize,
                                 );
                                 if (last.bits as ::core::ffi::c_int
                                     + here.bits as ::core::ffi::c_int)
@@ -2551,12 +2588,6 @@ pub unsafe extern "C" fn inflateCopy(
         (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
             (*state)
                 .lencode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as isize,
-        );
-        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .distcode
                 .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
                 as isize,
         );

@@ -659,7 +659,11 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
-                                (*state).distcode = table as *const crate::src::inftrees::code;
+                                {
+                                    let state_ref = &mut *state;
+                                    state_ref.distcode =
+                                        crate::src::inflate::distance_table::Dynamic(state_ref.next);
+                                }
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
                                 ret = crate::src::inftrees::inflate_table(
                                     crate::src::inftrees::DISTS,
@@ -831,11 +835,12 @@ pub unsafe extern "C" fn inflateBack(
                     bits = bits.wrapping_sub((*state).extra);
                 }
                 loop {
-                    here = *(*state).distcode.offset(
+                    here = (*state).distcode.entry(
+                        &(*state).codes,
                         (hold as ::core::ffi::c_uint
                             & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                 .wrapping_sub(1 as ::core::ffi::c_uint))
-                            as isize,
+                            as usize,
                     );
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
@@ -859,7 +864,8 @@ pub unsafe extern "C" fn inflateBack(
                 {
                     last = here;
                     loop {
-                        here = *(*state).distcode.offset(
+                        here = (*state).distcode.entry(
+                            &(*state).codes,
                             (last.val as ::core::ffi::c_uint).wrapping_add(
                                 (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint)
@@ -867,7 +873,7 @@ pub unsafe extern "C" fn inflateBack(
                                             + last.op as ::core::ffi::c_int)
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
                                     >> last.bits as ::core::ffi::c_int,
-                            ) as isize,
+                            ) as usize,
                         );
                         if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                             as ::core::ffi::c_uint

@@ -3241,7 +3241,7 @@ pub unsafe extern "C" fn inflate_fixed(mut state: *mut crate::src::inflate::infl
     let state = unsafe { &mut *state };
     state.lencode = lenfix.as_ptr();
     state.lenbits = 9 as ::core::ffi::c_uint;
-    state.distcode = distfix.as_ptr();
+    state.distcode = crate::src::inflate::distance_table::Fixed;
     state.distbits = 5 as ::core::ffi::c_uint;
 }
 #[export_name = "inflate_fixed"]
