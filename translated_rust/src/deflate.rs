@@ -3957,6 +3957,24 @@ fn huff_tally_literal_state(
     Some(flush_now)
 }
 
+/// Emit the distance-one match selected by the RLE parser and commit its
+/// cursor transitions only after the symbol tally succeeds.
+fn rle_tally_match_state(
+    s: &mut crate::src::deflate::deflate_state,
+    symbols: &mut [crate::zutil_h::uch],
+) -> Option<bool> {
+    let length = s.match_length;
+    if length < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        return None;
+    }
+    let len = length.wrapping_sub(3) as crate::zutil_h::uch;
+    let flush_now = tally_symbol_state(s, symbols, 1, len.into())?;
+    s.lookahead = s.lookahead.wrapping_sub(length);
+    s.strstart = s.strstart.wrapping_add(length);
+    s.match_length = 0;
+    Some(flush_now)
+}
+
 fn hash_match_is_usable(
     strstart: crate::src::deflate::IPos,
     hash_head: crate::src::deflate::IPos,
@@ -4030,8 +4048,6 @@ unsafe extern "C" fn deflate_rle(
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let state = &mut *s;
-            let length = state.match_length;
-            let len = length.wrapping_sub(3) as crate::zutil_h::uch;
             let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                 return need_more;
             };
@@ -4043,13 +4059,10 @@ unsafe extern "C" fn deflate_rle(
             } else {
                 ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
             };
-            let Some(flush_now) = tally_symbol_state(state, symbols, 1, len.into()) else {
+            let Some(flush_now) = rle_tally_match_state(state, symbols) else {
                 return need_more;
             };
             bflush = flush_now as ::core::ffi::c_int;
-            state.lookahead = state.lookahead.wrapping_sub(length);
-            state.strstart = state.strstart.wrapping_add(length);
-            state.match_length = 0;
         } else {
             let state = &mut *s;
             let Ok(window_len) = usize::try_from(state.window_size) else {
