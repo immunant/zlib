@@ -256,6 +256,28 @@ fn inflate_trailer_checksum(
     }
 }
 
+/// Convert the four little-endian dictionary-id bytes gathered by the
+/// bit-buffer into zlib's network-order Adler-32 value.  This uses the same
+/// scalar byte-order rule as a zlib trailer; cursor consumption and ABI
+/// publication remain at the ordinary-inflate boundary.
+fn inflate_dictionary_id(hold: ::core::ffi::c_ulong) -> ::core::ffi::c_ulong {
+    inflate_trailer_checksum(0, hold)
+}
+
+/// Validate a stored block's little-endian length/complement pair and return
+/// the length on success. The cursor loop supplies exactly four aligned
+/// bytes; keeping the complement test here makes malformed-block policy a
+/// pointer-free scalar decision.
+fn inflate_stored_block_len(hold: ::core::ffi::c_ulong) -> Option<::core::ffi::c_uint> {
+    let length = hold as ::core::ffi::c_uint & 0xffff;
+    let complement = (hold >> 16) as ::core::ffi::c_uint & 0xffff;
+    if length ^ complement == 0xffff {
+        Some(length)
+    } else {
+        None
+    }
+}
+
 /// Ordinary inflate only validates a trailer when the active wrapper has a
 /// checksum.  This preserves the raw decoder's no-wrapper path while keeping
 /// the comparison as a safe scalar operation.
@@ -1677,20 +1699,7 @@ pub fn inflate(
                                                                                                     // repeatedly traversing both ABI records.
                                                                                                     let strm_ref = &mut *strm;
                                                                                                     let state_ref = &mut *state;
-                                                                                                    state_ref.check = (hold >> 24 as ::core::ffi::c_int
-                                                                                                        & 0xff as ::core::ffi::c_ulong)
-                                                                                                        .wrapping_add(
-                                                                                                            hold >> 8 as ::core::ffi::c_int
-                                                                                                                & 0xff00 as ::core::ffi::c_ulong,
-                                                                                                        )
-                                                                                                        .wrapping_add(
-                                                                                                            (hold & 0xff00 as ::core::ffi::c_ulong)
-                                                                                                                << 8 as ::core::ffi::c_int,
-                                                                                                        )
-                                                                                                        .wrapping_add(
-                                                                                                            (hold & 0xff as ::core::ffi::c_ulong)
-                                                                                                                << 24 as ::core::ffi::c_int,
-                                                                                                        );
+                                                                                                    state_ref.check = inflate_dictionary_id(hold);
                                                                                                     strm_ref.adler = state_ref.check as crate::stdlib::uLong;
                                                                                                     hold = 0 as ::core::ffi::c_ulong;
                                                                                                     bits = 0 as ::core::ffi::c_uint;
@@ -1725,25 +1734,20 @@ pub fn inflate(
                                                                                                     }
                                                                                                     let strm_ref = &mut *strm;
                                                                                                     let state_ref = &mut *state;
-                                                                                                    if hold & 0xffff as ::core::ffi::c_ulong
-                                                                                                        != hold >> 16 as ::core::ffi::c_int
-                                                                                                            ^ 0xffff as ::core::ffi::c_ulong
-                                                                                                    {
+                                                                                                    let Some(length) = inflate_stored_block_len(hold) else {
                                                                                                         strm_ref.msg = INFLATE_ERROR_MESSAGES[4].as_ptr()
                                                                                                             as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
                                                                                                         state_ref.mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
+                                                                                                    };
+                                                                                                    state_ref.length = length;
+                                                                                                    hold = 0 as ::core::ffi::c_ulong;
+                                                                                                    bits = 0 as ::core::ffi::c_uint;
+                                                                                                    state_ref.mode = crate::src::inflate::COPY_;
+                                                                                                    if flush == crate::zlib_h::Z_TREES {
+                                                                                                        break '_inf_leave;
                                                                                                     } else {
-                                                                                                        state_ref.length = hold as ::core::ffi::c_uint
-                                                                                                            & 0xffff as ::core::ffi::c_uint;
-                                                                                                        hold = 0 as ::core::ffi::c_ulong;
-                                                                                                        bits = 0 as ::core::ffi::c_uint;
-                                                                                                        state_ref.mode = crate::src::inflate::COPY_;
-                                                                                                        if flush == crate::zlib_h::Z_TREES {
-                                                                                                            break '_inf_leave;
-                                                                                                        } else {
-                                                                                                            break 'c_2355;
-                                                                                                        }
+                                                                                                        break 'c_2355;
                                                                                                     }
                                                                                                 }
                                                                                                 16194 => {
