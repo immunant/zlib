@@ -1025,11 +1025,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
 ) -> ::core::ffi::c_int {
     inflateBack(strm, in_0, in_desc, out, out_desc)
 }
-pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() || (&*strm).inflate_state().is_none() || (*strm).zfree.is_none() {
+pub fn inflateBackEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    if strm.inflate_state().is_none() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).state = None;
+    strm.state = None;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackEnd"]
@@ -1037,5 +1037,8 @@ pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> :
 pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateBackEnd(strm)
 }

@@ -2291,22 +2291,25 @@ pub unsafe extern "C" fn inflate_ffi(
 ) -> ::core::ffi::c_int {
     inflate(strm, flush)
 }
-pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    if inflate_state_invalid(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state_handle = (&*strm)
+    let state_handle = strm
         .inflate_state()
         .expect("inflate state was checked above");
     let mut state = state_handle.borrow_mut();
-    (*state).window = None;
+    state.window = None;
     drop(state);
-    (*strm).state = None;
+    strm.state = None;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateEnd(strm)
 }
 pub unsafe extern "C" fn inflateGetDictionary(
