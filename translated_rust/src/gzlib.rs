@@ -295,6 +295,61 @@ pub(crate) fn gz_write_result(
     }
 }
 
+// Keep the write-path choices and byte accounting independent of the raw
+// source and destination buffers.  The callers still own the actual copy and
+// stream-pointer rebasing at the FFI boundary.
+pub(crate) fn gz_write_needs_init(state: &crate::gzguts_h::gz_state) -> bool {
+    state.size == 0
+}
+
+pub(crate) fn gz_write_needs_zero(state: &crate::gzguts_h::gz_state) -> bool {
+    state.skip != 0
+}
+
+pub(crate) fn gz_write_uses_buffer(
+    state: &crate::gzguts_h::gz_state,
+    remaining: crate::stdlib::z_size_t,
+) -> bool {
+    remaining < state.size as crate::stdlib::z_size_t
+}
+
+pub(crate) fn gz_buffered_copy_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: &mut crate::stdlib::z_size_t,
+    copied: ::core::ffi::c_uint,
+) {
+    gz_append_input(state, copied);
+    *remaining = remaining.wrapping_sub(copied as crate::stdlib::z_size_t);
+}
+
+pub(crate) fn gz_stream_write_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: &mut crate::stdlib::z_size_t,
+    offered: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let consumed = gz_consume_stream_input(state, offered);
+    *remaining = remaining.wrapping_sub(consumed as crate::stdlib::z_size_t);
+    consumed
+}
+
+pub(crate) fn gz_write_error_result(
+    state: &crate::gzguts_h::gz_state,
+    requested: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    gz_write_result(requested, remaining, state.again != 0)
+}
+
+pub(crate) fn gz_zero_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    offered: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let consumed = gz_produced(offered, state.strm.avail_in);
+    gz_advance_pos(state, consumed);
+    state.skip -= consumed as crate::stdlib::off64_t;
+    consumed
+}
+
 // Choose the amount a bulk gzip operation may handle in one stream request.
 // `available` is only a bound when data is already buffered.
 pub(crate) fn gz_buffered_chunk(
