@@ -4020,7 +4020,8 @@ unsafe fn gz_read(
     return got;
 }
 
-pub unsafe extern "C" fn gzread(
+#[export_name = "gzread"]
+pub unsafe extern "C" fn gzread_ffi(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
@@ -4060,15 +4061,6 @@ pub unsafe extern "C" fn gzread(
             -1 as ::core::ffi::c_int
         }
     }
-}
-#[export_name = "gzread"]
-
-pub unsafe extern "C" fn gzread_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: crate::stdlib::voidp,
-    mut len: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    gzread(file, buf, len)
 }
 pub unsafe extern "C" fn gzfread(
     mut buf: crate::stdlib::voidp,

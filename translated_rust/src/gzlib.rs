@@ -122,6 +122,17 @@ fn gzclearerr_core(
     }
 }
 
+fn gzclearerr_state_core(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if !gzclearerr_core(state.mode, &mut state.eof, &mut state.past) {
+        return false;
+    }
+
+    let free_message = !state.msg.is_null() && state.err != crate::zlib_h::Z_MEM_ERROR;
+    state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    state.err = crate::zlib_h::Z_OK;
+    free_message
+}
+
 fn gz_error_clears_buffer(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {
     err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0
 }
@@ -1226,15 +1237,11 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     }
 
     let state = unsafe { &mut *(file as crate::gzguts_h::gz_statep) };
-    if !gzclearerr_core(state.mode, &mut state.eof, &mut state.past) {
-        return;
-    }
-    unsafe {
-        gz_error(
-            state,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
+    let previous_message = state.msg;
+    if gzclearerr_state_core(state) {
+        unsafe {
+            crate::stdlib::free(previous_message as *mut ::core::ffi::c_void);
+        }
     }
 }
 pub unsafe extern "C" fn gz_error(
@@ -1310,12 +1317,13 @@ mod tests {
         gz_open_path_buffer_len, gz_open_recorded_offset, gz_parse_open_mode,
         gz_position_after_skip, gz_post_open_metadata, gz_prepare_open, gz_request_len,
         gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
-        gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result, gzerror_core,
-        gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
-        gzrewind_start_offset, gzseek_adjust_offset, gzseek_can_fast_forward,
-        gzseek_clears_pending_skip, gzseek_effective_skip, gzseek_error_allows_positioning,
-        gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset, gzseek_finish_fast_forward,
-        gzseek_plan, gzseek_plan_fast_forward, gzseek_plan_read_buffer_consumption,
+        gzclearerr_state_core, gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result,
+        gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
+        gzrewind_request_is_valid, gzrewind_start_offset, gzseek_adjust_offset,
+        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
+        gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
+        gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan,
+        gzseek_plan_fast_forward, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_plan_request, gzseek_read_buffer_consumed,
         gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
         gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
@@ -1507,6 +1515,30 @@ mod tests {
             &mut eof,
             &mut past
         ));
+    }
+
+    #[test]
+    fn gzclearerr_state_core_releases_regular_message() {
+        let mut state: crate::gzguts_h::gz_state = unsafe { ::core::mem::zeroed() };
+        state.mode = crate::gzguts_h::GZ_READ;
+        state.err = crate::zlib_h::Z_DATA_ERROR;
+        state.msg = 1 as *mut ::core::ffi::c_char;
+
+        assert!(gzclearerr_state_core(&mut state));
+        assert_eq!(state.err, crate::zlib_h::Z_OK);
+        assert!(state.msg.is_null());
+    }
+
+    #[test]
+    fn gzclearerr_state_core_retains_out_of_memory_message() {
+        let mut state: crate::gzguts_h::gz_state = unsafe { ::core::mem::zeroed() };
+        state.mode = crate::gzguts_h::GZ_WRITE;
+        state.err = crate::zlib_h::Z_MEM_ERROR;
+        state.msg = 1 as *mut ::core::ffi::c_char;
+
+        assert!(!gzclearerr_state_core(&mut state));
+        assert_eq!(state.err, crate::zlib_h::Z_OK);
+        assert!(state.msg.is_null());
     }
 
     #[test]
