@@ -426,7 +426,8 @@ unsafe extern "C" fn read_buf(
         (*strm).adler =
             crate::src::adler32::adler32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
     } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::crc32::crc32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
+        (*strm).adler =
+            crate::src::crc32::crc32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
     }
     (*strm).next_in = (*strm).next_in.offset(len as isize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
@@ -729,9 +730,8 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
     (*s).high_water = 0 as crate::zutil_h::ulg;
-    (*s).lit_bufsize =
-        ((1 as ::core::ffi::c_int) << config.mem_level + 6 as ::core::ffi::c_int)
-            as crate::stdlib::uInt;
+    (*s).lit_bufsize = ((1 as ::core::ffi::c_int) << config.mem_level + 6 as ::core::ffi::c_int)
+        as crate::stdlib::uInt;
     (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
@@ -2327,20 +2327,16 @@ unsafe extern "C" fn deflate_stored(
         let len_bytes = crate::src::trees::stored_block_len_bytes(len as crate::zutil_h::ulg);
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len_bytes[0];
+            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) = len_bytes[0];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            len_bytes[1];
+            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) = len_bytes[1];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            len_bytes[2];
+            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) = len_bytes[2];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            len_bytes[3];
+            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) = len_bytes[3];
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {

@@ -6,8 +6,8 @@ pub use crate::gzguts_h::COPY;
 pub use crate::gzguts_h::GZIP;
 pub use crate::gzguts_h::GZ_READ;
 pub use crate::gzguts_h::LOOK;
-pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_consume_buffered_read;
+pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_io_chunk_limit;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
@@ -20,10 +20,10 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate_ffi;
 pub use crate::src::inflate::inflateEnd_ffi;
 pub use crate::src::inflate::inflateInit2__ffi;
 pub use crate::src::inflate::inflateReset_ffi;
+pub use crate::src::inflate::inflate_ffi;
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -103,11 +103,7 @@ unsafe fn gz_load(
     return 0 as ::core::ffi::c_int;
 }
 
-fn gz_compact_input_buffer(
-    buf: &mut [crate::stdlib::Bytef],
-    next_offset: usize,
-    avail_in: usize,
-) {
+fn gz_compact_input_buffer(buf: &mut [crate::stdlib::Bytef], next_offset: usize, avail_in: usize) {
     if next_offset != 0 && avail_in != 0 {
         buf.copy_within(next_offset..next_offset + avail_in, 0);
     }
@@ -419,8 +415,7 @@ unsafe extern "C" fn gz_read(
                 (*state).x.next as *const ::core::ffi::c_void,
                 n as crate::__stddef_size_t_h::size_t,
             );
-            (*state).x.next = (*state).x.next.offset(n as isize);
-            (*state).x.have = (*state).x.have.wrapping_sub(n);
+            gz_advance_buffered_read_cursor(&mut *state, n);
             if (*state).err != crate::zlib_h::Z_OK {
                 err = -1 as ::core::ffi::c_int;
             }
@@ -481,10 +476,7 @@ fn gz_read_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
             || state.again != 0)
 }
 
-fn gz_record_decompressed_output(
-    state: &mut crate::gzguts_h::gz_state,
-    had: ::core::ffi::c_uint,
-) {
+fn gz_record_decompressed_output(state: &mut crate::gzguts_h::gz_state, had: ::core::ffi::c_uint) {
     state.x.have = had.wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
     state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize);
 }
@@ -492,6 +484,19 @@ fn gz_record_decompressed_output(
 fn gz_consume_skip_buffer(state: &mut crate::gzguts_h::gz_state) {
     let n = gz_consume_buffered_read(&mut state.x.have, &mut state.x.pos, &mut state.skip);
     state.x.next = state.x.next.wrapping_add(n as usize);
+}
+
+fn gz_advance_buffered_read_cursor(
+    state: &mut crate::gzguts_h::gz_state,
+    count: ::core::ffi::c_uint,
+) {
+    state.x.have = state.x.have.wrapping_sub(count);
+    state.x.next = state.x.next.wrapping_add(count as usize);
+}
+
+fn gz_note_buffered_read(state: &mut crate::gzguts_h::gz_state, count: ::core::ffi::c_uint) {
+    gz_advance_buffered_read_cursor(state, count);
+    state.x.pos += count as crate::stdlib::off64_t;
 }
 
 fn gz_shift_pushback_buffer(buf: &mut [crate::stdlib::Bytef], have: usize) -> usize {
@@ -605,11 +610,9 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     if (*state).x.have != 0 {
-        (*state).x.have = (*state).x.have.wrapping_sub(1);
-        (*state).x.pos += 1;
-        let c2rust_fresh2 = (*state).x.next;
-        (*state).x.next = (*state).x.next.offset(1);
-        return *c2rust_fresh2 as ::core::ffi::c_int;
+        let c = *(*state).x.next;
+        gz_note_buffered_read(&mut *state, 1 as ::core::ffi::c_uint);
+        return c as ::core::ffi::c_int;
     }
     return if gz_read(
         state,
@@ -749,9 +752,7 @@ pub unsafe extern "C" fn gzgets_ffi(
                     (*state).x.next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                (*state).x.have = (*state).x.have.wrapping_sub(n);
-                (*state).x.next = (*state).x.next.offset(n as isize);
-                (*state).x.pos += n as crate::stdlib::off64_t;
+                gz_note_buffered_read(&mut *state, n);
                 left = left.wrapping_sub(n);
                 buf = buf.offset(n as isize);
                 if !(left != 0 && eol.is_null()) {

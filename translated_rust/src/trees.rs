@@ -2378,8 +2378,7 @@ fn send_bits_state(
 ) -> SendBitsResult {
     let val = value as crate::zutil_h::ush as ::core::ffi::c_int;
     if bi_valid > crate::src::deflate::Buf_size - bit_len {
-        let next_bi_buf =
-            (bi_buf as ::core::ffi::c_int | val << bi_valid) as crate::zutil_h::ush;
+        let next_bi_buf = (bi_buf as ::core::ffi::c_int | val << bi_valid) as crate::zutil_h::ush;
         SendBitsResult {
             bytes: [
                 (next_bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
@@ -2401,15 +2400,11 @@ fn send_bits_state(
     }
 }
 
-fn bi_flush_state(
-    bi_buf: crate::zutil_h::ush,
-    bi_valid: ::core::ffi::c_int,
-) -> BiFlushResult {
+fn bi_flush_state(bi_buf: crate::zutil_h::ush, bi_valid: ::core::ffi::c_int) -> BiFlushResult {
     if bi_valid == 16 as ::core::ffi::c_int {
         BiFlushResult {
             bytes: [
-                (bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                    as crate::stdlib::Byte,
+                (bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::stdlib::Byte,
                 (bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte,
             ],
             len: 2,
@@ -2440,10 +2435,7 @@ struct BiWindupResult {
     bi_used: ::core::ffi::c_int,
 }
 
-fn bi_windup_state(
-    bi_buf: crate::zutil_h::ush,
-    bi_valid: ::core::ffi::c_int,
-) -> BiWindupResult {
+fn bi_windup_state(bi_buf: crate::zutil_h::ush, bi_valid: ::core::ffi::c_int) -> BiWindupResult {
     let len = if bi_valid > 8 as ::core::ffi::c_int {
         2
     } else if bi_valid > 0 as ::core::ffi::c_int {
@@ -2496,9 +2488,9 @@ fn gen_codes(
     let mut n: ::core::ffi::c_int = 0;
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
-        code = code
-            .wrapping_add(bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint)
-            << 1 as ::core::ffi::c_int;
+        code = code.wrapping_add(
+            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint,
+        ) << 1 as ::core::ffi::c_int;
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;
     }
@@ -2897,14 +2889,11 @@ fn scan_tree(
                     as crate::zutil_h::ush;
             } else if curlen != 0 as ::core::ffi::c_int {
                 if curlen != prevlen {
-                    bl_tree[curlen as usize].freq =
-                        bl_tree[curlen as usize].freq.wrapping_add(1);
+                    bl_tree[curlen as usize].freq = bl_tree[curlen as usize].freq.wrapping_add(1);
                 }
-                bl_tree[REP_3_6 as usize].freq =
-                    bl_tree[REP_3_6 as usize].freq.wrapping_add(1);
+                bl_tree[REP_3_6 as usize].freq = bl_tree[REP_3_6 as usize].freq.wrapping_add(1);
             } else if count <= 10 as ::core::ffi::c_int {
-                bl_tree[REPZ_3_10 as usize].freq =
-                    bl_tree[REPZ_3_10 as usize].freq.wrapping_add(1);
+                bl_tree[REPZ_3_10 as usize].freq = bl_tree[REPZ_3_10 as usize].freq.wrapping_add(1);
             } else {
                 bl_tree[REPZ_11_138 as usize].freq =
                     bl_tree[REPZ_11_138 as usize].freq.wrapping_add(1);

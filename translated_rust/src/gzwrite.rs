@@ -3,8 +3,8 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::gzguts_h::gz_state;
 pub use crate::gzguts_h::gz_statep;
 pub use crate::gzguts_h::GZ_WRITE;
-pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_clamped_uint;
+pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_io_chunk_limit;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
@@ -16,10 +16,10 @@ pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
-pub use crate::src::deflate::deflate_ffi;
 pub use crate::src::deflate::deflateEnd_ffi;
 pub use crate::src::deflate::deflateInit2__ffi;
 pub use crate::src::deflate::deflateReset_ffi;
+pub use crate::src::deflate::deflate_ffi;
 pub use crate::src::deflate::internal_state;
 
 pub use crate::stdlib::uInt;
@@ -336,18 +336,12 @@ fn gz_write_params_ready(state: &crate::gzguts_h::gz_state) -> bool {
     gz_write_state_ready(state) && state.direct == 0
 }
 
-fn gz_note_buffered_input(
-    state: &mut crate::gzguts_h::gz_state,
-    count: ::core::ffi::c_uint,
-) {
+fn gz_note_buffered_input(state: &mut crate::gzguts_h::gz_state, count: ::core::ffi::c_uint) {
     state.strm.avail_in = state.strm.avail_in.wrapping_add(count);
     state.x.pos += count as crate::stdlib::off64_t;
 }
 
-fn gz_note_direct_input_written(
-    strm: &mut crate::zlib_h::z_stream,
-    written: ::core::ffi::c_int,
-) {
+fn gz_note_direct_input_written(strm: &mut crate::zlib_h::z_stream, written: ::core::ffi::c_int) {
     strm.avail_in = strm.avail_in.wrapping_sub(written as ::core::ffi::c_uint);
     strm.next_in = strm.next_in.wrapping_add(written as usize);
 }

@@ -260,9 +260,7 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let Some(config) = inflate_reset2_config(windowBits) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !(*state).window.is_null()
-        && (*state).wbits != config.window_bits as ::core::ffi::c_uint
-    {
+    if !(*state).window.is_null() && (*state).wbits != config.window_bits as ::core::ffi::c_uint {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
             (*state).window as crate::stdlib::voidpf,
@@ -552,8 +550,7 @@ pub unsafe extern "C" fn inflate_ffi(
                         if (*state).wbits == 0 as ::core::ffi::c_uint {
                             (*state).wbits = 15 as ::core::ffi::c_uint;
                         }
-                        (*state).check =
-                            crate::src::crc32::crc32_initial() as ::core::ffi::c_ulong;
+                        (*state).check = crate::src::crc32::crc32_initial() as ::core::ffi::c_ulong;
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
                             (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1017,8 +1014,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     (*state).bits = bits;
                     return crate::zlib_h::Z_NEED_DICT;
                 }
-                (*state).check =
-                    crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
+                (*state).check = crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
                 (*strm).adler = (*state).check as crate::stdlib::uLong;
                 (*state).mode = crate::src::inflate::TYPE;
                 c2rust_current_block = 11604185039344352166;
@@ -2053,9 +2049,11 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         dictid = crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
-        dictid =
-            crate::src::adler32::adler32_ffi(dictid as crate::stdlib::uLong, dictionary, dictLength)
-                as ::core::ffi::c_ulong;
+        dictid = crate::src::adler32::adler32_ffi(
+            dictid as crate::stdlib::uLong,
+            dictionary,
+            dictLength,
+        ) as ::core::ffi::c_ulong;
         if dictid != (*state).check {
             return crate::zlib_h::Z_DATA_ERROR;
         }
@@ -2122,9 +2120,7 @@ fn syncsearch(
 }
 #[export_name = "inflateSync"]
 
-pub unsafe extern "C" fn inflateSync_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut len: ::core::ffi::c_uint = 0;
     let mut flags: ::core::ffi::c_int = 0;
     let mut in_0: ::core::ffi::c_ulong = 0;
