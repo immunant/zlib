@@ -6114,17 +6114,26 @@ fn copy_deflate_storage_regions(
     source: DeflateDispatchStorage<'_>,
     destination: DeflateDispatchStorage<'_>,
     layout: &DeflateCopyLayout,
-) {
-    destination.window[..layout.window_bytes]
-        .copy_from_slice(&source.window[..layout.window_bytes]);
-    destination.prev[..layout.prev_entries].copy_from_slice(&source.prev[..layout.prev_entries]);
-    destination.head[..layout.head_entries].copy_from_slice(&source.head[..layout.head_entries]);
-    if let Some(regions) = layout.pending.as_ref() {
-        destination.pending_buf[regions.queued.clone()]
-            .copy_from_slice(&source.pending_buf[regions.queued.clone()]);
-        destination.pending_buf[regions.symbols.clone()]
-            .copy_from_slice(&source.pending_buf[regions.symbols.clone()]);
-    }
+) -> bool {
+    // The ABI adapter has already performed its one complete callback-storage
+    // projection.  Convert those bounded views into the same pointer-free
+    // facade used by an owned copy, so range validation and copy semantics do
+    // not diverge between the two storage lifecycles.
+    deflateCopy(
+        DeflateCopySourceViews {
+            window: source.window,
+            prev: source.prev,
+            head: source.head,
+            pending: source.pending_buf,
+        },
+        DeflateCopyDestinationViews {
+            window: destination.window,
+            prev: destination.prev,
+            head: destination.head,
+            pending: destination.pending_buf,
+        },
+        layout,
+    )
 }
 
 // The C ABI still gives us callback-owned allocations and opaque stream
@@ -6361,7 +6370,15 @@ unsafe fn deflate_copy_from_abi_boundary(
     let destination_storage = destination_storage
         .into_dispatch_storage()
         .expect("complete destination copy storage projection");
-    copy_deflate_storage_regions(source_storage, destination_storage, &copy_layout);
+    // The immutable callback geometry was checked above, so this is an
+    // internal consistency assertion rather than a second failure path.  A
+    // new cleanup branch here would add another callback-release transition
+    // to the ABI adapter.
+    assert!(copy_deflate_storage_regions(
+        source_storage,
+        destination_storage,
+        &copy_layout,
+    ));
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
