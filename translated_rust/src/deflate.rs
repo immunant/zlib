@@ -1675,36 +1675,46 @@ fn deflate_bound_from_state(
     deflate_bound_z(source_len, state.map(deflate_bound_state), gzip_header)
 }
 
-pub unsafe extern "C" fn deflateBound_z(
+// The raw stream and retained gzip-header cursors are inspected only while
+// producing a value snapshot for the bound calculation. Keep that localized
+// here so Rust callers do not inherit an unsafe-function contract; the C ABI
+// wrapper below remains the thin exported dispatcher.
+pub fn deflateBound_z(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let (state, gzip_header) = if let Some((_strm, state)) = deflateStateCheck(strm) {
-        let gzip_header = if state.gzhead.is_null() {
-            None
+    // SAFETY: `deflateStateCheck()` validates the stream/state association
+    // before exposing it. A configured gzip header, name, and comment remain
+    // caller-owned C strings for the duration of this synchronous bound
+    // calculation, matching zlib's stream contract.
+    unsafe {
+        let (state, gzip_header) = if let Some((_strm, state)) = deflateStateCheck(strm) {
+            let gzip_header = if state.gzhead.is_null() {
+                None
+            } else {
+                let header = &*state.gzhead;
+                let name = if header.name.is_null() {
+                    None
+                } else {
+                    Some(::core::ffi::CStr::from_ptr(
+                        header.name as *const ::core::ffi::c_char,
+                    ))
+                };
+                let comment = if header.comment.is_null() {
+                    None
+                } else {
+                    Some(::core::ffi::CStr::from_ptr(
+                        header.comment as *const ::core::ffi::c_char,
+                    ))
+                };
+                Some(deflate_bound_gzip_header(header, name, comment))
+            };
+            (Some(state), gzip_header)
         } else {
-            let header = &*state.gzhead;
-            let name = if header.name.is_null() {
-                None
-            } else {
-                Some(::core::ffi::CStr::from_ptr(
-                    header.name as *const ::core::ffi::c_char,
-                ))
-            };
-            let comment = if header.comment.is_null() {
-                None
-            } else {
-                Some(::core::ffi::CStr::from_ptr(
-                    header.comment as *const ::core::ffi::c_char,
-                ))
-            };
-            Some(deflate_bound_gzip_header(header, name, comment))
+            (None, None)
         };
-        (Some(state), gzip_header)
-    } else {
-        (None, None)
-    };
-    deflate_bound_from_state(sourceLen, state.as_deref(), gzip_header)
+        deflate_bound_from_state(sourceLen, state.as_deref(), gzip_header)
+    }
 }
 #[export_name = "deflateBound_z"]
 
