@@ -139,6 +139,15 @@ impl GzDeflater<'_> {
     fn compress(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
         unsafe { crate::src::deflate::deflate(self.stream, flush) }
     }
+
+    fn set_params(&mut self, level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) {
+        // The legacy deflate stream keeps its state link in the ABI carrier.
+        // Keep that crossing in the same narrow facade as initialization and
+        // compression, rather than exposing it to gzip's safe state logic.
+        unsafe {
+            crate::src::deflate::deflateParams(self.stream, level, strategy);
+        }
+    }
 }
 
 fn gz_save_direct_input(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> bool {
@@ -887,11 +896,12 @@ pub unsafe extern "C" fn gzflush_ffi(
     };
     gzflush(state, flush, GzFlushBehavior::Public)
 }
-unsafe fn gzsetparams(
-    state: &mut crate::gzguts_h::gz_state,
+fn gzsetparams_impl(
+    compressor: &mut GzCompressor<'_>,
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let state = &mut *compressor.state;
     if state.mode != crate::gzguts_h::GZ_WRITE
         || state.err != crate::zlib_h::Z_OK && state.again == 0
         || state.direct != 0
@@ -906,7 +916,10 @@ unsafe fn gzsetparams(
         return state.err;
     }
     if state.size != 0 {
-        crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
+        GzDeflater {
+            stream: &mut state.strm,
+        }
+        .set_params(level, strategy);
     }
     state.level = level;
     state.strategy = strategy;
@@ -922,7 +935,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    gzsetparams(state, level, strategy)
+    gzsetparams_impl(&mut GzCompressor { state }, level, strategy)
 }
 /// Finish the write stream before releasing the already-owned gzip state.
 /// The opaque-handle conversion is confined to the exported boundary.
