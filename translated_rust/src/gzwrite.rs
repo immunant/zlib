@@ -349,28 +349,17 @@ unsafe extern "C" fn gz_write(
     }
     return put;
 }
-pub unsafe extern "C" fn gzwrite(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: crate::stdlib::voidpc,
-    mut len: ::core::ffi::c_uint,
+unsafe fn gzwrite(
+    state: &mut crate::gzguts_h::gz_state,
+    buf: &[u8],
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return 0 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return 0 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None, None);
+    if buf.len() > crate::limits_h::INT_MAX as usize {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_DATA_ERROR,
@@ -378,7 +367,11 @@ pub unsafe extern "C" fn gzwrite(
         );
         return 0 as ::core::ffi::c_int;
     }
-    return gz_write(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_int;
+    return gz_write(
+        state as *mut crate::gzguts_h::gz_state,
+        buf.as_ptr() as crate::stdlib::voidpc,
+        buf.len(),
+    ) as ::core::ffi::c_int;
 }
 #[export_name = "gzwrite"]
 
@@ -387,42 +380,45 @@ pub unsafe extern "C" fn gzwrite_ffi(
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzwrite(file, buf, len)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0 as ::core::ffi::c_int;
+    };
+    let buf = if len == 0 {
+        &[]
+    } else {
+        if buf.is_null() {
+            return 0 as ::core::ffi::c_int;
+        }
+        ::core::slice::from_raw_parts(buf as *const u8, len as usize)
+    };
+    gzwrite(state, buf)
 }
-pub unsafe extern "C" fn gzfwrite(
-    mut buf: crate::stdlib::voidpc,
+unsafe fn gzfwrite(
+    state: &mut crate::gzguts_h::gz_state,
+    buf: Result<&[u8], ()>,
     mut size: crate::stdlib::z_size_t,
-    mut nitems: crate::stdlib::z_size_t,
-    mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None, None);
+    let Ok(buf) = buf else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
         );
         return 0 as crate::stdlib::z_size_t;
-    }
-    return if len != 0 {
-        gz_write(state, buf, len).wrapping_div(size)
+    };
+    return if !buf.is_empty() {
+        gz_write(
+            state as *mut crate::gzguts_h::gz_state,
+            buf.as_ptr() as crate::stdlib::voidpc,
+            buf.len(),
+        )
+        .wrapping_div(size)
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -435,7 +431,16 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    gzfwrite(buf, size, nitems, file)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0 as crate::stdlib::z_size_t;
+    };
+    let buf = match size.checked_mul(nitems) {
+        Some(0) => Ok(&[][..]),
+        Some(len) if !buf.is_null() => Ok(::core::slice::from_raw_parts(buf as *const u8, len)),
+        Some(_) => Err(()),
+        None => Err(()),
+    };
+    gzfwrite(state, buf, size)
 }
 pub unsafe extern "C" fn gzputc(
     mut file: crate::zlib_h::gzFile,
@@ -498,30 +503,20 @@ pub unsafe extern "C" fn gzputc_ffi(
 ) -> ::core::ffi::c_int {
     gzputc(file, c)
 }
-pub unsafe extern "C" fn gzputs(
-    mut file: crate::zlib_h::gzFile,
-    mut s: *const ::core::ffi::c_char,
+unsafe fn gzputs(
+    state: &mut crate::gzguts_h::gz_state,
+    s: &::std::ffi::CStr,
 ) -> ::core::ffi::c_int {
     let mut len: crate::stdlib::z_size_t = 0;
     let mut put: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None, None);
+    len = s.to_bytes().len();
+    if len > crate::limits_h::INT_MAX as usize
         || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
     {
         crate::src::gzlib::gz_error(
@@ -531,7 +526,11 @@ pub unsafe extern "C" fn gzputs(
         );
         return -1 as ::core::ffi::c_int;
     }
-    put = gz_write(state, s as crate::stdlib::voidpc, len);
+    put = gz_write(
+        state as *mut crate::gzguts_h::gz_state,
+        s.as_ptr() as crate::stdlib::voidpc,
+        len,
+    );
     return if len != 0 && put == 0 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
@@ -544,7 +543,13 @@ pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    gzputs(file, s)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    if s.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzputs(state, ::std::ffi::CStr::from_ptr(s))
 }
 pub unsafe extern "C" fn gzflush(
     mut file: crate::zlib_h::gzFile,
