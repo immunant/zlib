@@ -212,21 +212,18 @@ unsafe extern "C" fn gz_open(
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut();
     }
+    let path = ::core::ffi::CStr::from_ptr(path.cast());
+    let mode = ::core::ffi::CStr::from_ptr(mode);
+    let (mut state, mut oflag, exclusive) = match gz_open_state(mode) {
+        Some(open) => open,
+        None => return ::core::ptr::null_mut(),
+    };
     // Keep the allocation and deallocation convention used by the existing close paths.
     let state_ptr = crate::stdlib::malloc(::core::mem::size_of::<crate::gzguts_h::gz_state>())
         as crate::gzguts_h::gz_statep;
     if state_ptr.is_null() {
         return ::core::ptr::null_mut();
     }
-    let path = ::core::ffi::CStr::from_ptr(path.cast());
-    let mode = ::core::ffi::CStr::from_ptr(mode);
-    let (mut state, mut oflag, exclusive) = match gz_open_state(mode) {
-        Some(open) => open,
-        None => {
-            crate::stdlib::free(state_ptr.cast());
-            return ::core::ptr::null_mut();
-        }
-    };
     let path_bytes = path.to_bytes_with_nul();
     state.path = crate::stdlib::malloc(path_bytes.len()) as *mut ::core::ffi::c_char;
     if state.path.is_null() {
