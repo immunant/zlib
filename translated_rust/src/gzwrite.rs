@@ -125,7 +125,6 @@ unsafe fn gz_comp(
     }
     if state.direct != 0 {
         while state.strm.avail_in != 0 {
-            *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
             state.again = 0 as ::core::ffi::c_int;
             put = gz_io_chunk_len(state.strm.avail_in);
             writ = crate::stdlib::write(
@@ -134,7 +133,7 @@ unsafe fn gz_comp(
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             let write_result = if writ < 0 as ::core::ffi::c_int {
-                gz_write_syscall_result(writ, *crate::stdlib::__errno_location())
+                gz_write_syscall_result(writ, gz_last_os_errno())
             } else {
                 gz_write_syscall_result(writ, 0 as ::core::ffi::c_int)
             };
@@ -175,7 +174,6 @@ unsafe fn gz_comp(
     loop {
         if gz_comp_should_write_pending(state.strm.avail_out, flush, ret) {
             while let Some(chunk) = gz_pending_output_chunk(state, max) {
-                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 state.again = 0 as ::core::ffi::c_int;
                 put = chunk;
                 writ = crate::stdlib::write(
@@ -184,7 +182,7 @@ unsafe fn gz_comp(
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 let write_result = if writ < 0 as ::core::ffi::c_int {
-                    gz_write_syscall_result(writ, *crate::stdlib::__errno_location())
+                    gz_write_syscall_result(writ, gz_last_os_errno())
                 } else {
                     gz_write_syscall_result(writ, 0 as ::core::ffi::c_int)
                 };
@@ -354,6 +352,12 @@ fn gz_write_errno_again(errno: ::core::ffi::c_int) -> ::core::ffi::c_int {
     } else {
         0 as ::core::ffi::c_int
     }
+}
+
+fn gz_last_os_errno() -> ::core::ffi::c_int {
+    ::std::io::Error::last_os_error()
+        .raw_os_error()
+        .unwrap_or(0 as ::core::ffi::c_int)
 }
 
 enum GzWriteSyscallResult {

@@ -2394,44 +2394,44 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     return crate::zlib_h::Z_OK;
 }
 unsafe fn longest_match(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
-    let mut chain_length: ::core::ffi::c_uint = (*s).max_chain_length as ::core::ffi::c_uint;
-    let mut scan: *mut crate::stdlib::Bytef = (*s).window.offset((*s).strstart as isize);
+    let s = &mut *s;
+    let mut chain_length: ::core::ffi::c_uint = s.max_chain_length as ::core::ffi::c_uint;
+    let mut scan: *mut crate::stdlib::Bytef = s.window.offset(s.strstart as isize);
     let mut match_0: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     let mut len: ::core::ffi::c_int = 0;
-    let mut best_len: ::core::ffi::c_int = (*s).prev_length as ::core::ffi::c_int;
-    let mut nice_match: ::core::ffi::c_int = (*s).nice_match;
-    let mut limit: crate::src::deflate::IPos = if (*s).strstart
-        > (*s)
-            .w_size
+    let mut best_len: ::core::ffi::c_int = s.prev_length as ::core::ffi::c_int;
+    let mut nice_match: ::core::ffi::c_int = s.nice_match;
+    let mut limit: crate::src::deflate::IPos = if s.strstart
+        > s.w_size
             .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
     {
-        ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(
-            (*s).w_size
+        (s.strstart as crate::src::deflate::IPos).wrapping_sub(
+            s.w_size
                 .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
         )
     } else {
         NIL as crate::src::deflate::IPos
     };
-    let mut prev: *mut crate::src::deflate::Posf = (*s).prev;
-    let mut wmask: crate::stdlib::uInt = (*s).w_mask;
-    let mut strend: *mut crate::stdlib::Bytef = (*s)
+    let mut prev: *mut crate::src::deflate::Posf = s.prev;
+    let mut wmask: crate::stdlib::uInt = s.w_mask;
+    let mut strend: *mut crate::stdlib::Bytef = s
         .window
-        .offset((*s).strstart as isize)
+        .offset(s.strstart as isize)
         .offset(crate::zutil_h::MAX_MATCH as isize);
     let mut scan_end1: crate::stdlib::Byte =
         *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize) as crate::stdlib::Byte;
     let mut scan_end: crate::stdlib::Byte = *scan.offset(best_len as isize) as crate::stdlib::Byte;
-    if (*s).prev_length >= (*s).good_match {
+    if s.prev_length >= s.good_match {
         chain_length >>= 2 as ::core::ffi::c_int;
     }
-    if nice_match as crate::stdlib::uInt > (*s).lookahead {
-        nice_match = (*s).lookahead as ::core::ffi::c_int;
+    if nice_match as crate::stdlib::uInt > s.lookahead {
+        nice_match = s.lookahead as ::core::ffi::c_int;
     }
     loop {
-        match_0 = (*s).window.offset(cur_match as isize);
+        match_0 = s.window.offset(cur_match as isize);
         if !(*match_0.offset(best_len as isize) as ::core::ffi::c_int
             != scan_end as ::core::ffi::c_int
             || *match_0.offset((best_len - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_int
@@ -2493,7 +2493,7 @@ unsafe fn longest_match(
                 - strend.offset_from(scan) as ::core::ffi::c_long as ::core::ffi::c_int;
             scan = strend.offset(-(crate::zutil_h::MAX_MATCH as isize));
             if len > best_len {
-                (*s).match_start = cur_match as crate::stdlib::uInt;
+                s.match_start = cur_match as crate::stdlib::uInt;
                 best_len = len;
                 if len >= nice_match {
                     break;
@@ -2512,10 +2512,10 @@ unsafe fn longest_match(
             break;
         }
     }
-    if best_len as crate::stdlib::uInt <= (*s).lookahead {
+    if best_len as crate::stdlib::uInt <= s.lookahead {
         return best_len as crate::stdlib::uInt;
     }
-    return (*s).lookahead;
+    return s.lookahead;
 }
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;

@@ -62,6 +62,12 @@ enum GzLoadReadResult {
     Eof,
 }
 
+fn gz_last_os_errno() -> ::core::ffi::c_int {
+    ::std::io::Error::last_os_error()
+        .raw_os_error()
+        .unwrap_or(0 as ::core::ffi::c_int)
+}
+
 fn gz_load_read_result(
     ret: ::core::ffi::c_int,
     have: ::core::ffi::c_uint,
@@ -90,7 +96,6 @@ unsafe fn gz_load(
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
     state.again = 0 as ::core::ffi::c_int;
-    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
     loop {
         get = gz_io_chunk_len(len.wrapping_sub(*have));
@@ -108,7 +113,7 @@ unsafe fn gz_load(
         }
     }
     let errno = if ret < 0 as ::core::ffi::c_int {
-        *crate::stdlib::__errno_location()
+        gz_last_os_errno()
     } else {
         0 as ::core::ffi::c_int
     };
