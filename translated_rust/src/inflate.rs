@@ -495,28 +495,51 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let mut state = InflateState(state);
     inflate_reset2_impl(strm, &mut state, windowBits)
 }
-/// Allocate and install an inflater state through the stream's ABI allocator.
+/// Allocate, initialize, and install an inflater state through the stream's
+/// ABI allocator.
 ///
-/// The callback owns the returned storage, so this is deliberately the only
-/// constructor that writes an `inflate_state` into callback-provided memory.
+/// The callback owns the returned storage, so this constructor keeps the
+/// complete transaction together: storage is initialized before it is exposed
+/// as a typed reference, and a failed reset releases the same allocation
+/// through its paired callback.
 unsafe fn inflate_allocate_state(
     strm: &mut crate::zlib_h::z_stream_s,
-) -> Result<*mut crate::src::inflate::inflate_state, ::core::ffi::c_int> {
+    window_bits: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
     let Some(zalloc) = strm.zalloc else {
-        return Err(crate::zlib_h::Z_STREAM_ERROR);
+        return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state = zalloc(
+    let allocation = zalloc(
         strm.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     )
     .cast::<crate::src::inflate::inflate_state>();
-    if state.is_null() {
-        return Err(crate::zlib_h::Z_MEM_ERROR);
+    if allocation.is_null() {
+        return crate::zlib_h::Z_MEM_ERROR;
     }
-    state.write(new_inflate_state());
-    strm.state = state.cast::<crate::src::deflate::internal_state>();
-    Ok(state)
+    strm.state = allocation.cast::<crate::src::deflate::internal_state>();
+
+    // Construct and reset on the stack first.  This keeps the callback-owned
+    // storage untyped until it contains a complete `inflate_state`.
+    let mut initialized = new_inflate_state();
+    initialized.mode = crate::src::inflate::HEAD;
+    let mut state = InflateState(&mut initialized);
+    let ret = inflate_reset2_impl(strm, &mut state, window_bits);
+    drop(state);
+    if ret != crate::zlib_h::Z_OK {
+        inflate_release_owned_state(&mut initialized);
+    }
+    allocation.write(initialized);
+    if ret != crate::zlib_h::Z_OK {
+        strm.zfree
+            .expect("initialized inflate stream has a free callback")(
+            strm.opaque,
+            allocation.cast(),
+        );
+        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    }
+    ret
 }
 
 /// Drop and return an inflater state to the allocator that created it.
@@ -564,26 +587,7 @@ pub unsafe fn inflateInit2_(
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    let state = match inflate_allocate_state(strm) {
-        Ok(state) => state,
-        Err(error) => return error,
-    };
-    let state = &mut *state;
-    state.mode = crate::src::inflate::HEAD;
-    let mut state = InflateState(state);
-    let ret = inflate_reset2_impl(strm, &mut state, windowBits);
-    if ret != crate::zlib_h::Z_OK {
-        inflate_release_owned_state(state.0);
-        let allocation = state.0 as *mut crate::src::inflate::inflate_state;
-        drop(state);
-        strm.zfree
-            .expect("initialized inflate stream has a free callback")(
-            strm.opaque,
-            allocation.cast(),
-        );
-        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    }
-    ret
+    inflate_allocate_state(strm, windowBits)
 }
 #[export_name = "inflateInit2_"]
 
