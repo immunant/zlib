@@ -2498,32 +2498,6 @@ pub(crate) fn bi_flush_or_windup(state: BitOutputState<'_>, action: BitOutputAct
     bit_output(state, action);
 }
 
-// The legacy bit exports have only an opaque deflate-state handle.  Their
-// projection is intentionally limited to the pending allocation: bit output
-// neither reads nor writes the window or hash tables.
-pub(crate) unsafe fn bit_output_from_deflate_state(
-    state: &mut crate::src::deflate::deflate_state,
-    action: BitOutputAction,
-) {
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.callback_storage.pending_len(),
-    );
-    bi_flush_or_windup(
-        BitOutputState {
-            pending_buf,
-            pending: &mut state.pending,
-            bi_buf: &mut state.bi_buf,
-            bi_valid: &mut state.bi_valid,
-            bi_used: &mut state.bi_used,
-        },
-        action,
-    );
-}
-
 fn tr_align_bytes(
     pending_buf: &mut [crate::stdlib::Bytef],
     pending: &mut crate::zutil_h::ulg,
@@ -3282,7 +3256,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     let Some(state) = s.as_mut() else {
         return;
     };
-    bit_output_from_deflate_state(state, BitOutputAction::Flush);
+    crate::src::deflate::deflate_tree_bit_output(state, BitOutputAction::Flush);
 }
 #[export_name = "_tr_align"]
 
@@ -3290,7 +3264,7 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let Some(state) = s.as_mut() else {
         return;
     };
-    bit_output_from_deflate_state(state, BitOutputAction::Align);
+    crate::src::deflate::deflate_tree_bit_output(state, BitOutputAction::Align);
 }
 fn compress_block(
     pending_buf: &mut [crate::stdlib::Bytef],

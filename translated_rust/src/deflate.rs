@@ -589,6 +589,33 @@ impl DeflateCallbackStorageOwner {
     }
 }
 
+// The legacy tree bit exports hold only an opaque deflate-state handle.  Keep
+// their one callback-backed pending-buffer projection beside the callback
+// lifecycle owner, then hand the tree code the same bounded pointer-free view
+// used by the stream adapter.  Tree code must not reconstruct this view from
+// callback storage itself.
+pub(crate) unsafe fn deflate_tree_bit_output(
+    state: &mut crate::src::deflate::deflate_state,
+    action: crate::src::trees::BitOutputAction,
+) {
+    let pending_len = state.callback_storage.pending_len();
+    let pending_ptr = state
+        .pending_buf
+        .expect("initialized pending buffer")
+        .as_ptr();
+    let pending_buf = unsafe { ::core::slice::from_raw_parts_mut(pending_ptr, pending_len) };
+    crate::src::trees::bi_flush_or_windup(
+        crate::src::trees::BitOutputState {
+            pending_buf,
+            pending: &mut state.pending,
+            bi_buf: &mut state.bi_buf,
+            bi_valid: &mut state.bi_valid,
+            bi_used: &mut state.bi_used,
+        },
+        action,
+    );
+}
+
 // This complete decision is pointer-free. The one callback boundary pairs
 // each marked slot with its original handle in pending/head/prev/window/state
 // order, preserving zlib's observable callback lifecycle.
