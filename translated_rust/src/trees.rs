@@ -3156,17 +3156,13 @@ unsafe fn build_bl_tree(mut s: *mut crate::src::deflate::deflate_state) -> ::cor
     max_blindex
 }
 
-unsafe fn send_all_trees(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut lcodes: ::core::ffi::c_int,
-    mut dcodes: ::core::ffi::c_int,
-    mut blcodes: ::core::ffi::c_int,
+fn send_all_trees(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    lcodes: ::core::ffi::c_int,
+    dcodes: ::core::ffi::c_int,
+    blcodes: ::core::ffi::c_int,
 ) {
-    let state = &mut *s;
-    let pending_buf = &mut *::core::ptr::slice_from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
     let header_bits = send_all_trees_header_bits(
         lcodes,
         dcodes,
@@ -3746,12 +3742,17 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
                 state.bi_buf = bits.bi_buf;
                 state.bi_valid = bits.bi_valid;
             }
-            send_all_trees(
-                s,
-                (*s).l_desc.max_code + 1 as ::core::ffi::c_int,
-                (*s).d_desc.max_code + 1 as ::core::ffi::c_int,
-                max_blindex + 1 as ::core::ffi::c_int,
-            );
+            {
+                let state = &mut *s;
+                let lcodes = state.l_desc.max_code + 1 as ::core::ffi::c_int;
+                let dcodes = state.d_desc.max_code + 1 as ::core::ffi::c_int;
+                let blcodes = max_blindex + 1 as ::core::ffi::c_int;
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    state.pending_buf,
+                    state.pending_buf_size as usize,
+                );
+                send_all_trees(state, pending_buf, lcodes, dcodes, blcodes);
+            }
             compress_block(
                 s,
                 &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
