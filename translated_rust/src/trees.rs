@@ -5021,8 +5021,7 @@ unsafe fn send_tree(
     }
 }
 
-unsafe fn build_bl_tree(mut s: *mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
-    let state = &mut *s;
+fn build_bl_tree(state: &mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     scan_tree(
         &mut state.bl_tree,
         &mut state.dyn_ltree,
@@ -5599,7 +5598,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         }
         build_tree(&mut *s, crate::src::deflate::DynamicTree::Literal);
         build_tree(&mut *s, crate::src::deflate::DynamicTree::Distance);
-        max_blindex = build_bl_tree(s);
+        max_blindex = build_bl_tree(state);
         opt_lenb = block_bit_length_bytes((*s).opt_len);
         static_lenb = block_bit_length_bytes((*s).static_len);
         if static_lenb <= opt_lenb || (*s).strategy == crate::zlib_h::Z_FIXED {

@@ -1602,6 +1602,23 @@ fn lm_reset_plan(w_size: crate::stdlib::uInt, level: ::core::ffi::c_int) -> LmRe
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct LmInitPlan {
+    head_reset: LmHeadResetPlan,
+    reset: LmResetPlan,
+}
+
+fn lm_init_plan(
+    hash_size: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+    level: ::core::ffi::c_int,
+) -> LmInitPlan {
+    LmInitPlan {
+        head_reset: lm_head_reset_plan(hash_size),
+        reset: lm_reset_plan(w_size, level),
+    }
+}
+
 fn lm_apply_reset(state: &mut crate::src::deflate::deflate_state, plan: LmResetPlan) {
     state.window_size = plan.window_size;
     state.slid = 0 as ::core::ffi::c_int;
@@ -1619,20 +1636,15 @@ fn lm_apply_reset(state: &mut crate::src::deflate::deflate_state, plan: LmResetP
     state.ins_h = 0 as crate::stdlib::uInt;
 }
 
-fn lm_reset_after_head_clear(state: &mut crate::src::deflate::deflate_state) {
-    let plan = lm_reset_plan(state.w_size, state.level);
-    lm_apply_reset(state, plan);
-}
-
 unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
-    let head_reset = lm_head_reset_plan(state.hash_size);
+    let plan = lm_init_plan(state.hash_size, state.w_size, state.level);
     crate::stdlib::memset(
         state.head as *mut ::core::ffi::c_void,
         0 as ::core::ffi::c_int,
-        head_reset.clear_len,
+        plan.head_reset.clear_len,
     );
-    lm_reset_after_head_clear(state);
+    lm_apply_reset(state, plan.reset);
 }
 pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
@@ -4374,7 +4386,7 @@ mod tests {
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
         fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_reset_plan,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_reset_plan, lm_init_plan,
         lm_initial_state, lm_match_parameters, lm_reset_plan, longest_match_candidate_update,
         longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
         longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
@@ -4759,6 +4771,30 @@ mod tests {
                 max_chain_length: 128,
             },
         );
+    }
+
+    #[test]
+    fn lm_init_plan_combines_head_clear_and_scalar_reset() {
+        let entry_size =
+            ::core::mem::size_of::<crate::src::deflate::Posf>() as crate::__stddef_size_t_h::size_t;
+
+        assert_eq!(
+            lm_init_plan(17, 32, 6),
+            super::LmInitPlan {
+                head_reset: super::LmHeadResetPlan {
+                    clear_len: 17 * entry_size,
+                },
+                reset: super::LmResetPlan {
+                    window_size: 64,
+                    prev_length: (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt,
+                    max_lazy_match: 16,
+                    good_match: 8,
+                    nice_match: 128,
+                    max_chain_length: 128,
+                },
+            },
+        );
+        assert_eq!(lm_init_plan(0, 0, 0).head_reset.clear_len, 0);
     }
 
     #[test]
