@@ -597,7 +597,7 @@ pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::tr_flush_block_from_raw as _tr_flush_block;
 pub use crate::src::trees::_tr_init;
-pub use crate::src::trees::_tr_stored_block;
+pub use crate::src::trees::_tr_stored_block_ffi as _tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
 pub use crate::src::zutil::zcfree;
@@ -2565,9 +2565,9 @@ pub unsafe fn deflate(
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
                 crate::src::trees::_tr_align(s as *mut crate::src::deflate::internal_state);
             } else if flush != crate::zlib_h::Z_BLOCK {
-                crate::src::trees::_tr_stored_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    ::core::ptr::null_mut::<crate::stdlib::charf>(),
+                crate::src::trees::tr_stored_block(
+                    &mut *s,
+                    &[],
                     0 as crate::zutil_h::ulg,
                     0 as ::core::ffi::c_int,
                 );

@@ -2956,7 +2956,7 @@ unsafe fn send_all_trees(
     let dtree = s.dyn_dtree;
     send_tree(s, &dtree, dcodes - 1);
 }
-pub(crate) unsafe fn tr_stored_block(
+pub(crate) fn tr_stored_block(
     s: &mut crate::src::deflate::deflate_state,
     buf: &[u8],
     stored_len: crate::zutil_h::ulg,
@@ -3017,11 +3017,13 @@ fn tr_stored_block_impl(
     }
 }
 
-pub unsafe extern "C" fn _tr_stored_block(
-    s: *mut crate::src::deflate::deflate_state,
-    buf: *mut crate::stdlib::charf,
-    stored_len: crate::zutil_h::ulg,
-    last: ::core::ffi::c_int,
+#[export_name = "_tr_stored_block"]
+
+pub unsafe extern "C" fn _tr_stored_block_ffi(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut buf: *mut crate::stdlib::charf,
+    mut stored_len: crate::zutil_h::ulg,
+    mut last: ::core::ffi::c_int,
 ) {
     let buf = if stored_len == 0 {
         &[]
@@ -3032,24 +3034,13 @@ pub unsafe extern "C" fn _tr_stored_block(
         if buf.is_null() {
             return;
         }
-        // The internal callers provide exactly `stored_len` readable bytes.
-        // Keep that raw-pointer contract at this thin boundary.
+        // The C ABI promises `stored_len` readable bytes for nonempty input.
         core::slice::from_raw_parts(buf.cast::<u8>(), len)
     };
     let Some(s) = s.as_mut() else {
         return;
     };
     tr_stored_block(s, buf, stored_len, last);
-}
-#[export_name = "_tr_stored_block"]
-
-pub unsafe extern "C" fn _tr_stored_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_stored_block(s, buf, stored_len, last)
 }
 pub unsafe fn _tr_flush_bits(s: &mut crate::src::deflate::deflate_state) {
     flush_bits_impl(s);
