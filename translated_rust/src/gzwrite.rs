@@ -110,20 +110,16 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         };
         gz_init_prepare_deflater(state);
-        // SAFETY: the validated write state owns both initialized buffers;
-        // this call creates the deflater that will use them.
-        ret = unsafe {
-            crate::src::deflate::deflateInit2_(
-                &mut state.strm,
-                level,
-                8 as ::core::ffi::c_int,
-                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-                8 as ::core::ffi::c_int,
-                strategy,
-                crate::zlib_h::ZLIB_VERSION.as_ptr(),
-                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-            )
-        };
+        ret = crate::src::deflate::deflateInit2_(
+            Some(&mut state.strm),
+            level,
+            8 as ::core::ffi::c_int,
+            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+            8 as ::core::ffi::c_int,
+            strategy,
+            Some(crate::zlib_h::ZLIB_VERSION[0]),
+            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+        );
         if ret != crate::zlib_h::Z_OK {
             // Failed initialization has not transferred either default
             // allocation, so release exactly those two buffers in C order.

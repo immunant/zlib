@@ -549,8 +549,8 @@ fn deflate_prepare_stream(stream: &mut crate::zlib_h::z_stream) {
 }
 
 // This internal parameter-defaulting dispatcher only accepts references
-// already bound by its callers. The actual raw initialization boundary
-// remains `deflateInit2_` below.
+// already bound by its callers. The exported `deflateInit2_` adapter binds
+// the raw ABI arguments before reaching the implementation below.
 //
 // zlib checks the version byte and stream layout before it considers the
 // stream pointer. Keep that scalar preflight separate so both initializers
@@ -634,18 +634,16 @@ pub fn deflateInit_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    unsafe {
-        deflateInit2_(
-            strm,
-            level,
-            crate::zlib_h::Z_DEFLATED,
-            crate::stdlib::MAX_WBITS,
-            crate::zutil_h::DEF_MEM_LEVEL,
-            crate::zlib_h::Z_DEFAULT_STRATEGY,
-            &version_first.expect("preflight accepted version"),
-            stream_size,
-        )
-    }
+    deflateInit2_(
+        Some(strm),
+        level,
+        crate::zlib_h::Z_DEFLATED,
+        crate::stdlib::MAX_WBITS,
+        crate::zutil_h::DEF_MEM_LEVEL,
+        crate::zlib_h::Z_DEFAULT_STRATEGY,
+        version_first,
+        stream_size,
+    )
 }
 #[export_name = "deflateInit_"]
 
@@ -661,52 +659,61 @@ pub unsafe extern "C" fn deflateInit__ffi(
     let version = unsafe { version.as_ref() };
     deflateInit_(strm, level, version, stream_size)
 }
-pub unsafe extern "C" fn deflateInit2_(
-    mut strm: crate::zlib_h::z_streamp,
+// The ABI adapter binds the optional stream and version byte before reaching
+// this implementation. Keeping the initializer reference- and value-based
+// removes the raw-pointer contract from the core allocation and reset path.
+pub fn deflateInit2_(
+    strm: Option<&mut crate::zlib_h::z_stream>,
     mut level: ::core::ffi::c_int,
     mut method: ::core::ffi::c_int,
     mut windowBits: ::core::ffi::c_int,
     mut memLevel: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
+    version: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let version_first = if version.is_null() { None } else { Some(*version) };
-    if !deflate_init_version_and_size_valid(version_first, stream_size) {
+    if !deflate_init_version_and_size_valid(version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() {
+    let Some(stream) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // `strm` has passed the ABI null check. Bind it once for the remaining
-    // initialization so the allocation and state setup below do not keep
-    // recovering the same reference from the raw stream pointer.
-    let stream = &mut *strm;
+    };
     deflate_prepare_stream(stream);
     let options = match deflate_init_options(level, method, windowBits, memLevel, strategy) {
         Ok(options) => options,
         Err(error) => return error,
     };
-    s = Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-        stream.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
+    // SAFETY: `deflate_prepare_stream()` installed a zlib-compatible
+    // allocator when the caller did not provide one. The callback ABI owns
+    // the allocation contract for this state request.
+    s = unsafe {
+        Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
+            stream.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::deflate_state
+    };
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        s as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
+    // SAFETY: the allocator returned a non-null allocation large enough for
+    // one `deflate_state`; C zlib initializes that allocation bytewise.
+    unsafe {
+        crate::stdlib::memset(
+            s as *mut ::core::ffi::c_void,
+            0 as ::core::ffi::c_int,
+            ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
+        );
+    }
     stream.state = s as *mut crate::src::deflate::internal_state;
     // The allocator returned a non-null `deflate_state` above. It is owned by
     // this stream until `deflateEnd()` handles the failure path below.
-    let state = &mut *s;
-    state.strm = strm;
+    // SAFETY: `s` is the non-null allocation initialized immediately above
+    // and remains owned by this stream until `deflateEnd()` releases it.
+    let state = unsafe { &mut *s };
+    state.strm = stream;
     state.status = crate::src::deflate::INIT_STATE;
     state.wrap = options.wrap;
     state.gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
@@ -722,34 +729,41 @@ pub unsafe extern "C" fn deflateInit2_(
         .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-    state.window = Some(stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        stream.opaque,
-        state.w_size,
-        (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-            as crate::stdlib::uInt,
-    ) as *mut crate::stdlib::Bytef;
-    state.prev = Some(stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        stream.opaque,
-        state.w_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    state.head = Some(stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        stream.opaque,
-        state.hash_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
+    // SAFETY: every request below uses the allocator installed above; their
+    // ownership transfers to `state` and failure is released by `deflateEnd`.
+    unsafe {
+        state.window = Some(stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            stream.opaque,
+            state.w_size,
+            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+                as crate::stdlib::uInt,
+        ) as *mut crate::stdlib::Bytef;
+        state.prev = Some(stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            stream.opaque,
+            state.w_size,
+            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::Posf;
+        state.head = Some(stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            stream.opaque,
+            state.hash_size,
+            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::Posf;
+    }
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = ((1 as ::core::ffi::c_int) << options.mem_level + 6 as ::core::ffi::c_int)
         as crate::stdlib::uInt;
-    state.pending_buf = Some(stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        stream.opaque,
-        state.lit_bufsize,
-        4 as crate::stdlib::uInt,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    // SAFETY: this is the stream allocator's final initialization request;
+    // its ownership transfers to `state` on success.
+    state.pending_buf = unsafe {
+        Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
+            stream.opaque,
+            state.lit_bufsize,
+            4 as crate::stdlib::uInt,
+        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
+    };
     state.pending_buf_size =
         (state.lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
     if state.window.is_null()
@@ -797,6 +811,10 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this ABI adapter alone binds optional foreign pointers.
+    // Validation and initialization remain in `deflateInit2_`.
+    let strm = unsafe { strm.as_mut() };
+    let version = unsafe { version.as_ref().copied() };
     deflateInit2_(
         strm,
         level,
