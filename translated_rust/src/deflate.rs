@@ -2692,6 +2692,7 @@ struct DeflateWorkspace<'a> {
     window: &'a mut [crate::stdlib::Bytef],
     head: Option<&'a mut [crate::src::deflate::Posf]>,
     prev: Option<&'a mut [crate::src::deflate::Posf]>,
+    pending_buf: &'a mut [crate::stdlib::Bytef],
     input: &'a [crate::stdlib::Bytef],
     output: &'a mut [crate::stdlib::Bytef],
 }
@@ -2709,12 +2710,13 @@ impl<'a> DeflateWorkspace<'a> {
             window,
             prev,
             head,
-            pending_buf: _,
+            pending_buf,
         } = storage;
         Self {
             window,
             head: Some(head),
             prev: Some(prev),
+            pending_buf,
             input,
             output,
         }
@@ -2728,7 +2730,6 @@ fn deflate_update(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     workspace: &mut DeflateWorkspace<'_>,
-    pending_buf: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
 ) -> Option<block_state> {
     if state.level == 0 {
@@ -2737,7 +2738,7 @@ fn deflate_update(
             strm,
             &mut *workspace.window,
             workspace.input,
-            pending_buf,
+            &mut *workspace.pending_buf,
             &mut *workspace.output,
             flush,
         ));
@@ -2755,7 +2756,7 @@ fn deflate_update(
             head,
             prev,
             workspace.input,
-            pending_buf,
+            &mut *workspace.pending_buf,
             &mut *workspace.output,
             flush,
         ));
@@ -2773,7 +2774,7 @@ fn deflate_update(
             head,
             prev,
             workspace.input,
-            pending_buf,
+            &mut *workspace.pending_buf,
             &mut *workspace.output,
             flush,
         ));
@@ -2784,7 +2785,7 @@ fn deflate_update(
             strm,
             &mut *workspace.window,
             workspace.input,
-            pending_buf,
+            &mut *workspace.pending_buf,
             &mut *workspace.output,
             flush,
         )),
@@ -2801,7 +2802,7 @@ fn deflate_update(
                 head,
                 prev,
                 workspace.input,
-                pending_buf,
+                &mut *workspace.pending_buf,
                 &mut *workspace.output,
                 flush,
             ))
@@ -2819,7 +2820,7 @@ fn deflate_update(
                 head,
                 prev,
                 workspace.input,
-                pending_buf,
+                &mut *workspace.pending_buf,
                 &mut *workspace.output,
                 flush,
             ))
@@ -3205,7 +3206,7 @@ pub fn deflate(
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             let result = if let Some(mut workspace) = owned.workspace(state, input, output) {
-                deflate_update(state, strm, &mut workspace, &mut pending_buffer, flush)
+                deflate_update(state, strm, &mut workspace, flush)
             } else {
                 None
             };
@@ -3244,11 +3245,12 @@ pub fn deflate(
                     window,
                     head: head.as_deref_mut(),
                     prev,
+                    pending_buf: &mut pending_buffer,
                     input,
                     output,
                 };
                 let Some(bstate) =
-                    deflate_update(state, strm, &mut workspace, &mut pending_buffer, flush)
+                    deflate_update(state, strm, &mut workspace, flush)
                 else {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
