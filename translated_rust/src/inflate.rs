@@ -328,6 +328,9 @@ fn inflate_reset_impl(
 /// conversion here, after checking it, instead of making each caller invoke
 /// the raw-pointer API.
 pub(crate) fn inflate_reset_gzip(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let state = strm.state as *mut crate::src::inflate::inflate_state;
     let Some(state) = (unsafe { state.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -335,31 +338,18 @@ pub(crate) fn inflate_reset_gzip(strm: &mut crate::zlib_h::z_stream_s) -> ::core
     inflate_reset_impl(strm, state)
 }
 
-pub unsafe extern "C" fn inflateReset(strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let strm = &mut *strm;
-    let state = strm.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflate_reset_impl(strm, &mut *state)
+pub unsafe fn inflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    inflate_reset_gzip(strm)
 }
 #[export_name = "inflateReset"]
 
 pub unsafe extern "C" fn inflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let strm = &mut *strm;
-    let state = strm.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflate_reset_impl(strm, &mut *state)
+    };
+    inflateReset(strm)
 }
 fn inflate_reset2_window_bits(
     mut window_bits: ::core::ffi::c_int,
@@ -2755,7 +2745,7 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     flags = (*state).flags;
     in_0 = (*strm).total_in as ::core::ffi::c_ulong;
     out = (*strm).total_out as ::core::ffi::c_ulong;
-    inflateReset(strm);
+    inflateReset(&mut *strm);
     (*strm).total_in = in_0 as crate::stdlib::uLong;
     (*strm).total_out = out as crate::stdlib::uLong;
     (*state).flags = flags;
