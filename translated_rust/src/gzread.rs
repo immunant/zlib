@@ -546,9 +546,13 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     }) else {
         return -1 as ::core::ffi::c_int;
     };
-    let Some(mut decomp) =
-        crate::src::gzlib::GzDecompState::new(output_len, state.junk, state.eof, state.how)
-    else {
+    let Some(mut decomp) = crate::src::gzlib::GzDecompState::new(
+        output_len,
+        state.strm.avail_in,
+        state.junk,
+        state.eof,
+        state.how,
+    ) else {
         return -1 as ::core::ffi::c_int;
     };
     state.strm.avail_out = decomp.output_available();
@@ -562,7 +566,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     // than recovering it later with raw-pointer arithmetic.
     let output_start = strm.next_out;
     loop {
-        if strm.avail_in == 0 as crate::stdlib::uInt {
+        if decomp.needs_input() {
             let cursor_address = strm.next_in.addr();
             if gz_avail(GzAvailState {
                 err: &mut state.err,
@@ -583,8 +587,9 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 break;
             }
             strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
+            decomp.record_input_available(strm.avail_in);
         }
-        if strm.avail_in == 0 as crate::stdlib::uInt {
+        if decomp.needs_input() {
             if state.again == 0 {
                 crate::src::gzlib::GzErrorState {
                     message: &mut state.msg,
@@ -601,6 +606,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );
+            decomp.record_input_available(strm.avail_in);
             match decomp.record_inflate(ret, strm.avail_out) {
                 crate::src::gzlib::GzDecompAction::Continue => {}
                 crate::src::gzlib::GzDecompAction::Stop => break,

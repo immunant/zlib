@@ -638,6 +638,7 @@ pub(crate) struct GzDecompStep {
 // `gz_state`; the current boundary only snapshots and republishes the values.
 pub(crate) struct GzDecompState {
     output: GzCodecOutput,
+    input_available: crate::stdlib::uInt,
     junk: ::core::ffi::c_int,
     eof: ::core::ffi::c_int,
     how: ::core::ffi::c_int,
@@ -646,16 +647,30 @@ pub(crate) struct GzDecompState {
 impl GzDecompState {
     pub(crate) fn new(
         output_capacity: usize,
+        input_available: crate::stdlib::uInt,
         junk: ::core::ffi::c_int,
         eof: ::core::ffi::c_int,
         how: ::core::ffi::c_int,
     ) -> Option<Self> {
         Some(Self {
             output: GzCodecOutput::new(output_capacity)?,
+            input_available,
             junk,
             eof,
             how,
         })
+    }
+
+    // The owning codec loop needs to decide when to refill without inspecting
+    // an ABI stream. Keep that scalar cursor state with the decompression
+    // transition; the current boundary only snapshots it around each codec
+    // call until the stream owner/view split is complete.
+    pub(crate) fn needs_input(&self) -> bool {
+        self.input_available == 0
+    }
+
+    pub(crate) fn record_input_available(&mut self, available: crate::stdlib::uInt) {
+        self.input_available = available;
     }
 
     pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
