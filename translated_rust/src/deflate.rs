@@ -5284,12 +5284,28 @@ struct DeflateOneShotCompletion {
 
 impl DeflateOneShotCodec {
     fn new(level: ::core::ffi::c_int) -> Result<Self, ::core::ffi::c_int> {
+        Self::new_with_parameters(
+            level,
+            crate::stdlib::MAX_WBITS,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+        )
+    }
+
+    // The temporary compressor and gzip's future persistent owner share the
+    // same pointer-free codec construction.  Keep framing and strategy in
+    // this safe constructor so an embedded gzip codec never has to recreate
+    // them by mutating an ABI `z_stream` before its first request.
+    fn new_with_parameters(
+        level: ::core::ffi::c_int,
+        window_bits: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    ) -> Result<Self, ::core::ffi::c_int> {
         let layout = deflate_layout(
             level,
             crate::zlib_h::Z_DEFLATED,
-            crate::stdlib::MAX_WBITS,
+            window_bits,
             crate::zutil_h::DEF_MEM_LEVEL,
-            crate::zlib_h::Z_DEFAULT_STRATEGY,
+            strategy,
         )
         .ok_or(crate::zlib_h::Z_STREAM_ERROR)?;
         let initial = layout.initial_state();
@@ -5329,7 +5345,7 @@ impl DeflateOneShotCodec {
             max_chain_length: 0,
             max_lazy_match: 0,
             level: layout.level,
-            strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
+            strategy,
             good_match: 0,
             nice_match: 0,
             dyn_ltree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 573],
