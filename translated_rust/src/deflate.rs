@@ -670,6 +670,49 @@ pub(crate) unsafe fn deflate_tree_bit_output(
             );
             0
         }
+        crate::src::trees::BitOutputAction::Block {
+            input,
+            stored_len,
+            last,
+        } => {
+            let data_type = if state.level > 0 {
+                Some(&mut state.data_type)
+            } else {
+                None
+            };
+            crate::src::trees::flush_block_from_views(
+                data_type,
+                crate::src::trees::BlockFlushState {
+                    level: state.level,
+                    strategy: state.strategy,
+                    pending_buf,
+                    pending: &mut state.pending,
+                    bi_buf: &mut state.bi_buf,
+                    bi_valid: &mut state.bi_valid,
+                    bi_used: &mut state.bi_used,
+                    dyn_ltree: &mut state.dyn_ltree,
+                    dyn_dtree: &mut state.dyn_dtree,
+                    bl_tree: &mut state.bl_tree,
+                    l_desc: &mut state.l_desc,
+                    d_desc: &mut state.d_desc,
+                    bl_desc: &mut state.bl_desc,
+                    heap: &mut state.heap,
+                    heap_len: &mut state.heap_len,
+                    heap_max: &mut state.heap_max,
+                    depth: &mut state.depth,
+                    bl_count: &mut state.bl_count,
+                    opt_len: &mut state.opt_len,
+                    static_len: &mut state.static_len,
+                    matches: &mut state.matches,
+                    sym_buf_start: state.sym_buf_start,
+                    sym_next: &mut state.sym_next,
+                },
+                input,
+                stored_len,
+                last,
+            );
+            0
+        }
         crate::src::trees::BitOutputAction::Tally { dist, lc } => {
             let sym_buf_start = state.sym_buf_start;
             crate::src::trees::_tr_tally(
