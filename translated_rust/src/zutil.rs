@@ -128,19 +128,17 @@ pub fn zlibCompileFlags() -> crate::stdlib::uLong {
 pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
     zlibCompileFlags()
 }
-pub unsafe extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    return ERROR_MESSAGES[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
+pub fn zError(err: ::core::ffi::c_int) -> &'static [u8] {
+    &ERROR_MESSAGES[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
         9 as ::core::ffi::c_int
     } else {
         2 as ::core::ffi::c_int - err
     }) as usize]
-        .as_ptr()
-        .cast();
 }
 #[export_name = "zError"]
 
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    zError(err)
+    zError(err).as_ptr().cast()
 }
 pub unsafe extern "C" fn zcalloc(
     _opaque: crate::stdlib::voidpf,
