@@ -392,6 +392,79 @@ pub(crate) fn inflate_stored_copy_len(
     remaining.min(available_input).min(available_output)
 }
 
+/// Select the source and bounded progress for one ordinary-inflate match.
+/// The legacy decoder still owns its ABI cursor lends and the bytewise copy
+/// (output-backed matches deliberately overlap), but the distance and
+/// circular-history arithmetic is ordinary checked scalar logic.  A malformed
+/// compatibility window cannot therefore wrap into an arbitrary cursor before
+/// the boundary has a chance to report the existing distance error.
+#[derive(Copy, Clone)]
+enum InflateMatchSource {
+    Window { index: usize },
+    Output { offset: usize },
+}
+
+#[derive(Copy, Clone)]
+struct InflateMatchCopyPlan {
+    source: InflateMatchSource,
+    copy: ::core::ffi::c_uint,
+    remaining_length: ::core::ffi::c_uint,
+}
+
+fn inflate_match_copy_plan(
+    initial_output: ::core::ffi::c_uint,
+    available_output: ::core::ffi::c_uint,
+    offset: ::core::ffi::c_uint,
+    length: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+    window_present: bool,
+    sane: bool,
+) -> Option<InflateMatchCopyPlan> {
+    let produced = initial_output.checked_sub(available_output)?;
+    let (source, copy) = if offset > produced {
+        if !window_present || wsize == 0 || wnext >= wsize || whave > wsize {
+            return None;
+        }
+        let back = offset.checked_sub(produced)?;
+        if sane && back > whave {
+            return None;
+        }
+        let index = if back > wnext {
+            let trailing = back.checked_sub(wnext)?;
+            wsize.checked_sub(trailing)?
+        } else {
+            wnext.checked_sub(back)?
+        };
+        let wsize = usize::try_from(wsize).ok()?;
+        let index = usize::try_from(index).ok()?;
+        if index >= wsize {
+            return None;
+        }
+        (InflateMatchSource::Window { index }, back)
+    } else {
+        if offset == 0 {
+            return None;
+        }
+        (
+            InflateMatchSource::Output {
+                offset: usize::try_from(offset).ok()?,
+            },
+            length,
+        )
+    };
+    let copy = copy.min(length).min(available_output);
+    if copy == 0 {
+        return None;
+    }
+    Some(InflateMatchCopyPlan {
+        source,
+        copy,
+        remaining_length: length.checked_sub(copy)?,
+    })
+}
+
 /// Decode zlib's overloaded `windowBits` argument without touching the ABI
 /// stream or inflate state.  The boundary remains responsible for freeing a
 /// mismatched history allocation and publishing the accepted settings.
@@ -3192,40 +3265,29 @@ pub fn inflate(
             // decoder boundary.
             let strm_ref = &mut *strm;
             let state_ref = &mut *state;
-            copy = out.wrapping_sub(left);
-            if state_ref.offset > copy {
-                copy = state_ref.offset.wrapping_sub(copy);
-                if copy > state_ref.whave {
-                    if state_ref.sane != 0 {
-                        strm_ref.msg = INFLATE_ERROR_MESSAGES[17].as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
-                        state_ref.mode = crate::src::inflate::BAD;
-                        continue;
-                    }
-                }
-                if copy > state_ref.wnext {
-                    copy = copy.wrapping_sub(state_ref.wnext);
-                    from = state_ref
-                        .window
-                        .wrapping_add(state_ref.wsize.wrapping_sub(copy) as usize);
-                } else {
-                    from = state_ref
-                        .window
-                        .wrapping_add(state_ref.wnext.wrapping_sub(copy) as usize);
-                }
-                if copy > state_ref.length {
-                    copy = state_ref.length;
-                }
-            } else {
-                from = put.wrapping_sub(state_ref.offset as usize);
-                copy = state_ref.length;
-            }
-            if copy > left {
-                copy = left;
-            }
+            let Some(plan) = inflate_match_copy_plan(
+                out,
+                left,
+                state_ref.offset,
+                state_ref.length,
+                state_ref.whave,
+                state_ref.wnext,
+                state_ref.wsize,
+                !state_ref.window.is_null(),
+                state_ref.sane != 0,
+            ) else {
+                strm_ref.msg = INFLATE_ERROR_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
+                    as *mut ::core::ffi::c_char;
+                state_ref.mode = crate::src::inflate::BAD;
+                continue;
+            };
+            from = match plan.source {
+                InflateMatchSource::Window { index } => state_ref.window.wrapping_add(index),
+                InflateMatchSource::Output { offset } => put.wrapping_sub(offset),
+            };
+            copy = plan.copy;
             left = left.wrapping_sub(copy);
-            state_ref.length = state_ref.length.wrapping_sub(copy);
+            state_ref.length = plan.remaining_length;
             loop {
                 let c2rust_fresh30 = from;
                 from = from.wrapping_add(1);
