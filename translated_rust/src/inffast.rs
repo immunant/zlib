@@ -132,6 +132,10 @@ fn input_bytes_needed(
     missing_bits / 8 + (missing_bits % 8 != 0) as ::core::ffi::c_uint
 }
 
+fn fast_decode_needs_prefetch(bits: ::core::ffi::c_uint) -> bool {
+    bits < 15 as ::core::ffi::c_uint
+}
+
 fn output_cursor_after_write(
     output_produced: crate::stdlib::uInt,
     output_remaining: crate::stdlib::uInt,
@@ -404,7 +408,7 @@ pub unsafe extern "C" fn inflate_fast(
     dmask = bit_mask((*state).distbits);
     let mut c2rust_current_block_141: u64;
     's_94: loop {
-        if bits < 15 as ::core::ffi::c_uint {
+        if fast_decode_needs_prefetch(bits) {
             let c2rust_fresh0 = in_0;
             in_0 = in_0.wrapping_add(1);
             input_remaining = input_remaining_after_read(input_remaining);
@@ -440,7 +444,7 @@ pub unsafe extern "C" fn inflate_fast(
                         }
                         (len, hold, bits) = add_and_consume_extra_bits(len, hold, bits, extra_bits);
                     }
-                    if bits < 15 as ::core::ffi::c_uint {
+                    if fast_decode_needs_prefetch(bits) {
                         let c2rust_fresh4 = in_0;
                         in_0 = in_0.wrapping_add(1);
                         input_remaining = input_remaining_after_read(input_remaining);
@@ -695,12 +699,12 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_dist_action, fast_litlen_action, fast_match_uses_window, fast_window_copy_plan,
-        fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
-        input_remaining_after_read, low_bits, match_copy_layout, output_cursor_after_write,
-        subtable_index, table_index, unread_input_state, validate_fast_window_distance,
-        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction,
-        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
+        fast_decode_needs_prefetch, fast_dist_action, fast_litlen_action, fast_match_uses_window,
+        fast_window_copy_plan, fast_window_distance_is_invalid, finish_fast_distance,
+        input_bytes_needed, input_remaining_after_read, low_bits, match_copy_layout,
+        output_cursor_after_write, subtable_index, table_index, unread_input_state,
+        validate_fast_window_distance, FastDistAction, FastDistance, FastDistanceSource,
+        FastLitLenAction, FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -935,6 +939,14 @@ mod tests {
         assert_eq!(input_bytes_needed(0, 8), 1);
         assert_eq!(input_bytes_needed(0, 9), 2);
         assert_eq!(input_bytes_needed(1, 9), 1);
+    }
+
+    #[test]
+    fn fast_decode_prefetch_preserves_fifteen_bit_threshold() {
+        assert!(fast_decode_needs_prefetch(0));
+        assert!(fast_decode_needs_prefetch(14));
+        assert!(!fast_decode_needs_prefetch(15));
+        assert!(!fast_decode_needs_prefetch(::core::ffi::c_uint::MAX));
     }
 
     #[test]

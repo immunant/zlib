@@ -549,6 +549,14 @@ fn deflate_fast_literal_state_after_emit(
     (lookahead.wrapping_sub(1), strstart.wrapping_add(1))
 }
 
+fn deflate_fast_should_insert_match(
+    match_length: crate::stdlib::uInt,
+    max_lazy_match: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> bool {
+    match_length <= max_lazy_match && lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+}
+
 fn deflate_insert_after_block(strstart: crate::stdlib::uInt) -> crate::stdlib::uInt {
     strstart.min((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt)
 }
@@ -3406,9 +3414,11 @@ unsafe extern "C" fn deflate_fast(
                     .wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
-            if (*s).match_length <= (*s).max_lazy_match
-                && (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            {
+            if deflate_fast_should_insert_match(
+                (*s).match_length,
+                (*s).max_lazy_match,
+                (*s).lookahead,
+            ) {
                 (*s).match_length = (*s).match_length.wrapping_sub(1);
                 loop {
                     (*s).strstart = (*s).strstart.wrapping_add(1);
@@ -4143,11 +4153,11 @@ mod tests {
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_dictionary_state_after_load, deflate_fast_literal_state_after_emit,
-        deflate_flush_rank, deflate_huff_literal_progress, deflate_insert_after_block,
-        deflate_match_refill_action, deflate_pending_value, deflate_preflight,
-        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
-        deflate_rle_can_scan_match, deflate_rle_clamp_match_length, deflate_rle_match_length,
-        deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
+        deflate_fast_should_insert_match, deflate_flush_rank, deflate_huff_literal_progress,
+        deflate_insert_after_block, deflate_match_refill_action, deflate_pending_value,
+        deflate_preflight, deflate_prime_bits_valid, deflate_request_is_invalid,
+        deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
+        deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
         deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
         deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
@@ -4333,6 +4343,20 @@ mod tests {
             deflate_fast_literal_state_after_emit(0, crate::stdlib::uInt::MAX),
             (crate::stdlib::uInt::MAX, 0),
         );
+    }
+
+    #[test]
+    fn deflate_fast_should_insert_match_honors_match_and_lookahead_boundaries() {
+        let min_match = crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+
+        assert!(deflate_fast_should_insert_match(4, 4, min_match));
+        assert!(!deflate_fast_should_insert_match(5, 4, min_match));
+        assert!(!deflate_fast_should_insert_match(4, 4, min_match - 1));
+        assert!(deflate_fast_should_insert_match(
+            crate::stdlib::uInt::MAX,
+            crate::stdlib::uInt::MAX,
+            crate::stdlib::uInt::MAX,
+        ));
     }
 
     #[test]

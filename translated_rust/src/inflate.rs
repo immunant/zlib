@@ -2418,8 +2418,14 @@ pub unsafe extern "C" fn inflate(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    in_0 = inflate_cursor_progress(in_0, (*strm).avail_in as ::core::ffi::c_uint);
-    out = inflate_cursor_progress(out, (*strm).avail_out as ::core::ffi::c_uint);
+    let progress = inflate_call_progress(
+        in_0,
+        (*strm).avail_in as ::core::ffi::c_uint,
+        out,
+        (*strm).avail_out as ::core::ffi::c_uint,
+    );
+    in_0 = progress.consumed;
+    out = progress.produced;
     (*strm).total_in = (*strm).total_in.wrapping_add(in_0 as crate::stdlib::uLong);
     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
@@ -2721,6 +2727,24 @@ fn inflate_cursor_progress(
     remaining: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
     initial.wrapping_sub(remaining)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct InflateCallProgress {
+    consumed: ::core::ffi::c_uint,
+    produced: ::core::ffi::c_uint,
+}
+
+fn inflate_call_progress(
+    initial_input: ::core::ffi::c_uint,
+    remaining_input: ::core::ffi::c_uint,
+    initial_output: ::core::ffi::c_uint,
+    remaining_output: ::core::ffi::c_uint,
+) -> InflateCallProgress {
+    InflateCallProgress {
+        consumed: inflate_cursor_progress(initial_input, remaining_input),
+        produced: inflate_cursor_progress(initial_output, remaining_output),
+    }
 }
 
 fn inflate_match_is_complete(remaining_length: ::core::ffi::c_uint) -> bool {
@@ -3149,12 +3173,13 @@ mod tests {
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_code_length_repeat_spec, dynamic_header_counts, gzip_extra_copy_bounds,
         inflateSyncPoint_ffi, inflate_align_to_byte_boundary, inflate_block_header,
-        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
-        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
-        inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_gzip_extra_progress,
-        inflate_gzip_flags, inflate_gzip_flags_error, inflate_gzip_flags_validation,
-        inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
-        inflate_gzip_header_has_crc, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflate_call_progress, inflate_can_use_fast_path, inflate_codes_used_offset_value,
+        inflate_copy_match_from_output, inflate_copy_progress, inflate_data_type_value,
+        inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
+        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
+        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_is_valid,
+        inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_window_bits, inflate_head_skip_mode,
         inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
         inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
@@ -3172,12 +3197,12 @@ mod tests {
         update_window_buffer_len, update_window_core, update_window_produced_len,
         window_allocation_failed, window_allocation_plan, window_allocation_request,
         window_allocation_request_for_plan, window_metadata_update_plan, window_needs_allocation,
-        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
-        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
-        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
-        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams,
-        WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress,
+        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
+        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
+        InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
+        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -3257,6 +3282,24 @@ mod tests {
         assert!(inflate_stream_buffers_are_valid(true, false, 0));
         assert!(!inflate_stream_buffers_are_valid(true, false, 1));
         assert!(!inflate_stream_buffers_are_valid(false, true, 0));
+    }
+
+    #[test]
+    fn inflate_call_progress_preserves_independent_wrapping_cursors() {
+        assert_eq!(
+            inflate_call_progress(12, 5, 16, 9),
+            InflateCallProgress {
+                consumed: 7,
+                produced: 7,
+            }
+        );
+        assert_eq!(
+            inflate_call_progress(1, ::core::ffi::c_uint::MAX, 0, 1),
+            InflateCallProgress {
+                consumed: 2,
+                produced: ::core::ffi::c_uint::MAX,
+            }
+        );
     }
 
     #[test]
