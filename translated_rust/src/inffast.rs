@@ -120,6 +120,14 @@ fn input_remaining_after_read(input_remaining: crate::stdlib::uInt) -> crate::st
     input_remaining.wrapping_sub(1)
 }
 
+fn input_bytes_needed(
+    bits: ::core::ffi::c_uint,
+    required_bits: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let missing_bits = required_bits.saturating_sub(bits);
+    missing_bits / 8 + if missing_bits % 8 == 0 { 0 } else { 1 }
+}
+
 fn output_cursor_after_write(
     output_produced: crate::stdlib::uInt,
     output_remaining: crate::stdlib::uInt,
@@ -317,17 +325,11 @@ pub unsafe extern "C" fn inflate_fast(
                     match fast_dist_action(op) {
                         FastDistAction::Distance { extra_bits } => {
                             dist = (*here).val as ::core::ffi::c_uint;
-                            if bits < extra_bits {
+                            for _ in 0..input_bytes_needed(bits, extra_bits) {
                                 let c2rust_fresh6 = in_0;
                                 in_0 = in_0.wrapping_add(1);
                                 input_remaining = input_remaining_after_read(input_remaining);
                                 (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh6);
-                                if bits < extra_bits {
-                                    let c2rust_fresh7 = in_0;
-                                    in_0 = in_0.wrapping_add(1);
-                                    input_remaining = input_remaining_after_read(input_remaining);
-                                    (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh7);
-                                }
                             }
                             (dist, hold, bits) =
                                 add_and_consume_extra_bits(dist, hold, bits, extra_bits);
@@ -578,7 +580,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_dist_action, fast_litlen_action, fast_window_distance_is_invalid,
+        fast_dist_action, fast_litlen_action, fast_window_distance_is_invalid, input_bytes_needed,
         input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
         unread_input_state, window_match_start, FastDistAction, FastLitLenAction,
     };
@@ -717,6 +719,15 @@ mod tests {
     fn input_remaining_after_read_preserves_wrapping_decrement() {
         assert_eq!(input_remaining_after_read(6), 5);
         assert_eq!(input_remaining_after_read(0), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn input_bytes_needed_refills_only_the_missing_bits() {
+        assert_eq!(input_bytes_needed(15, 13), 0);
+        assert_eq!(input_bytes_needed(8, 13), 1);
+        assert_eq!(input_bytes_needed(0, 13), 2);
+        assert_eq!(input_bytes_needed(0, 0), 0);
+        assert_eq!(input_bytes_needed(0, ::core::ffi::c_uint::MAX), 536_870_912);
     }
 
     #[test]

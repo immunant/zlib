@@ -3604,16 +3604,13 @@ static static_bl_desc: crate::src::deflate::static_tree_desc = {
 
 fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     let mut res: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
-    loop {
+    while len > 0 as ::core::ffi::c_int {
         res |= code & 1 as ::core::ffi::c_uint;
         code >>= 1 as ::core::ffi::c_int;
         res <<= 1 as ::core::ffi::c_int;
         len -= 1;
-        if !(len > 0 as ::core::ffi::c_int) {
-            break;
-        }
     }
-    return res >> 1 as ::core::ffi::c_int;
+    res >> 1 as ::core::ffi::c_int
 }
 
 fn dist_code_index(dist: ::core::ffi::c_uint) -> usize {
@@ -5320,6 +5317,9 @@ mod tests {
                 assert_eq!(bi_reverse(code, len), expected, "code={code}, len={len}");
             }
         }
+
+        assert_eq!(bi_reverse(0xdead_beef, 0), 0);
+        assert_eq!(bi_reverse(0xdead_beef, -1), 0);
     }
 
     #[test]
