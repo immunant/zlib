@@ -562,6 +562,31 @@ impl DeflateCallbackStorageOwner {
         })
     }
 
+    fn dispatch_request<'storage>(
+        &self,
+        storage: DeflateCallbackStorage<'storage>,
+    ) -> Option<(
+        DeflateDispatchStorage<'storage>,
+        DeflateAbiCursors<'storage>,
+    )> {
+        let DeflateCallbackStorage {
+            window,
+            prev,
+            head,
+            pending,
+            cursors,
+        } = storage;
+        let cursors = cursors?;
+        let storage = self.dispatch_storage(DeflateCallbackStorage {
+            window,
+            prev,
+            head,
+            pending,
+            cursors: None,
+        })?;
+        Some((storage, cursors))
+    }
+
     // A deflate copy crosses two independently callback-paired allocation
     // lifecycles.  Verify their immutable request geometry before the ABI
     // boundary performs its bounded raw copies.  The pointer-free copy facade
@@ -1620,6 +1645,16 @@ struct DeflateCallbackStorage<'stream> {
     prev: Option<&'stream mut [crate::src::deflate::Posf]>,
     head: Option<&'stream mut [crate::src::deflate::Posf]>,
     pending: Option<&'stream mut [crate::stdlib::Bytef]>,
+    cursors: Option<DeflateAbiCursors<'stream>>,
+}
+
+// The ABI stream projection creates these bounded caller views alongside the
+// callback-storage projection.  Keeping them in the same call-scoped carrier
+// means the dispatch adapter never has to rebuild an ABI slice after it has
+// acquired the opaque state.
+struct DeflateAbiCursors<'stream> {
+    input: &'stream [crate::stdlib::Bytef],
+    output: &'stream mut [crate::stdlib::Bytef],
 }
 
 // This operation-facing owner is intentionally pointer-free: the persistent
@@ -1643,6 +1678,10 @@ enum DeflateStorageProjection<'request> {
     // at the shared stream/state boundary rather than rebuilding a pending
     // slice in a consumer-specific adapter.
     Complete,
+    // Dispatch also borrows the caller's input and output cursors.  Form all
+    // six bounded views at the one ABI/state projection boundary, then lend
+    // only ordinary slices to the pointer-free state machine.
+    Dispatch,
     // Dictionary installation is a complete pointer-free operation once the
     // shared boundary has lent it the callback-owned views.  Keep its status
     // slot in the request so the FFI export can dispatch directly without
@@ -1725,13 +1764,18 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         }
     });
     let storage_layout = state.callback_storage.storage();
-    let complete_storage = matches!(&projection, DeflateStorageProjection::Complete);
-    let storage = match projection {
+    let complete_storage = matches!(
+        &projection,
+        DeflateStorageProjection::Complete | DeflateStorageProjection::Dispatch
+    );
+    let dispatch_cursors = matches!(&projection, DeflateStorageProjection::Dispatch);
+    let mut storage = match projection {
         DeflateStorageProjection::None => DeflateCallbackStorage {
             window: None,
             prev: None,
             head: None,
             pending: None,
+            cursors: None,
         },
         DeflateStorageProjection::Hash => DeflateCallbackStorage {
             window: None,
@@ -1744,9 +1788,11 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                     .expect("validated head allocation geometry"),
             )),
             pending: None,
+            cursors: None,
         },
         DeflateStorageProjection::Dictionary
         | DeflateStorageProjection::Complete
+        | DeflateStorageProjection::Dispatch
         | DeflateStorageProjection::DictionaryInstall { .. }
         | DeflateStorageProjection::DictionaryQuery { .. } => DeflateCallbackStorage {
             window: Some(::core::slice::from_raw_parts_mut(
@@ -1784,8 +1830,25 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             } else {
                 None
             },
+            cursors: None,
         },
     };
+    if dispatch_cursors {
+        if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
+            strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
+                .as_ptr()
+                .cast_mut()
+                .cast();
+            return None;
+        }
+        let input = if strm.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+        };
+        let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+        storage.cursors = Some(DeflateAbiCursors { input, output });
+    }
     if let DeflateStorageProjection::DictionaryInstall { dictionary, result } = projection {
         let Some(storage) = state.callback_storage.dictionary_storage(storage) else {
             return Some((
@@ -1796,6 +1859,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                     prev: None,
                     head: None,
                     pending: None,
+                    cursors: None,
                 },
                 gzip_header,
             ));
@@ -1834,6 +1898,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                     prev: None,
                     head: None,
                     pending: None,
+                    cursors: None,
                 },
                 gzip_header,
             ));
@@ -1861,6 +1926,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                 prev: None,
                 head: None,
                 pending: None,
+                cursors: None,
             },
             gzip_header,
         ));
@@ -4934,28 +5000,17 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // Dispatch needs the same three bounded history views as dictionary
-    // handling, plus pending bytes. Reuse the single complete callback-
-    // storage projection instead of rebuilding any storage slice here.
+    // handling, plus pending bytes and the caller cursors.  Reuse the single
+    // complete projection so this adapter never rebuilds an ABI slice after
+    // associating the opaque state.
     let Some((strm, state, storage, _)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Complete, None)
+        deflate_stream_and_state(strm, DeflateStorageProjection::Dispatch, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
-        strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
-            .as_ptr()
-            .cast_mut()
-            .cast();
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-
-    let input = if strm.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-    };
-    let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
-    let Some(storage) = state.callback_storage.dispatch_storage(storage) else {
+    let Some((storage, DeflateAbiCursors { input, output })) =
+        state.callback_storage.dispatch_request(storage)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let dispatch = DeflateDispatch {
