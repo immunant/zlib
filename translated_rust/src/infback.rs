@@ -123,12 +123,16 @@ pub unsafe extern "C" fn inflateBackInit_(
     // boundary. The back-mode payload is pointer-free until that boundary
     // publishes it into the callback-owned opaque record.
     let strm = &mut *strm;
+    let mut copied_state = None;
     crate::src::inflate::inflate_publish_callback_owner(
         strm,
-        crate::src::inflate::InflateCallbackInitRequest::Back {
+        Some(crate::src::inflate::InflateCallbackInitRequest::Back {
             wbits: plan.wbits,
             wsize: plan.wsize,
-        },
+        }),
+        None,
+        0,
+        &mut copied_state,
     )
 }
 #[export_name = "inflateBackInit_"]

@@ -507,6 +507,35 @@ impl InflateOwnedDecoder {
     }
 }
 
+// An inflate copy can duplicate all persistent decoder data without retaining
+// either the callback allocation handle or the registered header target.  It
+// is intentionally provisioned only after the destination state callback has
+// succeeded: zlib requires a history-allocation failure to release that state
+// allocation before either replacement is published.
+struct InflateCopyOwner {
+    decoder: InflateOwnedDecoder,
+    back_window: Option<InflateBackWindow>,
+}
+
+impl InflateCopyOwner {
+    fn provision_after_state_allocation(
+        decoder: &InflateOwnedDecoder,
+        back_window: &Option<InflateBackWindow>,
+    ) -> Option<Self> {
+        // Clone the complete window first without exposing its allocation as
+        // a borrowed callback view. The inactive tail is then reset just as
+        // a newly provisioned history buffer would be before publication.
+        let mut owned_window = decoder.normal.owned_window.clone();
+        if let Some(window) = owned_window.as_deref_mut() {
+            window[decoder.normal.whave as usize..].fill(0);
+        }
+        Some(Self {
+            decoder: decoder.deep_copy_with_window(owned_window),
+            back_window: back_window.clone(),
+        })
+    }
+}
+
 // This is deliberately separate from `inflate_state`: normal decoder state
 // has no retained ABI registrations, so its explicit deep copy can remain a
 // wholly safe allocation-and-copy transaction.  `inflateCopy()` invokes it
@@ -739,28 +768,36 @@ impl InflateCallbackInitRequest {
 // callback handle, stream pointer, or foreign registration.
 pub(crate) unsafe fn inflate_publish_callback_owner(
     strm: &mut crate::zlib_h::z_stream_s,
-    request: InflateCallbackInitRequest,
+    request: Option<InflateCallbackInitRequest>,
+    copy_source: Option<&inflate_state>,
+    destination_identity: usize,
+    copied_state: &mut Option<::core::ptr::NonNull<inflate_state>>,
 ) -> ::core::ffi::c_int {
     // Keep the caller's stream projection at the allocator boundary. The
     // callback-owned state is published only after it has been fully
     // initialized below, since zalloc() need not return initialized bytes.
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
-        strm.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if strm.zfree.is_none() {
-        strm.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
+    // A copy has already passed the stream/state validation, so it must retain
+    // the source callbacks and message unchanged.  Initialization, on the
+    // other hand, owns default callback installation and message clearing.
+    if request.is_some() {
+        strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        if strm.zalloc.is_none() {
+            strm.zalloc = Some(
+                crate::src::zutil::zcalloc
+                    as unsafe extern "C" fn(
+                        crate::stdlib::voidpf,
+                        ::core::ffi::c_uint,
+                        ::core::ffi::c_uint,
+                    ) -> crate::stdlib::voidpf,
+            ) as crate::zlib_h::alloc_func;
+            strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        }
+        if strm.zfree.is_none() {
+            strm.zfree = Some(
+                crate::src::zutil::zcfree
+                    as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+            ) as crate::zlib_h::free_func;
+        }
     }
     // Retain the callback result with its provenance while initialization is
     // in flight.  The raw allocation is not exposed to the pointer-free
@@ -777,35 +814,62 @@ pub(crate) unsafe fn inflate_publish_callback_owner(
         return crate::zlib_h::Z_MEM_ERROR;
     };
     // Preserve the callback ordering: allocation comes first, then the
-    // pointer-free initialization plan is built and published as one value.
-    // A failing plan therefore still has a matching callback release below.
-    let InflateCallbackInitOwner {
-        normal,
-        back_window,
-        update,
-    } = request.after_callback_allocation();
-    // Publish one complete value into the callback-owned allocation.  Writing
-    // fields piecemeal here would briefly treat uninitialized callback bytes
-    // as Rust fields with drop glue.
-    ::core::ptr::write(
-        state.as_ptr(),
-        crate::src::inflate::inflate_state {
-            stream_identity: ::core::ptr::from_mut(strm).addr(),
-            head: None,
-            back_window,
-            decoder: InflateOwnedDecoder::from_normal(normal),
-        },
-    );
-    strm.state = Some(state.cast());
-    let update = match update {
-        Ok(update) => update,
+    // pointer-free payload is built and published as one value.  A failing
+    // initialization or history clone therefore has the same matching
+    // callback release below.
+    let prepared = match request {
+        Some(request) => {
+            let InflateCallbackInitOwner {
+                normal,
+                back_window,
+                update,
+            } = request.after_callback_allocation();
+            update.map(|update| {
+                (
+                    crate::src::inflate::inflate_state {
+                        stream_identity: ::core::ptr::from_mut(strm).addr(),
+                        head: None,
+                        back_window,
+                        decoder: InflateOwnedDecoder::from_normal(normal),
+                    },
+                    Some(update),
+                )
+            })
+        }
+        None => {
+            let source = copy_source.expect("copy publication has a source state");
+            InflateCopyOwner::provision_after_state_allocation(&source.decoder, &source.back_window)
+                .map(|owner| {
+                    (
+                        crate::src::inflate::inflate_state {
+                            stream_identity: destination_identity,
+                            head: source.head,
+                            back_window: owner.back_window,
+                            decoder: owner.decoder,
+                        },
+                        None,
+                    )
+                })
+                .ok_or(crate::zlib_h::Z_MEM_ERROR)
+        }
+    };
+    let (state_value, update) = match prepared {
+        Ok(prepared) => prepared,
         Err(status) => {
             Some(strm.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(strm.opaque, state.as_ptr().cast());
-            strm.state = None;
             return status;
         }
     };
+    // Publish one complete value into the callback-owned allocation.  Writing
+    // fields piecemeal here would briefly treat uninitialized callback bytes
+    // as Rust fields with drop glue.
+    ::core::ptr::write(state.as_ptr(), state_value);
+    let Some(update) = update else {
+        *copied_state = Some(state);
+        return crate::zlib_h::Z_OK;
+    };
+    strm.state = Some(state.cast());
     if let InflateCallbackInitUpdate::Normal(update) = update {
         strm.total_out = 0;
         strm.total_in = strm.total_out;
@@ -995,11 +1059,15 @@ pub unsafe extern "C" fn inflateInit2_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let mut copied_state = None;
     inflate_publish_callback_owner(
         strm,
-        InflateCallbackInitRequest::Normal {
+        Some(InflateCallbackInitRequest::Normal {
             window_bits: windowBits,
-        },
+        }),
+        None,
+        0,
+        &mut copied_state,
     )
 }
 #[export_name = "inflateInit2_"]
@@ -3842,45 +3910,22 @@ pub unsafe fn inflateCopy(
     // Build the replacement before borrowing the destination.  This retains
     // C's behavior even for a source/destination alias while all state
     // access remains scoped to the checked source stream.
-    let (copy, state_copy, destination_stream) = {
+    let destination_stream = {
         let Some((source, state)) = inflate_stream_and_state(source) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        let copy = Some(source.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            source.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state;
-        let Some(copy) = ::core::ptr::NonNull::new(copy) else {
-            return crate::zlib_h::Z_MEM_ERROR;
-        };
-        // The window allocation stays at this callback boundary: its failure
-        // must release the newly allocated state through the paired zfree
-        // before either state is published.  The remaining decoder copy is
-        // pointer-free and therefore belongs to its owner below.
-        let owned_window = match state.decoder.normal.owned_window.as_deref() {
-            Some(source_window) => {
-                let Some(mut window) = allocate_inflate_window(source_window.len()) else {
-                    Some(source.zfree.expect("non-null function pointer"))
-                        .expect("non-null function pointer")(
-                        source.opaque, copy.as_ptr().cast()
-                    );
-                    return crate::zlib_h::Z_MEM_ERROR;
-                };
-                window[..state.decoder.normal.whave as usize]
-                    .copy_from_slice(&source_window[..state.decoder.normal.whave as usize]);
-                Some(window)
-            }
-            None => None,
-        };
-        let decoder = state.decoder.deep_copy_with_window(owned_window);
-        let state_copy = inflate_state {
-            stream_identity: dest_identity,
-            head: state.head,
-            back_window: state.back_window.clone(),
-            decoder,
-        };
+        let mut copied_state = None;
+        let status = inflate_publish_callback_owner(
+            source,
+            None,
+            Some(state),
+            dest_identity,
+            &mut copied_state,
+        );
+        if status != crate::zlib_h::Z_OK {
+            return status;
+        }
+        let copy = copied_state.expect("successful copy publication returns state");
         let destination_stream = crate::zlib_h::z_stream_s {
             next_in: source.next_in,
             avail_in: source.avail_in,
@@ -3897,12 +3942,11 @@ pub unsafe fn inflateCopy(
             adler: source.adler,
             reserved: source.reserved,
         };
-        (copy, state_copy, destination_stream)
+        destination_stream
     };
     // zalloc() returns uninitialized storage.  Publish a fully initialized
     // state in one write, then mirror the source stream exactly with only its
     // opaque state handle changed.
-    copy.as_ptr().write(state_copy);
     *dest = destination_stream;
     return crate::zlib_h::Z_OK;
 }
