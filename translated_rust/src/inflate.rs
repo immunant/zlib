@@ -283,6 +283,25 @@ fn inflate_header_crc_matches(
     wrap & 4 as ::core::ffi::c_int == 0 || hold == check & 0xffff as ::core::ffi::c_ulong
 }
 
+/// Identify the diagnostic for an ordinary zlib header word.  This is only
+/// the scalar validation performed after the cursor loop has supplied two
+/// bytes; consuming those bytes and publishing the error remain at the ABI
+/// boundary.
+fn inflate_zlib_header_error(
+    wrap: ::core::ffi::c_int,
+    hold: ::core::ffi::c_ulong,
+) -> Option<usize> {
+    let header = hold as ::core::ffi::c_uint;
+    let check = ((header & 0xff) << 8) as ::core::ffi::c_ulong;
+    if wrap & 1 == 0 || check.wrapping_add(hold >> 8).wrapping_rem(31) != 0 {
+        Some(0)
+    } else if header & 0x0f != crate::zlib_h::Z_DEFLATED as ::core::ffi::c_uint {
+        Some(1)
+    } else {
+        None
+    }
+}
+
 /// Preserve zlib's final no-progress/finish result mapping independently of
 /// the ABI cursor commit that precedes it.
 fn inflate_exit_status(
@@ -1315,27 +1334,14 @@ pub unsafe fn inflate(
                                                                                                             if !state_ref.head.is_null() {
                                                                                                                 (*state_ref.head).done = -1 as ::core::ffi::c_int;
                                                                                                             }
-                                                                                                            if state_ref.wrap & 1 as ::core::ffi::c_int == 0
-                                                                                                                || (((hold as ::core::ffi::c_uint
-                                                                                                                    & ((1 as ::core::ffi::c_uint) << 8 as ::core::ffi::c_int)
-                                                                                                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                                                                                    << 8 as ::core::ffi::c_int) as ::core::ffi::c_ulong)
-                                                                                                                    .wrapping_add(hold >> 8 as ::core::ffi::c_int)
-                                                                                                                    .wrapping_rem(31 as ::core::ffi::c_ulong) != 0
-                                                                                                            {
-                                                                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[0].as_ptr()
+                                                                                                            if let Some(error) = inflate_zlib_header_error(
+                                                                                                                state_ref.wrap,
+                                                                                                                hold,
+                                                                                                            ) {
+                                                                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[error].as_ptr()
                                                                                                                     as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                                state_ref.mode = crate::src::inflate::BAD;
-                                                                                                                continue '_inf_leave;
-                                                                                                            } else if hold as ::core::ffi::c_uint
-                                                                                                                & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                                                                                                                    .wrapping_sub(1 as ::core::ffi::c_uint)
-                                                                                                                != crate::zlib_h::Z_DEFLATED as ::core::ffi::c_uint
-                                                                                                            {
-                                                                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[1].as_ptr()
-                                                                                                                    as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                                state_ref.mode = crate::src::inflate::BAD;
-                                                                                                                continue '_inf_leave;
+                                                                                                               state_ref.mode = crate::src::inflate::BAD;
+                                                                                                               continue '_inf_leave;
                                                                                                             } else {
                                                                                                                 hold >>= 4 as ::core::ffi::c_int;
                                                                                                                 bits = bits
