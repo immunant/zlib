@@ -3438,7 +3438,8 @@ impl DeflateCopyPreparation {
     // can keep the scalar snapshot and its allocations together.
     fn into_owned_copy(self, source: &DeflateOwnedStorage) -> Option<DeflateOwnedCopy> {
         let mut destination = self.plan.storage.allocate_owned()?;
-        self.copy_storage(source.source_views(), destination.destination_views())
+        DeflateCopyStorage::new(source.source_views(), destination.destination_views())
+            .copy(&self)
             .then_some(DeflateOwnedCopy {
                 preparation: self,
                 storage: destination,
@@ -3495,6 +3496,31 @@ struct DeflateCopyDestinationViews<'a> {
     prev: &'a mut [crate::src::deflate::Posf],
     head: &'a mut [crate::src::deflate::Posf],
     pending: &'a mut [crate::stdlib::Bytef],
+}
+
+// A copy transaction always needs both complete four-region view sets. Keep
+// them paired in one pointer-free facade so a callback-allocation boundary
+// can lend all eight bounded slices as one operation, rather than asking the
+// copy core to reconstruct either allocation independently.
+struct DeflateCopyStorage<'source, 'destination> {
+    source: DeflateCopySourceViews<'source>,
+    destination: DeflateCopyDestinationViews<'destination>,
+}
+
+impl<'source, 'destination> DeflateCopyStorage<'source, 'destination> {
+    fn new(
+        source: DeflateCopySourceViews<'source>,
+        destination: DeflateCopyDestinationViews<'destination>,
+    ) -> Self {
+        Self {
+            source,
+            destination,
+        }
+    }
+
+    fn copy(self, preparation: &DeflateCopyPreparation) -> bool {
+        preparation.copy_storage(self.source, self.destination)
+    }
 }
 
 impl DeflateOwnedStorage {
