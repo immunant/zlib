@@ -768,6 +768,20 @@ enum CallbackDeflateStorageNeed {
     WorkspaceAndPending,
 }
 
+/// One typed, pointer-free view of callback-owned deflate storage.
+///
+/// The legacy allocator handles are converted only by
+/// `with_callback_deflate_storage`.  Keeping the resulting borrows together
+/// gives reset, streaming, and copy one safe storage shape, which is also the
+/// shape a later callback-paired owner can construct without changing those
+/// callers.
+struct CallbackDeflateStorage<'a> {
+    window: Option<&'a mut [crate::stdlib::Bytef]>,
+    head: Option<&'a mut [crate::src::deflate::Posf]>,
+    prev: Option<&'a mut [crate::src::deflate::Posf]>,
+    pending_buf: Option<&'a mut [crate::stdlib::Bytef]>,
+}
+
 /// Borrow callback-owned deflate storage for exactly one typed operation.
 ///
 /// The ABI allocator owns these buffers, so their raw handles remain at this
@@ -776,13 +790,7 @@ enum CallbackDeflateStorageNeed {
 fn with_callback_deflate_storage<R>(
     state: &mut crate::src::deflate::deflate_state,
     need: CallbackDeflateStorageNeed,
-    action: impl FnOnce(
-        &mut crate::src::deflate::deflate_state,
-        Option<&mut [crate::stdlib::Bytef]>,
-        Option<&mut [crate::src::deflate::Posf]>,
-        Option<&mut [crate::src::deflate::Posf]>,
-        Option<&mut [crate::stdlib::Bytef]>,
-    ) -> R,
+    action: impl FnOnce(&mut crate::src::deflate::deflate_state, CallbackDeflateStorage<'_>) -> R,
 ) -> Option<R> {
     // Preserve the legacy workspace boundary's validation order: an update
     // with no window must fail before it tries to view either hash table.
@@ -841,7 +849,15 @@ fn with_callback_deflate_storage<R>(
     } else {
         None
     };
-    Some(action(state, window, head, prev, pending))
+    Some(action(
+        state,
+        CallbackDeflateStorage {
+            window,
+            head,
+            prev,
+            pending_buf: pending,
+        },
+    ))
 }
 
 fn read_buf(
@@ -1929,7 +1945,7 @@ pub(crate) fn deflate_reset_state(
     with_callback_deflate_storage(
         state,
         CallbackDeflateStorageNeed::HeadOnly,
-        |state, _, head, _, _| head.map(|head| deflate_reset(stream, state, head)),
+        |state, storage| storage.head.map(|head| deflate_reset(stream, state, head)),
     )
     .flatten()
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
@@ -3223,10 +3239,16 @@ fn with_callback_deflate_workspace<R>(
     with_callback_deflate_storage(
         state,
         CallbackDeflateStorageNeed::Workspace,
-        |state, window, head, prev, _| {
-            let window = window?;
-            let mut workspace =
-                callback_deflate_workspace(window, head, prev, input, output, pending_buf);
+        |state, storage| {
+            let window = storage.window?;
+            let mut workspace = callback_deflate_workspace(
+                window,
+                storage.head,
+                storage.prev,
+                input,
+                output,
+                pending_buf,
+            );
             action(state, strm, &mut workspace, flush)
         },
     )
@@ -3318,8 +3340,8 @@ fn deflate_validated(
     with_callback_deflate_storage(
         state,
         CallbackDeflateStorageNeed::PendingOnly,
-        |state, _, _, _, pending_buffer| {
-            pending_buffer.map(|pending_buffer| {
+        |state, storage| {
+            storage.pending_buf.map(|pending_buffer| {
                 deflate_with_pending_buffer(strm, state, flush, input, output, pending_buffer)
             })
         },
@@ -3714,8 +3736,8 @@ fn deflate_with_pending_buffer(
                         with_callback_deflate_storage(
                             state,
                             CallbackDeflateStorageNeed::HeadOnly,
-                            |state, _, head, _, _| {
-                                head.map(|head| clear_full_flush_hash(state, head))
+                            |state, storage| {
+                                storage.head.map(|head| clear_full_flush_hash(state, head))
                             },
                         )
                         .flatten()
@@ -3961,33 +3983,33 @@ fn copy_callback_deflate_storage_from_states(
     with_callback_deflate_storage(
         destination_state,
         CallbackDeflateStorageNeed::WorkspaceAndPending,
-        |_, destination_window, destination_head, destination_prev, destination_pending| {
-            let Some(destination_window) = destination_window else {
+        |_, destination_storage| {
+            let Some(destination_window) = destination_storage.window else {
                 return false;
             };
-            let Some(destination_head) = destination_head else {
+            let Some(destination_head) = destination_storage.head else {
                 return false;
             };
-            let Some(destination_prev) = destination_prev else {
+            let Some(destination_prev) = destination_storage.prev else {
                 return false;
             };
-            let Some(destination_pending) = destination_pending else {
+            let Some(destination_pending) = destination_storage.pending_buf else {
                 return false;
             };
             with_callback_deflate_storage(
                 source_state,
                 CallbackDeflateStorageNeed::WorkspaceAndPending,
-                |_, source_window, source_head, source_prev, source_pending| {
-                    let Some(source_window) = source_window else {
+                |_, source_storage| {
+                    let Some(source_window) = source_storage.window else {
                         return false;
                     };
-                    let Some(source_head) = source_head else {
+                    let Some(source_head) = source_storage.head else {
                         return false;
                     };
-                    let Some(source_prev) = source_prev else {
+                    let Some(source_prev) = source_storage.prev else {
                         return false;
                     };
-                    let Some(source_pending) = source_pending else {
+                    let Some(source_pending) = source_storage.pending_buf else {
                         return false;
                     };
                     copy_callback_deflate_storage(
