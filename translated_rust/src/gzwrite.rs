@@ -315,6 +315,17 @@ fn gz_write_failure_result(
     }
 }
 
+/// Validate the common public gzip-writer admission state without borrowing
+/// the opaque handle.  A retryable descriptor error remains writable, as it
+/// does for every write-family entry point.
+fn gzwrite_state_is_valid(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+) -> bool {
+    mode == crate::gzguts_h::GZ_WRITE && (err == crate::zlib_h::Z_OK || again != 0)
+}
+
 /// Compute the byte length requested by `gzfwrite`.  `None` preserves the
 /// API's overflow failure, while `Some(0)` remains an ordinary empty request.
 fn gzfwrite_request_len(
@@ -497,9 +508,7 @@ pub unsafe extern "C" fn gzwrite(
         return 0 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gzwrite_state_is_valid((*state).mode, (*state).err, (*state).again) {
         return 0 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -538,9 +547,7 @@ pub unsafe extern "C" fn gzfwrite(
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gzwrite_state_is_valid((*state).mode, (*state).err, (*state).again) {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_error(
@@ -585,9 +592,7 @@ pub unsafe extern "C" fn gzputc(
     }
     state = file as crate::gzguts_h::gz_statep;
     strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gzwrite_state_is_valid((*state).mode, (*state).err, (*state).again) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -643,9 +648,7 @@ pub unsafe extern "C" fn gzputs(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gzwrite_state_is_valid((*state).mode, (*state).err, (*state).again) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -685,9 +688,7 @@ pub unsafe extern "C" fn gzflush(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-    {
+    if !gzwrite_state_is_valid(state.mode, state.err, state.again) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_error(
