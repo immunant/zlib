@@ -118,6 +118,7 @@ pub use crate::src::inftrees::LENS;
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
+
 pub use crate::stdlib::voidpf;
 pub use crate::stdlib::Byte;
 pub use crate::stdlib::Bytef;
@@ -145,6 +146,22 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
+
+/// Update the wrapper checksum for bytes that the decoder has already
+/// produced.  The surrounding codec boundary owns the temporary output
+/// view; keeping the choice of checksum here avoids duplicating that raw
+/// view across the gzip and zlib branches.
+fn inflate_output_checksum(
+    check: crate::stdlib::uLong,
+    flags: ::core::ffi::c_int,
+    output: &[u8],
+) -> ::core::ffi::c_ulong {
+    if flags != 0 {
+        crate::src::crc32::crc32_z(check, output) as ::core::ffi::c_ulong
+    } else {
+        crate::src::adler32::adler32_z(check, output) as ::core::ffi::c_ulong
+    }
+}
 
 // Keep all inflate diagnostics in one immutable table.  Besides making their
 // storage explicit, this lets gzip retain an inflate error without treating
@@ -1214,17 +1231,15 @@ pub unsafe fn inflate(
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
                                                                                                         if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0
                                                                                                         {
-                                                                                                            (*state).check = (if (*state).flags != 0 {
-                                                                                                                crate::src::crc32::crc32_z(
-                                                                                                                    (*state).check as crate::stdlib::uLong,
-                                                                                                                    core::slice::from_raw_parts(put.wrapping_sub(out as usize), out as usize),
-                                                                                                                )
-                                                                                                            } else {
-                                                                                                                crate::src::adler32::adler32_z(
-                                                                                                                    (*state).check as crate::stdlib::uLong,
-                                                                                                                    core::slice::from_raw_parts(put.wrapping_sub(out as usize), out as usize),
-                                                                                                                )
-                                                                                                            }) as ::core::ffi::c_ulong;
+                                                                                                            let output = core::slice::from_raw_parts(
+                                                                                                                put.wrapping_sub(out as usize),
+                                                                                                                out as usize,
+                                                                                                            );
+                                                                                                            (*state).check = inflate_output_checksum(
+                                                                                                                (*state).check as crate::stdlib::uLong,
+                                                                                                                (*state).flags,
+                                                                                                                output,
+                                                                                                            );
                                                                                                             (*strm).adler = (*state).check as crate::stdlib::uLong;
                                                                                                         }
                                                                                                         out = left;
@@ -2565,23 +2580,13 @@ pub unsafe fn inflate(
     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
-        (*state).check = (if (*state).flags != 0 {
-            crate::src::crc32::crc32_z(
-                (*state).check as crate::stdlib::uLong,
-                core::slice::from_raw_parts(
-                    (*strm).next_out.wrapping_sub(out as usize),
-                    out as usize,
-                ),
-            )
-        } else {
-            crate::src::adler32::adler32_z(
-                (*state).check as crate::stdlib::uLong,
-                core::slice::from_raw_parts(
-                    (*strm).next_out.wrapping_sub(out as usize),
-                    out as usize,
-                ),
-            )
-        }) as ::core::ffi::c_ulong;
+        let output =
+            core::slice::from_raw_parts((*strm).next_out.wrapping_sub(out as usize), out as usize);
+        (*state).check = inflate_output_checksum(
+            (*state).check as crate::stdlib::uLong,
+            (*state).flags,
+            output,
+        );
         (*strm).adler = (*state).check as crate::stdlib::uLong;
     }
     (*strm).data_type = (*state).bits as ::core::ffi::c_int
