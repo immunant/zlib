@@ -5417,7 +5417,6 @@ fn detect_data_type(tree: &[crate::src::deflate::ct_data]) -> ::core::ffi::c_int
 
 fn tr_flush_block_state(
     state: &mut crate::src::deflate::deflate_state,
-    data_type: &mut ::core::ffi::c_int,
     pending_and_symbols: &mut [crate::stdlib::Byte],
     stored: Option<&[crate::stdlib::Byte]>,
     stored_len: crate::zutil_h::ulg,
@@ -5434,8 +5433,8 @@ fn tr_flush_block_state(
     let mut max_blindex = 0;
 
     if state.level > 0 {
-        if *data_type == crate::zlib_h::Z_UNKNOWN {
-            *data_type = detect_data_type(&state.dyn_ltree);
+        if state.data_type == crate::zlib_h::Z_UNKNOWN {
+            state.data_type = detect_data_type(&state.dyn_ltree);
         }
         if !build_l_tree_state(state) || !build_d_tree_state(state) {
             return false;
@@ -5566,8 +5565,7 @@ pub fn _tr_flush_block(
         let Ok(stored_len_usize) = usize::try_from(stored_len) else {
             return;
         };
-        let strm = state.strm;
-        if (pending_len != 0 && state.pending_buf.is_null()) || strm.is_null() {
+        if pending_len != 0 && state.pending_buf.is_null() {
             return;
         }
         let pending_and_symbols = if pending_len == 0 {
@@ -5583,14 +5581,7 @@ pub fn _tr_flush_block(
                 stored_len_usize,
             ))
         };
-        let _ = tr_flush_block_state(
-            state,
-            &mut (*strm).data_type,
-            pending_and_symbols,
-            stored,
-            stored_len,
-            last,
-        );
+        let _ = tr_flush_block_state(state, pending_and_symbols, stored, stored_len, last);
     }
 }
 #[export_name = "_tr_flush_block"]
@@ -5604,7 +5595,14 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     let Some(state) = s.as_mut() else {
         return;
     };
-    _tr_flush_block(state, buf, stored_len, last)
+    if state.strm.is_null() {
+        return;
+    }
+    _tr_flush_block(state, buf, stored_len, last);
+    let Some(strm) = state.strm.as_mut() else {
+        return;
+    };
+    strm.data_type = state.data_type;
 }
 pub fn _tr_tally(
     symbols: &mut [crate::zutil_h::uch],

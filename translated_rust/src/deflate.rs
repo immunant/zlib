@@ -82,6 +82,10 @@ pub type deflate_state = crate::src::deflate::internal_state;
 pub struct internal_state {
     pub strm: crate::zlib_h::z_streamp,
     pub status: ::core::ffi::c_int,
+    // `data_type` is observable through the ABI stream, but it is inferred by
+    // the tree core.  Keep the working value with the opaque codec state so
+    // that core tree work does not need to dereference `strm`.
+    pub data_type: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
     pub pending_out: *mut crate::stdlib::Bytef,
@@ -159,6 +163,7 @@ fn deflate_initial_state() -> deflate_state {
     internal_state {
         strm: ::core::ptr::null_mut(),
         status: 0,
+        data_type: crate::zlib_h::Z_UNKNOWN,
         pending_buf: ::core::ptr::null_mut(),
         pending_buf_size: 0,
         pending_out: ::core::ptr::null_mut(),
@@ -1521,6 +1526,7 @@ pub(crate) fn deflate_reset_keep_state(
     strm.total_in = strm.total_out;
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
+    state.data_type = crate::zlib_h::Z_UNKNOWN;
     state.pending = 0 as crate::zutil_h::ulg;
     state.pending_out = state.pending_buf;
     if state.wrap < 0 as ::core::ffi::c_int {
@@ -2449,6 +2455,9 @@ fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate::stdlib::uInt {
             return strm.avail_out;
         }
         let s = &mut *state;
+        // Tree construction keeps this derived value in opaque state.  Publish
+        // it while this existing ABI stream/state boundary is already active.
+        strm.data_type = s.data_type;
         let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
             return strm.avail_out;
         };
