@@ -2809,17 +2809,35 @@ pub unsafe fn inflate(
                         }
                         // Keep distance-table state and its error publication on
                         // the decoder entry's validated records. The table cursor
-                        // itself remains a boundary-owned compatibility pointer
-                        // until the ordinary inflate core owns its tables.
+                        // is resolved once to a bounded view, so both root and
+                        // subtable reads stay checked slice accesses.
                         let strm_ref = &mut *strm;
                         let state_ref = &mut *state;
+                        let Some(dcode) = inflate_fast_table(
+                            &state_ref.codes,
+                            state_ref.distcode as usize,
+                            crate::src::inftrees::inffixed_h::distfix.as_ptr() as usize,
+                            &crate::src::inftrees::inffixed_h::distfix,
+                        ) else {
+                            strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
+                                as *const ::core::ffi::c_char
+                                as *mut ::core::ffi::c_char;
+                            state_ref.mode = crate::src::inflate::BAD;
+                            continue '_inf_leave;
+                        };
                         loop {
-                            here = *state_ref.distcode.wrapping_add(
-                                (hold as ::core::ffi::c_uint
+                            let index = (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint) << state_ref.distbits)
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    as usize,
-                            );
+                                as usize;
+                            let Some(code) = dcode.get(index).copied() else {
+                                strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
+                                state_ref.mode = crate::src::inflate::BAD;
+                                continue '_inf_leave;
+                            };
+                            here = code;
                             if here.bits as ::core::ffi::c_uint <= bits {
                                 break;
                             }
@@ -2838,16 +2856,22 @@ pub unsafe fn inflate(
                         {
                             last = here;
                             loop {
-                                here = *state_ref.distcode.wrapping_add(
-                                    (last.val as ::core::ffi::c_uint).wrapping_add(
+                                let index = (last.val as ::core::ffi::c_uint).wrapping_add(
                                         (hold as ::core::ffi::c_uint
                                             & ((1 as ::core::ffi::c_uint)
                                                 << last.bits as ::core::ffi::c_int
                                                     + last.op as ::core::ffi::c_int)
                                                 .wrapping_sub(1 as ::core::ffi::c_uint))
                                             >> last.bits as ::core::ffi::c_int,
-                                    ) as usize,
-                                );
+                                    ) as usize;
+                                let Some(code) = dcode.get(index).copied() else {
+                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
+                                        as *const ::core::ffi::c_char
+                                        as *mut ::core::ffi::c_char;
+                                    state_ref.mode = crate::src::inflate::BAD;
+                                    continue '_inf_leave;
+                                };
+                                here = code;
                                 if (last.bits as ::core::ffi::c_int
                                     + here.bits as ::core::ffi::c_int)
                                     as ::core::ffi::c_uint
