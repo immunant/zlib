@@ -690,16 +690,13 @@ pub(crate) enum InflateCallbackInitRequest {
     },
 }
 
-// Version observation belongs to the named initialization implementation,
-// while version/size acceptance remains coupled to callback allocation and
-// publication below.  The distinction lets that transaction operate on a
-// pointer-free byte without changing its validation precedence.
-pub(crate) enum InflateAbiVersion {
-    Unchecked,
-    // Initialization observes only zlib's leading ABI version byte.  Keep
-    // that value, rather than a borrowed foreign byte, across the callback
-    // allocation transaction.
-    Observed(Option<::core::ffi::c_char>),
+// Callback-back has one additional pre-allocation admission rule: the caller
+// supplies a non-null work-area handle and a supported window width. Keep
+// those scalars pointer-free so the shared publication boundary can preserve
+// their ordering with version validation and stream selection.
+pub(crate) struct InflateBackInitAdmission {
+    pub(crate) window_bits: ::core::ffi::c_int,
+    pub(crate) window_present: bool,
 }
 
 enum InflateCallbackInitUpdate {
@@ -751,8 +748,10 @@ impl InflateCallbackInitRequest {
 pub(crate) unsafe fn inflate_publish_callback_owner(
     strm: Option<::core::ptr::NonNull<crate::zlib_h::z_stream_s>>,
     request: Option<InflateCallbackInitRequest>,
-    version: InflateAbiVersion,
+    version: *const ::core::ffi::c_char,
+    validate_version: bool,
     stream_size: ::core::ffi::c_int,
+    back_admission: Option<InflateBackInitAdmission>,
     copy_source: Option<&inflate_state>,
     destination_identity: usize,
     copied_state: &mut Option<::core::ptr::NonNull<inflate_state>>,
@@ -760,7 +759,8 @@ pub(crate) unsafe fn inflate_publish_callback_owner(
     // Version/size validation belongs to the callback allocation seam.  It
     // deliberately precedes nullable-stream selection, matching zlib's
     // Z_VERSION_ERROR-before-Z_STREAM_ERROR behavior.
-    if let InflateAbiVersion::Observed(version) = version {
+    if validate_version {
+        let version = version.as_ref().copied();
         if version.is_none_or(|version| {
             version as ::core::ffi::c_int != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
         }) || stream_size
@@ -769,6 +769,25 @@ pub(crate) unsafe fn inflate_publish_callback_owner(
             return crate::zlib_h::Z_VERSION_ERROR;
         }
     }
+    // Callback-back validates its window after version/size acceptance but
+    // before nullable-stream selection, matching its distinct initializer
+    // admission order. Construct the ordinary pointer-free request only once
+    // that scalar validation has completed.
+    let request = match back_admission {
+        Some(admission) => {
+            if !(8..=15).contains(&admission.window_bits) {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            if strm.is_none() || !admission.window_present {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            Some(InflateCallbackInitRequest::Back {
+                wbits: admission.window_bits as ::core::ffi::c_uint,
+                wsize: 1u32 << admission.window_bits,
+            })
+        }
+        None => request,
+    };
     let Some(mut strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -1080,14 +1099,13 @@ unsafe fn inflate_init2_from_abi(
     stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut copied_state = None;
-    // Observe only the leading ABI version byte before the allocation seam;
-    // that seam retains the comparison and its version/size precedence.
-    let version = InflateAbiVersion::Observed(version.as_ref().copied());
     inflate_publish_callback_owner(
         strm.map(::core::ptr::NonNull::from),
         Some(inflateInit2_(window_bits)),
         version,
+        true,
         stream_size,
+        None,
         None,
         0,
         &mut copied_state,
@@ -3467,8 +3485,10 @@ pub(crate) unsafe fn inflate_from_stream(
         let status = inflate_publish_callback_owner(
             Some(::core::ptr::NonNull::from(&mut *strm)),
             None,
-            InflateAbiVersion::Unchecked,
+            ::core::ptr::null(),
+            false,
             0,
+            None,
             Some(state),
             destination_identity,
             &mut copied_state,

@@ -68,37 +68,6 @@ pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 
-// Keep the validation and scalar geometry for callback-back mode independent
-// of its ABI stream and caller window.  This is the first piece of the
-// pointer-free back-mode owner: a later call-scoped window/callback facade can
-// consume this plan without repeating the FFI checks.
-struct InflateBackInitPlan {
-    wbits: ::core::ffi::c_uint,
-    wsize: ::core::ffi::c_uint,
-}
-
-impl InflateBackInitPlan {
-    fn new(
-        version_matches: bool,
-        window_bits: ::core::ffi::c_int,
-        stream_size: ::core::ffi::c_int,
-    ) -> Result<Self, ::core::ffi::c_int> {
-        if !version_matches
-            || stream_size
-                != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-        {
-            return Err(crate::zlib_h::Z_VERSION_ERROR);
-        }
-        if !(8..=15).contains(&window_bits) {
-            return Err(crate::zlib_h::Z_STREAM_ERROR);
-        }
-        Ok(Self {
-            wbits: window_bits as ::core::ffi::c_uint,
-            wsize: 1u32 << window_bits,
-        })
-    }
-}
-
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -106,33 +75,21 @@ pub unsafe extern "C" fn inflateBackInit_(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // Initialization only compares zlib's leading version byte. Borrow that
-    // one byte directly instead of doing raw offset arithmetic (and without
-    // scanning the caller's C string).
-    let version_matches = version
-        .as_ref()
-        .copied()
-        .is_some_and(|version| version == crate::zlib_h::ZLIB_VERSION[0]);
-    let plan = match InflateBackInitPlan::new(version_matches, windowBits, stream_size) {
-        Ok(plan) => plan,
-        Err(status) => return status,
-    };
-    if strm.is_null() || window.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // Keep the ABI stream projection at the shared callback allocation
-    // boundary. The back-mode payload and its validated stream handle remain
-    // pointer-free until that boundary publishes the callback-owned record.
-    let strm = ::core::ptr::NonNull::new(strm).expect("non-null stream checked above");
+    // The shared non-FFI transaction owns raw leading-version observation,
+    // callback-back admission, and callback allocation/publication. This
+    // adapter carries only scalar admission data and the nullable handle.
+    let strm = ::core::ptr::NonNull::new(strm);
     let mut copied_state = None;
     crate::src::inflate::inflate_publish_callback_owner(
-        Some(strm),
-        Some(crate::src::inflate::InflateCallbackInitRequest::Back {
-            wbits: plan.wbits,
-            wsize: plan.wsize,
+        strm,
+        None,
+        version,
+        true,
+        stream_size,
+        Some(crate::src::inflate::InflateBackInitAdmission {
+            window_bits: windowBits,
+            window_present: !window.is_null(),
         }),
-        crate::src::inflate::InflateAbiVersion::Unchecked,
-        0,
         None,
         0,
         &mut copied_state,
