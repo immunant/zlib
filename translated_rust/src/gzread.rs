@@ -1001,7 +1001,12 @@ pub fn gzclose_r(mut allocation: Box<crate::gzguts_h::gz_state>) -> ::core::ffi:
         (state.fd.take(), err)
     };
     let ret = match fd {
-        Some(fd) => unsafe { crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)) },
+        // `try_close` consumes the exact descriptor and retains close's errno
+        // result, unlike dropping `OwnedFd`.
+        Some(fd) => unsafe {
+            rustix::io::try_close(std::os::fd::IntoRawFd::into_raw_fd(fd))
+                .map_or(-1, |_| 0)
+        },
         None => -1,
     };
     return if ret != 0 {
