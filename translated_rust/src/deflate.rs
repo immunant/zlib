@@ -955,9 +955,15 @@ fn write_stream_bytes(
     true
 }
 
-unsafe fn fill_window(
+/// Refill the LZ window from a bounded view of the stream's current input.
+///
+/// `input` starts at the stream cursor on entry.  The stream's decreasing
+/// `avail_in` then selects the unconsumed suffix on subsequent loop turns,
+/// keeping the window logic independent of raw buffer pointers.
+fn fill_window_from_input(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
+    input: Option<&[crate::stdlib::Bytef]>,
 ) {
     let wsize = s.w_size;
     let Ok(window_len) = usize::try_from(s.window_size) else {
@@ -1028,13 +1034,22 @@ unsafe fn fill_window(
         let Some(end) = start.checked_add(n_usize) else {
             return;
         };
-        if end > window_len || (n != 0 && strm.next_in.is_null()) {
+        if end > window_len {
             return;
         }
         if n != 0 {
-            // `n` is bounded by `avail_in`, and the stream validator ensures
-            // that a nonempty input range is live for exactly that extent.
-            let input = unsafe { core::slice::from_raw_parts(strm.next_in, n_usize) };
+            let Some(input) = input else {
+                return;
+            };
+            let Some(input_start) = input.len().checked_sub(strm.avail_in as usize) else {
+                return;
+            };
+            let Some(input_end) = input_start.checked_add(n_usize) else {
+                return;
+            };
+            let Some(input) = input.get(input_start..input_end) else {
+                return;
+            };
             let Some(window) = s.window.as_deref_mut() else {
                 return;
             };
@@ -1144,6 +1159,7 @@ unsafe fn fill_window(
         window[start..end].fill(0);
     }
 }
+
 pub unsafe extern "C" fn deflateInit_(
     strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
@@ -1434,7 +1450,8 @@ pub unsafe extern "C" fn deflateSetDictionary(
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
     (*strm).avail_in = dictLength;
     (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
-    fill_window(s, strm);
+    let dictionary_input = core::slice::from_raw_parts(dictionary, dictLength as usize);
+    fill_window_from_input(s, strm, Some(dictionary_input));
     while (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
         str = (*s).strstart;
         n = (*s).lookahead.wrapping_sub(
@@ -1474,7 +1491,7 @@ pub unsafe extern "C" fn deflateSetDictionary(
         (*s).strstart = str;
         (*s).lookahead =
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        fill_window(s, strm);
+        fill_window_from_input(s, strm, Some(dictionary_input));
     }
     (*s).strstart = (*s).strstart.wrapping_add((*s).lookahead);
     (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -2583,6 +2600,14 @@ pub unsafe fn deflate(
         || (*s).lookahead != 0 as crate::stdlib::uInt
         || flush != crate::zlib_h::Z_NO_FLUSH && (*s).status != crate::src::deflate::FINISH_STATE
     {
+        // The stream and its input cursor were validated before entering the
+        // compression state machine.  Every engine receives this one bounded
+        // view and tracks progress through the ABI cursor it updates.
+        let input = if strm.avail_in == 0 {
+            &[]
+        } else {
+            core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+        };
         let mut bstate: block_state = need_more;
         bstate = (if (*s).level == 0 as ::core::ffi::c_int
             || matches!(
@@ -2590,17 +2615,11 @@ pub unsafe fn deflate(
                 CompressionEngine::Stored
             )
         {
-            let input_len = strm.avail_in as usize;
+            let input_len = input.len();
             let output_len = strm.avail_out as usize;
-            let next_in = strm.next_in;
             // The stream was validated above.  These short-lived views are
             // immediately converted back into ABI cursors after the stored
             // block engine returns.
-            let input = if input_len == 0 {
-                &[]
-            } else {
-                unsafe { core::slice::from_raw_parts(next_in, input_len) }
-            };
             let output = unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) };
             let mut io = DeflateStoredIo {
                 input,
@@ -2623,14 +2642,14 @@ pub unsafe fn deflate(
             strm.adler = io.adler;
             result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(&mut *s, strm, flush) as ::core::ffi::c_uint
+            deflate_huff(&mut *s, strm, flush, input) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
-            deflate_rle(s, strm, flush) as ::core::ffi::c_uint
+            deflate_rle(s, strm, flush, input) as ::core::ffi::c_uint
         } else {
             (match configuration_table[(*s).level as usize].func {
                 CompressionEngine::Stored => unreachable!("stored levels use the slice-based engine"),
-                CompressionEngine::Fast => deflate_fast(s, strm, flush),
-                CompressionEngine::Slow => deflate_slow(&mut *s, strm, flush),
+                CompressionEngine::Fast => deflate_fast(s, strm, flush, input),
+                CompressionEngine::Slow => deflate_slow(&mut *s, strm, flush, input),
             }) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
@@ -3453,12 +3472,13 @@ unsafe fn deflate_fast(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(s, strm);
+            fill_window_from_input(s, strm, Some(input));
             if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3567,12 +3587,13 @@ unsafe fn deflate_slow(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(s, strm);
+            fill_window_from_input(s, strm, Some(input));
             if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3793,11 +3814,12 @@ unsafe fn deflate_rle(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
     flush: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
-            fill_window(s, strm);
+            fill_window_from_input(s, strm, Some(input));
             if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3928,11 +3950,12 @@ unsafe fn deflate_huff(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
     flush: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if s.lookahead == 0 as crate::stdlib::uInt {
-            fill_window(s, strm);
+            fill_window_from_input(s, strm, Some(input));
             if s.lookahead == 0 as crate::stdlib::uInt {
                 if flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
