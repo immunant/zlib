@@ -99,10 +99,6 @@ pub struct internal_state {
     pub pending_buf_size: crate::zutil_h::ulg,
     pub pending_out_offset: usize,
     pub pending: crate::zutil_h::ulg,
-    /// A one-call override for the stored-block length written by the tree
-    /// boundary. `deflate_stored()` emits that header into pending storage
-    /// while sending its payload directly to caller output.
-    pub pending_header_len_override: Option<crate::zutil_h::ulg>,
     pub wrap: ::core::ffi::c_int,
     pub gzhead: crate::zlib_h::gz_headerp,
     pub gzindex: crate::zutil_h::ulg,
@@ -185,7 +181,6 @@ impl internal_state {
             pending_buf_size: 0,
             pending_out_offset: 0,
             pending: 0,
-            pending_header_len_override: None,
             wrap: 0,
             gzhead: ::core::ptr::null_mut(),
             gzindex: 0,
@@ -4920,16 +4915,26 @@ fn stored_block_length_bytes(len: ::core::ffi::c_uint) -> [crate::stdlib::Bytef;
     ]
 }
 
-/// Consume the direct-output stored-block header override, if one was set by
-/// `deflate_stored()`. All other tree callers use their payload length.
-pub(crate) fn take_pending_header_len_override(
+/// Emit the header for a stored block whose payload goes directly to the
+/// caller output.  The caller has already established the single bounded
+/// pending/symbol allocation, so this stays entirely in the safe core rather
+/// than round-tripping through the raw `_tr_stored_block` export.
+fn stored_block_emit_direct_header(
+    storage: &mut PendingStorageView<'_>,
     state: &mut crate::src::deflate::deflate_state,
-    stored_len: crate::zutil_h::ulg,
-) -> crate::zutil_h::ulg {
-    state
-        .pending_header_len_override
-        .take()
-        .unwrap_or(stored_len)
+    len: ::core::ffi::c_uint,
+    last: ::core::ffi::c_int,
+) {
+    crate::src::trees::tr_stored_block_core(
+        storage,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &mut state.bi_used,
+        &[],
+        len as crate::zutil_h::ulg,
+        last,
+    );
 }
 
 // As with the RLE and Huffman-only strategies, level-zero's remaining raw
@@ -4968,16 +4973,21 @@ macro_rules! deflate_stored_at_ffi_boundary {
                 }
                 last = stored_block_is_last(flush, len, left, (*(*s).strm).avail_in)
                     as ::core::ffi::c_int;
-                // The tree boundary owns the callback-backed pending-storage view.
-                // Tell it to encode this direct-output block's length there, rather
-                // than rewriting four pending bytes through raw interior pointers.
-                (*s).pending_header_len_override = Some(len as crate::zutil_h::ulg);
-                crate::src::trees::_tr_stored_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    ::core::ptr::null_mut::<crate::stdlib::charf>(),
-                    0 as crate::zutil_h::ulg,
-                    last,
+                // The exported deflate boundary establishes the callback-backed
+                // pending view once for this header; the encoding itself is safe.
+                let state = &mut *s;
+                let layout = pending_storage_layout_for_state(state)
+                    .expect("validated pending storage layout");
+                let pending = core::slice::from_raw_parts_mut(
+                    state
+                        .pending_buf
+                        .expect("validated pending storage")
+                        .as_ptr(),
+                    layout.total_len,
                 );
+                let mut storage = PendingStorageView::new(pending, layout)
+                    .expect("pending storage layout matches its allocation");
+                stored_block_emit_direct_header(&mut storage, state, len, last);
                 flush_pending((*s).strm);
                 let (window_len, input_len) = stored_block_copy_lengths(left, len);
                 if window_len != 0 {
@@ -5990,10 +6000,10 @@ mod tests {
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
         stored_block_buffered_len, stored_block_can_emit, stored_block_copy_buffered_output,
-        stored_block_copy_lengths, stored_block_header_bytes, stored_block_is_last,
-        stored_block_length_bytes, stored_block_min_size, stored_block_payload_len,
-        stored_block_should_wait, stored_block_update_history, stored_insert_after_input,
-        symbol_buffer_is_full, symbol_triplet_cursors, take_pending_header_len_override,
+        stored_block_copy_lengths, stored_block_emit_direct_header, stored_block_header_bytes,
+        stored_block_is_last, stored_block_length_bytes, stored_block_min_size,
+        stored_block_payload_len, stored_block_should_wait, stored_block_update_history,
+        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors,
         with_pending_storage, zlib_header, DeflateBoundGzipHeader, DeflateBoundState,
         DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
         DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, DeflateSymbolWorkingSet,
@@ -6015,7 +6025,6 @@ mod tests {
         assert_eq!(state.sym_buf_offset, 0);
         assert_eq!(state.status, 0);
         assert_eq!(state.pending_out_offset, 0);
-        assert_eq!(state.pending_header_len_override, None);
         assert_eq!(state.window_size, 0);
         assert_eq!(state.block_start, 0);
         assert_eq!(state.high_water, 0);
@@ -7400,6 +7409,24 @@ mod tests {
     }
 
     #[test]
+    fn stored_direct_header_uses_the_payload_length_without_a_state_override() {
+        let mut state = super::internal_state::newly_allocated();
+        let layout = pending_storage_layout(4);
+        state.lit_bufsize = 4;
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        state.sym_buf_offset = layout.symbol_offset;
+        state.sym_end = layout.symbol_flush_threshold;
+        let mut pending = [0; 16];
+        let mut storage = PendingStorageView::new(&mut pending, layout).unwrap();
+
+        stored_block_emit_direct_header(&mut storage, &mut state, 0x1234, 0);
+
+        assert_eq!(state.pending, 5);
+        assert_eq!(storage.pending_bytes()[..5], [0, 0x34, 0x12, 0xcb, 0xed]);
+        assert_eq!((state.bi_buf, state.bi_valid, state.bi_used), (0, 0, 3));
+    }
+
+    #[test]
     fn pending_storage_layout_preserves_shared_allocation_geometry() {
         assert_eq!(
             pending_storage_layout(16),
@@ -8520,17 +8547,6 @@ mod tests {
             stored_block_length_bytes(crate::src::deflate::MAX_STORED as ::core::ffi::c_uint),
             [0xff, 0xff, 0x00, 0x00]
         );
-    }
-
-    #[test]
-    fn stored_header_length_override_is_one_call_and_defaults_to_payload_length() {
-        let mut state = super::internal_state::newly_allocated();
-
-        assert_eq!(take_pending_header_len_override(&mut state, 7), 7);
-        state.pending_header_len_override = Some(0x1234);
-        assert_eq!(take_pending_header_len_override(&mut state, 7), 0x1234);
-        assert_eq!(state.pending_header_len_override, None);
-        assert_eq!(take_pending_header_len_override(&mut state, 7), 7);
     }
 
     #[test]

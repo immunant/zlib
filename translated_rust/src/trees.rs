@@ -5027,7 +5027,11 @@ fn send_all_trees(
     send_tree(writer, dyn_ltree, bl_tree, lcodes - 1)
         && send_tree(writer, dyn_dtree, bl_tree, dcodes - 1)
 }
-fn tr_stored_block_core(
+/// Encode a stored-block header and payload through an already-established
+/// pending-storage view.  Exported deflate boundaries establish that view;
+/// strategy cores must not reconstruct callback-backed storage from raw
+/// state pointers.
+pub(crate) fn tr_stored_block_core(
     storage: &mut crate::src::deflate::PendingStorageView<'_>,
     pending: &mut crate::zutil_h::ulg,
     bi_buf: &mut crate::zutil_h::ush,
@@ -5098,8 +5102,6 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     } else {
         core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
     };
-    let stored_header_len =
-        crate::src::deflate::take_pending_header_len_override(state, stored_len);
     crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
         tr_stored_block_core(
             storage,
@@ -5108,7 +5110,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
             &mut state.bi_valid,
             &mut state.bi_used,
             stored_data,
-            stored_header_len,
+            stored_len,
             last,
         );
     })
