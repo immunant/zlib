@@ -856,6 +856,22 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
         );
     }
 }
+
+/// Apply the scalar part of a gzip error transition.  The caller owns any
+/// previous or replacement C error string at the ABI boundary.  The return
+/// value says whether a non-static message still needs to be composed.
+fn gz_error_state(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    has_message: bool,
+) -> bool {
+    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && state.again == 0 {
+        state.x.have = 0;
+    }
+    state.err = err;
+    has_message && err != crate::zlib_h::Z_MEM_ERROR
+}
+
 pub unsafe extern "C" fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
     mut err: ::core::ffi::c_int,
@@ -867,14 +883,7 @@ pub unsafe extern "C" fn gz_error(
         }
         (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && (*state).again == 0 {
-        (*state).x.have = 0 as ::core::ffi::c_uint;
-    }
-    (*state).err = err;
-    if msg.is_null() {
-        return;
-    }
-    if err == crate::zlib_h::Z_MEM_ERROR {
+    if !gz_error_state(&mut *state, err, !msg.is_null()) {
         return;
     }
     (*state).msg = crate::stdlib::malloc(
