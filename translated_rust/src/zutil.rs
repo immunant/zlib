@@ -82,6 +82,26 @@ impl<T> IdentityOwner<T> {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&identity)
     }
+
+    pub(crate) fn with_ref<R>(&self, identity: usize, action: impl FnOnce(&T) -> R) -> Option<R> {
+        let values = self
+            .values
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        values.get(&identity).map(action)
+    }
+
+    pub(crate) fn with_mut<R>(
+        &self,
+        identity: usize,
+        action: impl FnOnce(&mut T) -> R,
+    ) -> Option<R> {
+        let mut values = self
+            .values
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        values.get_mut(&identity).map(action)
+    }
 }
 
 /// Allocate, initialize, and expose one opaque stream-state value.
