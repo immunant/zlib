@@ -237,6 +237,36 @@ fn inflate_back_code_length_repeat(symbol: ::core::ffi::c_ushort) -> InflateBack
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct InflateBackCodeLengthRepeatPlan {
+    length: ::core::ffi::c_uint,
+    count: ::core::ffi::c_uint,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+}
+
+fn inflate_back_code_length_repeat_plan(
+    repeat: &InflateBackCodeLengthRepeat,
+    previous_length: Option<::core::ffi::c_ushort>,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+) -> Option<InflateBackCodeLengthRepeatPlan> {
+    let (length, base, extra_bits) = match repeat {
+        InflateBackCodeLengthRepeat::Previous { extra_bits } => {
+            (previous_length? as ::core::ffi::c_uint, 3, *extra_bits)
+        }
+        InflateBackCodeLengthRepeat::Zero { extra_bits, base } => (0, *base, *extra_bits),
+    };
+    let (extra, hold, bits) = inflate_back_take_bits(hold, bits, extra_bits);
+
+    Some(InflateBackCodeLengthRepeatPlan {
+        length,
+        count: base.wrapping_add(extra),
+        hold,
+        bits,
+    })
+}
+
 fn inflate_back_match_copy_plan(
     window_size: ::core::ffi::c_uint,
     offset: ::core::ffi::c_uint,
@@ -681,35 +711,27 @@ pub unsafe extern "C" fn inflateBack(
                                 }
                                 hold >>= here.bits as ::core::ffi::c_int;
                                 bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                match repeat {
-                                    InflateBackCodeLengthRepeat::Previous { extra_bits } => {
-                                        if (*state).have == 0 as ::core::ffi::c_uint {
-                                            (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                                as *const ::core::ffi::c_char
-                                                as *mut ::core::ffi::c_char;
-                                            (*state).mode = crate::src::inflate::BAD;
-                                            break;
-                                        }
-                                        len = (*state).lens[(*state)
-                                            .have
-                                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                                            as usize]
-                                            as ::core::ffi::c_uint;
-                                        let (extra, remaining_hold, remaining_bits) =
-                                            inflate_back_take_bits(hold, bits, extra_bits);
-                                        copy = (3 as ::core::ffi::c_uint).wrapping_add(extra);
-                                        hold = remaining_hold;
-                                        bits = remaining_bits;
-                                    }
-                                    InflateBackCodeLengthRepeat::Zero { extra_bits, base } => {
-                                        len = 0 as ::core::ffi::c_uint;
-                                        let (extra, remaining_hold, remaining_bits) =
-                                            inflate_back_take_bits(hold, bits, extra_bits);
-                                        copy = base.wrapping_add(extra);
-                                        hold = remaining_hold;
-                                        bits = remaining_bits;
-                                    }
-                                }
+                                let previous_length = if (*state).have == 0 {
+                                    None
+                                } else {
+                                    Some((*state).lens[(*state).have.wrapping_sub(1) as usize])
+                                };
+                                let Some(plan) = inflate_back_code_length_repeat_plan(
+                                    &repeat,
+                                    previous_length,
+                                    hold,
+                                    bits,
+                                ) else {
+                                    (*strm).msg = b"invalid bit length repeat\0".as_ptr()
+                                        as *const ::core::ffi::c_char
+                                        as *mut ::core::ffi::c_char;
+                                    (*state).mode = crate::src::inflate::BAD;
+                                    break;
+                                };
+                                len = plan.length;
+                                copy = plan.count;
+                                hold = plan.hold;
+                                bits = plan.bits;
                                 if (*state).have.wrapping_add(copy)
                                     > (*state).nlen.wrapping_add((*state).ndist)
                                 {
@@ -1134,12 +1156,13 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 mod tests {
     use super::{
         inflate_back_align_to_byte_boundary, inflate_back_block_header,
-        inflate_back_code_length_repeat, inflate_back_consume_input_byte, inflate_back_copy_count,
-        inflate_back_copy_match, inflate_back_distance_exceeds_window,
-        inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
-        inflate_back_litlen_action, inflate_back_match_copy_plan, inflate_back_stored_block_length,
-        inflate_back_take_bits, inflate_back_window_bits_are_valid, inflate_back_window_size,
-        InflateBackBlockKind, InflateBackCodeLengthRepeat, InflateBackLitLenAction,
+        inflate_back_code_length_repeat, inflate_back_code_length_repeat_plan,
+        inflate_back_consume_input_byte, inflate_back_copy_count, inflate_back_copy_match,
+        inflate_back_distance_exceeds_window, inflate_back_finish_flush_status,
+        inflate_back_init_metadata_is_valid, inflate_back_litlen_action,
+        inflate_back_match_copy_plan, inflate_back_stored_block_length, inflate_back_take_bits,
+        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
+        InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan, InflateBackLitLenAction,
         InflateBackMatchSource,
     };
 
@@ -1349,6 +1372,58 @@ mod tests {
                 extra_bits: 7,
                 base: 11,
             }
+        );
+    }
+
+    #[test]
+    fn inflate_back_code_length_repeat_plan_uses_previous_length_and_consumes_extra_bits() {
+        assert_eq!(
+            inflate_back_code_length_repeat_plan(
+                &InflateBackCodeLengthRepeat::Previous { extra_bits: 2 },
+                Some(9),
+                0b110_10,
+                5,
+            ),
+            Some(InflateBackCodeLengthRepeatPlan {
+                length: 9,
+                count: 5,
+                hold: 0b110,
+                bits: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn inflate_back_code_length_repeat_plan_rejects_previous_repeat_without_history() {
+        assert_eq!(
+            inflate_back_code_length_repeat_plan(
+                &InflateBackCodeLengthRepeat::Previous { extra_bits: 2 },
+                None,
+                0,
+                2,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn inflate_back_code_length_repeat_plan_builds_zero_run_from_base_and_extra_bits() {
+        assert_eq!(
+            inflate_back_code_length_repeat_plan(
+                &InflateBackCodeLengthRepeat::Zero {
+                    extra_bits: 3,
+                    base: 3,
+                },
+                None,
+                0b1_101,
+                4,
+            ),
+            Some(InflateBackCodeLengthRepeatPlan {
+                length: 0,
+                count: 8,
+                hold: 1,
+                bits: 1,
+            })
         );
     }
 

@@ -1054,6 +1054,14 @@ fn inflate_gzip_length_check_required(wrap: ::core::ffi::c_int, flags: ::core::f
     wrap != 0 && flags != 0
 }
 
+fn inflate_gzip_trailer_length_is_valid(
+    wrap: ::core::ffi::c_int,
+    received_length: crate::stdlib::uLong,
+    total_length: crate::stdlib::uLong,
+) -> bool {
+    wrap & 4 == 0 || received_length == total_length & 0xffffffff as crate::stdlib::uLong
+}
+
 fn update_window_metadata(
     wbits: ::core::ffi::c_uint,
     wsize: &mut ::core::ffi::c_uint,
@@ -1549,9 +1557,7 @@ pub unsafe extern "C" fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh34 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    if (*state).wrap & 4 as ::core::ffi::c_int != 0
-                        && hold != (*state).total & 0xffffffff as ::core::ffi::c_ulong
-                    {
+                    if !inflate_gzip_trailer_length_is_valid((*state).wrap, hold, (*state).total) {
                         (*strm).msg = b"incorrect length check\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
@@ -4711,6 +4717,21 @@ mod tests {
         assert!(inflate_gzip_length_check_required(4, -1));
         assert!(!inflate_gzip_length_check_required(0, 1));
         assert!(!inflate_gzip_length_check_required(4, 0));
+    }
+
+    #[test]
+    fn gzip_trailer_length_validation_respects_wrap_and_32_bit_length() {
+        assert!(super::inflate_gzip_trailer_length_is_valid(0, 7, 8));
+        assert!(super::inflate_gzip_trailer_length_is_valid(
+            4,
+            0x89ab_cdef,
+            0x1_89ab_cdef
+        ));
+        assert!(!super::inflate_gzip_trailer_length_is_valid(
+            4,
+            0x89ab_cdef,
+            0x1_89ab_cdee
+        ));
     }
 
     #[test]
