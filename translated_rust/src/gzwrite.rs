@@ -4,7 +4,7 @@ pub use crate::gzguts_h::gz_state;
 pub use crate::gzguts_h::gz_statep;
 pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::src::gzlib::gz_error;
-pub use crate::src::gzlib::gz_intmax;
+pub use crate::src::gzlib::gz_clamped_uint;
 
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;
@@ -237,7 +237,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        n = gz_zero_chunk_size((*state).size, (*state).skip);
+        n = gz_clamped_uint((*state).size, (*state).skip);
         if first != 0 {
             crate::stdlib::memset(
                 (*state).in_0 as *mut ::core::ffi::c_void,
@@ -260,21 +260,6 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         }
     }
     return 0 as ::core::ffi::c_int;
-}
-
-fn gz_zero_chunk_size(
-    size: crate::stdlib::uInt,
-    skip: crate::stdlib::off64_t,
-) -> crate::stdlib::uInt {
-    if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-        && size > crate::src::gzlib::gz_intmax()
-        || size as crate::stdlib::off64_t > skip
-    {
-        skip as crate::stdlib::uInt
-    } else {
-        size
-    }
 }
 
 unsafe extern "C" fn gz_write(
@@ -367,6 +352,10 @@ fn gz_write_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
         && (state.err == crate::zlib_h::Z_OK || state.again != 0)
 }
 
+fn gz_write_params_ready(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_write_state_ready(state) && state.direct == 0
+}
+
 fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
 }
@@ -422,9 +411,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gz_write_state_ready(&*state) {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_error(
@@ -462,9 +449,7 @@ pub unsafe extern "C" fn gzputc_ffi(
     }
     state = file as crate::gzguts_h::gz_statep;
     strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gz_write_state_ready(&*state) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -521,9 +506,7 @@ pub unsafe extern "C" fn gzputs_ffi(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gz_write_state_ready(&*state) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -603,10 +586,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     }
     state = file as crate::gzguts_h::gz_statep;
     strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-        || (*state).direct != 0
-    {
+    if !gz_write_params_ready(&*state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_error(

@@ -352,6 +352,20 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     }
     gzbuffer(&mut *(file as crate::gzguts_h::gz_statep), size)
 }
+pub fn gz_clamped_uint(
+    value: crate::stdlib::uInt,
+    limit: crate::stdlib::off64_t,
+) -> crate::stdlib::uInt {
+    if ::core::mem::size_of::<::core::ffi::c_int>() as usize
+        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
+        && value > gz_intmax()
+        || value as crate::stdlib::off64_t > limit
+    {
+        limit as crate::stdlib::uInt
+    } else {
+        value
+    }
+}
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -449,15 +463,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
         }
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-            == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-            && (*state).x.have > gz_intmax()
-            || (*state).x.have as crate::stdlib::off64_t > offset
-        {
-            offset as ::core::ffi::c_uint
-        } else {
-            (*state).x.have
-        };
+        n = gz_clamped_uint((*state).x.have, offset);
         (*state).x.have = (*state).x.have.wrapping_sub(n);
         (*state).x.next = (*state).x.next.offset(n as isize);
         (*state).x.pos += n as crate::stdlib::off64_t;
