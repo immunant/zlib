@@ -569,6 +569,10 @@ pub(crate) fn symbol_triplet_cursors(
     ([start, second, third], third.wrapping_add(1))
 }
 
+fn symbol_buffer_is_full(sym_next: crate::stdlib::uInt, sym_end: crate::stdlib::uInt) -> bool {
+    sym_next == sym_end
+}
+
 fn deflate_huff_literal_progress(
     sym_next_after_literal: crate::stdlib::uInt,
     sym_end: crate::stdlib::uInt,
@@ -584,7 +588,7 @@ fn deflate_huff_literal_progress(
         sym_next_after_literal,
         lookahead.wrapping_sub(1),
         strstart.wrapping_add(1),
-        sym_next_after_literal == sym_end,
+        symbol_buffer_is_full(sym_next_after_literal, sym_end),
     )
 }
 
@@ -3472,7 +3476,7 @@ unsafe extern "C" fn deflate_fast(
                     .fc
                     .value
                     .wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
             if deflate_fast_should_insert_match(
                 (*s).match_length,
@@ -3521,7 +3525,7 @@ unsafe extern "C" fn deflate_fast(
             *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc.value =
                 (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             ((*s).lookahead, (*s).strstart) =
                 deflate_fast_literal_state_after_emit((*s).lookahead, (*s).strstart);
         }
@@ -3735,7 +3739,7 @@ unsafe extern "C" fn deflate_slow(
                     .fc
                     .value
                     .wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s)
                 .lookahead
                 .wrapping_sub((*s).prev_length.wrapping_sub(1 as crate::stdlib::uInt));
@@ -3806,7 +3810,7 @@ unsafe extern "C" fn deflate_slow(
             *(*s).sym_buf.offset(c2rust_fresh42 as isize) = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc.value =
                 (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
                     s as *mut crate::src::deflate::internal_state,
@@ -3852,7 +3856,7 @@ unsafe extern "C" fn deflate_slow(
         *(*s).sym_buf.offset(c2rust_fresh45 as isize) = cc_0 as crate::zutil_h::uchf;
         (*s).dyn_ltree[cc_0 as usize].fc.value =
             (*s).dyn_ltree[cc_0 as usize].fc.value.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+        bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
     (*s).insert = deflate_insert_after_block((*s).strstart);
@@ -4004,7 +4008,7 @@ unsafe fn deflate_rle(
                     .fc
                     .value
                     .wrapping_add(1);
-                bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+                bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
                 ((*s).lookahead, (*s).strstart, (*s).match_length) =
                     deflate_rle_match_state_after_emit(
                         (*s).lookahead,
@@ -4022,7 +4026,7 @@ unsafe fn deflate_rle(
                 *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
                 (*s).dyn_ltree[cc as usize].fc.value =
                     (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
-                bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+                bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
                 (*s).lookahead = (*s).lookahead.wrapping_sub(1);
                 (*s).strstart = (*s).strstart.wrapping_add(1);
             }
@@ -4234,8 +4238,8 @@ mod tests {
         short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
         stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
         stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
-        symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction, DeflatePreflight,
-        DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
+        symbol_buffer_is_full, symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
     };
 
     #[test]
@@ -4531,6 +4535,16 @@ mod tests {
                 1
             )
         );
+    }
+
+    #[test]
+    fn symbol_buffer_is_full_requires_exact_cursor_equality() {
+        assert!(symbol_buffer_is_full(12, 12));
+        assert!(!symbol_buffer_is_full(11, 12));
+        assert!(!symbol_buffer_is_full(
+            crate::stdlib::uInt::MAX,
+            crate::stdlib::uInt::MAX - 1,
+        ));
     }
 
     #[test]

@@ -4555,6 +4555,10 @@ fn tree_next_cursor(index: ::core::ffi::c_int) -> usize {
     index.wrapping_add(1) as usize
 }
 
+fn bl_code_index_at_rank(rank: ::core::ffi::c_int) -> usize {
+    bl_order[rank as usize] as usize
+}
+
 fn last_nonzero_bl_code_rank(
     nonzero_at_rank: &[bool; crate::src::deflate::BL_CODES as usize],
 ) -> ::core::ffi::c_int {
@@ -5015,10 +5019,11 @@ unsafe fn send_all_trees(
     }
     rank = 0 as ::core::ffi::c_int;
     while rank < blcodes {
+        let code_index = bl_code_index_at_rank(rank);
         let mut len_2: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if bit_buffer_would_overflow((*s).bi_valid, len_2) {
             let mut val_2: ::core::ffi::c_int =
-                (*s).bl_tree[bl_order[rank as usize] as usize].dl.len as ::core::ffi::c_int;
+                (*s).bl_tree[code_index].dl.len as ::core::ffi::c_int;
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                 | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                 as crate::zutil_h::ush;
@@ -5038,8 +5043,8 @@ unsafe fn send_all_trees(
             (*s).bi_valid += len_2 - crate::src::deflate::Buf_size;
         } else {
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | ((*s).bl_tree[bl_order[rank as usize] as usize].dl.len as ::core::ffi::c_int)
-                    << (*s).bi_valid) as crate::zutil_h::ush;
+                | ((*s).bl_tree[code_index].dl.len as ::core::ffi::c_int) << (*s).bi_valid)
+                as crate::zutil_h::ush;
             (*s).bi_valid += len_2;
         }
         rank += 1;
@@ -5640,15 +5645,16 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bit_buffer_would_overflow,
-        bit_length_correction, bl_order, bl_tree_header_bit_length, block_bit_length_bytes,
-        block_header_bits, canonical_code_assignments, canonical_codes_for_lengths,
-        clamped_tree_bit_length, classify_tree_run, combined_tree_frequency, decode_symbol_triplet,
-        detect_data_type_from_ltree, dist_code_index, dynamic_tree_header_counts,
-        gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
-        last_nonzero_bl_code_rank, length_extra_bits, mark_bl_code_nonzero_at_rank,
-        match_tree_codes, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_bit_length_counts,
-        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        bit_length_correction, bl_code_index_at_rank, bl_order, bl_tree_header_bit_length,
+        block_bit_length_bytes, block_header_bits, canonical_code_assignments,
+        canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
+        combined_tree_frequency, decode_symbol_triplet, detect_data_type_from_ltree,
+        dist_code_index, dynamic_tree_header_counts, gen_bitlen_node_plan,
+        gen_bitlen_overflow_reassignment, heap_node_precedes, last_nonzero_bl_code_rank,
+        length_extra_bits, mark_bl_code_nonzero_at_rank, match_tree_codes, next_code_for_len,
+        next_codes, pending_cursor_after_bytes, pqdownheap_child_to_promote,
+        rebalance_overflowed_bit_lengths, reset_bit_length_counts, reset_block_trees,
+        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
@@ -6465,5 +6471,12 @@ mod tests {
             bl_tree_header_bit_length(crate::src::deflate::BL_CODES - 1),
             71
         );
+    }
+
+    #[test]
+    fn bl_code_index_at_rank_follows_deflate_bit_length_code_order() {
+        assert_eq!(bl_code_index_at_rank(0), 16);
+        assert_eq!(bl_code_index_at_rank(3), 0);
+        assert_eq!(bl_code_index_at_rank(crate::src::deflate::BL_CODES - 1), 15);
     }
 }

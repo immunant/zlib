@@ -1007,6 +1007,13 @@ fn gz_decomp_needs_input_load(avail_in: crate::stdlib::uInt) -> bool {
     avail_in == 0
 }
 
+fn gz_decomp_produced_output(
+    prior_avail_out: ::core::ffi::c_uint,
+    avail_out: crate::stdlib::uInt,
+) -> bool {
+    avail_out < prior_avail_out
+}
+
 fn gz_decomp_reports_unexpected_eof(again: ::core::ffi::c_int) -> bool {
     again == 0
 }
@@ -1126,7 +1133,7 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
         );
         let decision = gz_decomp_decision(
             ret,
-            (*strm).avail_out < had,
+            gz_decomp_produced_output(had, (*strm).avail_out),
             (*state).junk,
             (*strm).avail_out,
         );
@@ -1769,6 +1776,13 @@ mod tests {
         assert!(gz_decomp_needs_input_load(0));
         assert!(!gz_decomp_needs_input_load(1));
         assert!(!gz_decomp_needs_input_load(crate::stdlib::uInt::MAX));
+    }
+
+    #[test]
+    fn gz_decomp_produced_output_requires_available_output_to_decrease() {
+        assert!(gz_decomp_produced_output(10, 9));
+        assert!(!gz_decomp_produced_output(10, 10));
+        assert!(!gz_decomp_produced_output(10, 11));
     }
 
     #[test]
