@@ -930,11 +930,9 @@ pub unsafe extern "C" fn deflateGetDictionary(
     let window = if len == 0 {
         None
     } else {
-        Some(::core::slice::from_raw_parts(
-            state.window.offset(state.strstart.wrapping_add(state.lookahead) as isize)
-                .offset(-(len as isize)),
-            len as usize,
-        ))
+        let end = state.strstart.wrapping_add(state.lookahead) as usize;
+        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+        Some(&window[end - len as usize..end])
     };
     let dict_length = if dictLength.is_null() {
         None
