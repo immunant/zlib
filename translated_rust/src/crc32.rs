@@ -4827,11 +4827,15 @@ pub unsafe extern "C" fn crc32_ffi(
     };
     crc32(crc, bytes)
 }
-pub fn crc32_combine_gen64(len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
+fn crc32_combine_operator(len2: crate::stdlib::off64_t) -> Option<crate::stdlib::uLong> {
     if len2 < 0 {
-        return 0;
+        return None;
     }
-    x2nmodp(len2 as u64, 3)
+    Some(x2nmodp(len2 as u64, 3))
+}
+
+pub fn crc32_combine_gen64(len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
+    crc32_combine_operator(len2).unwrap_or(0)
 }
 #[export_name = "crc32_combine_gen64"]
 
@@ -4874,7 +4878,9 @@ pub fn crc32_combine64(
     crc2: crate::stdlib::uLong,
     len2: crate::stdlib::off64_t,
 ) -> crate::stdlib::uLong {
-    crc32_combine_op(crc1, crc2, crc32_combine_gen64(len2))
+    crc32_combine_operator(len2)
+        .map(|op| crc32_combine_op(crc1, crc2, op))
+        .unwrap_or(0)
 }
 #[export_name = "crc32_combine64"]
 
@@ -4905,9 +4911,10 @@ pub unsafe extern "C" fn crc32_combine_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_from_state,
-        crc32_initial_state, crc32_update_byte, crc32_update_bytes, crc32_z, crc_table_ref,
-        multmodp, next_poly_term, x2n_table, x2nmodp, CRC32_MASK, POLY,
+        crc32, crc32_combine, crc32_combine64, crc32_combine_gen64, crc32_combine_op,
+        crc32_combine_operator, crc32_from_state, crc32_initial_state, crc32_update_byte,
+        crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term, x2n_table, x2nmodp,
+        CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -5031,17 +5038,29 @@ mod tests {
     }
 
     #[test]
-    fn generated_operator_matches_direct_combine() {
-        let op = crc32_combine_gen64(5);
-        assert_eq!(
-            crc32_combine_op(HELLO_SPACE_CRC, WORLD_CRC, op),
-            HELLO_WORLD_CRC
-        );
+    fn combine_operator_handles_negative_zero_and_positive_lengths() {
+        assert_eq!(crc32_combine_operator(-1), None);
+        assert_eq!(crc32_combine_operator(0), Some(x2nmodp(0, 3)));
+        assert_eq!(crc32_combine_operator(5), Some(x2nmodp(5, 3)));
     }
 
     #[test]
-    fn invalid_lengths_and_operators_return_zero() {
+    fn generated_operator_preserves_sentinel_and_combine_equivalence() {
         assert_eq!(crc32_combine_gen64(-1), 0);
+        assert_eq!(crc32_combine64(HELLO_SPACE_CRC, WORLD_CRC, -1), 0);
+
+        for len2 in [0, 5] {
+            let op = crc32_combine_gen64(len2);
+            assert_eq!(
+                crc32_combine64(HELLO_SPACE_CRC, WORLD_CRC, len2),
+                crc32_combine_op(HELLO_SPACE_CRC, WORLD_CRC, op)
+            );
+        }
+
+        assert_eq!(
+            crc32_combine_op(HELLO_SPACE_CRC, WORLD_CRC, crc32_combine_gen64(5)),
+            HELLO_WORLD_CRC
+        );
         assert_eq!(crc32_combine_op(HELLO_SPACE_CRC, WORLD_CRC, 0), 0);
     }
 
