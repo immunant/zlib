@@ -1201,22 +1201,6 @@ pub(crate) fn gz_error_io(state: &mut crate::gzguts_h::gz_state, code: ::core::f
     }
 }
 
-// Transitional adapter for the translated gzip I/O routines.  New code uses
-// `gz_error_update_state`; this raw form remains until those routines have
-// been moved behind their boundary adapters.
-pub unsafe fn gz_error(
-    state: crate::gzguts_h::gz_statep,
-    err: ::core::ffi::c_int,
-    msg: *const ::core::ffi::c_char,
-) {
-    let message = if msg.is_null() {
-        None
-    } else {
-        Some(::std::ffi::CStr::from_ptr(msg))
-    };
-    gz_error_update_state(&mut *state, err, message);
-}
-
 #[export_name = "gz_error"]
 
 pub unsafe extern "C" fn gz_error_ffi(
@@ -1225,7 +1209,13 @@ pub unsafe extern "C" fn gz_error_ffi(
     mut msg: *const ::core::ffi::c_char,
 ) {
     if !state.is_null() {
-        gz_error(state, err, msg);
+        let state = &mut *state;
+        let message = if msg.is_null() {
+            None
+        } else {
+            Some(::std::ffi::CStr::from_ptr(msg))
+        };
+        gz_error_update_state(state, err, message);
     }
 }
 pub fn gz_intmax() -> ::core::ffi::c_uint {

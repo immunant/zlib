@@ -6,7 +6,6 @@ pub use crate::gzguts_h::COPY;
 pub use crate::gzguts_h::GZIP;
 pub use crate::gzguts_h::GZ_READ;
 pub use crate::gzguts_h::LOOK;
-pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_intmax;
 
 pub use crate::stdlib::EAGAIN;
@@ -400,14 +399,17 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                     ret = crate::zlib_h::Z_OK;
                     break;
                 } else {
-                    crate::src::gzlib::gz_error(
+                    let message = if state.strm.msg.is_null() {
+                        ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0").ok()
+                    } else {
+                        Some(::std::ffi::CStr::from_ptr(
+                            state.strm.msg as *const ::core::ffi::c_char,
+                        ))
+                    };
+                    crate::src::gzlib::gz_error_update_state(
                         state,
                         crate::zlib_h::Z_DATA_ERROR,
-                        if state.strm.msg.is_null() {
-                            b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                        } else {
-                            state.strm.msg as *const ::core::ffi::c_char
-                        },
+                        message,
                     );
                     break;
                 }
