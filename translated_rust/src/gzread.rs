@@ -701,36 +701,31 @@ unsafe fn gz_load(
     }
 }
 
-unsafe fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let action = {
-        let state_ref = &*state;
-        gz_avail_action(state_ref.err, state_ref.eof, state_ref.strm.avail_in)
-    };
+unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    let action = gz_avail_action(state.err, state.eof, state.strm.avail_in);
     match action {
         GzAvailAction::Error => return -1 as ::core::ffi::c_int,
         GzAvailAction::Done => return 0 as ::core::ffi::c_int,
         GzAvailAction::Refill { compact_input } => {
             let (buf, len, prior_avail_in) = {
-                let state_ref = &mut *state;
-                let p = state_ref.in_0;
-                let q = state_ref.strm.next_in;
-                let plan = gz_avail_refill_plan(state_ref.size, state_ref.strm.avail_in);
+                let p = state.in_0;
+                let q = state.strm.next_in;
+                let plan = gz_avail_refill_plan(state.size, state.strm.avail_in);
                 if gz_avail_should_compact(compact_input, q == p) {
-                    core::ptr::copy(q, p, state_ref.strm.avail_in as usize);
+                    core::ptr::copy(q, p, state.strm.avail_in as usize);
                 }
                 (
-                    state_ref.in_0.wrapping_add(plan.input_offset),
+                    state.in_0.wrapping_add(plan.input_offset),
                     plan.read_len,
                     plan.prior_avail_in,
                 )
             };
-            let load = gz_load(state, buf, len);
+            let load = gz_load(state as *mut crate::gzguts_h::gz_state, buf, len);
             match gz_avail_load_action(prior_avail_in, &load) {
                 GzAvailLoadAction::Error => return -1 as ::core::ffi::c_int,
                 GzAvailLoadAction::Commit { avail_in } => {
-                    let state_ref = &mut *state;
-                    state_ref.strm.avail_in = avail_in;
-                    state_ref.strm.next_in = state_ref.in_0 as *mut crate::stdlib::Bytef;
+                    state.strm.avail_in = avail_in;
+                    state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
                 }
             }
         }
@@ -900,7 +895,11 @@ unsafe fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         );
         return 0 as ::core::ffi::c_int;
     }
-    if gz_avail(state) == -1 as ::core::ffi::c_int {
+    let (avail, again) = {
+        let state_ref = &mut *state;
+        (gz_avail(state_ref), state_ref.again)
+    };
+    if avail == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     let header = if gz_look_header_is_available((*strm).avail_in) {
@@ -914,7 +913,7 @@ unsafe fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     } else {
         None
     };
-    match gz_look_action((*strm).avail_in, (*state).again, header) {
+    match gz_look_action((*strm).avail_in, again, header) {
         GzLookAction::NeedMoreInput => return 0 as ::core::ffi::c_int,
         GzLookAction::Gzip => {
             crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
@@ -1081,15 +1080,22 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     had = (*strm).avail_out as ::core::ffi::c_uint;
     loop {
-        let load_failed = gz_decomp_needs_input_load((*strm).avail_in)
-            && gz_avail(state) == -1 as ::core::ffi::c_int;
+        let (load_failed, state_err, again) = {
+            let state_ref = &mut *state;
+            (
+                gz_decomp_needs_input_load((*strm).avail_in)
+                    && gz_avail(state_ref) == -1 as ::core::ffi::c_int,
+                state_ref.err,
+                state_ref.again,
+            )
+        };
         match gz_decomp_input_action(load_failed, (*strm).avail_in) {
             GzDecompInputAction::InputError => {
-                ret = (*state).err;
+                ret = state_err;
                 break;
             }
             GzDecompInputAction::UnexpectedEof => {
-                if gz_decomp_reports_unexpected_eof((*state).again) {
+                if gz_decomp_reports_unexpected_eof(again) {
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_BUF_ERROR,
