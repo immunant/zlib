@@ -3404,8 +3404,8 @@ unsafe extern "C" fn deflate_rle(
         {
             scan = (*s)
                 .window
-                .offset((*s).strstart as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize));
+                .wrapping_offset((*s).strstart as isize)
+                .wrapping_offset(-(1 as ::core::ffi::c_int as isize));
             prev = *scan as crate::stdlib::uInt;
             scan = scan.wrapping_add(1);
             if prev == *scan as crate::stdlib::uInt
@@ -3420,8 +3420,8 @@ unsafe extern "C" fn deflate_rle(
             {
                 strend = (*s)
                     .window
-                    .offset((*s).strstart as isize)
-                    .offset(crate::zutil_h::MAX_MATCH as isize);
+                    .wrapping_offset((*s).strstart as isize)
+                    .wrapping_offset(crate::zutil_h::MAX_MATCH as isize);
                 loop {
                     scan = scan.wrapping_add(1);
                     if !(prev == *scan as crate::stdlib::uInt

@@ -540,21 +540,20 @@ unsafe fn gz_load(
 
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let action = {
-        let state_ref = &mut *state;
+        let state_ref = &*state;
         gz_avail_action(state_ref.err, state_ref.eof, state_ref.strm.avail_in)
     };
     match action {
         GzAvailAction::Error => return -1 as ::core::ffi::c_int,
         GzAvailAction::Done => return 0 as ::core::ffi::c_int,
         GzAvailAction::Refill { compact_input } => {
-            let state_ref = &mut *state;
-            let p = state_ref.in_0;
-            let q = state_ref.strm.next_in;
-            if gz_avail_should_compact(compact_input, q == p) {
-                core::ptr::copy(q, p, state_ref.strm.avail_in as usize);
-            }
             let (buf, len) = {
-                let state_ref = &*state;
+                let state_ref = &mut *state;
+                let p = state_ref.in_0;
+                let q = state_ref.strm.next_in;
+                if gz_avail_should_compact(compact_input, q == p) {
+                    core::ptr::copy(q, p, state_ref.strm.avail_in as usize);
+                }
                 (
                     state_ref
                         .in_0
@@ -883,10 +882,12 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
             GzDecompAction::Continue => {}
         }
     }
-    (*state).x.have = gz_decomp_output_len(had, (*strm).avail_out);
-    (*state).x.next = (*strm)
-        .next_out
-        .wrapping_sub(gz_decomp_output_rewind_len((*state).x.have));
+    let (avail_out, next_out) = ((*strm).avail_out, (*strm).next_out);
+    {
+        let state_ref = &mut *state;
+        state_ref.x.have = gz_decomp_output_len(had, avail_out);
+        state_ref.x.next = next_out.wrapping_sub(gz_decomp_output_rewind_len(state_ref.x.have));
+    }
     match gz_decomp_result(ret) {
         GzDecompResult::RestartLook => {
             (*state).junk = 0 as ::core::ffi::c_int;

@@ -1620,9 +1620,9 @@ pub unsafe extern "C" fn inflate(
                         copy as crate::__stddef_size_t_h::size_t,
                     );
                     have = progress.remaining_input;
-                    next = next.offset(copy as isize);
+                    next = next.wrapping_add(copy as usize);
                     left = progress.remaining_output;
-                    put = put.offset(copy as isize);
+                    put = put.wrapping_add(copy as usize);
                     (*state).length = progress.remaining_length;
                     continue;
                 } else {
@@ -1893,7 +1893,7 @@ pub unsafe extern "C" fn inflate(
                             ) as ::core::ffi::c_ulong;
                         }
                         have = have.wrapping_sub(copy);
-                        next = next.offset(copy as isize);
+                        next = next.wrapping_add(copy as usize);
                         (*state).length = (*state).length.wrapping_sub(copy);
                     }
                     if (*state).length != 0 {
@@ -1965,7 +1965,7 @@ pub unsafe extern "C" fn inflate(
                         ) as ::core::ffi::c_ulong;
                     }
                     have = have.wrapping_sub(copy);
-                    next = next.offset(copy as isize);
+                    next = next.wrapping_add(copy as usize);
                     if len != 0 {
                         break;
                     }
@@ -2079,7 +2079,7 @@ pub unsafe extern "C" fn inflate(
                         ) as ::core::ffi::c_ulong;
                     }
                     have = have.wrapping_sub(copy);
-                    next = next.offset(copy as isize);
+                    next = next.wrapping_add(copy as usize);
                     if len != 0 {
                         break;
                     }
@@ -2192,9 +2192,9 @@ pub unsafe extern "C" fn inflate(
         (*state).length = remaining_length;
         loop {
             let c2rust_fresh30 = from;
-            from = from.offset(1);
+            from = from.wrapping_add(1);
             let c2rust_fresh31 = put;
-            put = put.offset(1);
+            put = put.wrapping_add(1);
             *c2rust_fresh31 = *c2rust_fresh30;
             copy = copy.wrapping_sub(1);
             if !(copy != 0) {
