@@ -4764,6 +4764,14 @@ pub unsafe extern "C" fn get_crc_table_ffi() -> *const crate::stdlib::z_crc_t {
 }
 const CRC32_MASK: crate::stdlib::uLong = 0xffff_ffff;
 
+fn crc32_initial_state(crc: crate::stdlib::uLong) -> crate::stdlib::uLong {
+    !crc & CRC32_MASK
+}
+
+fn crc32_from_state(state: crate::stdlib::uLong) -> crate::stdlib::uLong {
+    (state ^ CRC32_MASK) & CRC32_MASK
+}
+
 fn crc32_update_byte(crc: crate::stdlib::uLong, byte: u8) -> crate::stdlib::uLong {
     let table_index = ((crc ^ byte as crate::stdlib::uLong) & 0xff) as usize;
     ((crc >> 8) ^ crc_table[table_index] as crate::stdlib::uLong) & CRC32_MASK
@@ -4777,9 +4785,9 @@ fn crc32_update_bytes(mut state: crate::stdlib::uLong, bytes: &[u8]) -> crate::s
 }
 
 pub fn crc32_z(mut crc: crate::stdlib::uLong, buf: &[u8]) -> crate::stdlib::uLong {
-    crc = !crc & CRC32_MASK;
+    crc = crc32_initial_state(crc);
     crc = crc32_update_bytes(crc, buf);
-    (crc ^ CRC32_MASK) & CRC32_MASK
+    crc32_from_state(crc)
 }
 
 pub fn crc32(crc: crate::stdlib::uLong, buf: &[u8]) -> crate::stdlib::uLong {
@@ -4897,9 +4905,9 @@ pub unsafe extern "C" fn crc32_combine_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_update_byte,
-        crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term, x2n_table, x2nmodp,
-        CRC32_MASK, POLY,
+        crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_from_state,
+        crc32_initial_state, crc32_update_byte, crc32_update_bytes, crc32_z, crc_table_ref,
+        multmodp, next_poly_term, x2n_table, x2nmodp, CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -4962,6 +4970,16 @@ mod tests {
         }
 
         assert_eq!((state ^ CRC32_MASK) & CRC32_MASK, crc32_z(0, input));
+    }
+
+    #[test]
+    fn crc32_state_transitions_preserve_the_32_bit_crc_domain() {
+        let crc = crate::stdlib::uLong::MAX;
+        let initial = crc32_initial_state(crc);
+
+        assert_eq!(initial, 0);
+        assert_eq!(crc32_from_state(initial), CRC32_MASK);
+        assert_eq!(crc32_from_state(CRC32_MASK), 0);
     }
 
     #[test]

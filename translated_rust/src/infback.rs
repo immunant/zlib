@@ -97,6 +97,14 @@ fn inflate_back_stored_block_length(hold: ::core::ffi::c_ulong) -> Option<::core
     }
 }
 
+fn inflate_back_copy_count(
+    requested: ::core::ffi::c_uint,
+    available_input: ::core::ffi::c_uint,
+    available_output: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    requested.min(available_input).min(available_output)
+}
+
 fn inflate_back_consume_input_byte(
     have: ::core::ffi::c_uint,
     hold: ::core::ffi::c_ulong,
@@ -415,12 +423,7 @@ pub unsafe extern "C" fn inflateBack(
                             break 's_69;
                         }
                     }
-                    if copy > have {
-                        copy = have;
-                    }
-                    if copy > left {
-                        copy = left;
-                    }
+                    copy = inflate_back_copy_count(copy, have, left);
                     crate::stdlib::memcpy(
                         put as *mut ::core::ffi::c_void,
                         next as *const ::core::ffi::c_void,
@@ -1114,7 +1117,7 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        inflate_back_block_header, inflate_back_consume_input_byte,
+        inflate_back_block_header, inflate_back_consume_input_byte, inflate_back_copy_count,
         inflate_back_distance_exceeds_window, inflate_back_init_metadata_is_valid,
         inflate_back_stored_block_length, inflate_back_window_bits_are_valid,
         inflate_back_window_size, InflateBackBlockKind,
@@ -1183,6 +1186,14 @@ mod tests {
         assert_eq!(inflate_back_stored_block_length(0xedcb1234), Some(0x1234));
         assert_eq!(inflate_back_stored_block_length(0xffff0000), Some(0));
         assert_eq!(inflate_back_stored_block_length(0xedca1234), None);
+    }
+
+    #[test]
+    fn inflate_back_copy_count_limits_requested_input_and_output() {
+        assert_eq!(inflate_back_copy_count(8, 12, 16), 8);
+        assert_eq!(inflate_back_copy_count(20, 12, 16), 12);
+        assert_eq!(inflate_back_copy_count(20, 24, 16), 16);
+        assert_eq!(inflate_back_copy_count(20, 0, 16), 0);
     }
 
     #[test]

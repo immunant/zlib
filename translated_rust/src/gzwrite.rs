@@ -784,6 +784,26 @@ fn gzsetparams_settings_match(
     requested_level == current_level && requested_strategy == current_strategy
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzSetParamsBufferAction {
+    SetOnly,
+    DeflateOnly,
+    FlushThenDeflate,
+}
+
+fn gzsetparams_buffer_action(
+    size: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+) -> GzSetParamsBufferAction {
+    if !gz_buffer_is_initialized(size) {
+        GzSetParamsBufferAction::SetOnly
+    } else if gz_has_pending_input(avail_in) {
+        GzSetParamsBufferAction::FlushThenDeflate
+    } else {
+        GzSetParamsBufferAction::DeflateOnly
+    }
+}
+
 fn gzclose_mode_is_writable(mode: ::core::ffi::c_int) -> bool {
     mode == crate::gzguts_h::GZ_WRITE
 }
@@ -1005,12 +1025,13 @@ pub unsafe extern "C" fn gzsetparams(
     if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
         return (*state).err;
     }
-    if gz_buffer_is_initialized((*state).size) {
-        if gz_has_pending_input((*strm).avail_in)
-            && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
-        {
-            return (*state).err;
-        }
+    let action = gzsetparams_buffer_action((*state).size, (*strm).avail_in);
+    if matches!(action, GzSetParamsBufferAction::FlushThenDeflate)
+        && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
+    {
+        return (*state).err;
+    }
+    if !matches!(action, GzSetParamsBufferAction::SetOnly) {
         crate::src::deflate::deflateParams(strm as *mut crate::zlib_h::z_stream_s, level, strategy);
     }
     (*state).level = level;
@@ -1091,8 +1112,9 @@ mod tests {
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
-        GzCompResetAction, GzCompWriteFailure, GzWriteDirectAction, GzZeroAction,
+        gzsetparams_buffer_action, gzsetparams_settings_match, gzsetparams_state_is_usable,
+        gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure, GzSetParamsBufferAction,
+        GzWriteDirectAction, GzZeroAction,
     };
 
     #[test]
@@ -1229,6 +1251,22 @@ mod tests {
     #[test]
     fn gzputs_result_reports_nonempty_write_failures() {
         assert_eq!(gzputs_result(1, 0), -1);
+    }
+
+    #[test]
+    fn gzsetparams_buffer_action_preserves_buffer_and_pending_input_cases() {
+        assert_eq!(
+            gzsetparams_buffer_action(0, 1),
+            GzSetParamsBufferAction::SetOnly
+        );
+        assert_eq!(
+            gzsetparams_buffer_action(1, 0),
+            GzSetParamsBufferAction::DeflateOnly
+        );
+        assert_eq!(
+            gzsetparams_buffer_action(1, 1),
+            GzSetParamsBufferAction::FlushThenDeflate
+        );
     }
 
     #[test]
