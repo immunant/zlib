@@ -332,6 +332,78 @@ pub(crate) fn inflate_has_end_of_block_code(lens: &[::core::ffi::c_ushort]) -> b
         != 0 as ::core::ffi::c_ushort
 }
 
+enum InflateDynamicTables {
+    Built {
+        lens_used: usize,
+        total_used: usize,
+        lenbits: ::core::ffi::c_uint,
+        distbits: ::core::ffi::c_uint,
+    },
+    InvalidLiteralLengths {
+        lenbits: ::core::ffi::c_uint,
+    },
+    InvalidDistances {
+        lens_used: usize,
+        lenbits: ::core::ffi::c_uint,
+        distbits: ::core::ffi::c_uint,
+    },
+}
+
+fn inflate_build_dynamic_tables(
+    lens: &[::core::ffi::c_ushort],
+    nlen: ::core::ffi::c_uint,
+    ndist: ::core::ffi::c_uint,
+    codes: &mut [crate::src::inftrees::code],
+    work: &mut [::core::ffi::c_ushort],
+) -> InflateDynamicTables {
+    let mut lenbits = 9 as ::core::ffi::c_uint;
+    let mut lens_used = 0usize;
+    let ret = crate::src::inftrees::inflate_table_impl(
+        crate::src::inftrees::LENS,
+        lens,
+        nlen,
+        codes,
+        &mut lens_used,
+        &mut lenbits,
+        work,
+    );
+    if ret != 0 {
+        return InflateDynamicTables::InvalidLiteralLengths { lenbits };
+    }
+
+    let mut distbits = 6 as ::core::ffi::c_uint;
+    let mut dist_used = 0usize;
+    let dist_lens = lens.get(nlen as usize..).unwrap_or(&[]);
+    let dist_table = if lens_used <= codes.len() {
+        &mut codes[lens_used..]
+    } else {
+        &mut []
+    };
+    let ret = crate::src::inftrees::inflate_table_impl(
+        crate::src::inftrees::DISTS,
+        dist_lens,
+        ndist,
+        dist_table,
+        &mut dist_used,
+        &mut distbits,
+        work,
+    );
+    if ret != 0 {
+        return InflateDynamicTables::InvalidDistances {
+            lens_used,
+            lenbits,
+            distbits,
+        };
+    }
+
+    InflateDynamicTables::Built {
+        lens_used,
+        total_used: lens_used + dist_used,
+        lenbits,
+        distbits,
+    }
+}
+
 struct InflateGzipHeaderFieldScan {
     consumed: usize,
     terminated: bool,
@@ -1649,66 +1721,59 @@ pub unsafe extern "C" fn inflate_ffi(
                     (*state).mode = crate::src::inflate::BAD;
                     continue;
                 } else {
-                    (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                    (*state).lencode = (*state).next as *const crate::src::inftrees::code;
-                    (*state).lenbits = 9 as ::core::ffi::c_uint;
-                    let mut lens_table_used = 0usize;
-                    ret = crate::src::inftrees::inflate_table_impl(
-                        crate::src::inftrees::LENS,
-                        &(*state).lens,
-                        (*state).nlen,
-                        &mut (*state).codes,
-                        &mut lens_table_used,
-                        &mut (*state).lenbits,
-                        &mut (*state).work,
-                    );
-                    if ret == 0 {
-                        (*state).next = (*state).codes.as_mut_ptr().wrapping_add(lens_table_used);
-                    }
-                    if ret != 0 {
-                        (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
-                        (*state).mode = crate::src::inflate::BAD;
-                        continue;
-                    } else {
-                        (*state).distcode = (*state).next as *const crate::src::inftrees::code;
-                        (*state).distbits = 6 as ::core::ffi::c_uint;
-                        let lens_start = (*state).nlen as usize;
-                        let dist_lens = (*state).lens.get(lens_start..).unwrap_or(&[]);
-                        let codes_base = (*state).codes.as_mut_ptr();
-                        let mut dist_table_used = 0usize;
-                        ret = {
-                            let dist_table = if lens_table_used <= (*state).codes.len() {
-                                &mut (&mut (*state).codes)[lens_table_used..]
-                            } else {
-                                &mut []
-                            };
-                            crate::src::inftrees::inflate_table_impl(
-                                crate::src::inftrees::DISTS,
-                                dist_lens,
-                                (*state).ndist,
-                                dist_table,
-                                &mut dist_table_used,
-                                &mut (*state).distbits,
-                                &mut (*state).work,
-                            )
-                        };
-                        if ret == 0 {
-                            (*state).next =
-                                codes_base.wrapping_add(lens_table_used + dist_table_used);
-                        }
-                        if ret != 0 {
-                            (*strm).msg = b"invalid distances set\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
-                            continue;
-                        } else {
-                            (*state).mode = crate::src::inflate::LEN_;
+                    let state_ref = &mut *state;
+                    let codes_base = state_ref.codes.as_mut_ptr();
+                    state_ref.next = codes_base;
+                    state_ref.lencode = codes_base as *const crate::src::inftrees::code;
+                    match crate::src::inflate::inflate_build_dynamic_tables(
+                        &state_ref.lens,
+                        state_ref.nlen,
+                        state_ref.ndist,
+                        &mut state_ref.codes,
+                        &mut state_ref.work,
+                    ) {
+                        crate::src::inflate::InflateDynamicTables::Built {
+                            lens_used,
+                            total_used,
+                            lenbits,
+                            distbits,
+                        } => {
+                            state_ref.lenbits = lenbits;
+                            state_ref.next = codes_base.wrapping_add(lens_used);
+                            state_ref.distcode =
+                                state_ref.next as *const crate::src::inftrees::code;
+                            state_ref.distbits = distbits;
+                            state_ref.next = codes_base.wrapping_add(total_used);
+                            state_ref.mode = crate::src::inflate::LEN_;
                             if flush == crate::zlib_h::Z_TREES {
                                 break;
                             }
+                        }
+                        crate::src::inflate::InflateDynamicTables::InvalidLiteralLengths {
+                            lenbits,
+                        } => {
+                            state_ref.lenbits = lenbits;
+                            (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
+                                as *const ::core::ffi::c_char
+                                as *mut ::core::ffi::c_char;
+                            state_ref.mode = crate::src::inflate::BAD;
+                            continue;
+                        }
+                        crate::src::inflate::InflateDynamicTables::InvalidDistances {
+                            lens_used,
+                            lenbits,
+                            distbits,
+                        } => {
+                            state_ref.lenbits = lenbits;
+                            state_ref.next = codes_base.wrapping_add(lens_used);
+                            state_ref.distcode =
+                                state_ref.next as *const crate::src::inftrees::code;
+                            state_ref.distbits = distbits;
+                            (*strm).msg = b"invalid distances set\0".as_ptr()
+                                as *const ::core::ffi::c_char
+                                as *mut ::core::ffi::c_char;
+                            state_ref.mode = crate::src::inflate::BAD;
+                            continue;
                         }
                     }
                 }
