@@ -104,7 +104,33 @@ pub fn uncompress2_z(
             err = crate::zlib_h::Z_STREAM_ERROR;
             break;
         }
-        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH, input);
+        let output = if stream.avail_out == 0 {
+            Some(&mut [][..])
+        } else {
+            let Some(dest) = dest.as_deref_mut() else {
+                err = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            };
+            let Some(offset) = stream.next_out.addr().checked_sub(dest.as_ptr().addr()) else {
+                err = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            };
+            let Some(end) = offset.checked_add(stream.avail_out as usize) else {
+                err = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            };
+            let Some(output) = dest.get_mut(offset..end) else {
+                err = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            };
+            Some(output)
+        };
+        err = crate::src::inflate::inflate(
+            &mut stream,
+            crate::zlib_h::Z_NO_FLUSH,
+            input,
+            output,
+        );
         if err != crate::zlib_h::Z_OK {
             break;
         }

@@ -1117,6 +1117,7 @@ pub fn inflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
     input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
     unsafe {
         // The exported wrapper and internal callers provide a live stream
@@ -1127,6 +1128,10 @@ pub fn inflate(
             || strm.avail_in != 0 as crate::stdlib::uInt
                 && (strm.next_in.is_null()
                     || input.map_or(true, |input| input.len() != strm.avail_in as usize))
+            || output.as_ref().map_or(true, |output| {
+                output.len() != strm.avail_out as usize
+                    || (strm.avail_out != 0 && output.as_ptr() != strm.next_out)
+            })
         {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
@@ -1199,7 +1204,6 @@ pub fn inflate(
         {
             state.mode = crate::src::inflate::TYPEDO;
         }
-        let output_start = strm.next_out;
         // The FFI wrapper and safe callers establish this bounded immutable
         // view. Retain it for the byte-at-a-time decoder instead of rebuilding
         // a slice from the moving ABI cursor in the streaming engine.
@@ -1208,11 +1212,12 @@ pub fn inflate(
             bytes: input,
             start: input.as_ptr().addr(),
         };
-        // The ABI validation above established one caller-owned output span
-        // for this invocation. Keep that span borrowed for the engine so
-        // literal, stored-block, fast-path, history, and checksum handling
-        // can use checked slice access instead of rebuilding raw views.
-        let output = ::core::slice::from_raw_parts_mut(output_start, strm.avail_out as usize);
+        // The ABI wrapper and internal callers establish this caller-owned
+        // output span. Keep it borrowed for the engine so literal,
+        // stored-block, fast-path, history, and checksum handling can use
+        // checked slice access instead of rebuilding a slice from the ABI
+        // cursor here.
+        let output = output.expect("validated output");
         left = strm.avail_out as ::core::ffi::c_uint;
         next = strm.next_in as *mut ::core::ffi::c_uchar;
         have = strm.avail_in as ::core::ffi::c_uint;
@@ -3075,7 +3080,17 @@ pub unsafe extern "C" fn inflate_ffi(
             strm.avail_in as usize,
         ))
     };
-    inflate(strm, flush, input)
+    let output = if strm.next_out.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    } else if strm.avail_out == 0 {
+        Some(&mut [][..])
+    } else {
+        Some(::core::slice::from_raw_parts_mut(
+            strm.next_out,
+            strm.avail_out as usize,
+        ))
+    };
+    inflate(strm, flush, input, output)
 }
 
 /// Release the window and state allocations in the order required by the C

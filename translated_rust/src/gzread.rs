@@ -314,7 +314,10 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_decomp(
+    state: &mut crate::gzguts_h::gz_state,
+    mut caller_output: Option<&mut [crate::stdlib::Bytef]>,
+) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     // Keep the caller's output start instead of deriving it later by walking
     // backwards from inflate's cursor.  `gz_decomp` is used for both the
@@ -322,6 +325,26 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     // need to retain here.
     let output_start = state.strm.next_out;
     let had = state.strm.avail_out as ::core::ffi::c_uint;
+    let output_len = had as usize;
+    let output_matches_stream = match caller_output.as_deref_mut() {
+        Some(output) => {
+            output.len() == output_len
+                && (output_len == 0 || output.as_mut_ptr() == output_start)
+        }
+        None => {
+            state.out.len() == output_len
+                && (output_len == 0 || state.out.as_mut_ptr() == output_start)
+        }
+    };
+    if !output_matches_stream {
+        crate::src::gzlib::gz_static_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"internal inflate output corrupt\0",
+        );
+        return -1 as ::core::ffi::c_int;
+    }
+    let mut output_offset = 0usize;
     loop {
         if state.strm.avail_in == 0 as crate::stdlib::uInt
             && gz_avail(state) == -1 as ::core::ffi::c_int
@@ -342,11 +365,44 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             // current suffix directly to inflate instead of asking its core
             // to reconstruct a view from the ABI cursor.
             let input = gz_input_range(state).and_then(|range| state.in_0.get(range));
+            let remaining = state.strm.avail_out as usize;
+            let output_end = match output_offset.checked_add(remaining) {
+                Some(end) => end,
+                None => {
+                    crate::src::gzlib::gz_static_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal inflate output corrupt\0",
+                    );
+                    ret = crate::zlib_h::Z_STREAM_ERROR;
+                    break;
+                }
+            };
+            let output = match caller_output.as_deref_mut() {
+                Some(output) => output.get_mut(output_offset..output_end),
+                None => state.out.get_mut(output_offset..output_end),
+            };
             ret = crate::src::inflate::inflate(
                 &mut state.strm,
                 crate::zlib_h::Z_NO_FLUSH,
                 input,
+                output,
             );
+            let produced = match output_len
+                .checked_sub(state.strm.avail_out as usize)
+            {
+                Some(produced) => produced,
+                None => {
+                    crate::src::gzlib::gz_static_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal inflate output corrupt\0",
+                    );
+                    ret = crate::zlib_h::Z_STREAM_ERROR;
+                    break;
+                }
+            };
+            output_offset = produced;
             if state.strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
             }
@@ -472,7 +528,7 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 state.strm.avail_out =
                     (state.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
                 state.strm.next_out = state.out.as_mut_ptr() as *mut crate::stdlib::Bytef;
-                if gz_decomp(state) == -1 as ::core::ffi::c_int {
+                if gz_decomp(state, None) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
@@ -670,7 +726,7 @@ fn gz_read(
                 } else {
                     state.strm.avail_out = n as crate::stdlib::uInt;
                     state.strm.next_out = buf.as_mut_ptr();
-                    err = gz_decomp(state);
+                    err = gz_decomp(state, Some(buf));
                     n = state.x.have;
                     state.x.have = 0 as ::core::ffi::c_uint;
                 }
