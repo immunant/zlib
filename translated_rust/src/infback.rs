@@ -122,6 +122,9 @@ pub unsafe extern "C" fn inflateBackInit_(
     (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
     (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
     (*state).window = Some(::core::ptr::NonNull::new(window).expect("validated caller window"));
+    // The state allocation comes from the caller's zalloc() callback, whose
+    // returned bytes are not required to be initialized.
+    ::core::ptr::write(::core::ptr::addr_of_mut!((*state).owned_window), None);
     (*state).wnext = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
     (*state).sane = 1 as ::core::ffi::c_int;

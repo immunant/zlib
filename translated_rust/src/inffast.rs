@@ -262,9 +262,7 @@ pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::c
     let written = start.wrapping_sub(strm.avail_out) as usize;
     let output_start = strm.next_out.wrapping_sub(written);
     let output = core::slice::from_raw_parts_mut(output_start, start as usize);
-    let window = state
-        .window
-        .map(|window| core::slice::from_raw_parts(window.as_ptr(), state.wsize as usize));
+    let window = state.owned_window.as_deref();
     let mut fast_state = InflateFastState {
         history: FastHistory::External(window),
         wsize: state.wsize as usize,
