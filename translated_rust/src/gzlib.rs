@@ -78,6 +78,12 @@ pub fn gz_syscall_chunk(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if len > max { max } else { len }
 }
 
+// Keep the logical gzip position update independent of the raw buffer
+// adapters used by the read and write paths.
+pub(crate) fn gz_advance_pos(state: &mut crate::gzguts_h::gz_state, count: crate::stdlib::uInt) {
+    state.x.pos += count as crate::stdlib::off64_t;
+}
+
 unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
     (*state).x.have = 0 as ::core::ffi::c_uint;
     if (*state).mode == crate::gzguts_h::GZ_READ {
