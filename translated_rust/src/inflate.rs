@@ -2246,11 +2246,12 @@ pub unsafe fn inflate(
                                                                 // optional header CRC, and mode transition.
                                                                 let state_ref = &mut *state;
                                                                 if !state_ref.head.is_null() {
-                                                                    (*state_ref.head).xflags = (hold
+                                                                    let head = &mut *state_ref.head;
+                                                                    head.xflags = (hold
                                                                         & 0xff
                                                                             as ::core::ffi::c_ulong)
                                                                         as ::core::ffi::c_int;
-                                                                    (*state_ref.head).os = (hold
+                                                                    head.os = (hold
                                                                         >> 8 as ::core::ffi::c_int)
                                                                         as ::core::ffi::c_int;
                                                                 }
@@ -3061,9 +3062,10 @@ pub unsafe fn inflate(
                 }
             }
             if !state_ref.head.is_null() {
-                (*state_ref.head).hcrc =
+                let head = &mut *state_ref.head;
+                head.hcrc =
                     state_ref.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
-                (*state_ref.head).done = 1 as ::core::ffi::c_int;
+                head.done = 1 as ::core::ffi::c_int;
             }
             state_ref.check = inflate_header_crc_update(0, &[]);
             strm_ref.adler = state_ref.check as crate::stdlib::uLong;
