@@ -1865,10 +1865,6 @@ pub fn inflate(
     // cursors themselves stay fixed.  Slice views own all interior movement.
     let mut next: usize = 0;
     let mut put: usize = 0;
-    let mut next_cursor: *mut ::core::ffi::c_uchar =
-        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut put_cursor: *mut ::core::ffi::c_uchar =
-        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -1935,10 +1931,8 @@ pub fn inflate(
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         state_ref.mode = entry_mode;
-        put_cursor = strm_ref.next_out as *mut ::core::ffi::c_uchar;
         put = 0;
         left = strm_ref.avail_out as ::core::ffi::c_uint;
-        next_cursor = strm_ref.next_in as *mut ::core::ffi::c_uchar;
         next = 0;
         have = strm_ref.avail_in as ::core::ffi::c_uint;
         hold = state_ref.hold;
@@ -1957,9 +1951,9 @@ pub fn inflate(
             let input = if have == 0 {
                 &[]
             } else {
-                ::core::slice::from_raw_parts(next_cursor, have as usize)
+                ::core::slice::from_raw_parts(strm_ref.next_in, have as usize)
             };
-            let output = ::core::slice::from_raw_parts_mut(put_cursor, left as usize);
+            let output = ::core::slice::from_raw_parts_mut(strm_ref.next_out, left as usize);
             let window = if state_ref.window.is_null() {
                 None
             } else {
@@ -3744,14 +3738,12 @@ pub fn inflate(
                 state_ref.mode = crate::src::inflate::LEN;
             }
         }
-            // Convert the final checked offsets back to ABI cursors only after
-            // the decode loop has released both bounded views.
-            next_cursor = if in_0 == 0 {
-                strm_ref.next_in as *mut ::core::ffi::c_uchar
-            } else {
-                input[next..].as_ptr() as *mut ::core::ffi::c_uchar
-            };
-            put_cursor = output[put..].as_mut_ptr();
+            // Publish the final checked offsets as ABI cursors while their
+            // bounded views still make the resulting positions explicit.
+            if in_0 != 0 {
+                strm_ref.next_in = input[next..].as_ptr() as *mut crate::stdlib::Bytef;
+            }
+            strm_ref.next_out = output[put..].as_mut_ptr();
         }
         // The invocation-local ABI views above have ended before this exit
         // boundary can invoke an allocator callback.
@@ -3765,9 +3757,7 @@ pub fn inflate(
         // tied to the same scalar snapshot.
         {
             let state_ref = &mut *state_ref;
-            strm_ref.next_out = put_cursor as *mut crate::stdlib::Bytef;
             strm_ref.avail_out = left as crate::stdlib::uInt;
-            strm_ref.next_in = next_cursor as *mut crate::stdlib::Bytef;
             strm_ref.avail_in = have as crate::stdlib::uInt;
             state_ref.hold = hold;
             state_ref.bits = bits;
