@@ -1496,23 +1496,43 @@ pub unsafe extern "C" fn deflateParams_ffi(
     };
     deflateParams(strm, level, strategy)
 }
-pub unsafe extern "C" fn deflateTune(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn deflateTune(
+    strm: crate::zlib_h::z_streamp,
     mut good_length: ::core::ffi::c_int,
     mut max_lazy: ::core::ffi::c_int,
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    (*s).good_match = good_length as crate::stdlib::uInt;
-    (*s).max_lazy_match = max_lazy as crate::stdlib::uInt;
-    (*s).nice_match = nice_length;
-    (*s).max_chain_length = max_chain as crate::stdlib::uInt;
+    // The state pointer is installed by initialization.  Validate its
+    // backlink and state machine before allowing the parameter update to
+    // borrow it.
+    if strm.state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let s = unsafe { &mut *strm.state };
+    let stream_pointer = core::ptr::from_mut(strm);
+    if s.strm != stream_pointer
+        || (s.status != crate::src::deflate::INIT_STATE
+            && s.status != crate::src::deflate::GZIP_STATE
+            && s.status != crate::src::deflate::EXTRA_STATE
+            && s.status != crate::src::deflate::NAME_STATE
+            && s.status != crate::src::deflate::COMMENT_STATE
+            && s.status != crate::src::deflate::HCRC_STATE
+            && s.status != crate::src::deflate::BUSY_STATE
+            && s.status != crate::src::deflate::FINISH_STATE)
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    s.good_match = good_length as crate::stdlib::uInt;
+    s.max_lazy_match = max_lazy as crate::stdlib::uInt;
+    s.nice_match = nice_length;
+    s.max_chain_length = max_chain as crate::stdlib::uInt;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateTune"]
