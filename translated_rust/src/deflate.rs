@@ -2643,7 +2643,41 @@ pub unsafe fn deflate(
             strm.adler = io.adler;
             result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(&mut *s, strm, flush, input) as ::core::ffi::c_uint
+            let input_len = input.len();
+            let output_len = strm.avail_out as usize;
+            // As with the fast engine, the dispatcher owns the one ABI
+            // output conversion.  The Huffman-only engine receives only the
+            // bounded cursor below.
+            let output = if output_len == 0 {
+                &mut []
+            } else {
+                unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) }
+            };
+            let mut io = DeflateFastIo {
+                input,
+                input_pos: 0,
+                output,
+                output_pos: 0,
+                total_in: strm.total_in,
+                total_out: strm.total_out,
+                adler: strm.adler,
+                data_type: strm.data_type,
+            };
+            let result = deflate_huff(&mut *s, &mut io, flush);
+            if input_len != 0 {
+                strm.next_in = io.input.as_ptr().wrapping_add(io.input_pos)
+                    as *mut crate::stdlib::Bytef;
+            }
+            strm.avail_in = io.avail_in();
+            if output_len != 0 {
+                strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
+            }
+            strm.avail_out = io.avail_out();
+            strm.total_in = io.total_in;
+            strm.total_out = io.total_out;
+            strm.adler = io.adler;
+            strm.data_type = io.data_type;
+            result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, strm, flush, input) as ::core::ffi::c_uint
         } else {
@@ -3253,6 +3287,39 @@ impl DeflateFastIo<'_> {
             s.pending_out = 0;
         }
     }
+}
+
+/// Reuse the established window-filling logic with the Huffman engine's
+/// slice-based cursors.  The temporary stream is local bookkeeping only: it
+/// never escapes this helper, and its updated scalar cursor state is copied
+/// back into `io` before the engine resumes.
+fn fill_window_from_fast_io(
+    s: &mut crate::src::deflate::deflate_state,
+    io: &mut DeflateFastIo<'_>,
+) {
+    let input = &io.input[io.input_pos..];
+    let mut stream = crate::zlib_h::z_stream_s {
+        next_in: input.as_ptr().cast_mut(),
+        avail_in: io.avail_in(),
+        total_in: io.total_in,
+        next_out: ::core::ptr::null_mut(),
+        avail_out: 0,
+        total_out: 0,
+        msg: ::core::ptr::null_mut(),
+        state: ::core::ptr::null_mut(),
+        zalloc: None,
+        zfree: None,
+        opaque: ::core::ptr::null_mut(),
+        data_type: 0,
+        adler: io.adler,
+        reserved: 0,
+    };
+    let available_before = stream.avail_in;
+    fill_window_from_input(s, &mut stream, Some(input));
+    let consumed = available_before.wrapping_sub(stream.avail_in) as usize;
+    io.input_pos = io.input_pos.saturating_add(consumed).min(io.input.len());
+    io.total_in = stream.total_in;
+    io.adler = stream.adler;
 }
 
 impl DeflateStoredIo<'_> {
@@ -4252,16 +4319,15 @@ unsafe fn deflate_rle(
     return block_done;
 }
 
-unsafe fn deflate_huff(
+fn deflate_huff(
     s: &mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream_s,
+    io: &mut DeflateFastIo<'_>,
     flush: ::core::ffi::c_int,
-    input: &[crate::stdlib::Bytef],
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if s.lookahead == 0 as crate::stdlib::uInt {
-            fill_window_from_input(s, strm, Some(input));
+            fill_window_from_fast_io(s, io);
             if s.lookahead == 0 as crate::stdlib::uInt {
                 if flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
@@ -4289,14 +4355,14 @@ unsafe fn deflate_huff(
             };
             crate::src::trees::tr_flush_block(
                 s,
-                Some(&mut strm.data_type),
+                Some(&mut io.data_type),
                 block.as_deref(),
                 block_len,
                 0,
             );
             s.block_start = s.strstart as ::core::ffi::c_long;
-            flush_pending_impl(s, strm);
-            if strm.avail_out == 0 {
+            io.flush_pending(s);
+            if io.avail_out() == 0 {
                 return need_more;
             }
         }
@@ -4311,14 +4377,14 @@ unsafe fn deflate_huff(
         };
         crate::src::trees::tr_flush_block(
             s,
-            Some(&mut strm.data_type),
+            Some(&mut io.data_type),
             block.as_deref(),
             block_len,
             1,
         );
         s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending_impl(s, strm);
-        if strm.avail_out == 0 {
+        io.flush_pending(s);
+        if io.avail_out() == 0 {
             return finish_started;
         }
         return finish_done;
@@ -4332,14 +4398,14 @@ unsafe fn deflate_huff(
         };
         crate::src::trees::tr_flush_block(
             s,
-            Some(&mut strm.data_type),
+            Some(&mut io.data_type),
             block.as_deref(),
             block_len,
             0,
         );
         s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending_impl(s, strm);
-        if strm.avail_out == 0 {
+        io.flush_pending(s);
+        if io.avail_out() == 0 {
             return need_more;
         }
     }
