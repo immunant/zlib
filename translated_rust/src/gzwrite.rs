@@ -667,11 +667,10 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
     if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
-    crate::stdlib::free(state as *mut ::core::ffi::c_void);
+    drop(Box::from_raw(state));
     return ret;
 }
 #[export_name = "gzclose_w"]

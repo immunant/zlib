@@ -36,14 +36,15 @@ pub mod gzguts_h {
 
     pub const GZIP: ::core::ffi::c_int = 2;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct gz_state {
         pub x: crate::zlib_h::gzFile_s,
         pub mode: ::core::ffi::c_int,
         pub fd: ::core::ffi::c_int,
-        pub path: *mut ::core::ffi::c_char,
+        // `gz_state` is opaque at the C ABI boundary.  Keep the text it owns
+        // in Rust containers instead of separately allocated C buffers.
+        pub path: std::ffi::CString,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
         pub in_0: *mut ::core::ffi::c_uchar,
@@ -60,7 +61,7 @@ pub mod gzguts_h {
         pub reset: ::core::ffi::c_int,
         pub skip: crate::stdlib::off64_t,
         pub err: ::core::ffi::c_int,
-        pub msg: *mut ::core::ffi::c_char,
+        pub msg: Option<std::ffi::CString>,
         pub strm: crate::zlib_h::z_stream,
     }
 

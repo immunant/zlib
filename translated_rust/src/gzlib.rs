@@ -89,25 +89,54 @@ unsafe extern "C" fn gz_open(
 ) -> crate::zlib_h::gzFile {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut len: crate::stdlib::z_size_t = 0;
     let mut oflag: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut exclusive: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    state = crate::stdlib::malloc(::core::mem::size_of::<crate::gzguts_h::gz_state>())
-        as crate::gzguts_h::gz_statep;
-    if state.is_null() {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    (*state).size = 0 as ::core::ffi::c_uint;
-    (*state).want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
-    (*state).err = crate::zlib_h::Z_OK;
-    (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*state).mode = crate::gzguts_h::GZ_NONE;
-    (*state).level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
-    (*state).strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
-    (*state).direct = 0 as ::core::ffi::c_int;
+    state = Box::into_raw(Box::new(crate::gzguts_h::gz_state {
+        x: crate::zlib_h::gzFile_s {
+            have: 0,
+            next: ::core::ptr::null_mut(),
+            pos: 0,
+        },
+        mode: crate::gzguts_h::GZ_NONE,
+        fd: -1,
+        path: std::ffi::CString::default(),
+        size: 0,
+        want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
+        in_0: ::core::ptr::null_mut(),
+        out: ::core::ptr::null_mut(),
+        direct: 0,
+        junk: 0,
+        how: 0,
+        again: 0,
+        start: 0,
+        eof: 0,
+        past: 0,
+        level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
+        strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
+        reset: 0,
+        skip: 0,
+        err: crate::zlib_h::Z_OK,
+        msg: None,
+        strm: crate::zlib_h::z_stream_s {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        },
+    }));
     while *mode != 0 {
         if *mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
             && *mode as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
@@ -125,7 +154,7 @@ unsafe extern "C" fn gz_open(
                     (*state).mode = crate::gzguts_h::GZ_APPEND;
                 }
                 43 => {
-                    crate::stdlib::free(state as *mut ::core::ffi::c_void);
+                    drop(Box::from_raw(state));
                     return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
                 }
                 101 => {
@@ -161,37 +190,22 @@ unsafe extern "C" fn gz_open(
         mode = mode.offset(1);
     }
     if (*state).mode == crate::gzguts_h::GZ_NONE {
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
+        drop(Box::from_raw(state));
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
         if (*state).direct == 1 as ::core::ffi::c_int {
-            crate::stdlib::free(state as *mut ::core::ffi::c_void);
+            drop(Box::from_raw(state));
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
         if (*state).direct == 0 as ::core::ffi::c_int {
             (*state).direct = 1 as ::core::ffi::c_int;
         }
     } else if (*state).direct == -1 as ::core::ffi::c_int {
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
+        drop(Box::from_raw(state));
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
-    (*state).path = crate::stdlib::malloc(
-        (len as crate::__stddef_size_t_h::size_t)
-            .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_char;
-    if (*state).path.is_null() {
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    crate::stdlib::snprintf(
-        (*state).path,
-        (len as crate::__stddef_size_t_h::size_t)
-            .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-        b"%s\0".as_ptr() as *const ::core::ffi::c_char,
-        path as *const ::core::ffi::c_char,
-    );
+    (*state).path = std::ffi::CStr::from_ptr(path as *const ::core::ffi::c_char).to_owned();
     oflag |= crate::stdlib::O_LARGEFILE
         | (if (*state).mode == crate::gzguts_h::GZ_READ {
             crate::stdlib::O_RDONLY
@@ -233,8 +247,7 @@ unsafe extern "C" fn gz_open(
         (*state).fd = fd;
     }
     if (*state).fd == -1 as ::core::ffi::c_int {
-        crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
+        drop(Box::from_raw(state));
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     if (*state).mode == crate::gzguts_h::GZ_APPEND {
@@ -629,10 +642,10 @@ pub unsafe extern "C" fn gzerror(
     }
     return if (*state).err == crate::zlib_h::Z_MEM_ERROR {
         b"out of memory\0".as_ptr() as *const ::core::ffi::c_char
-    } else if (*state).msg.is_null() {
+    } else if (*state).msg.is_none() {
         b"\0".as_ptr() as *const ::core::ffi::c_char
     } else {
-        (*state).msg as *const ::core::ffi::c_char
+        (*state).msg.as_ref().unwrap().as_ptr()
     };
 }
 #[export_name = "gzerror"]
@@ -673,41 +686,58 @@ pub unsafe extern "C" fn gz_error(
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    if !(*state).msg.is_null() {
-        if (*state).err != crate::zlib_h::Z_MEM_ERROR {
-            crate::stdlib::free((*state).msg as *mut ::core::ffi::c_void);
-        }
-        (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let msg = if msg.is_null() {
+        None
+    } else {
+        Some(std::ffi::CStr::from_ptr(msg))
+    };
+    gz_error_safe(&mut *state, err, msg);
+}
+
+/// Set the gzip error state using Rust-owned path and message buffers.
+///
+/// `CString` keeps the diagnostic stable for `gzerror()` until the next
+/// error update, matching zlib's C-facing lifetime without manual malloc/free.
+pub fn gz_error_safe(
+    state: &mut crate::gzguts_h::gz_state,
+    mut err: ::core::ffi::c_int,
+    msg: Option<&std::ffi::CStr>,
+) {
+    state.msg = None;
+    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && state.again == 0 {
+        state.x.have = 0;
     }
-    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && (*state).again == 0 {
-        (*state).x.have = 0 as ::core::ffi::c_uint;
-    }
-    (*state).err = err;
-    if msg.is_null() {
+    state.err = err;
+    let Some(msg) = msg else {
         return;
-    }
+    };
     if err == crate::zlib_h::Z_MEM_ERROR {
         return;
     }
-    (*state).msg = crate::stdlib::malloc(
-        crate::stdlib::strlen((*state).path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_char;
-    if (*state).msg.is_null() {
-        (*state).err = crate::zlib_h::Z_MEM_ERROR;
+
+    let path = state.path.as_bytes();
+    let message = msg.to_bytes();
+    let Some(capacity) = path
+        .len()
+        .checked_add(2)
+        .and_then(|len| len.checked_add(message.len()))
+        .and_then(|len| len.checked_add(1))
+    else {
+        state.err = crate::zlib_h::Z_MEM_ERROR;
+        return;
+    };
+    let mut text = Vec::new();
+    if text.try_reserve_exact(capacity).is_err() {
+        state.err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
-    crate::stdlib::snprintf(
-        (*state).msg,
-        crate::stdlib::strlen((*state).path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
-        b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
-        (*state).path,
-        b": \0".as_ptr() as *const ::core::ffi::c_char,
-        msg,
-    );
+    text.extend_from_slice(path);
+    text.extend_from_slice(b": ");
+    text.extend_from_slice(message);
+    text.push(0);
+    // CStr excludes its terminating NUL, so the constructed vector is always
+    // a valid CString.
+    state.msg = Some(std::ffi::CString::from_vec_with_nul(text).unwrap());
 }
 #[export_name = "gz_error"]
 
