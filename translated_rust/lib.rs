@@ -42,7 +42,9 @@ pub mod gzguts_h {
         pub x: crate::zlib_h::gzFile_s,
         pub mode: ::core::ffi::c_int,
         pub fd: ::core::ffi::c_int,
-        pub path: *mut ::core::ffi::c_char,
+        // `gz_state` is opaque at the C boundary.  Keep the path owned by the
+        // handle rather than retaining a separately allocated C pointer.
+        pub path: Option<Box<[u8]>>,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
         pub in_0: *mut ::core::ffi::c_uchar,
@@ -59,7 +61,9 @@ pub mod gzguts_h {
         pub reset: ::core::ffi::c_int,
         pub skip: crate::stdlib::off64_t,
         pub err: ::core::ffi::c_int,
-        pub msg: *mut ::core::ffi::c_char,
+        // Error text is likewise handle-owned; the FFI boundary publishes a
+        // temporary C pointer when `gzerror()` asks for it.
+        pub msg: Option<Box<[u8]>>,
         pub strm: crate::zlib_h::z_stream,
     }
 
