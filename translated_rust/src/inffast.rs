@@ -61,6 +61,28 @@ struct InflateFastResult {
     error: Option<InflateFastError>,
 }
 
+// The fast loop reports positions relative to its already-bound input and
+// output views.  Publishing them through slice tails keeps the cursor update
+// bounds-checked and separate from the raw stream binding at the ABI edge.
+fn publish_inflate_fast_result(
+    strm: &mut crate::zlib_h::z_stream,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    result: InflateFastResult,
+) {
+    if let Some(error) = result.error {
+        strm.msg = match error {
+            InflateFastError::DistanceTooFarBack => b"invalid distance too far back\0".as_ptr(),
+            InflateFastError::InvalidDistanceCode => b"invalid distance code\0".as_ptr(),
+            InflateFastError::InvalidLengthCode => b"invalid literal/length code\0".as_ptr(),
+        } as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+    }
+    strm.next_in = input[result.input_index..].as_ptr() as *mut crate::stdlib::Bytef;
+    strm.next_out = output[result.output_index..].as_mut_ptr();
+    strm.avail_in = (input.len() - result.input_index) as crate::stdlib::uInt;
+    strm.avail_out = (output.len() - result.output_index) as crate::stdlib::uInt;
+}
+
 fn inflate_fast_impl(
     state: &mut crate::src::inflate::inflate_state,
     input: &[crate::stdlib::Bytef],
@@ -261,17 +283,7 @@ pub unsafe fn inflate_fast(
     let lcode = ::core::slice::from_raw_parts(state.lencode, lcode_len);
     let dcode = ::core::slice::from_raw_parts(state.distcode, dcode_len);
     let result = inflate_fast_impl(state, input, output, window, lcode, dcode, used);
-    if let Some(error) = result.error {
-        strm.msg = match error {
-            InflateFastError::DistanceTooFarBack => b"invalid distance too far back\0".as_ptr(),
-            InflateFastError::InvalidDistanceCode => b"invalid distance code\0".as_ptr(),
-            InflateFastError::InvalidLengthCode => b"invalid literal/length code\0".as_ptr(),
-        } as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-    }
-    strm.next_in = input.as_ptr().wrapping_add(result.input_index) as *mut crate::stdlib::Bytef;
-    strm.next_out = output.as_mut_ptr().wrapping_add(result.output_index) as *mut crate::stdlib::Bytef;
-    strm.avail_in = (input.len() - result.input_index) as crate::stdlib::uInt;
-    strm.avail_out = (output.len() - result.output_index) as crate::stdlib::uInt;
+    publish_inflate_fast_result(strm, input, output, result);
 }
 #[export_name = "inflate_fast"]
 
