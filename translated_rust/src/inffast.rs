@@ -165,12 +165,21 @@ struct FastOutput<'a> {
 }
 
 impl<'a> FastOutput<'a> {
-    fn new(bytes: &'a mut [u8], index: usize, fast_end: usize) -> Self {
-        Self {
+    /// Construct a bounded fast-loop output cursor.
+    ///
+    /// The raw stream bridge supplies these bounds today, while a future
+    /// owned-stream implementation can construct the same checked facade
+    /// directly. Keep the decoder from relying on unchecked cursor arithmetic
+    /// at either boundary.
+    fn new(bytes: &'a mut [u8], index: usize, fast_end: usize) -> Option<Self> {
+        if index > fast_end || fast_end > bytes.len() {
+            return None;
+        }
+        Some(Self {
             bytes,
             index,
             fast_end,
-        }
+        })
     }
 
     fn index(&self) -> usize {
@@ -316,8 +325,15 @@ fn inflate_fast_slices(
     let mut op: ::core::ffi::c_uint = 0;
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
-    last = input.len().wrapping_sub(5);
-    let mut output = FastOutput::new(output_bytes, out_index, end_index);
+    if input.len() < 5 {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    }
+    last = input.len() - 5;
+    let Some(mut output) = FastOutput::new(output_bytes, out_index, end_index) else {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    };
     let mut error = None;
     wsize = state.wsize;
     whave = state.whave;
