@@ -955,18 +955,18 @@ fn inflate_match_copy_plan(
         if sane && back > whave {
             return None;
         }
-        let index = if back > wnext {
-            let trailing = back.checked_sub(wnext)?;
-            wsize.checked_sub(trailing)?
+        let (index, copy) = if back > wnext {
+            let copy = back.checked_sub(wnext)?;
+            (wsize.checked_sub(copy)?, copy)
         } else {
-            wnext.checked_sub(back)?
+            (wnext.checked_sub(back)?, back)
         };
         let wsize = usize::try_from(wsize).ok()?;
         let index = usize::try_from(index).ok()?;
         if index >= wsize {
             return None;
         }
-        (InflateMatchSource::Window { index }, back)
+        (InflateMatchSource::Window { index }, copy)
     } else {
         if offset == 0 {
             return None;
