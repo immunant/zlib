@@ -80,6 +80,36 @@ struct GzOffsetQuery<'a> {
     buffered_input: crate::stdlib::uInt,
 }
 
+// A checked, pointer-free view of unread bytes in gzip's owned output buffer.
+// The ABI cursor is converted to its address at the state boundary, leaving
+// read/seek policy with an index and a slice only.  Keep this small view in
+// gzlib so the remaining buffered read paths can adopt the same proof without
+// teaching their cores about `gzFile_s::next`.
+struct GzBufferedCursor<'a> {
+    buffer: &'a [u8],
+    start: usize,
+    have: usize,
+}
+
+impl<'a> GzBufferedCursor<'a> {
+    fn from_owned_buffer(buffer: &'a [u8], cursor_address: usize, have: u32) -> Option<Self> {
+        let start = cursor_address.checked_sub(buffer.as_ptr().addr())?;
+        let have = have as usize;
+        let end = start.checked_add(have)?;
+        buffer.get(start..end)?;
+        Some(Self {
+            buffer,
+            start,
+            have,
+        })
+    }
+
+    fn unread(&self) -> &'a [u8] {
+        // Construction checked this exact range against `buffer`.
+        &self.buffer[self.start..self.start + self.have]
+    }
+}
+
 impl GzPosition {
     fn active(&self) -> bool {
         self.mode == crate::gzguts_h::GZ_READ || self.mode == crate::gzguts_h::GZ_WRITE
@@ -887,20 +917,15 @@ pub unsafe extern "C" fn gzseek64(
     let buffered = if state.x.have == 0 {
         None
     } else {
-        let cursor = state.x.next;
         let Some(buffer) = state.out.as_deref() else {
             return -1 as crate::stdlib::off64_t;
         };
-        let Some(start) = cursor.addr().checked_sub(buffer.as_ptr().addr()) else {
+        let Some(buffered) =
+            GzBufferedCursor::from_owned_buffer(buffer, state.x.next.addr(), state.x.have)
+        else {
             return -1 as crate::stdlib::off64_t;
         };
-        let Some(end) = start.checked_add(state.x.have as usize) else {
-            return -1 as crate::stdlib::off64_t;
-        };
-        let Some(buffered) = buffer.get(start..end) else {
-            return -1 as crate::stdlib::off64_t;
-        };
-        Some(buffered)
+        Some(buffered.unread())
     };
     let (result, reset, consumed) = gzseek64_state(
         GzSeekState {
