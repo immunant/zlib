@@ -245,32 +245,30 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
                 &mut state.strm,
                 crate::zlib_h::Z_NO_FLUSH,
             );
-            if state.strm.avail_out < had {
-                state.junk = 0 as ::core::ffi::c_int;
-            }
-            if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"internal error: inflate stream corrupt\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                );
-                break;
-            } else if ret == crate::zlib_h::Z_MEM_ERROR {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-                );
-                break;
-            } else if ret == crate::zlib_h::Z_DATA_ERROR {
-                if state.junk == 1 as ::core::ffi::c_int {
-                    state.strm.avail_in = 0 as crate::stdlib::uInt;
-                    state.eof = 1 as ::core::ffi::c_int;
-                    state.how = crate::gzguts_h::LOOK;
-                    ret = crate::zlib_h::Z_OK;
+            match crate::src::gzlib::gz_decomp_after_inflate(state, had, ret) {
+                crate::src::gzlib::GzDecompStep::Continue => {}
+                crate::src::gzlib::GzDecompStep::Stop(result) => {
+                    ret = result;
                     break;
-                } else {
+                }
+                crate::src::gzlib::GzDecompStep::StreamError => {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal error: inflate stream corrupt\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                    );
+                    break;
+                }
+                crate::src::gzlib::GzDecompStep::MemError => {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_MEM_ERROR,
+                        b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                    break;
+                }
+                crate::src::gzlib::GzDecompStep::DataError => {
                     crate::src::gzlib::gz_error(
                         state,
                         crate::zlib_h::Z_DATA_ERROR,
@@ -282,8 +280,6 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
                     );
                     break;
                 }
-            } else if !(state.strm.avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END) {
-                break;
             }
         }
     }
@@ -293,15 +289,10 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
         .strm
         .next_out
         .wrapping_sub(state.x.have as usize) as *mut ::core::ffi::c_uchar;
-    if ret == crate::zlib_h::Z_STREAM_END {
-        state.junk = 0 as ::core::ffi::c_int;
-        state.how = crate::gzguts_h::LOOK;
-        return 0 as ::core::ffi::c_int;
-    }
-    return if ret != crate::zlib_h::Z_OK {
-        -1 as ::core::ffi::c_int
-    } else {
+    return if crate::src::gzlib::gz_decomp_finish(state, ret) {
         0 as ::core::ffi::c_int
+    } else {
+        -1 as ::core::ffi::c_int
     };
 }
 

@@ -220,6 +220,55 @@ pub(crate) fn gz_is_gzip_header(header: [::core::ffi::c_uchar; 4]) -> bool {
     header == [31, 139, 8, header[3]] && header[3] < 32
 }
 
+// Classify the state transition after the raw inflate call.  The gzip read
+// adapter retains the call itself, the output-buffer rebasing, and the
+// optional inflater message pointer used for a data error.
+pub(crate) enum GzDecompStep {
+    Continue,
+    Stop(::core::ffi::c_int),
+    StreamError,
+    MemError,
+    DataError,
+}
+
+pub(crate) fn gz_decomp_after_inflate(
+    state: &mut crate::gzguts_h::gz_state,
+    available_before: ::core::ffi::c_uint,
+    ret: ::core::ffi::c_int,
+) -> GzDecompStep {
+    if state.strm.avail_out < available_before {
+        state.junk = 0;
+    }
+    if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
+        GzDecompStep::StreamError
+    } else if ret == crate::zlib_h::Z_MEM_ERROR {
+        GzDecompStep::MemError
+    } else if ret == crate::zlib_h::Z_DATA_ERROR {
+        if state.junk == 1 {
+            state.strm.avail_in = 0;
+            state.eof = 1;
+            state.how = crate::gzguts_h::LOOK;
+            GzDecompStep::Stop(crate::zlib_h::Z_OK)
+        } else {
+            GzDecompStep::DataError
+        }
+    } else if state.strm.avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END {
+        GzDecompStep::Continue
+    } else {
+        GzDecompStep::Stop(ret)
+    }
+}
+
+pub(crate) fn gz_decomp_finish(state: &mut crate::gzguts_h::gz_state, ret: ::core::ffi::c_int) -> bool {
+    if ret == crate::zlib_h::Z_STREAM_END {
+        state.junk = 0;
+        state.how = crate::gzguts_h::LOOK;
+        true
+    } else {
+        ret == crate::zlib_h::Z_OK
+    }
+}
+
 pub(crate) fn gz_set_gzip_input(state: &mut crate::gzguts_h::gz_state, junk: bool) {
     state.how = crate::gzguts_h::GZIP;
     state.junk = junk as ::core::ffi::c_int;
