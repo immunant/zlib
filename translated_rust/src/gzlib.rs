@@ -522,19 +522,6 @@ pub unsafe extern "C" fn gzclearerr_ffi(file: crate::zlib_h::gzFile) {
     };
     gzclearerr(state)
 }
-pub unsafe extern "C" fn gz_error(
-    mut state: crate::gzguts_h::gz_statep,
-    mut err: ::core::ffi::c_int,
-    mut msg: *const ::core::ffi::c_char,
-) {
-    let msg = if msg.is_null() {
-        None
-    } else {
-        Some(std::ffi::CStr::from_ptr(msg))
-    };
-    gz_error_safe(&mut *state, err, msg);
-}
-
 /// Set the gzip error state using Rust-owned path and message buffers.
 ///
 /// `CString` keeps the diagnostic stable for `gzerror()` until the next
@@ -583,11 +570,19 @@ pub fn gz_error_safe(
 #[export_name = "gz_error"]
 
 pub unsafe extern "C" fn gz_error_ffi(
-    mut state: crate::gzguts_h::gz_statep,
-    mut err: ::core::ffi::c_int,
-    mut msg: *const ::core::ffi::c_char,
+    state: crate::gzguts_h::gz_statep,
+    err: ::core::ffi::c_int,
+    msg: *const ::core::ffi::c_char,
 ) {
-    gz_error(state, err, msg)
+    let Some(state) = (unsafe { state.as_mut() }) else {
+        return;
+    };
+    let msg = if msg.is_null() {
+        None
+    } else {
+        Some(unsafe { std::ffi::CStr::from_ptr(msg) })
+    };
+    gz_error_safe(state, err, msg);
 }
 pub fn gz_intmax() -> ::core::ffi::c_uint {
     crate::limits_h::INT_MAX as ::core::ffi::c_uint
