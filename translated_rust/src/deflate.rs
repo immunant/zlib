@@ -857,7 +857,31 @@ struct DeflateReleasePlan {
     state: bool,
 }
 
+// The callback handles themselves remain at the ABI lifecycle boundary, but
+// their release sequence is ordinary pointer-free policy.  Keeping this
+// order in the plan prevents a future owner from deriving it ad hoc while
+// preserving zlib's observable pending/head/prev/window/state callback
+// order.
+#[derive(Clone, Copy)]
+enum DeflateReleaseSlot {
+    Pending,
+    Head,
+    Prev,
+    Window,
+    State,
+}
+
 impl DeflateReleasePlan {
+    fn ordered_slots(&self) -> [Option<DeflateReleaseSlot>; 5] {
+        [
+            self.pending.then_some(DeflateReleaseSlot::Pending),
+            self.head.then_some(DeflateReleaseSlot::Head),
+            self.prev.then_some(DeflateReleaseSlot::Prev),
+            self.window.then_some(DeflateReleaseSlot::Window),
+            self.state.then_some(DeflateReleaseSlot::State),
+        ]
+    }
+
     fn result(&self) -> ::core::ffi::c_int {
         if self.status == crate::src::deflate::BUSY_STATE {
             crate::zlib_h::Z_DATA_ERROR
@@ -5902,33 +5926,19 @@ pub unsafe fn deflateEnd(
         drop(state.gzhead.take());
         (
             release_plan,
-            [
-                if release_plan.pending {
-                    state.pending_buf.map(|allocation| allocation.cast())
-                } else {
-                    None
-                },
-                if release_plan.head {
-                    state.head.map(|allocation| allocation.cast())
-                } else {
-                    None
-                },
-                if release_plan.prev {
-                    state.prev.map(|allocation| allocation.cast())
-                } else {
-                    None
-                },
-                if release_plan.window {
-                    state.window.map(|allocation| allocation.cast())
-                } else {
-                    None
-                },
-                if release_plan.state {
-                    state_allocation.map(|allocation| allocation.cast())
-                } else {
-                    None
-                },
-            ],
+            release_plan.ordered_slots().map(|slot| {
+                slot.and_then(|slot| match slot {
+                    DeflateReleaseSlot::Pending => {
+                        state.pending_buf.map(|allocation| allocation.cast())
+                    }
+                    DeflateReleaseSlot::Head => state.head.map(|allocation| allocation.cast()),
+                    DeflateReleaseSlot::Prev => state.prev.map(|allocation| allocation.cast()),
+                    DeflateReleaseSlot::Window => state.window.map(|allocation| allocation.cast()),
+                    DeflateReleaseSlot::State => {
+                        state_allocation.map(|allocation| allocation.cast())
+                    }
+                })
+            }),
         )
     };
     for allocation in allocations.into_iter().flatten() {
