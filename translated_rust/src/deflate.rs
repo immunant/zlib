@@ -2694,6 +2694,18 @@ struct DeflateCopyPreparation {
 }
 
 impl DeflateCopyPreparation {
+    // Every storage owner reaches the same checked copy commit through this
+    // pointer-free operation.  In particular, a callback-pairing owner can
+    // project its allocations once, then use this without duplicating the
+    // layout checks or teaching the copy core about callback handles.
+    fn copy_storage(
+        &self,
+        source: DeflateCopySourceViews<'_>,
+        destination: DeflateCopyDestinationViews<'_>,
+    ) -> bool {
+        deflateCopy(source, destination, &self.plan.layout)
+    }
+
     // This is the pointer-free commit point for a deep copy.  The callback
     // boundary is still responsible for preserving zalloc/zfree pairing, but
     // once it has supplied owned storage it need not repeat the geometry or
@@ -2703,12 +2715,8 @@ impl DeflateCopyPreparation {
         source: &DeflateOwnedStorage,
     ) -> Option<DeflateOwnedStorage> {
         let mut destination = self.plan.storage.allocate_owned()?;
-        deflateCopy(
-            source.source_views(),
-            destination.destination_views(),
-            &self.plan.layout,
-        )
-        .then_some(destination)
+        self.copy_storage(source.source_views(), destination.destination_views())
+            .then_some(destination)
     }
 }
 
