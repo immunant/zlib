@@ -2917,22 +2917,19 @@ fn deflate_update(
     }
 }
 
-/// Run one update against the four buffers supplied by a custom allocator.
+/// Construct one typed view of a callback-owned deflate workspace.
 ///
 /// Default-pair streams use `DeflateOwnedStorage` and never enter this
-/// bridge.  Keeping the three legacy buffer views together makes the custom
-/// allocator boundary explicit: callers supply only typed state, stream, and
-/// borrowed caller buffers, while this adapter is solely responsible for
-/// proving the callback-owned workspace geometry before the safe strategy
-/// dispatcher sees it.
-fn update_callback_deflate_workspace(
+/// bridge.  Custom and mixed streams still retain ABI allocation handles, so
+/// this is the single temporary conversion point before the safe strategy
+/// dispatcher sees their buffers.  A future callback-storage owner can
+/// replace this constructor without changing the dispatcher or strategies.
+fn callback_deflate_workspace<'a>(
     state: &mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream,
-    input: &[crate::stdlib::Bytef],
-    output: &mut [crate::stdlib::Bytef],
-    pending_buf: &mut [crate::stdlib::Bytef],
-    flush: ::core::ffi::c_int,
-) -> Option<block_state> {
+    input: &'a [crate::stdlib::Bytef],
+    output: &'a mut [crate::stdlib::Bytef],
+    pending_buf: &'a mut [crate::stdlib::Bytef],
+) -> Option<DeflateWorkspace<'a>> {
     if state.window.is_null() || state.pending_buf.is_null() {
         return None;
     }
@@ -2941,7 +2938,7 @@ fn update_callback_deflate_workspace(
     // boundary until the allocator facade can own those allocations directly.
     unsafe {
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-        let mut head = if state.head.is_null() {
+        let head = if state.head.is_null() {
             None
         } else {
             Some(::core::slice::from_raw_parts_mut(
@@ -2959,14 +2956,31 @@ fn update_callback_deflate_workspace(
         };
         let mut workspace = DeflateWorkspace {
             window,
-            head: head.as_deref_mut(),
+            head,
             prev,
             pending_buf,
             input,
             output,
         };
-        deflate_update(state, strm, &mut workspace, flush)
+        Some(workspace)
     }
+}
+
+/// Run one update against the four buffers supplied by a custom allocator.
+///
+/// The raw callback-storage conversion is isolated in
+/// `callback_deflate_workspace`; this dispatcher only receives a typed
+/// workspace and retains the existing update behavior.
+fn update_callback_deflate_workspace(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
+) -> Option<block_state> {
+    let mut workspace = callback_deflate_workspace(state, input, output, pending_buf)?;
+    deflate_update(state, strm, &mut workspace, flush)
 }
 
 pub fn deflate(
