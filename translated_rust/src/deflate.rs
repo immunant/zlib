@@ -455,32 +455,6 @@ impl DeflateStorageResults {
     }
 }
 
-// Each allocator result must be installed before the next callback: custom
-// allocators can inspect the stream re-entrantly.  Keep that one raw state
-// projection in this boundary helper so the pointer-free allocation plan has
-// one ordered publication boundary.
-unsafe fn publish_deflate_storage(
-    state: *mut crate::src::deflate::internal_state,
-    slot: &DeflateStorageSlot,
-    allocation: crate::stdlib::voidpf,
-) {
-    let state = &mut *state;
-    match slot {
-        DeflateStorageSlot::Window => {
-            state.window = ::core::ptr::NonNull::new(allocation.cast());
-        }
-        DeflateStorageSlot::Prev => {
-            state.prev = ::core::ptr::NonNull::new(allocation.cast());
-        }
-        DeflateStorageSlot::Head => {
-            state.head = ::core::ptr::NonNull::new(allocation.cast());
-        }
-        DeflateStorageSlot::Pending => {
-            state.pending_buf = ::core::ptr::NonNull::new(allocation.cast());
-        }
-    }
-}
-
 // Keep the state record in the same pointer-free allocation plan as its four
 // backing regions.  The current ABI adapter still invokes zalloc directly,
 // but a future allocation broker can consume this complete plan and preserve
@@ -1044,7 +1018,25 @@ pub unsafe extern "C" fn deflateInit2_(
             stream.opaque, request.items, request.size
         );
         let allocated = !allocation.is_null();
-        publish_deflate_storage(s, slot, allocation);
+        // Publish every callback result before requesting the next region:
+        // custom allocators are permitted to inspect the stream re-entrantly.
+        // This projection stays at the allocation boundary; the scheduling and
+        // completion accounting above remain pointer-free.
+        let state = &mut *s;
+        match slot {
+            DeflateStorageSlot::Window => {
+                state.window = ::core::ptr::NonNull::new(allocation.cast());
+            }
+            DeflateStorageSlot::Prev => {
+                state.prev = ::core::ptr::NonNull::new(allocation.cast());
+            }
+            DeflateStorageSlot::Head => {
+                state.head = ::core::ptr::NonNull::new(allocation.cast());
+            }
+            DeflateStorageSlot::Pending => {
+                state.pending_buf = ::core::ptr::NonNull::new(allocation.cast());
+            }
+        }
         allocated
     });
     let state = &mut *s;
