@@ -1905,6 +1905,49 @@ enum DeflateStorageProjection<'request> {
     },
 }
 
+// Projection admission is scalar-only policy.  Keeping it separate from the
+// ABI/state borrow is the first seam for the C4 owner: a future owner can
+// decide which bounded views a request needs without carrying callback
+// handles, stream cursors, or opaque state.
+struct DeflateProjectionAdmission {
+    storage_layout: DeflateStorageLayout,
+    complete_storage: bool,
+    dispatch_cursors: bool,
+}
+
+fn admit_deflate_projection(
+    status: ::core::ffi::c_int,
+    storage_layout: DeflateStorageLayout,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    last_flush: ::core::ffi::c_int,
+    projection: &DeflateStorageProjection<'_>,
+) -> Option<DeflateProjectionAdmission> {
+    if !deflate_state_status_is_valid(status) {
+        return None;
+    }
+    let parameter_requires_flush = match projection {
+        DeflateStorageProjection::ParameterDispatch(plan) => {
+            let algorithm = configuration_table[level as usize].algorithm;
+            (plan.strategy != strategy
+                || algorithm != configuration_table[plan.level as usize].algorithm)
+                && last_flush != -2 as ::core::ffi::c_int
+        }
+        _ => false,
+    };
+    let complete_storage = matches!(
+        projection,
+        DeflateStorageProjection::Complete | DeflateStorageProjection::Dispatch
+    ) || parameter_requires_flush;
+    let dispatch_cursors = matches!(projection, DeflateStorageProjection::Dispatch)
+        || parameter_requires_flush;
+    Some(DeflateProjectionAdmission {
+        storage_layout,
+        complete_storage,
+        dispatch_cursors,
+    })
+}
+
 // The caller first checks and borrows the ABI stream, then this short-lived
 // projection validates its opaque state.  Keeping all returned borrows tied
 // to that stream borrow prevents a state or callback-buffer reference from
@@ -1924,25 +1967,17 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         .state?
         .cast::<crate::src::deflate::deflate_state>()
         .as_mut();
-    if !deflate_state_status_is_valid(state.status) {
-        return None;
-    }
-    let storage_layout = state.callback_storage.storage();
-    let parameter_requires_flush = match &projection {
-        DeflateStorageProjection::ParameterDispatch(plan) => {
-            let algorithm = configuration_table[state.level as usize].algorithm;
-            (plan.strategy != state.strategy
-                || algorithm != configuration_table[plan.level as usize].algorithm)
-                && state.last_flush != -2 as ::core::ffi::c_int
-        }
-        _ => false,
-    };
-    let complete_storage = matches!(
+    let admission = admit_deflate_projection(
+        state.status,
+        state.callback_storage.storage(),
+        state.level,
+        state.strategy,
+        state.last_flush,
         &projection,
-        DeflateStorageProjection::Complete | DeflateStorageProjection::Dispatch
-    ) || parameter_requires_flush;
-    let dispatch_cursors =
-        matches!(&projection, DeflateStorageProjection::Dispatch) || parameter_requires_flush;
+    )?;
+    let storage_layout = admission.storage_layout;
+    let complete_storage = admission.complete_storage;
+    let dispatch_cursors = admission.dispatch_cursors;
     let mut storage = match projection {
         DeflateStorageProjection::None => DeflateCallbackStorage {
             window: None,
