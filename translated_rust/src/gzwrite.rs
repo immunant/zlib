@@ -321,6 +321,21 @@ fn gz_comp_write_chunk_len(available: usize, max: ::core::ffi::c_uint) -> ::core
     }
 }
 
+fn gz_comp_output_write_chunk_len(
+    next_out_address: usize,
+    next_address: usize,
+    max: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    if next_out_address > next_address {
+        Some(gz_comp_write_chunk_len(
+            next_out_address.wrapping_sub(next_address),
+            max,
+        ))
+    } else {
+        None
+    }
+}
+
 fn gz_comp_remaining_direct_input(
     avail_in: crate::stdlib::uInt,
     written: ::core::ffi::c_int,
@@ -470,13 +485,14 @@ unsafe extern "C" fn gz_comp(
     ret = crate::zlib_h::Z_OK;
     loop {
         if gz_comp_needs_output_write((*strm).avail_out, flush, ret) {
-            while (*strm).next_out > (*state).x.next {
+            while let Some(chunk_len) = gz_comp_output_write_chunk_len(
+                (*strm).next_out as usize,
+                (*state).x.next as usize,
+                max,
+            ) {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 (*state).again = 0 as ::core::ffi::c_int;
-                put = gz_comp_write_chunk_len(
-                    (*strm).next_out.offset_from((*state).x.next) as usize,
-                    max,
-                );
+                put = chunk_len;
                 writ = crate::stdlib::write(
                     (*state).fd,
                     (*state).x.next as *const ::core::ffi::c_void,
@@ -946,17 +962,17 @@ mod tests {
     use super::{
         gz_buffer_is_initialized, gz_buffered_have, gz_comp_has_output, gz_comp_max_write_chunk,
         gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write, gz_comp_needs_reset,
-        gz_comp_output_produced, gz_comp_remaining_direct_input, gz_comp_reset_action,
-        gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
-        gz_comp_write_failed, gz_has_pending_skip, gz_write_apply_direct_progress,
-        gz_write_buffered_copy_len, gz_write_buffered_step, gz_write_chunk_consumed_len,
-        gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
-        gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
-        gz_zero_needs_pending_flush, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_len_fits_int,
+        gz_comp_output_produced, gz_comp_output_write_chunk_len, gz_comp_remaining_direct_input,
+        gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_skips_empty_flush,
+        gz_comp_write_chunk_len, gz_comp_write_failed, gz_has_pending_skip,
+        gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_step,
+        gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
+        gz_write_error_result, gz_write_is_empty, gz_write_needs_pending_flush,
+        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_apply_progress,
+        gz_zero_chunk_len, gz_zero_needs_initialization, gz_zero_needs_pending_flush,
+        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len,
+        gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1213,6 +1229,18 @@ mod tests {
             gz_comp_write_chunk_len(usize::MAX, gz_comp_max_write_chunk()),
             gz_comp_max_write_chunk()
         );
+    }
+
+    #[test]
+    fn gz_comp_output_write_chunk_len_requires_pending_output() {
+        assert_eq!(gz_comp_output_write_chunk_len(100, 100, 64), None);
+        assert_eq!(gz_comp_output_write_chunk_len(99, 100, 64), None);
+    }
+
+    #[test]
+    fn gz_comp_output_write_chunk_len_uses_pending_output_length() {
+        assert_eq!(gz_comp_output_write_chunk_len(124, 100, 64), Some(24));
+        assert_eq!(gz_comp_output_write_chunk_len(200, 100, 64), Some(64));
     }
 
     #[test]

@@ -2097,18 +2097,11 @@ pub unsafe extern "C" fn inflate(
     (*strm).avail_in = have as crate::stdlib::uInt;
     (*state).hold = hold;
     (*state).bits = bits;
-    if (*state).wsize != 0
-        || out != (*strm).avail_out
-            && ((*state).mode as ::core::ffi::c_uint)
-                < crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
-            && (((*state).mode as ::core::ffi::c_uint)
-                < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
-                || flush != crate::zlib_h::Z_FINISH)
-    {
+    if inflate_should_update_window((*state).wsize, out, left, (*state).mode, flush) {
         if updatewindow(
             strm,
             (*strm).next_out,
-            out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint),
+            out.wrapping_sub(left),
         ) != 0
         {
             (*state).mode = crate::src::inflate::MEM;
@@ -2328,6 +2321,19 @@ fn inflate_needs_buffer_error(
 ) -> bool {
     (consumed == 0 && produced == 0 || flush == crate::zlib_h::Z_FINISH)
         && result == crate::zlib_h::Z_OK
+}
+
+fn inflate_should_update_window(
+    wsize: ::core::ffi::c_uint,
+    initial_out: ::core::ffi::c_uint,
+    remaining_out: ::core::ffi::c_uint,
+    mode: inflate_mode,
+    flush: ::core::ffi::c_int,
+) -> bool {
+    wsize != 0
+        || initial_out != remaining_out
+            && mode < crate::src::inflate::BAD
+            && (mode < crate::src::inflate::CHECK || flush != crate::zlib_h::Z_FINISH)
 }
 
 fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
@@ -2669,9 +2675,9 @@ mod tests {
         inflate_data_type_value, inflate_header_wrap_allows_capture, inflate_mark_value,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update,
         inflate_reset2_params, inflate_state_metadata_is_valid, inflate_sync_point_value,
-        inflate_sync_search_core, inflate_validate_wrap, initial_window_metadata,
+        inflate_sync_search_core, inflate_should_update_window, inflate_validate_wrap, initial_window_metadata,
         stored_block_lengths_are_valid, syncsearch_safe, window_update_plan, InflatePrimeUpdate,
-        InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC,
+        InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC,
         TYPE,
     };
 
@@ -2754,6 +2760,16 @@ mod tests {
         assert!(inflate_header_wrap_allows_capture(2));
         assert!(inflate_header_wrap_allows_capture(3));
         assert!(!inflate_header_wrap_allows_capture(4));
+    }
+
+    #[test]
+    fn inflate_window_update_gate_preserves_mode_and_flush_boundaries() {
+        assert!(inflate_should_update_window(1, 8, 8, BAD, crate::zlib_h::Z_FINISH));
+        assert!(!inflate_should_update_window(0, 8, 8, TYPE, crate::zlib_h::Z_NO_FLUSH));
+        assert!(inflate_should_update_window(0, 8, 7, TYPE, crate::zlib_h::Z_FINISH));
+        assert!(!inflate_should_update_window(0, 8, 7, BAD, crate::zlib_h::Z_NO_FLUSH));
+        assert!(!inflate_should_update_window(0, 8, 7, CHECK, crate::zlib_h::Z_FINISH));
+        assert!(inflate_should_update_window(0, 8, 7, CHECK, crate::zlib_h::Z_NO_FLUSH));
     }
 
     #[test]
