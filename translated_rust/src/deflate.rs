@@ -1455,20 +1455,32 @@ mod callback_owner {
                     *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
                 }
                 let [window, pending] = byte_views;
-                let prev = Some(::core::slice::from_raw_parts_mut(
-                    prev_handle.expect("initialized prev table").as_ptr(),
-                    storage_layout
-                        .prev
-                        .element_len::<crate::src::deflate::Posf>()
-                        .expect("validated prev allocation geometry"),
-                ));
-                let head = Some(::core::slice::from_raw_parts_mut(
-                    head_handle.expect("initialized head table").as_ptr(),
-                    storage_layout
-                        .head
-                        .element_len::<crate::src::deflate::Posf>()
-                        .expect("validated head allocation geometry"),
-                ));
+                // The two hash regions have the same typed element layout.
+                // Build them through one projection site, just as the byte
+                // regions above do.  The callback ledger has already proved
+                // that these are distinct complete allocations, and this
+                // owner remains the sole place that turns their handles into
+                // bounded views.
+                let mut hash_views: [Option<&mut [crate::src::deflate::Posf]>; 2] = [None, None];
+                for (view, (handle, len)) in hash_views.iter_mut().zip([
+                    (
+                        prev_handle.expect("initialized prev table"),
+                        storage_layout
+                            .prev
+                            .element_len::<crate::src::deflate::Posf>()
+                            .expect("validated prev allocation geometry"),
+                    ),
+                    (
+                        head_handle.expect("initialized head table"),
+                        storage_layout
+                            .head
+                            .element_len::<crate::src::deflate::Posf>()
+                            .expect("validated head allocation geometry"),
+                    ),
+                ]) {
+                    *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
+                }
+                let [prev, head] = hash_views;
                 match projection {
                     DeflateStorageProjection::Pending => lifecycle
                         .pending_storage(pending)
