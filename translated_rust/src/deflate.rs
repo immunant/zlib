@@ -2528,41 +2528,38 @@ fn set_stored_block_length(
     header[3] = (!len >> 8) as crate::stdlib::Bytef;
 }
 
-// The callers have already validated and projected the ABI stream and its
-// opaque state. Keep that projection at their boundary: the shared pending
-// flush only needs those scoped references plus bounded views of the two
-// callback-owned byte regions.
-unsafe fn flush_pending(
-    strm: &mut crate::zlib_h::z_stream_s,
-    state: &mut crate::src::deflate::deflate_state,
+// Pending flushing is a bounded byte operation.  The ABI dispatcher owns
+// cursor publication; this kernel needs only the scalar bit/pending state and
+// the two call-scoped storage views.
+fn flush_pending(
     pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    pending_out: &mut usize,
     output: &mut [crate::stdlib::Bytef],
     output_pos: &mut usize,
-) -> crate::stdlib::uInt {
+) -> ::core::ffi::c_uint {
     crate::src::trees::flush_pending_bits(
         pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
+        pending,
+        bi_buf,
+        bi_valid,
     );
-    let len = state
-        .pending
+    let len = (*pending)
         .min(output.len().saturating_sub(*output_pos) as crate::zutil_h::ulg)
         as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
-        return strm.avail_out;
+        return 0;
     }
     let len = flush_pending_bytes(
         &mut output[*output_pos..*output_pos + len as usize],
         pending_buf,
-        &mut state.pending_out,
-        &mut state.pending,
+        pending_out,
+        pending,
     );
     *output_pos += len as usize;
-    strm.next_out = strm.next_out.wrapping_add(len as usize);
-    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
-    strm.avail_out = strm.avail_out.wrapping_sub(len);
-    strm.avail_out
+    len
 }
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
@@ -2625,7 +2622,10 @@ pub unsafe extern "C" fn deflate(
     old_flush = s.last_flush;
     s.last_flush = flush;
     if s.pending != 0 as crate::zutil_h::ulg {
-        flush_pending(strm, s, pending_buf, output, &mut output_pos);
+        let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+        strm.next_out = strm.next_out.wrapping_add(len as usize);
+        strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+        strm.avail_out = strm.avail_out.wrapping_sub(len);
         if strm.avail_out == 0 as crate::stdlib::uInt {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2685,7 +2685,10 @@ pub unsafe extern "C" fn deflate(
             );
         }
         s.status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm, s, pending_buf, output, &mut output_pos);
+        let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+        strm.next_out = strm.next_out.wrapping_add(len as usize);
+        strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+        strm.avail_out = strm.avail_out.wrapping_sub(len);
         if s.pending != 0 as crate::zutil_h::ulg {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2705,7 +2708,10 @@ pub unsafe extern "C" fn deflate(
         ) {
             None => {
                 state.status = crate::src::deflate::BUSY_STATE;
-                flush_pending(strm, s, pending_buf, output, &mut output_pos);
+                let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                strm.next_out = strm.next_out.wrapping_add(len as usize);
+                strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+                strm.avail_out = strm.avail_out.wrapping_sub(len);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2744,7 +2750,10 @@ pub unsafe extern "C" fn deflate(
                 if complete {
                     break;
                 }
-                flush_pending(strm, s, pending_buf, output, &mut output_pos);
+                let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                strm.next_out = strm.next_out.wrapping_add(len as usize);
+                strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+                strm.avail_out = strm.avail_out.wrapping_sub(len);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2775,7 +2784,10 @@ pub unsafe extern "C" fn deflate(
             };
             loop {
                 if s.pending == s.pending_buf_size {
-                    flush_pending(strm, s, pending_buf, output, &mut output_pos);
+                    let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                    strm.next_out = strm.next_out.wrapping_add(len as usize);
+                    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+                    strm.avail_out = strm.avail_out.wrapping_sub(len);
                     if s.pending != 0 as crate::zutil_h::ulg {
                         s.last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2823,7 +2835,10 @@ pub unsafe extern "C" fn deflate(
             };
             loop {
                 if s.pending == s.pending_buf_size {
-                    flush_pending(strm, s, pending_buf, output, &mut output_pos);
+                    let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                    strm.next_out = strm.next_out.wrapping_add(len as usize);
+                    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+                    strm.avail_out = strm.avail_out.wrapping_sub(len);
                     if s.pending != 0 as crate::zutil_h::ulg {
                         s.last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2853,7 +2868,10 @@ pub unsafe extern "C" fn deflate(
     if s.status == crate::src::deflate::HCRC_STATE {
         if s.gzhead.as_ref().is_some_and(|header| header.hcrc) {
             if s.pending.wrapping_add(2 as crate::zutil_h::ulg) > s.pending_buf_size {
-                flush_pending(strm, s, pending_buf, output, &mut output_pos);
+                let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+                strm.next_out = strm.next_out.wrapping_add(len as usize);
+                strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+                strm.avail_out = strm.avail_out.wrapping_sub(len);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2875,7 +2893,10 @@ pub unsafe extern "C" fn deflate(
             strm.adler = crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None);
         }
         s.status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm, s, pending_buf, output, &mut output_pos);
+        let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+        strm.next_out = strm.next_out.wrapping_add(len as usize);
+        strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+        strm.avail_out = strm.avail_out.wrapping_sub(len);
         if s.pending != 0 as crate::zutil_h::ulg {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -3139,7 +3160,10 @@ pub unsafe extern "C" fn deflate(
                     }
                 }
             }
-            flush_pending(strm, s, pending_buf, output, &mut output_pos);
+            let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+            strm.next_out = strm.next_out.wrapping_add(len as usize);
+            strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+            strm.avail_out = strm.avail_out.wrapping_sub(len);
             if strm.avail_out == 0 as crate::stdlib::uInt {
                 s.last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -3163,7 +3187,10 @@ pub unsafe extern "C" fn deflate(
         strm.adler,
         strm.total_in,
     );
-    flush_pending(strm, s, pending_buf, output, &mut output_pos);
+    let len = flush_pending(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid, &mut s.pending_out, output, &mut output_pos);
+    strm.next_out = strm.next_out.wrapping_add(len as usize);
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm.avail_out = strm.avail_out.wrapping_sub(len);
     if s.wrap > 0 as ::core::ffi::c_int {
         s.wrap = -s.wrap;
     }
