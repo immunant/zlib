@@ -3578,7 +3578,7 @@ static bl_order: [crate::zutil_h::uch; 19] = [
     15 as crate::zutil_h::uch,
 ];
 
-static mut static_l_desc: crate::src::deflate::static_tree_desc = unsafe {
+static mut static_l_desc: crate::src::deflate::static_tree_desc = {
     static_tree_desc_s {
         static_tree: &raw const static_ltree as *const crate::src::deflate::ct_data,
         extra_bits: &raw const extra_lbits as *const crate::stdlib::intf,
@@ -3588,7 +3588,7 @@ static mut static_l_desc: crate::src::deflate::static_tree_desc = unsafe {
     }
 };
 
-static mut static_d_desc: crate::src::deflate::static_tree_desc = unsafe {
+static mut static_d_desc: crate::src::deflate::static_tree_desc = {
     static_tree_desc_s {
         static_tree: &raw const static_dtree as *const crate::src::deflate::ct_data,
         extra_bits: &raw const extra_dbits as *const crate::stdlib::intf,
@@ -3598,7 +3598,7 @@ static mut static_d_desc: crate::src::deflate::static_tree_desc = unsafe {
     }
 };
 
-static mut static_bl_desc: crate::src::deflate::static_tree_desc = unsafe {
+static mut static_bl_desc: crate::src::deflate::static_tree_desc = {
     static_tree_desc_s {
         static_tree: ::core::ptr::null::<crate::src::deflate::ct_data>(),
         extra_bits: &raw const extra_blbits as *const crate::stdlib::intf,
@@ -3608,7 +3608,7 @@ static mut static_bl_desc: crate::src::deflate::static_tree_desc = unsafe {
     }
 };
 
-unsafe extern "C" fn bi_reverse(
+fn bi_reverse(
     mut code: ::core::ffi::c_uint,
     mut len: ::core::ffi::c_int,
 ) -> ::core::ffi::c_uint {
@@ -3698,7 +3698,7 @@ unsafe extern "C" fn gen_codes(
     }
 }
 
-unsafe extern "C" fn tr_static_init() {}
+fn tr_static_init() {}
 
 unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
