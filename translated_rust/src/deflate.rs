@@ -627,21 +627,17 @@ pub fn deflateInit_(
     version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let version_first = version.copied();
-    if !deflate_init_version_and_size_valid(version_first, stream_size) {
-        return crate::zlib_h::Z_VERSION_ERROR;
-    }
-    let Some(strm) = strm else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    // `deflateInit2_()` owns the shared version-before-null validation.  Do
+    // not repeat it here: keeping one implementation path prevents this
+    // convenience initializer from drifting from the exported initializer.
     deflateInit2_(
-        Some(strm),
+        strm,
         level,
         crate::zlib_h::Z_DEFLATED,
         crate::stdlib::MAX_WBITS,
         crate::zutil_h::DEF_MEM_LEVEL,
         crate::zlib_h::Z_DEFAULT_STRATEGY,
-        version_first,
+        version.copied(),
         stream_size,
     )
 }

@@ -621,17 +621,13 @@ pub fn inflateInit_(
     version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let version_first = version.copied();
-    if !inflate_init_version_and_size_valid(version_first, stream_size) {
-        return crate::zlib_h::Z_VERSION_ERROR;
-    }
-    let Some(strm) = strm else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    // `inflateInit2_()` owns the shared version-before-null validation.  Do
+    // not duplicate it here, since both initializer spellings must retain
+    // exactly the same error ordering.
     inflateInit2_(
-        Some(strm),
+        strm,
         crate::zutil_h::DEF_WBITS,
-        version_first,
+        version.copied(),
         stream_size,
     )
 }
