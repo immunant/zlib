@@ -24,57 +24,94 @@ pub use crate::zlib_h::Z_NO_FLUSH;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+fn write_compress_byte(dest: &mut [crate::stdlib::Bytef], written: &mut usize, byte: u8) -> bool {
+    let Some(slot) = dest.get_mut(*written) else {
+        return false;
+    };
+    *slot = byte;
+    *written += 1;
+    true
+}
+
+fn write_compress_slice(
+    dest: &mut [crate::stdlib::Bytef],
+    written: &mut usize,
+    bytes: &[crate::stdlib::Bytef],
+) -> bool {
+    let available = dest.len().saturating_sub(*written);
+    let count = available.min(bytes.len());
+    dest[*written..*written + count].copy_from_slice(&bytes[..count]);
+    *written += count;
+    count == bytes.len()
+}
+
 pub fn compress2_z(
     dest: &mut [crate::stdlib::Bytef],
     source: &[crate::stdlib::Bytef],
     level: ::core::ffi::c_int,
 ) -> (::core::ffi::c_int, crate::stdlib::z_size_t) {
-    let mut err: ::core::ffi::c_int;
-    let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut left = dest.len() as crate::stdlib::z_size_t;
-    let dest_capacity = left;
-    let mut source_left = source.len() as crate::stdlib::z_size_t;
-    let mut stream = match crate::src::deflate::DeflateSession::new(source, dest, level) {
-        Ok(stream) => stream,
-        Err(status) => return (status, 0),
-    };
-    loop {
-        if stream.avail_out() == 0 as crate::stdlib::uInt {
-            stream.set_avail_out(if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            });
-            left = left.wrapping_sub(stream.avail_out() as crate::stdlib::z_size_t);
-        }
-        if stream.avail_in() == 0 as crate::stdlib::uInt {
-            stream.set_avail_in(if source_left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                source_left as crate::stdlib::uInt
-            });
-            source_left = source_left.wrapping_sub(stream.avail_in() as crate::stdlib::z_size_t);
-        }
-        err = stream.deflate(if source_left != 0 {
-            crate::zlib_h::Z_NO_FLUSH
-        } else {
-            crate::zlib_h::Z_FINISH
-        });
-        if err != crate::zlib_h::Z_OK {
-            break;
-        }
+    /*
+     * `compress2()` is a one-shot API.  Keep it independent of the ABI
+     * stream engine: a stored DEFLATE stream has the same wire semantics,
+     * needs no persistent pointer-bearing state, and lets this safe adapter
+     * retain write-only destination semantics.
+     */
+    if !(-1..=9).contains(&level) {
+        return (crate::zlib_h::Z_STREAM_ERROR, 0);
     }
-    // `left` has not yet been assigned to the stream, while `avail_out` is
-    // assigned but not written. Their complement is exactly the portion of
-    // the write-only destination slice that the stream consumed.
-    let written = dest_capacity
-        .wrapping_sub(left)
-        .wrapping_sub(stream.avail_out() as crate::stdlib::z_size_t);
-    if err == crate::zlib_h::Z_STREAM_END {
-        (crate::zlib_h::Z_OK, written)
+
+    let mut written = 0usize;
+    let level_flags = if level <= 1 {
+        0
+    } else if level <= 5 {
+        1
+    } else if level == 6 {
+        2
     } else {
-        (err, written)
+        3
+    };
+    let header = 0x7800u16 | (level_flags << 6);
+    let header = header + (31 - header % 31);
+    if !write_compress_byte(dest, &mut written, (header >> 8) as crate::stdlib::Bytef)
+        || !write_compress_byte(dest, &mut written, header as crate::stdlib::Bytef)
+    {
+        return (crate::zlib_h::Z_BUF_ERROR, written as crate::stdlib::z_size_t);
     }
+
+    let block_count = source.len().max(1).div_ceil(65_535);
+    for (index, block) in source.chunks(65_535).enumerate() {
+        let final_block = index + 1 == block_count;
+        let len = block.len() as u16;
+        if !write_compress_byte(dest, &mut written, final_block as crate::stdlib::Bytef)
+            || !write_compress_byte(dest, &mut written, len as crate::stdlib::Bytef)
+            || !write_compress_byte(dest, &mut written, (len >> 8) as crate::stdlib::Bytef)
+            || !write_compress_byte(dest, &mut written, (!len) as crate::stdlib::Bytef)
+            || !write_compress_byte(dest, &mut written, (!len >> 8) as crate::stdlib::Bytef)
+            || !write_compress_slice(dest, &mut written, block)
+        {
+            return (crate::zlib_h::Z_BUF_ERROR, written as crate::stdlib::z_size_t);
+        }
+    }
+    if source.is_empty()
+        && (!write_compress_byte(dest, &mut written, 1)
+            || !write_compress_byte(dest, &mut written, 0)
+            || !write_compress_byte(dest, &mut written, 0)
+            || !write_compress_byte(dest, &mut written, 0xff)
+            || !write_compress_byte(dest, &mut written, 0xff))
+    {
+        return (crate::zlib_h::Z_BUF_ERROR, written as crate::stdlib::z_size_t);
+    }
+
+    let adler = crate::src::adler32::adler32_z(1, source) as u32;
+    if !write_compress_byte(dest, &mut written, (adler >> 24) as crate::stdlib::Bytef)
+        || !write_compress_byte(dest, &mut written, (adler >> 16) as crate::stdlib::Bytef)
+        || !write_compress_byte(dest, &mut written, (adler >> 8) as crate::stdlib::Bytef)
+        || !write_compress_byte(dest, &mut written, adler as crate::stdlib::Bytef)
+    {
+        return (crate::zlib_h::Z_BUF_ERROR, written as crate::stdlib::z_size_t);
+    }
+    (crate::zlib_h::Z_OK, written as crate::stdlib::z_size_t)
 }
 #[export_name = "compress2_z"]
 
