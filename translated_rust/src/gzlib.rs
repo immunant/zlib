@@ -134,6 +134,7 @@ fn gz_open_state(
         err: crate::zlib_h::Z_OK,
         msg: None,
         deflater: None,
+        inflater: None,
         strm: crate::zlib_h::z_stream_s {
             next_in: ::core::ptr::null_mut(),
             avail_in: 0,
