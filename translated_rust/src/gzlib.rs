@@ -877,35 +877,49 @@ fn gzoffset64_adjust_for_buffered_read(
     }
 }
 
-pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    let mut offset: crate::stdlib::off64_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+fn gzoffset64_result(
+    mode: ::core::ffi::c_int,
+    offset: crate::stdlib::off64_t,
+    avail_in: crate::stdlib::uInt,
+) -> crate::stdlib::off64_t {
+    if !gz_is_read_or_write_mode(mode) || offset == -1 {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_is_read_or_write_mode((*state).mode) {
-        return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
-    }
-    offset = crate::stdlib::lseek64(
-        (*state).fd,
-        0 as crate::stdlib::__off64_t,
-        crate::stdlib::SEEK_CUR,
-    ) as crate::stdlib::off64_t;
-    if offset == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
-        return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
-    }
-    gzoffset64_adjust_for_buffered_read(offset, (*state).mode, (*state).strm.avail_in)
+
+    gzoffset64_adjust_for_buffered_read(offset, mode, avail_in)
 }
 #[export_name = "gzoffset64"]
 
 pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    gzoffset64(file)
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
+    }
+
+    let state = unsafe { &*(file as *const crate::gzguts_h::gz_state) };
+    let offset = unsafe {
+        crate::stdlib::lseek64(
+            state.fd,
+            0 as crate::stdlib::__off64_t,
+            crate::stdlib::SEEK_CUR,
+        ) as crate::stdlib::off64_t
+    };
+    gzoffset64_result(state.mode, offset, state.strm.avail_in)
 }
 #[export_name = "gzoffset"]
 pub unsafe extern "C" fn gzoffset_ffi(file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gz_legacy_offset_result(gzoffset64(file))
+    if file.is_null() {
+        return gz_legacy_offset_result(-1 as ::core::ffi::c_int as crate::stdlib::off64_t);
+    }
+
+    let state = unsafe { &*(file as *const crate::gzguts_h::gz_state) };
+    let offset = unsafe {
+        crate::stdlib::lseek64(
+            state.fd,
+            0 as crate::stdlib::__off64_t,
+            crate::stdlib::SEEK_CUR,
+        ) as crate::stdlib::off64_t
+    };
+    gz_legacy_offset_result(gzoffset64_result(state.mode, offset, state.strm.avail_in))
 }
 fn gzeof_result(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if mode == crate::gzguts_h::GZ_READ {
@@ -981,26 +995,24 @@ pub unsafe extern "C" fn gzerror_ffi(
         GzErrorMessage::Stored => state.msg as *const ::core::ffi::c_char,
     }
 }
-pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gzclearerr_core((*state).mode, &mut (*state).eof, &mut (*state).past) {
-        return;
-    }
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-}
 #[export_name = "gzclearerr"]
 
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
-    gzclearerr(file)
+    if file.is_null() {
+        return;
+    }
+
+    let state = unsafe { &mut *(file as crate::gzguts_h::gz_statep) };
+    if !gzclearerr_core(state.mode, &mut state.eof, &mut state.past) {
+        return;
+    }
+    unsafe {
+        gz_error(
+            state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+    }
 }
 pub unsafe extern "C" fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
@@ -1066,7 +1078,8 @@ mod tests {
         gz_open_recorded_offset, gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking,
         gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
         gzbuffer_normalized_want, gzclearerr_core, gzerror_core, gzeof_core, gzeof_result,
-        gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
+        gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
+        gzseek_adjust_offset,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
         gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
@@ -1334,6 +1347,18 @@ mod tests {
             gzoffset64_adjust_for_buffered_read(42, crate::gzguts_h::GZ_WRITE, 7),
             42
         );
+    }
+
+    #[test]
+    fn gzoffset64_result_rejects_inactive_modes_and_seek_errors() {
+        assert_eq!(gzoffset64_result(crate::gzguts_h::GZ_NONE, 42, 7), -1);
+        assert_eq!(gzoffset64_result(crate::gzguts_h::GZ_READ, -1, 7), -1);
+    }
+
+    #[test]
+    fn gzoffset64_result_adjusts_active_read_offsets() {
+        assert_eq!(gzoffset64_result(crate::gzguts_h::GZ_READ, 42, 7), 35);
+        assert_eq!(gzoffset64_result(crate::gzguts_h::GZ_WRITE, 42, 7), 42);
     }
 
     #[test]

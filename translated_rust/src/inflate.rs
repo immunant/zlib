@@ -2245,6 +2245,10 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     inflateSetDictionary(strm, dictionary, dictLength)
 }
+fn inflate_header_wrap_allows_capture(wrap: ::core::ffi::c_int) -> bool {
+    wrap & 2 as ::core::ffi::c_int != 0
+}
+
 pub unsafe extern "C" fn inflateGetHeader(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
@@ -2255,7 +2259,7 @@ pub unsafe extern "C" fn inflateGetHeader(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+    if !inflate_header_wrap_allows_capture((*state).wrap) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     (*state).head = head;
@@ -2633,8 +2637,9 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_window_update, dynamic_header_counts, inflate_data_type_value, inflate_mark_value,
-        inflate_mode_is_valid, inflate_prime_update, inflate_reset2_params, inflate_state_metadata_is_valid,
+        apply_window_update, dynamic_header_counts, inflate_data_type_value,
+        inflate_header_wrap_allows_capture, inflate_mark_value, inflate_mode_is_valid,
+        inflate_prime_update, inflate_reset2_params, inflate_state_metadata_is_valid,
         inflate_sync_point_value, inflate_sync_search_core, inflate_validate_wrap,
         initial_window_metadata, syncsearch_safe, window_update_plan,
         InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH,
@@ -2656,6 +2661,14 @@ mod tests {
         assert_eq!(inflate_validate_wrap(4, -1), 4);
         assert_eq!(inflate_validate_wrap(9, 0), 9);
         assert_eq!(inflate_validate_wrap(0, 1), 0);
+    }
+
+    #[test]
+    fn inflate_header_wrap_requires_gzip_capture_bit() {
+        assert!(!inflate_header_wrap_allows_capture(0));
+        assert!(inflate_header_wrap_allows_capture(2));
+        assert!(inflate_header_wrap_allows_capture(3));
+        assert!(!inflate_header_wrap_allows_capture(4));
     }
 
     #[test]
