@@ -1961,6 +1961,11 @@ pub fn inflate(
         in_0 = have;
         out = left;
         ret = crate::zlib_h::Z_OK;
+        // Retain the validated output base for the exit-only history/checksum
+        // view.  The loop publishes `next_out` before an allocator callback
+        // can run, so deriving that view from the final ABI cursor would need
+        // raw pointer subtraction after the callback boundary.
+        let output_base = strm_ref.next_out;
         {
             // Lend the immutable input, mutable output, and separate history
             // allocation once for this decoder invocation.  The loop neither
@@ -3855,7 +3860,7 @@ pub fn inflate(
                     || inflate_exit_needs_checksum(wrap, exit.output_used as usize);
                 let produced = if needs_output_view && exit.output_used != 0 {
                     ::core::slice::from_raw_parts(
-                        strm_ref.next_out.wrapping_sub(exit.output_used as usize),
+                        output_base,
                         exit.output_used as usize,
                     )
                 } else {
