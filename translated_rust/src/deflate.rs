@@ -1597,36 +1597,36 @@ fn read_buf_core(
     }
 }
 
-// The raw stream and callback-backed output storage are still established by
-// the deflate boundary. Keep each crossing explicit while the copy and
-// checksum work stays in the safe slice core above.
-fn read_buf(
-    strm: crate::zlib_h::z_streamp,
-    buf: *mut crate::stdlib::Bytef,
-    size: ::core::ffi::c_uint,
-    wrap: ::core::ffi::c_int,
-) -> ::core::ffi::c_uint {
-    let stream = unsafe { &mut *strm };
-    let len = read_buf_len(stream.avail_in, size);
-    if len == 0 {
-        return 0;
-    }
-    let input = unsafe { core::slice::from_raw_parts(stream.next_in, len as usize) };
-    let output = unsafe { core::slice::from_raw_parts_mut(buf, len as usize) };
-    let result = read_buf_core(
-        input,
-        output,
-        stream.avail_in,
-        size,
-        stream.total_in,
-        stream.adler,
-        wrap,
-    );
-    stream.avail_in = result.avail_in;
-    stream.adler = result.adler;
-    stream.next_in = stream.next_in.wrapping_add(result.copied as usize);
-    stream.total_in = result.total_in;
-    result.copied
+// `deflate_stored_at_ffi_boundary!` expands only in the exported `deflate`
+// wrapper.  Keep the short-lived caller views there while the copy and
+// checksum work stays in `read_buf_core`; a private adapter would make those
+// raw crossings implementation-level unsafe code.
+#[macro_export]
+macro_rules! read_buf_at_ffi_boundary {
+    ($strm:expr, $buf:expr, $size:expr, $wrap:expr $(,)?) => {{
+        let stream = &mut *$strm;
+        let len = read_buf_len(stream.avail_in, $size);
+        if len == 0 {
+            0
+        } else {
+            let input = core::slice::from_raw_parts(stream.next_in, len as usize);
+            let output = core::slice::from_raw_parts_mut($buf, len as usize);
+            let result = read_buf_core(
+                input,
+                output,
+                stream.avail_in,
+                $size,
+                stream.total_in,
+                stream.adler,
+                $wrap,
+            );
+            stream.avail_in = result.avail_in;
+            stream.adler = result.adler;
+            stream.next_in = stream.next_in.wrapping_add(result.copied as usize);
+            stream.total_in = result.total_in;
+            result.copied
+        }
+    }};
 }
 
 fn fill_window_available_space(
@@ -5001,7 +5001,7 @@ macro_rules! deflate_stored_at_ffi_boundary {
                     (*s).block_start += window_len as ::core::ffi::c_long;
                 }
                 if input_len != 0 {
-                    read_buf((*s).strm, (*(*s).strm).next_out, input_len, wrap);
+                    read_buf_at_ffi_boundary!((*s).strm, (*(*s).strm).next_out, input_len, wrap);
                     (*(*s).strm).next_out = (*(*s).strm).next_out.offset(input_len as isize);
                     (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(input_len);
                     (*(*s).strm).total_out = (*(*s).strm)
@@ -5080,7 +5080,7 @@ macro_rules! deflate_stored_at_ffi_boundary {
                 have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
             }
             if have != 0 {
-                read_buf(
+                read_buf_at_ffi_boundary!(
                     (*s).strm,
                     (*s).window.wrapping_add((*s).strstart as usize),
                     have,
