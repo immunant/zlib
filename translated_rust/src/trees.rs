@@ -3700,7 +3700,14 @@ unsafe extern "C" fn gen_codes(
 
 fn tr_static_init() {}
 
-unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
+fn reset_block_metadata(s: &mut crate::src::deflate::deflate_state) {
+    s.static_len = 0 as crate::zutil_h::ulg;
+    s.opt_len = s.static_len;
+    s.matches = 0 as crate::stdlib::uInt;
+    s.sym_next = s.matches;
+}
+
+unsafe extern "C" fn init_block(s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::L_CODES {
@@ -3718,11 +3725,9 @@ unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) 
         n += 1;
     }
     (*s).dyn_ltree[END_BLOCK as usize].fc.freq = 1 as crate::zutil_h::ush;
-    (*s).static_len = 0 as crate::zutil_h::ulg;
-    (*s).opt_len = (*s).static_len;
-    (*s).matches = 0 as crate::stdlib::uInt;
-    (*s).sym_next = (*s).matches;
+    reset_block_metadata(&mut *s);
 }
+
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
     tr_static_init();
     (*s).l_desc.dyn_tree = &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
