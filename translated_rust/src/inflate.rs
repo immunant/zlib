@@ -212,12 +212,27 @@ impl InflateWindowLayout {
 }
 
 impl InflateOwnedWindow {
-    /// Keep the owned hand-off explicit so a future allocator-facade switch
-    /// cannot recreate an allocation-derived raw slice for history updates.
-    fn window(&mut self) -> InflateWindow<'_> {
-        InflateWindow {
+    /// Confirm that an owned allocation still matches the scalar state before
+    /// handing it to the resumable window-update core.  The eventual
+    /// allocator facade must use this check rather than rebuilding a span
+    /// from `state.window` and its capacity.
+    fn matches_state(&self, state: &inflate_state) -> bool {
+        let Some(layout) = InflateWindowLayout::from_state(state) else {
+            return false;
+        };
+        layout.matches_state_window(state)
+            && state.whave <= layout.allocation_items
+            && state.wnext <= layout.allocation_items
+            && self.bytes.len() == layout.len
+    }
+
+    /// Keep the owned hand-off explicit and state-validated so a future
+    /// allocator-facade switch cannot recreate an allocation-derived raw
+    /// slice for history updates.
+    fn window(&mut self, state: &inflate_state) -> Option<InflateWindow<'_>> {
+        self.matches_state(state).then_some(InflateWindow {
             bytes: &mut self.bytes,
-        }
+        })
     }
 }
 
