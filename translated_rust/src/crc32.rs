@@ -4913,8 +4913,14 @@ mod tests {
         let pointer = core::ptr::NonNull::<u8>::dangling().as_ptr();
         let seed = 0x1234_5678;
 
-        assert_eq!(unsafe { super::crc32_z_ffi(seed, pointer, 0) }, crc32_z(seed, &[]));
-        assert_eq!(unsafe { super::crc32_ffi(seed, pointer, 0) }, crc32(seed, &[]));
+        assert_eq!(
+            unsafe { super::crc32_z_ffi(seed, pointer, 0) },
+            crc32_z(seed, &[])
+        );
+        assert_eq!(
+            unsafe { super::crc32_ffi(seed, pointer, 0) },
+            crc32(seed, &[])
+        );
         assert_eq!(unsafe { super::crc32_z_ffi(seed, core::ptr::null(), 0) }, 0);
         assert_eq!(unsafe { super::crc32_ffi(seed, core::ptr::null(), 0) }, 0);
     }

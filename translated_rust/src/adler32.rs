@@ -151,7 +151,10 @@ mod tests {
         let pointer = core::ptr::NonNull::<Bytef>::dangling().as_ptr();
         let seed = 0x1234_5678;
 
-        assert_eq!(unsafe { adler32_z_ffi(seed, pointer, 0) }, adler32_z(seed, &[]));
+        assert_eq!(
+            unsafe { adler32_z_ffi(seed, pointer, 0) },
+            adler32_z(seed, &[])
+        );
         assert_eq!(unsafe { adler32_ffi(seed, pointer, 0) }, adler32(seed, &[]));
         assert_eq!(unsafe { adler32_z_ffi(seed, core::ptr::null(), 0) }, 1);
         assert_eq!(unsafe { adler32_ffi(seed, core::ptr::null(), 0) }, 1);
