@@ -329,16 +329,17 @@ fn gz_write(
     if buffered {
         loop {
             let plan = crate::src::gzlib::gz_buffered_copy_plan(state, len);
-            // SAFETY: the plan limits the destination to free bytes in the
-            // initialized gzip input buffer; the FFI caller supplied at least
-            // the remaining source bytes. These ranges do not overlap.
-            unsafe {
-                crate::stdlib::memcpy(
-                    state.in_0.wrapping_add(plan.offset as usize) as *mut ::core::ffi::c_void,
-                    source.as_ptr() as *const ::core::ffi::c_void,
-                    plan.len as crate::__stddef_size_t_h::size_t,
-                );
-            }
+            // SAFETY: the plan limits this range to free bytes in the
+            // initialized gzip input allocation, and the FFI caller supplied
+            // at least the remaining source bytes. Bind that allocation once;
+            // the copy itself can then stay in safe Rust.
+            let destination = unsafe {
+                ::core::slice::from_raw_parts_mut(
+                    state.in_0.wrapping_add(plan.offset as usize),
+                    plan.len as usize,
+                )
+            };
+            destination.copy_from_slice(&source[..plan.len as usize]);
             crate::src::gzlib::gz_buffered_copy_progress(state, &mut len, plan.len);
             source = &source[plan.len as usize..];
             if len == 0 as crate::stdlib::z_size_t {
