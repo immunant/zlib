@@ -1222,84 +1222,80 @@ pub unsafe fn deflateInit2_(
     if windowBits == 8 as ::core::ffi::c_int {
         windowBits = 9 as ::core::ffi::c_int;
     }
-    unsafe {
-        let s = Some(strm.zalloc.expect("non-null function pointer"))
+    // Build the Rust-owned portions before requesting the ABI state slot.
+    // The codec buffers use Rust owners, so this leaves no partially
+    // initialized callback allocation to clean up if one of them cannot be
+    // allocated.
+    let Some(mut state) = prepare_deflate_state(level, method, windowBits, memLevel, strategy, wrap)
+    else {
+        strm.msg = crate::src::zutil::z_errmsg[6].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let state_allocation = unsafe {
+        let state_allocation = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::deflate_state;
-        if s.is_null() {
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-        let state_allocation = s.cast::<::core::ffi::c_void>();
-        let state_storage =
-            &mut *s.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>();
-        let s = state_storage.write(new_deflate_state());
-        strm.state = s as *mut crate::src::deflate::internal_state;
-        s.status = crate::src::deflate::INIT_STATE;
-        s.wrap = wrap;
-        s.gzhead = 0;
-        s.w_bits = windowBits as crate::stdlib::uInt;
-        s.w_size = ((1 as ::core::ffi::c_int) << s.w_bits) as crate::stdlib::uInt;
-        s.w_mask = s.w_size.wrapping_sub(1 as crate::stdlib::uInt);
-        s.hash_bits = (memLevel as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
-        s.hash_size = ((1 as ::core::ffi::c_int) << s.hash_bits) as crate::stdlib::uInt;
-        s.hash_mask = s.hash_size.wrapping_sub(1 as crate::stdlib::uInt);
-        s.hash_shift = s
-            .hash_bits
-            .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
-            .wrapping_sub(1 as crate::stdlib::uInt)
-            .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-        s.window = allocate_window(s.w_size as usize * 2);
-        s.prev = allocate_prev_table(s.w_size as usize);
-        s.head = Some(allocate_head_table(s.hash_size as usize).unwrap_or_default());
-        s.high_water = 0 as crate::zutil_h::ulg;
-        s.lit_bufsize = ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int)
-            as crate::stdlib::uInt;
-        s.pending_buf_size =
-            (s.lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
-        s.pending_buf = allocate_pending_buffer(s.pending_buf_size as usize);
-        if s.window.is_none()
-            || s.prev.is_none()
-            || s.head
-                .as_ref()
-                .is_none_or(|head| head.len() != s.hash_size as usize)
-            || s.pending_buf.is_none()
-        {
-            s.status = crate::src::deflate::FINISH_STATE;
-            strm.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
-            }) as usize]
-                .load(::core::sync::atomic::Ordering::Relaxed);
-            let end = deflate_end_impl(
-                s,
-                strm.zalloc.is_some() && strm.zfree.is_some(),
-            );
-            if end != crate::zlib_h::Z_STREAM_ERROR {
-                strm.zfree.expect("deflate_init2_ validated zfree")(
-                    strm.opaque,
-                    state_allocation,
-                );
-                strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-            }
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-        s.sym_buf = s.lit_bufsize as usize;
-        s.sym_end = s
-            .lit_bufsize
-            .wrapping_sub(1 as crate::stdlib::uInt)
-            .wrapping_mul(3 as crate::stdlib::uInt);
-        s.level = level;
-        s.strategy = strategy;
-        s.method = method as crate::stdlib::Byte;
-        deflate_reset_state(strm, s)
+        state_allocation
+    };
+    if state_allocation.is_null() {
+        return crate::zlib_h::Z_MEM_ERROR;
     }
+    let state_storage = unsafe {
+        &mut *state_allocation.cast::<
+            ::core::mem::MaybeUninit<crate::src::deflate::deflate_state>,
+        >()
+    };
+    let state = state_storage.write(state);
+    strm.state = state;
+    deflate_reset_state(strm, state)
+}
+
+/// Construct a fully owned deflate state before it is installed in the ABI
+/// allocation selected by the caller's allocator callbacks.
+fn prepare_deflate_state(
+    level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    window_bits: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+) -> Option<crate::src::deflate::deflate_state> {
+    let mut state = new_deflate_state();
+    state.status = crate::src::deflate::INIT_STATE;
+    state.wrap = wrap;
+    state.w_bits = window_bits as crate::stdlib::uInt;
+    state.w_size = 1u32 << state.w_bits;
+    state.w_mask = state.w_size.wrapping_sub(1);
+    state.hash_bits = mem_level as crate::stdlib::uInt + 7;
+    state.hash_size = 1u32 << state.hash_bits;
+    state.hash_mask = state.hash_size.wrapping_sub(1);
+    state.hash_shift = (state.hash_bits + crate::zutil_h::MIN_MATCH as crate::stdlib::uInt - 1)
+        / crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+    state.window = allocate_window(state.w_size as usize * 2);
+    state.prev = allocate_prev_table(state.w_size as usize);
+    state.head = Some(allocate_head_table(state.hash_size as usize).unwrap_or_default());
+    state.lit_bufsize = 1u32 << (mem_level + 6);
+    state.pending_buf_size = state.lit_bufsize as crate::zutil_h::ulg * 4;
+    state.pending_buf = allocate_pending_buffer(state.pending_buf_size as usize);
+    if state.window.is_none()
+        || state.prev.is_none()
+        || state
+            .head
+            .as_ref()
+            .is_none_or(|head| head.len() != state.hash_size as usize)
+        || state.pending_buf.is_none()
+    {
+        return None;
+    }
+    state.sym_buf = state.lit_bufsize as usize;
+    state.sym_end = (state.lit_bufsize - 1) * 3;
+    state.level = level;
+    state.strategy = strategy;
+    state.method = method as crate::stdlib::Byte;
+    Some(state)
 }
 
 /// Initialize a stream for the gzip writer's fixed deflate configuration.
