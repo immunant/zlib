@@ -2970,31 +2970,32 @@ fn stored_block_size(
 }
 
 // The stored-block strategy receives the stream/state relationship already
-// validated by the compression dispatch, then binds its owned allocations and
-// caller cursors once for the slice-only algorithm below.
+// validated by the compression dispatch. Reuse the common window/input binder;
+// this strategy only needs to bind its pending and output ranges directly.
 fn deflate_stored(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     // SAFETY: the compression dispatch invokes this only with the validated
-    // state maintained by `deflate()`. Its allocations and caller cursors are
-    // the bounded ranges for this compression call.
+    // state maintained by `deflate()`. `pending_buf` and the output cursor are
+    // the two ranges not supplied by the shared window/input binder below.
     unsafe {
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let pending =
             ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        let input = if stream.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-        };
         let output = if stream.avail_out == 0 {
             &mut []
         } else {
             ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
         };
-        deflate_stored_impl(state, stream, window, pending, input, output, flush)
+        fill_window(
+            state,
+            stream,
+            true,
+            |state, stream, window, _head, _prev, input| {
+                deflate_stored_impl(state, stream, window, pending, input, output, flush)
+            },
+        )
     }
 }
 
