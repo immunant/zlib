@@ -191,6 +191,10 @@ pub unsafe extern "C" fn inflateBack(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    // Keep the two ABI projections at this boundary. The decoder below uses
+    // scoped Rust borrows; only the callback cursors remain raw.
+    let strm = &mut *strm;
+    let state = &mut *state;
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     (*state).mode = crate::src::inflate::TYPE;
     (*state).last = 0 as ::core::ffi::c_int;
@@ -243,7 +247,6 @@ pub unsafe extern "C" fn inflateBack(
                             (*state).mode = crate::src::inflate::STORED;
                         }
                         1 => {
-                            let state = &mut *state;
                             crate::src::inftrees::inflate_fixed(
                                 &mut state.lencode,
                                 &mut state.lenbits,
@@ -422,7 +425,6 @@ pub unsafe extern "C" fn inflateBack(
                     (*state).lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
                     (*state).lenbits = 7 as ::core::ffi::c_uint;
                     ret = 'table: {
-                        let state = &mut *state;
                         let table_start = state.next;
                         let Some(lens) = state.lens.get(..19) else {
                             break 'table 1;
@@ -664,7 +666,6 @@ pub unsafe extern "C" fn inflateBack(
                             (*state).lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
                             (*state).lenbits = 9 as ::core::ffi::c_uint;
                             ret = 'table: {
-                                let state = &mut *state;
                                 let codes = state.nlen as usize;
                                 let table_start = state.next;
                                 let Some(lens) = state.lens.get(..codes) else {
@@ -699,7 +700,6 @@ pub unsafe extern "C" fn inflateBack(
                                     crate::src::inflate::CodeTableRef::Dynamic((*state).next);
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
                                 ret = 'table: {
-                                    let state = &mut *state;
                                     let lens_start = state.nlen as usize;
                                     let codes = state.ndist as usize;
                                     let Some(lens_end) = lens_start.checked_add(codes) else {
@@ -762,7 +762,6 @@ pub unsafe extern "C" fn inflateBack(
             // directly through those views instead of republishing them via
             // the legacy raw-stream fast adapter.
             let input = ::core::slice::from_raw_parts(next, have as usize);
-            let state = &mut *state;
             let window = state.window.expect("inflateBack window");
             let window_size = state.wsize as usize;
             let output = ::core::slice::from_raw_parts_mut(window.as_ptr(), window_size);
