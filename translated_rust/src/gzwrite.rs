@@ -436,12 +436,14 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     gzfwrite(state, buf, size)
 }
-unsafe fn gzputc(
+fn gzputc(
     state: &mut crate::gzguts_h::gz_state,
     c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let buf = [c as ::core::ffi::c_uchar];
-    if gzwrite(state, &buf) != 1 as ::core::ffi::c_int {
+    // `state` is the validated handle supplied by the FFI wrapper, and `buf`
+    // lives for the entire synchronous write.
+    if unsafe { gzwrite(state, &buf) } != 1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
