@@ -139,8 +139,9 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
     0
 }
 
-unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let state = &mut *state;
+// All callers have already validated and bound the gzip state.  Allocation
+// and input-buffer access remain raw within this internal adapter.
+unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
         state.in_0 = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar;
@@ -221,10 +222,12 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     }
 }
 
-unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+// The decompressor is likewise internal to the read state machine.  Its
+// inflater and output-buffer adapters remain raw, but the state itself is
+// reference-bound by every caller.
+unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
-    let state = &mut *state;
     had = state.strm.avail_out as ::core::ffi::c_uint;
     loop {
         if state.strm.avail_in == 0 as crate::stdlib::uInt
