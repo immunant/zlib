@@ -133,26 +133,63 @@ fn gzbuffer_want(
     })
 }
 
+struct GzReadResetFields {
+    eof: ::core::ffi::c_int,
+    past: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    junk: ::core::ffi::c_int,
+}
+
+struct GzResetFields {
+    have: ::core::ffi::c_uint,
+    read: Option<GzReadResetFields>,
+    reset: Option<::core::ffi::c_int>,
+    again: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+    pos: crate::stdlib::off64_t,
+    avail_in: crate::stdlib::uInt,
+}
+
+fn gz_reset_fields(mode: ::core::ffi::c_int) -> GzResetFields {
+    let read = mode == crate::gzguts_h::GZ_READ;
+    GzResetFields {
+        have: 0,
+        read: read.then_some(GzReadResetFields {
+            eof: 0,
+            past: 0,
+            how: crate::gzguts_h::LOOK,
+            junk: -1,
+        }),
+        reset: (!read).then_some(0),
+        again: 0,
+        skip: 0,
+        pos: 0,
+        avail_in: 0,
+    }
+}
+
 unsafe fn gz_reset(state: crate::gzguts_h::gz_statep) {
     let state = &mut *state;
-    state.x.have = 0 as ::core::ffi::c_uint;
-    if state.mode == crate::gzguts_h::GZ_READ {
-        state.eof = 0 as ::core::ffi::c_int;
-        state.past = 0 as ::core::ffi::c_int;
-        state.how = crate::gzguts_h::LOOK;
-        state.junk = -1 as ::core::ffi::c_int;
-    } else {
-        state.reset = 0 as ::core::ffi::c_int;
+    let fields = gz_reset_fields(state.mode);
+    state.x.have = fields.have;
+    if let Some(read) = fields.read {
+        state.eof = read.eof;
+        state.past = read.past;
+        state.how = read.how;
+        state.junk = read.junk;
     }
-    state.again = 0 as ::core::ffi::c_int;
-    state.skip = 0 as crate::stdlib::off64_t;
+    if let Some(reset) = fields.reset {
+        state.reset = reset;
+    }
+    state.again = fields.again;
+    state.skip = fields.skip;
     gz_error(
         state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    state.x.pos = 0 as crate::stdlib::off64_t;
-    state.strm.avail_in = 0 as crate::stdlib::uInt;
+    state.x.pos = fields.pos;
+    state.strm.avail_in = fields.avail_in;
 }
 
 unsafe extern "C" fn gz_open(
