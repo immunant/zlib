@@ -285,12 +285,7 @@ unsafe extern "C" fn gz_write(
             if (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 (*state).strm.next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
             }
-            have = (*state)
-                .strm
-                .next_in
-                .offset((*state).strm.avail_in as isize)
-                .offset_from((*state).in_0) as ::core::ffi::c_long
-                as ::core::ffi::c_uint;
+            have = gz_buffered_input_used(&*state);
             copy = (*state).size.wrapping_sub(have);
             if copy as crate::stdlib::z_size_t > len {
                 copy = len as ::core::ffi::c_uint;
@@ -351,6 +346,12 @@ fn gz_write_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
 
 fn gz_write_params_ready(state: &crate::gzguts_h::gz_state) -> bool {
     gz_write_state_ready(state) && state.direct == 0
+}
+
+fn gz_buffered_input_used(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_uint {
+    (state.strm.next_in as usize)
+        .wrapping_add(state.strm.avail_in as usize)
+        .wrapping_sub(state.in_0 as usize) as ::core::ffi::c_uint
 }
 
 fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
@@ -461,11 +462,7 @@ pub unsafe extern "C" fn gzputc_ffi(
         if (*strm).avail_in == 0 as crate::stdlib::uInt {
             (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
         }
-        have = (*strm)
-            .next_in
-            .offset((*strm).avail_in as isize)
-            .offset_from((*state).in_0) as ::core::ffi::c_long
-            as ::core::ffi::c_uint;
+        have = gz_buffered_input_used(&*state);
         if have < (*state).size {
             *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
             (*strm).avail_in = (*strm).avail_in.wrapping_add(1);

@@ -2704,16 +2704,16 @@ unsafe extern "C" fn build_tree(
     }
 }
 
-unsafe extern "C" fn scan_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
+fn scan_tree(
+    bl_tree: &mut [crate::src::deflate::ct_data; 39],
+    tree: &mut [crate::src::deflate::ct_data],
     mut max_code: ::core::ffi::c_int,
 ) {
     let mut n: ::core::ffi::c_int = 0;
     let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
     let mut nextlen: ::core::ffi::c_int =
-        (*tree.offset(0 as ::core::ffi::c_int as isize)).dad as ::core::ffi::c_int;
+        tree[0 as ::core::ffi::c_int as usize].dad as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
     let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
@@ -2721,32 +2721,32 @@ unsafe extern "C" fn scan_tree(
         max_count = 138 as ::core::ffi::c_int;
         min_count = 3 as ::core::ffi::c_int;
     }
-    (*tree.offset((max_code + 1 as ::core::ffi::c_int) as isize)).dad =
+    tree[(max_code + 1 as ::core::ffi::c_int) as usize].dad =
         0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
-        nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize)).dad as ::core::ffi::c_int;
+        nextlen = tree[(n + 1 as ::core::ffi::c_int) as usize].dad as ::core::ffi::c_int;
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
-                (*s).bl_tree[curlen as usize].freq = ((*s).bl_tree[curlen as usize].freq
+                bl_tree[curlen as usize].freq = (bl_tree[curlen as usize].freq
                     as ::core::ffi::c_int
                     + count as crate::zutil_h::ush as ::core::ffi::c_int)
                     as crate::zutil_h::ush;
             } else if curlen != 0 as ::core::ffi::c_int {
                 if curlen != prevlen {
-                    (*s).bl_tree[curlen as usize].freq =
-                        (*s).bl_tree[curlen as usize].freq.wrapping_add(1);
+                    bl_tree[curlen as usize].freq =
+                        bl_tree[curlen as usize].freq.wrapping_add(1);
                 }
-                (*s).bl_tree[REP_3_6 as usize].freq =
-                    (*s).bl_tree[REP_3_6 as usize].freq.wrapping_add(1);
+                bl_tree[REP_3_6 as usize].freq =
+                    bl_tree[REP_3_6 as usize].freq.wrapping_add(1);
             } else if count <= 10 as ::core::ffi::c_int {
-                (*s).bl_tree[REPZ_3_10 as usize].freq =
-                    (*s).bl_tree[REPZ_3_10 as usize].freq.wrapping_add(1);
+                bl_tree[REPZ_3_10 as usize].freq =
+                    bl_tree[REPZ_3_10 as usize].freq.wrapping_add(1);
             } else {
-                (*s).bl_tree[REPZ_11_138 as usize].freq =
-                    (*s).bl_tree[REPZ_11_138 as usize].freq.wrapping_add(1);
+                bl_tree[REPZ_11_138 as usize].freq =
+                    bl_tree[REPZ_11_138 as usize].freq.wrapping_add(1);
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
@@ -3055,17 +3055,16 @@ unsafe extern "C" fn build_bl_tree(
     mut s: *mut crate::src::deflate::deflate_state,
 ) -> ::core::ffi::c_int {
     let mut max_blindex: ::core::ffi::c_int = 0;
+    let state = &mut *s;
     scan_tree(
-        s,
-        &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
-        (*s).l_desc.max_code,
+        &mut state.bl_tree,
+        &mut state.dyn_ltree,
+        state.l_desc.max_code,
     );
     scan_tree(
-        s,
-        &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
-        (*s).d_desc.max_code,
+        &mut state.bl_tree,
+        &mut state.dyn_dtree,
+        state.d_desc.max_code,
     );
     build_tree(
         s,
