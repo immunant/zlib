@@ -3113,6 +3113,12 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     };
     tr_align(s);
 }
+/*
+ * The pointer-based `compress_block` translation used to live here.  Its
+ * callers now use the slice-based `compress_block_impl` below, which also
+ * preserves the necessary snapshot of the overlapping symbol/output buffer.
+ * Keep the old translation out of the compiled crate until this generated
+ * source section is removed wholesale.
 unsafe extern "C" fn compress_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut ltree: *const crate::src::deflate::ct_data,
@@ -3303,6 +3309,8 @@ unsafe extern "C" fn compress_block(
         (*s).bi_valid += len_4;
     };
 }
+
+*/
 
 trait HuffmanEntry {
     fn code(&self) -> crate::zutil_h::ush;
