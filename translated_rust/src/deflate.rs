@@ -856,16 +856,10 @@ pub(crate) unsafe fn deflate_tree_bit_output_from_state(
     // The legacy exports own only an opaque state handle.  Let the common C4
     // owner form their one pending view as well, so tree output cannot become
     // a second raw callback-buffer projection boundary.
-    let storage_layout = state.callback_storage.storage();
-    let lifecycle = state.callback_storage;
-    let (state, views) = if lifecycle.is_complete() {
-        let (state, views) = callback_owner::storage_views(state, storage_layout);
-        (state, Some(views))
-    } else {
-        (state, None)
-    };
-    let storage =
-        callback_owner::storage_request(lifecycle, &DeflateStorageProjection::Pending, views);
+    // The callback owner performs the complete scoped projection before
+    // narrowing it to this legacy pending-only request.  Tree code therefore
+    // cannot become a second C4 view boundary.
+    let (state, storage) = callback_owner::storage_views(state, &DeflateStorageProjection::Pending);
     let pending_buf = storage
         .into_pending_storage()
         .expect("initialized pending storage projection")
@@ -1348,13 +1342,11 @@ mod callback_owner {
                         return None;
                     };
                     let mut state_handle = allocation.cast();
-                    state_handle.write(
-                        build
-                            .take()
-                            .expect("state request is first in callback schedule")(
-                            DeflateCallbackStorageOwner::new_state(plan.storage),
-                        ),
-                    );
+                    state_handle.write(build
+                        .take()
+                        .expect("state request is first in callback schedule")(
+                        DeflateCallbackStorageOwner::new_state(plan.storage),
+                    ));
                     stream.state = Some(state_handle.cast());
                     state = Some(state_handle);
                 }
@@ -1401,16 +1393,22 @@ mod callback_owner {
         }
     }
 
-    // This is the sole raw callback-storage projection. Checked handles stay
-    // in the state adapter and never escape this call: this helper returns
-    // only scoped ordinary slices, not callback identities.
-    pub(super) unsafe fn storage_views<'storage>(
+    // This is the sole raw callback-storage projection and request handoff.
+    // Checked handles stay inside the owner and never escape this call: its
+    // result carries only the scoped ordinary slices selected by `projection`,
+    // not callback identities.  Returning the state reborrow alongside that
+    // request keeps both parts tied to the same ABI-call lifetime.
+    pub(super) unsafe fn storage_views<'storage, 'request>(
         state: &'storage mut crate::src::deflate::deflate_state,
-        storage_layout: DeflateStorageLayout,
+        projection: &DeflateStorageProjection<'request>,
     ) -> (
         &'storage mut crate::src::deflate::deflate_state,
-        DeflateCallbackStorageViews<'storage>,
+        DeflateCallbackStorageRequest<'storage>,
     ) {
+        let lifecycle = state.callback_storage;
+        if !lifecycle.is_complete() || matches!(projection, DeflateStorageProjection::None) {
+            return (state, lifecycle.empty_request());
+        }
         // Tie every returned view to this scoped state borrow. In particular,
         // callback storage is never promoted to a forged `'static` lifetime.
         let window_handle = state.window.expect("initialized window");
@@ -1420,7 +1418,7 @@ mod callback_owner {
         // Freeze all four checked capacities before constructing the first
         // slice.  The complete view set then has one immutable allocation
         // schedule for this request.
-        let lengths = storage_layout.view_lengths();
+        let lengths = lifecycle.storage().view_lengths();
         // Every live C4 operation opens the same four regions once, then the
         // pointer-free request builder narrows those views to its action.
         let mut byte_views: [Option<&mut [crate::stdlib::Bytef]>; 2] = [None, None];
@@ -1436,24 +1434,26 @@ mod callback_owner {
         // The two hash regions have the same typed element layout. Build them
         // through one projection site, just as the byte regions above do.
         let mut hash_views: [Option<&mut [crate::src::deflate::Posf]>; 2] = [None, None];
-        for (view, (handle, len)) in hash_views.iter_mut().zip([
-            (prev_handle, lengths.prev),
-            (head_handle, lengths.head),
-        ]) {
+        for (view, (handle, len)) in hash_views
+            .iter_mut()
+            .zip([(prev_handle, lengths.prev), (head_handle, lengths.head)])
+        {
             *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
         }
         let [Some(prev), Some(head)] = hash_views else {
             unreachable!("two hash callback views were constructed")
         };
-        (
-            state,
-            DeflateCallbackStorageViews {
+        let request = storage_request(
+            lifecycle,
+            projection,
+            Some(DeflateCallbackStorageViews {
                 window,
                 prev,
                 head,
                 pending,
-            },
-        )
+            }),
+        );
+        (state, request)
     }
 
     // The request builder is pointer-free: the lifecycle ledger determines
@@ -2291,13 +2291,11 @@ enum DeflateStorageProjection<'request> {
 // decide which bounded views a request needs without carrying callback
 // handles, stream cursors, or opaque state.
 struct DeflateProjectionAdmission {
-    storage_layout: DeflateStorageLayout,
     dispatch_cursors: bool,
 }
 
 fn admit_deflate_projection(
     status: ::core::ffi::c_int,
-    storage_layout: DeflateStorageLayout,
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
     last_flush: ::core::ffi::c_int,
@@ -2317,10 +2315,7 @@ fn admit_deflate_projection(
     };
     let dispatch_cursors =
         matches!(projection, DeflateStorageProjection::Dispatch) || parameter_requires_flush;
-    Some(DeflateProjectionAdmission {
-        storage_layout,
-        dispatch_cursors,
-    })
+    Some(DeflateProjectionAdmission { dispatch_cursors })
 }
 
 // The caller first checks and borrows the ABI stream, then this short-lived
@@ -2346,23 +2341,14 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     let state = state_handle.as_mut();
     let admission = admit_deflate_projection(
         state.status,
-        state.callback_storage.storage(),
         state.level,
         state.strategy,
         state.last_flush,
         &projection,
     )?;
-    let storage_layout = admission.storage_layout;
     let dispatch_cursors = admission.dispatch_cursors;
     let lifecycle = state.callback_storage;
-    let (state, views) =
-        if lifecycle.is_complete() && !matches!(projection, DeflateStorageProjection::None) {
-            let (state, views) = callback_owner::storage_views(state, storage_layout);
-            (state, Some(views))
-        } else {
-            (state, None)
-        };
-    let mut storage = callback_owner::storage_request(lifecycle, &projection, views);
+    let (state, mut storage) = callback_owner::storage_views(state, &projection);
     if dispatch_cursors {
         if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
             strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
