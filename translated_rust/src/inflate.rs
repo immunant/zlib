@@ -3857,7 +3857,12 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     if inflate_state_check_at_ffi_boundary!(source) || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*source).state as *mut crate::src::inflate::inflate_state);
+    // `z_stream` is an ABI mirror with `Copy` fields.  Use the established
+    // wrapper references for its shallow copy rather than calling the C
+    // byte-copy routine; the separately allocated inflate state and window
+    // remain explicitly copied below.
+    let source_stream = &*source;
+    let state = &mut *(source_stream.state as *mut crate::src::inflate::inflate_state);
     let Some(window_ownership) = state_window_ownership(state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3870,9 +3875,9 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    copy = Some((*source).zalloc.expect("non-null function pointer"))
+    copy = Some(source_stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*source).opaque,
+        source_stream.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
@@ -3881,26 +3886,23 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     }
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if let Some((items, size)) = window_plan.allocation_request() {
-        window = Some((*source).zalloc.expect("non-null function pointer"))
+        window = Some(source_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*source).opaque,
+            source_stream.opaque,
             items,
             size,
         ) as *mut ::core::ffi::c_uchar;
         if window.is_null() {
-            Some((*source).zfree.expect("non-null function pointer"))
+            Some(source_stream.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
-                (*source).opaque,
+                source_stream.opaque,
                 copy as crate::stdlib::voidpf,
             );
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>() as crate::__stddef_size_t_h::size_t,
-    );
+    let dest_stream = &mut *dest;
+    *dest_stream = *source_stream;
     crate::stdlib::memcpy(
         copy as *mut ::core::ffi::c_void,
         state as *mut crate::src::inflate::inflate_state as *const ::core::ffi::c_void,
@@ -3923,7 +3925,7 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     } else {
         WindowOwnership::CallbackOwned.raw()
     };
-    (*dest).state = copy as *mut crate::src::inflate::inflate_state
+    dest_stream.state = copy as *mut crate::src::inflate::inflate_state
         as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
 }
@@ -5119,6 +5121,81 @@ mod tests {
         assert_eq!(
             unsafe { inflateSyncPoint_ffi(::core::ptr::null_mut()) },
             crate::zlib_h::Z_STREAM_ERROR
+        );
+    }
+
+    #[test]
+    fn inflate_copy_preserves_the_stream_mirror_while_rebinding_opaque_state() {
+        let mut source = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 17,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 23,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 29,
+            adler: 31,
+            reserved: 37,
+        };
+        let mut destination = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut source,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+
+        assert_eq!(
+            unsafe { super::inflateCopy_ffi(&mut destination, &mut source) },
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(destination.total_in, source.total_in);
+        assert_eq!(destination.total_out, source.total_out);
+        assert_eq!(destination.data_type, source.data_type);
+        assert_eq!(destination.adler, source.adler);
+        assert_eq!(destination.reserved, source.reserved);
+        assert_eq!(destination.zalloc.is_some(), source.zalloc.is_some());
+        assert_eq!(destination.zfree.is_some(), source.zfree.is_some());
+        assert_ne!(destination.state, source.state);
+
+        let destination_state = unsafe {
+            &*(destination.state as *const crate::src::inflate::inflate_state)
+        };
+        assert_eq!(destination_state.strm, &mut destination as *mut _);
+
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut destination) },
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut source) },
+            crate::zlib_h::Z_OK
         );
     }
 
