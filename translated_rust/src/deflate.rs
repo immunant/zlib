@@ -1097,26 +1097,11 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     }
     deflateInit2_(&mut *strm, level, method, windowBits, memLevel, strategy)
 }
-unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null()
-        || (*s).status != crate::src::deflate::INIT_STATE
-            && (*s).status != crate::src::deflate::GZIP_STATE
-            && (*s).status != crate::src::deflate::EXTRA_STATE
-            && (*s).status != crate::src::deflate::NAME_STATE
-            && (*s).status != crate::src::deflate::COMMENT_STATE
-            && (*s).status != crate::src::deflate::HCRC_STATE
-            && (*s).status != crate::src::deflate::BUSY_STATE
-            && (*s).status != crate::src::deflate::FINISH_STATE
-    {
-        return 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
+fn deflateStateCheck(
+    strm: &crate::zlib_h::z_stream,
+    state: &crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
+    (!deflate_state_is_valid(strm, state)) as ::core::ffi::c_int
 }
 
 fn deflate_state_is_valid(
@@ -1310,10 +1295,16 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm = &mut *strm;
-    if deflateStateCheck(strm) != 0 {
+    let Some(state) = strm.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if deflateStateCheck(strm, state) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *strm.state;
+    let state = strm
+        .state
+        .as_mut()
+        .expect("deflate state was checked above");
     let result = deflateResetKeep(strm, state, false);
     update_tracked_deflate_status(state.registry_key, state.status);
     result
@@ -1350,11 +1341,17 @@ pub unsafe extern "C" fn deflateReset_ffi(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if deflateStateCheck(strm) != 0 {
+    let strm = &mut *strm;
+    let Some(state) = strm.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if deflateStateCheck(strm, state) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let strm = &mut *strm;
-    let state = &mut *strm.state;
+    let state = strm
+        .state
+        .as_mut()
+        .expect("deflate state was checked above");
     deflateReset(strm, state.registry_key)
 }
 
@@ -1409,7 +1406,14 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let strm = &mut *strm;
+    let Some(state) = strm.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if deflateStateCheck(strm, state) != 0 || state.wrap != 2 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
@@ -1442,7 +1446,10 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
             Err(()) => return crate::zlib_h::Z_MEM_ERROR,
         }
     };
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    let state = strm
+        .state
+        .as_mut()
+        .expect("deflate state was checked above");
     state
         .buffers
         .as_mut()
@@ -1466,11 +1473,20 @@ pub unsafe extern "C" fn deflatePending_ffi(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm = &mut *strm;
-    let state = &*strm.state;
+    let Some(state) = strm.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if deflateStateCheck(strm, state) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = strm
+        .state
+        .as_ref()
+        .expect("deflate state was checked above");
     let Ok((pending_count, bit_count)) = deflatePending(strm, state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -1501,11 +1517,20 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm = &mut *strm;
-    let state = &*strm.state;
+    let Some(state) = strm.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if deflateStateCheck(strm, state) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = strm
+        .state
+        .as_ref()
+        .expect("deflate state was checked above");
     let Ok(bit_count) = deflateUsed(strm, state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -1560,11 +1585,20 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm = &mut *strm;
-    let state = &mut *strm.state;
+    let Some(state) = strm.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if deflateStateCheck(strm, state) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = strm
+        .state
+        .as_mut()
+        .expect("deflate state was checked above");
     deflatePrime(strm, state, bits, value)
 }
 pub fn deflateParams(
@@ -1628,11 +1662,17 @@ pub unsafe extern "C" fn deflateParams_ffi(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if deflateStateCheck(strm) != 0 {
+    let strm = &mut *strm;
+    let Some(state) = strm.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if deflateStateCheck(strm, state) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let strm = &mut *strm;
-    let state = &mut *strm.state;
+    let state = strm
+        .state
+        .as_mut()
+        .expect("deflate state was checked above");
     deflateParams(strm, state, level, strategy)
 }
 pub fn deflateTune(
@@ -1657,11 +1697,20 @@ pub unsafe extern "C" fn deflateTune_ffi(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let strm = &mut *strm;
+    let Some(state) = strm.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if deflateStateCheck(strm, state) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     deflateTune(
-        &mut *(*strm).state,
+        strm.state
+            .as_mut()
+            .expect("deflate state was checked above"),
         good_length,
         max_lazy,
         nice_length,
@@ -1885,7 +1934,10 @@ pub fn deflate(
         let mut old_flush: ::core::ffi::c_int = 0;
         let mut s: *mut crate::src::deflate::deflate_state =
             ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-        if deflateStateCheck(strm) != 0
+        let Some(state) = strm.state.as_ref() else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if deflateStateCheck(strm, state) != 0
             || flush > crate::zlib_h::Z_BLOCK
             || flush < 0 as ::core::ffi::c_int
         {
