@@ -112,7 +112,7 @@ fn inflate_fast_core(
     mut bits: u32,
     lenbits: u32,
     distbits: u32,
-    sane: bool,
+    _sane: bool,
     start: u32,
 ) -> InflateFastProgress {
     // The translated raw loop relies on these reserves before it reads ahead.
@@ -123,7 +123,11 @@ fn inflate_fast_core(
     if lenbits >= u32::BITS || distbits >= u32::BITS || bits >= u64::BITS {
         return InflateFastProgress::invalid(hold, bits, 14);
     }
-    if wsize > window.len() || whave > wsize || wnext > wsize {
+    if wsize > window.len()
+        || whave > wsize
+        || (wsize == 0 && wnext != 0)
+        || (wsize != 0 && wnext >= wsize)
+    {
         return InflateFastProgress::invalid(hold, bits, 17);
     }
     let Ok(output_capacity) = u32::try_from(output.len()) else {
@@ -255,7 +259,12 @@ fn inflate_fast_core(
                         error = Some(15);
                         break 'fast;
                     };
-                    let index = dist_here.val as usize + (hold & mask) as usize;
+                    let Some(index) = (dist_here.val as usize).checked_add((hold & mask) as usize)
+                    else {
+                        mode = Some(crate::src::inflate::BAD);
+                        error = Some(15);
+                        break 'fast;
+                    };
                     let Some(&next) = dcode.get(index) else {
                         mode = Some(crate::src::inflate::BAD);
                         error = Some(15);
@@ -264,31 +273,35 @@ fn inflate_fast_core(
                     dist_here = next;
                 };
 
+                if dist == 0 {
+                    mode = Some(crate::src::inflate::BAD);
+                    error = Some(17);
+                    break 'fast;
+                }
                 if dist > output_at {
-                    let mut back = dist - output_at;
-                    if back > whave || back > wsize || wsize > window.len() {
-                        if sane {
-                            mode = Some(crate::src::inflate::BAD);
-                            error = Some(17);
-                            break 'fast;
-                        }
+                    // The first `back` bytes precede this output span, so
+                    // they come from the circular history window.  Once
+                    // copied, ordinary overlapping output copying supplies
+                    // any remaining match bytes.  Advancing modulo `wsize`
+                    // preserves both of the legacy window-wrap branches.
+                    let back = dist - output_at;
+                    if back > whave || back > wsize {
                         mode = Some(crate::src::inflate::BAD);
                         error = Some(17);
                         break 'fast;
                     }
-                    let mut from = if wnext == 0 {
-                        wsize - back
-                    } else if wnext < back {
-                        wsize + wnext - back
-                    } else {
-                        wnext - back
+                    let Some(window_end) = wnext.checked_add(wsize) else {
+                        mode = Some(crate::src::inflate::BAD);
+                        error = Some(17);
+                        break 'fast;
                     };
-                    let first = if wnext != 0 && wnext < back {
-                        back - wnext
-                    } else {
-                        back
+                    let Some(mut from) = window_end.checked_sub(back).map(|index| index % wsize)
+                    else {
+                        mode = Some(crate::src::inflate::BAD);
+                        error = Some(17);
+                        break 'fast;
                     };
-                    let take = first.min(len);
+                    let take = back.min(len);
                     for _ in 0..take {
                         let Some(&byte) = window.get(from) else {
                             mode = Some(crate::src::inflate::BAD);
@@ -300,35 +313,12 @@ fn inflate_fast_core(
                         };
                         *slot = byte;
                         from += 1;
+                        if from == wsize {
+                            from = 0;
+                        }
                         output_at += 1;
                     }
                     len -= take;
-                    back -= take;
-                    if len != 0 && wnext != 0 && wnext < dist - output_at {
-                        from = 0;
-                        let take = wnext.min(len);
-                        for _ in 0..take {
-                            let Some(&byte) = window.get(from) else {
-                                mode = Some(crate::src::inflate::BAD);
-                                error = Some(17);
-                                break 'fast;
-                            };
-                            let Some(slot) = output.get_mut(output_at) else {
-                                break 'fast;
-                            };
-                            *slot = byte;
-                            from += 1;
-                            output_at += 1;
-                        }
-                        len -= take;
-                    }
-                    if len != 0 {
-                        if output_at < dist {
-                            mode = Some(crate::src::inflate::BAD);
-                            error = Some(17);
-                            break 'fast;
-                        }
-                    }
                 }
                 while len != 0 {
                     if output_at < dist {
@@ -356,7 +346,11 @@ fn inflate_fast_core(
                     error = Some(14);
                     break 'fast;
                 };
-                let index = here.val as usize + (hold & mask) as usize;
+                let Some(index) = (here.val as usize).checked_add((hold & mask) as usize) else {
+                    mode = Some(crate::src::inflate::BAD);
+                    error = Some(14);
+                    break 'fast;
+                };
                 let Some(&next) = lcode.get(index) else {
                     mode = Some(crate::src::inflate::BAD);
                     error = Some(14);
