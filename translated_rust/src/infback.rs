@@ -440,8 +440,7 @@ fn inflate_back_initialize_state(
     window: &mut [::core::ffi::c_uchar],
     window_bits: ::core::ffi::c_int,
 ) {
-    stream.state = state as *mut crate::src::inflate::inflate_state
-        as *mut crate::src::deflate::internal_state;
+    stream.state = state as *mut crate::src::inflate::inflate_state as *mut ::core::ffi::c_void;
     state.dmax = 32768;
     state.wbits = window_bits as crate::stdlib::uInt as ::core::ffi::c_uint;
     state.wsize = window.len() as ::core::ffi::c_uint;
@@ -1249,7 +1248,7 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
         (*strm).opaque,
         (*strm).state as crate::stdlib::voidpf,
     );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    (*strm).state = ::core::ptr::null_mut::<::core::ffi::c_void>();
     crate::zlib_h::Z_OK
 }
 
@@ -1437,8 +1436,8 @@ mod tests {
             reserved: 0,
         };
         let mut state = crate::src::inflate::inflate_state::newly_allocated();
-        let state_address = (&mut state as *mut crate::src::inflate::inflate_state)
-            as *mut crate::src::deflate::internal_state;
+        let state_address =
+            (&mut state as *mut crate::src::inflate::inflate_state) as *mut ::core::ffi::c_void;
         let mut window = [0_u8; 256];
 
         inflate_back_initialize_state(&mut stream, &mut state, &mut window, 8);

@@ -134,7 +134,11 @@ pub mod zlib_h {
         pub avail_out: crate::stdlib::uInt,
         pub total_out: crate::stdlib::uLong,
         pub msg: *mut ::core::ffi::c_char,
-        pub state: *mut crate::src::deflate::internal_state,
+        /// Opaque implementation state owned by either the deflate or
+        /// inflate boundary.  The C ABI exposes this as `voidpf`; keeping it
+        /// opaque here prevents the ABI mirror from claiming that all streams
+        /// carry a deflate state.
+        pub state: *mut ::core::ffi::c_void,
         pub zalloc: crate::zlib_h::alloc_func,
         pub zfree: crate::zlib_h::free_func,
         pub opaque: crate::stdlib::voidpf,
@@ -404,3 +408,25 @@ pub mod src {
     pub mod uncompr;
     pub mod zutil;
 } // mod src
+
+#[cfg(test)]
+mod abi_layout_tests {
+    use super::{src::deflate::internal_state, zlib_h::z_stream_s};
+
+    #[test]
+    fn z_stream_state_stays_an_opaque_pointer_slot() {
+        assert_eq!(
+            core::mem::size_of::<*mut core::ffi::c_void>(),
+            core::mem::size_of::<*mut internal_state>()
+        );
+        assert_eq!(
+            core::mem::align_of::<*mut core::ffi::c_void>(),
+            core::mem::align_of::<*mut internal_state>()
+        );
+        assert_eq!(
+            core::mem::offset_of!(z_stream_s, zalloc),
+            core::mem::offset_of!(z_stream_s, state)
+                + core::mem::size_of::<*mut core::ffi::c_void>()
+        );
+    }
+}

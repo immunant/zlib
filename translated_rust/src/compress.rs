@@ -215,7 +215,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
         avail_out: 0,
         total_out: 0,
         msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
+        state: ::core::ptr::null_mut::<::core::ffi::c_void>(),
         zalloc: None,
         zfree: None,
         opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),

@@ -1666,7 +1666,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     core::ptr::write(state, inflate_state::newly_allocated());
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
+    (*strm).state = state as *mut ::core::ffi::c_void;
     (*state).strm = strm;
     ret = inflateReset2(strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
@@ -1674,7 +1674,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
             (*strm).opaque,
             state as crate::stdlib::voidpf,
         );
-        (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        (*strm).state = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
     return ret;
 }
@@ -3292,7 +3292,7 @@ pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
         (*strm).opaque,
         (*strm).state as crate::stdlib::voidpf,
     );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    (*strm).state = ::core::ptr::null_mut::<::core::ffi::c_void>();
     crate::zlib_h::Z_OK
 }
 #[export_name = "inflateGetDictionary"]
@@ -4099,8 +4099,7 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     } else {
         WindowOwnership::CallbackOwned.raw()
     };
-    dest_stream.state = copy as *mut crate::src::inflate::inflate_state
-        as *mut crate::src::deflate::internal_state;
+    dest_stream.state = copy as *mut crate::src::inflate::inflate_state as *mut ::core::ffi::c_void;
     return crate::zlib_h::Z_OK;
 }
 fn inflate_undermine_core(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
@@ -6265,8 +6264,7 @@ mod tests {
         };
         let mut state = super::inflate_state::newly_allocated();
         state.strm = &mut stream;
-        stream.state = &mut state as *mut super::inflate_state
-            as *mut crate::src::deflate::internal_state;
+        stream.state = &mut state as *mut super::inflate_state as *mut ::core::ffi::c_void;
 
         assert!(inflate_state_references_are_valid(&stream, &state, true));
 

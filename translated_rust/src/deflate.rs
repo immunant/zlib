@@ -1234,7 +1234,7 @@ unsafe fn read_buf(
         size,
         stream.total_in,
         stream.adler,
-        (*stream.state).wrap,
+        (*(stream.state as *mut crate::src::deflate::deflate_state)).wrap,
     );
     stream.avail_in = result.avail_in;
     stream.adler = result.adler;
@@ -1579,7 +1579,7 @@ pub unsafe extern "C" fn deflateInit2_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     core::ptr::write(s, internal_state::newly_allocated());
-    (*strm).state = s as *mut crate::src::deflate::internal_state;
+    (*strm).state = s as *mut ::core::ffi::c_void;
     (*s).strm = strm;
     (*s).status = crate::src::deflate::INIT_STATE;
     (*s).wrap = wrap;
@@ -2127,7 +2127,7 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
-    let state = &mut *(*strm).state;
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     if let Err(status) = deflate_set_header_core(state) {
         return status;
     }
@@ -2291,7 +2291,7 @@ pub unsafe extern "C" fn deflatePrime_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
-    let state = &mut *(*strm).state;
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     let Some(layout) = pending_storage_layout_from_metadata(
         state.lit_bufsize,
         state.pending_buf_size,
@@ -3643,36 +3643,37 @@ pub unsafe extern "C" fn deflateEnd_ffi(
     if !deflate_state_is_valid_at_ffi_boundary!(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    status = (*(*strm).state).status;
-    if !(*(*strm).state).pending_buf.is_null() {
+    let state = (*strm).state as *mut crate::src::deflate::deflate_state;
+    status = (*state).status;
+    if !(*state).pending_buf.is_null() {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*(*strm).state).pending_buf as crate::stdlib::voidpf,
+            (*state).pending_buf as crate::stdlib::voidpf,
         );
     }
-    if !(*(*strm).state).head.is_null() {
+    if !(*state).head.is_null() {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*(*strm).state).head as crate::stdlib::voidpf,
+            (*state).head as crate::stdlib::voidpf,
         );
     }
-    if !(*(*strm).state).prev.is_null() {
+    if !(*state).prev.is_null() {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*(*strm).state).prev as crate::stdlib::voidpf,
+            (*state).prev as crate::stdlib::voidpf,
         );
     }
-    if !(*(*strm).state).window.is_null() {
+    if !(*state).window.is_null() {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*(*strm).state).window as crate::stdlib::voidpf,
+            (*state).window as crate::stdlib::voidpf,
         );
     }
     Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
         (*strm).opaque,
         (*strm).state as crate::stdlib::voidpf,
     );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    (*strm).state = ::core::ptr::null_mut::<::core::ffi::c_void>();
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
     } else {
@@ -3737,7 +3738,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*dest).state = ds as *mut crate::src::deflate::internal_state;
+    (*dest).state = ds as *mut ::core::ffi::c_void;
     // The source state is copied over the complete callback allocation before
     // any field is observed.  Clearing it first is therefore redundant.
     crate::stdlib::memcpy(
