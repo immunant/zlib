@@ -1871,15 +1871,26 @@ fn deflate_bound_impl(
     }
 }
 
-pub unsafe extern "C" fn deflateBound_z(
-    mut strm: crate::zlib_h::z_streamp,
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
-    if deflateStateCheck(strm) != 0 {
-        return deflate_bound_impl(sourceLen, None);
+unsafe fn deflate_bound_state_for_stream(
+    stream: &crate::zlib_h::z_stream_s,
+    stream_ptr: crate::zlib_h::z_streamp,
+) -> Option<DeflateBoundState> {
+    if stream.zalloc.is_none() || stream.zfree.is_none() {
+        return None;
     }
-    let stream = &*strm;
-    let state = &*(stream.state as *const crate::src::deflate::deflate_state);
+    let state = (stream.state as *const crate::src::deflate::deflate_state).as_ref()?;
+    if state.strm.as_ptr() != stream_ptr
+        || state.status != crate::src::deflate::INIT_STATE
+            && state.status != crate::src::deflate::GZIP_STATE
+            && state.status != crate::src::deflate::EXTRA_STATE
+            && state.status != crate::src::deflate::NAME_STATE
+            && state.status != crate::src::deflate::COMMENT_STATE
+            && state.status != crate::src::deflate::HCRC_STATE
+            && state.status != crate::src::deflate::BUSY_STATE
+            && state.status != crate::src::deflate::FINISH_STATE
+    {
+        return None;
+    }
     let mut gzip_extra_len = None;
     let mut gzip_name_len = None;
     let mut gzip_comment_len = None;
@@ -1894,20 +1905,24 @@ pub unsafe extern "C" fn deflateBound_z(
             gzip_hcrc = header.hcrc;
         }
     }
-    deflate_bound_impl(
-        sourceLen,
-        Some(DeflateBoundState {
-            wrap: state.wrap,
-            strstart: state.strstart,
-            gzip_extra_len,
-            gzip_name_len,
-            gzip_comment_len,
-            gzip_hcrc,
-            w_bits: state.w_bits,
-            hash_bits: state.hash_bits,
-            level: state.level,
-        }),
-    )
+    Some(DeflateBoundState {
+        wrap: state.wrap,
+        strstart: state.strstart,
+        gzip_extra_len,
+        gzip_name_len,
+        gzip_comment_len,
+        gzip_hcrc,
+        w_bits: state.w_bits,
+        hash_bits: state.hash_bits,
+        level: state.level,
+    })
+}
+
+fn deflateBound_z(
+    source_len: crate::stdlib::z_size_t,
+    state: Option<DeflateBoundState>,
+) -> crate::stdlib::z_size_t {
+    deflate_bound_impl(source_len, state)
 }
 #[export_name = "deflateBound_z"]
 
@@ -1915,7 +1930,10 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    deflateBound_z(strm, sourceLen)
+    let state = strm
+        .as_ref()
+        .and_then(|stream| deflate_bound_state_for_stream(stream, strm));
+    deflateBound_z(sourceLen, state)
 }
 #[export_name = "deflateBound"]
 
@@ -1923,7 +1941,10 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t) as crate::stdlib::uLong
+    let state = strm
+        .as_ref()
+        .and_then(|stream| deflate_bound_state_for_stream(stream, strm));
+    deflateBound_z(sourceLen as crate::stdlib::z_size_t, state) as crate::stdlib::uLong
 }
 
 fn put_short_msb_bytes(
