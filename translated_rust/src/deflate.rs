@@ -87,7 +87,15 @@ pub type deflate_state = crate::src::deflate::internal_state;
 pub struct internal_state {
     pub strm: crate::zlib_h::z_streamp,
     pub status: ::core::ffi::c_int,
-    pub pending_buf: *mut crate::stdlib::Bytef,
+    /// Callback-owned pending/symbol allocation. `None` represents the
+    /// pre-allocation and allocation-failure states. A callback result is
+    /// recorded as non-null before implementation code can use it.
+    ///
+    /// This removes nullable raw storage from the algorithm state while the
+    /// remaining callback-ownership migration is completed. Existing private
+    /// algorithms still establish short-lived views; moving those crossings
+    /// to exported boundaries is the next migration step.
+    pub pending_buf: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
     pub pending_buf_size: crate::zutil_h::ulg,
     pub pending_out_offset: usize,
     pub pending: crate::zutil_h::ulg,
@@ -173,7 +181,7 @@ impl internal_state {
         Self {
             strm: ::core::ptr::null_mut(),
             status: 0,
-            pending_buf: ::core::ptr::null_mut(),
+            pending_buf: None,
             pending_buf_size: 0,
             pending_out_offset: 0,
             pending: 0,
@@ -1790,17 +1798,18 @@ pub unsafe extern "C" fn deflateInit2_(
     let pending_plan = pending_storage_allocation_plan(lit_bufsize)
         .expect("validated deflate pending allocation");
     let pending_layout = pending_plan.layout();
-    (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
+    let pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
         pending_plan.items,
         pending_plan.item_size,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    (*s).pending_buf = ::core::ptr::NonNull::new(pending_buf);
     (*s).pending_buf_size = pending_layout.total_len as crate::zutil_h::ulg;
     if (*s).window.is_null()
         || (*s).prev.is_null()
         || (*s).head.is_null()
-        || (*s).pending_buf.is_null()
+        || (*s).pending_buf.is_none()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
         (*strm).msg =
@@ -2463,11 +2472,11 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if state.pending_buf.is_null() {
+    let Some(pending_buf) = state.pending_buf else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
     let pending_buffer =
-        core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        core::slice::from_raw_parts_mut(pending_buf.as_ptr(), state.pending_buf_size as usize);
     with_pending_storage(pending_buffer, layout, |storage| {
         deflatePrime(state, storage, bits, value)
     })
@@ -3016,8 +3025,10 @@ fn drain_pending(
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let stream = &mut *strm;
     let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
-    let pending_storage =
-        core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let pending_storage = core::slice::from_raw_parts_mut(
+        state.pending_buf.expect("validated pending storage").as_ptr(),
+        state.pending_buf_size as usize,
+    );
     let layout = pending_storage_layout(state.lit_bufsize);
     assert!(with_pending_storage(pending_storage, layout, |storage| {
         crate::src::trees::tr_flush_bits_core(
@@ -3355,11 +3366,14 @@ pub unsafe extern "C" fn deflate_ffi(
     ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if (*s).pending_buf.is_null() {
+    if (*s).pending_buf.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let pending_buffer = {
-        core::slice::from_raw_parts((*s).pending_buf, pending_layout.total_len)
+        core::slice::from_raw_parts(
+            (*s).pending_buf.expect("validated pending storage").as_ptr(),
+            pending_layout.total_len,
+        )
     };
     match deflate_preflight(
         (*strm).next_out.is_null(),
@@ -3413,8 +3427,10 @@ pub unsafe extern "C" fn deflate_ffi(
             state.level,
             state.strstart != 0,
         );
-        let pending_buffer =
-            core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let pending_buffer = core::slice::from_raw_parts_mut(
+            state.pending_buf.expect("validated pending storage").as_ptr(),
+            state.pending_buf_size as usize,
+        );
         let _ = put_short_msb_core(pending_buffer, &mut state.pending, header);
         if state.strstart != 0 as crate::stdlib::uInt {
             let _ = put_short_msb_core(
@@ -3442,7 +3458,7 @@ pub unsafe extern "C" fn deflate_ffi(
         (*strm).adler = 0 as crate::stdlib::uLong;
         let state = &mut *s;
         let pending_buffer = core::slice::from_raw_parts_mut(
-            state.pending_buf,
+            state.pending_buf.expect("validated pending storage").as_ptr(),
             state.pending_buf_size as usize,
         );
         let layout = pending_storage_layout(state.lit_bufsize);
@@ -3453,7 +3469,7 @@ pub unsafe extern "C" fn deflate_ffi(
         if (*s).gzhead.is_null() {
             let state = &mut *s;
             let pending_buffer = core::slice::from_raw_parts_mut(
-                state.pending_buf,
+                state.pending_buf.expect("validated pending storage").as_ptr(),
                 state.pending_buf_size as usize,
             );
             let layout = pending_storage_layout(state.lit_bufsize);
@@ -3483,7 +3499,7 @@ pub unsafe extern "C" fn deflate_ffi(
                 gzhead.extra_len,
             );
             let pending_buffer = core::slice::from_raw_parts_mut(
-                (*s).pending_buf,
+                (*s).pending_buf.expect("validated pending storage").as_ptr(),
                 (*s).pending_buf_size as usize,
             );
             let layout = pending_storage_layout((*s).lit_bufsize);
@@ -3528,7 +3544,7 @@ pub unsafe extern "C" fn deflate_ffi(
                 let copy: crate::zutil_h::ulg =
                     (*s).pending_buf_size.wrapping_sub((*s).pending);
                 let pending = core::slice::from_raw_parts_mut(
-                    (*s).pending_buf,
+                    (*s).pending_buf.expect("validated pending storage").as_ptr(),
                     (*s).pending_buf_size as usize,
                 );
                 let Some(next_pending) =
@@ -3554,7 +3570,7 @@ pub unsafe extern "C" fn deflate_ffi(
                 left = left.wrapping_sub(copy);
             }
             let pending = core::slice::from_raw_parts_mut(
-                (*s).pending_buf,
+                (*s).pending_buf.expect("validated pending storage").as_ptr(),
                 (*s).pending_buf_size as usize,
             );
             let Some(next_pending) =
@@ -3599,7 +3615,11 @@ pub unsafe extern "C" fn deflate_ffi(
                 val = *(*(*s).gzhead).name.offset(c2rust_fresh19 as isize) as ::core::ffi::c_int;
                 let c2rust_fresh20 = (*s).pending;
                 (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh20 as isize) = val as crate::stdlib::Bytef;
+                *(*s)
+                    .pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr()
+                    .wrapping_add(c2rust_fresh20 as usize) = val as crate::stdlib::Bytef;
                 if !(val != 0 as ::core::ffi::c_int) {
                     break;
                 }
@@ -3641,7 +3661,11 @@ pub unsafe extern "C" fn deflate_ffi(
                     *(*(*s).gzhead).comment.offset(c2rust_fresh21 as isize) as ::core::ffi::c_int;
                 let c2rust_fresh22 = (*s).pending;
                 (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh22 as isize) = val_0 as crate::stdlib::Bytef;
+                *(*s)
+                    .pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr()
+                    .wrapping_add(c2rust_fresh22 as usize) = val_0 as crate::stdlib::Bytef;
                 if !(val_0 != 0 as ::core::ffi::c_int) {
                     break;
                 }
@@ -3670,7 +3694,7 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
             }
             let pending_buffer = core::slice::from_raw_parts_mut(
-                (*s).pending_buf,
+                (*s).pending_buf.expect("validated pending storage").as_ptr(),
                 (*s).pending_buf_size as usize,
             );
             let layout = pending_storage_layout((*s).lit_bufsize);
@@ -3763,7 +3787,7 @@ pub unsafe extern "C" fn deflate_ffi(
     if (*s).wrap == 2 as ::core::ffi::c_int {
         let state = &mut *s;
         let pending_buffer = core::slice::from_raw_parts_mut(
-            state.pending_buf,
+            state.pending_buf.expect("validated pending storage").as_ptr(),
             state.pending_buf_size as usize,
         );
         let layout = pending_storage_layout(state.lit_bufsize);
@@ -3774,8 +3798,10 @@ pub unsafe extern "C" fn deflate_ffi(
         .expect("pending storage layout matches its allocation"));
     } else {
         let state = &mut *s;
-        let pending_buffer =
-            core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let pending_buffer = core::slice::from_raw_parts_mut(
+            state.pending_buf.expect("validated pending storage").as_ptr(),
+            state.pending_buf_size as usize,
+        );
         let _ = put_short_msb_core(
             pending_buffer,
             &mut state.pending,
@@ -3808,10 +3834,10 @@ pub unsafe extern "C" fn deflateEnd_ffi(
     }
     let state = (*strm).state as *mut crate::src::deflate::deflate_state;
     status = (*state).status;
-    if !(*state).pending_buf.is_null() {
+    if let Some(pending_buf) = (*state).pending_buf.take() {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*state).pending_buf as crate::stdlib::voidpf,
+            pending_buf.as_ptr() as crate::stdlib::voidpf,
         );
     }
     if !(*state).head.is_null() {
@@ -3884,7 +3910,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if (*ss).pending_buf.is_null() {
+    if (*ss).pending_buf.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // `z_stream` is an ABI mirror made entirely of `Copy` fields.  Copy the
@@ -3927,16 +3953,17 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         (*ds).hash_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*ds).pending_buf = Some((*dest).zalloc.expect("non-null function pointer"))
+    let pending_buf = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
         pending_plan.items,
         pending_plan.item_size,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    (*ds).pending_buf = ::core::ptr::NonNull::new(pending_buf);
     if (*ds).window.is_null()
         || (*ds).prev.is_null()
         || (*ds).head.is_null()
-        || (*ds).pending_buf.is_null()
+        || (*ds).pending_buf.is_none()
     {
         deflateEnd_ffi(dest);
         return crate::zlib_h::Z_MEM_ERROR;
@@ -4004,17 +4031,21 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         deflateEnd_ffi(dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if (*ss).pending_buf.is_null() {
+    if (*ss).pending_buf.is_none() {
         deflateEnd_ffi(dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // Both raw views are established at this exported ownership boundary.
     // The safe storage core below preserves the historical copy order for
     // the pending/symbol temporal overlay.
-    let source_pending =
-        core::slice::from_raw_parts((*ss).pending_buf, pending_layout.total_len);
-    let destination_pending =
-        core::slice::from_raw_parts_mut((*ds).pending_buf, pending_layout.total_len);
+    let source_pending = core::slice::from_raw_parts(
+        (*ss).pending_buf.expect("validated source pending storage").as_ptr(),
+        pending_layout.total_len,
+    );
+    let destination_pending = core::slice::from_raw_parts_mut(
+        (*ds).pending_buf.expect("validated destination pending storage").as_ptr(),
+        pending_layout.total_len,
+    );
     let Some(source_storage) = PendingStorageReadView::new(source_pending, pending_layout) else {
         deflateEnd_ffi(dest);
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -4574,7 +4605,11 @@ unsafe extern "C" fn deflate_fast(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
-    let symbol_base = (*s).pending_buf.wrapping_add((*s).sym_buf_offset);
+    let symbol_base = (*s)
+        .pending_buf
+        .expect("validated pending storage")
+        .as_ptr()
+        .wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -4793,7 +4828,11 @@ unsafe extern "C" fn deflate_slow(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
-    let symbol_base = (*s).pending_buf.wrapping_add((*s).sym_buf_offset);
+    let symbol_base = (*s)
+        .pending_buf
+        .expect("validated pending storage")
+        .as_ptr()
+        .wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -5046,7 +5085,11 @@ unsafe fn deflate_rle(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let symbol_base = (*s).pending_buf.wrapping_add((*s).sym_buf_offset);
+    let symbol_base = (*s)
+        .pending_buf
+        .expect("validated pending storage")
+        .as_ptr()
+        .wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
@@ -5364,7 +5407,7 @@ mod tests {
         let state = super::internal_state::newly_allocated();
 
         assert!(state.strm.is_null());
-        assert!(state.pending_buf.is_null());
+        assert!(state.pending_buf.is_none());
         assert!(state.gzhead.is_null());
         assert!(state.window.is_null());
         assert!(state.prev.is_null());
