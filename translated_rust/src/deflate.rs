@@ -2844,27 +2844,35 @@ fn stored_block_size(
 }
 
 // This private adapter binds the deflater allocations and caller cursors once.
-// The stored-block algorithm below uses only those bounded views.
-unsafe fn deflate_stored(
+// The stored-block algorithm below uses only those bounded views. Its only
+// callers are the validated compression dispatch, so keep that raw binding
+// local instead of requiring the slice-only strategy implementation to be
+// unsafe.
+fn deflate_stored(
     s: *mut crate::src::deflate::deflate_state,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    let state = &mut *s;
-    let stream = &mut *state.strm;
-    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let input = if stream.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-    };
-    let output = if stream.avail_out == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-    };
-    deflate_stored_impl(state, stream, window, pending, input, output, flush)
+    // SAFETY: the compression dispatch invokes this only with the validated
+    // state maintained by `deflate()`. Its allocations and caller cursors are
+    // the bounded ranges for this compression call.
+    unsafe {
+        let state = &mut *s;
+        let stream = &mut *state.strm;
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        let pending =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let input = if stream.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        };
+        let output = if stream.avail_out == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
+        };
+        deflate_stored_impl(state, stream, window, pending, input, output, flush)
+    }
 }
 
 fn flush_pending_stored(
