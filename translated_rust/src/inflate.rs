@@ -2730,24 +2730,24 @@ pub unsafe extern "C" fn inflateCopy_ffi(
             as *const crate::src::inftrees::code
         && (*state).lencode
             <= (&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                .offset(crate::src::inftrees::ENOUGH as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize))
+                .wrapping_add(crate::src::inftrees::ENOUGH as usize)
+                .wrapping_sub(1)
                 as *const crate::src::inftrees::code
     {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
+        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_offset(
             (*state)
                 .lencode
                 .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
                 as isize,
         );
-        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
+        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_offset(
             (*state)
                 .distcode
                 .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
                 as isize,
         );
     }
-    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
+    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_offset(
         (*state)
             .next
             .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
