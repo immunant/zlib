@@ -16,8 +16,8 @@ pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflateParams;
 use crate::src::deflate::deflate_reset_keep_from_stream;
-use crate::src::deflate::DeflateResetKind;
 pub use crate::src::deflate::internal_state;
+use crate::src::deflate::DeflateResetKind;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpc;
@@ -233,6 +233,15 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1 as ::core::ffi::c_int;
         }
+        // Successful initialization, rather than buffer allocation or
+        // compressed mode, is the lifecycle proof needed by close.  Install
+        // the pointer-free owner before any later setup can publish cursors.
+        state.buffers.deflate_state = Some(crate::src::gzlib::GzEmbeddedDeflateState::new(
+            0,
+            0,
+            state.strm.total_in,
+            state.strm.total_out,
+        ));
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
     if state.direct == 0 {
@@ -442,14 +451,12 @@ unsafe fn gz_comp(
         // staged fresh input since the last pass. Totals persist with the
         // paired gzip buffers so later write policy need not trust ABI
         // counters between calls.
-        let persisted = state.buffers.deflate_state.unwrap_or_else(|| {
-            crate::src::gzlib::GzEmbeddedDeflateState::new(
-                input_available,
-                output_available,
-                state.strm.total_in,
-                state.strm.total_out,
-            )
-        });
+        // `gz_init()` installs this tag immediately after `deflateInit2_()`
+        // succeeds.  Do not recreate it from allocation state here: that
+        // would allow a failed setup to masquerade as an initialized codec.
+        let Some(persisted) = state.buffers.deflate_state else {
+            return -1;
+        };
         let codec_state = crate::src::gzlib::GzEmbeddedDeflateState::new(
             input_available,
             output_available,
@@ -1053,24 +1060,29 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     }
     let status = gz_comp(state, crate::zlib_h::Z_FINISH, None);
     result.record_codec_result(status, state.err);
+    // The lifecycle tag, not mode or allocated-buffer size, authorizes the
+    // matching codec end operation.  Consume it before either buffer is
+    // detached so a partial setup cannot erase an initialized deflater.
+    if state.buffers.take_embedded_deflater().is_some() {
+        crate::src::deflate::deflateEnd(
+            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+        );
+        state.buffers.output = None;
+    }
     if state.buffers.size != 0 {
-        if state.direct == 0 {
-            crate::src::deflate::deflateEnd(
-                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
-            state.buffers.output = None;
-        }
         state.buffers.input = None;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     state.path = None;
     state.msg = None;
-    result.finish(state
-        .fd
-        .take()
-        .map(crate::src::gzlib::gz_close_fd)
-        .transpose()
-        .is_err())
+    result.finish(
+        state
+            .fd
+            .take()
+            .map(crate::src::gzlib::gz_close_fd)
+            .transpose()
+            .is_err(),
+    )
 }
 #[export_name = "gzclose_w"]
 

@@ -177,6 +177,14 @@ impl crate::gzguts_h::GzBuffers {
         self.size = 0;
     }
 
+    // A compressed gzip writer owns an initialized embedded deflater exactly
+    // when this tag is present.  Close consumes it before releasing either
+    // paired buffer, so allocation state alone can never authorize a codec
+    // teardown.
+    pub(crate) fn take_embedded_deflater(&mut self) -> Option<GzEmbeddedDeflateState> {
+        self.deflate_state.take()
+    }
+
     // The completed read cursor belongs to the output allocation.  Keep the
     // owner as the source of truth between buffered-read operations; `x` is
     // only the ABI projection published for the public gzgetc macro.

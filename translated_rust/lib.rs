@@ -52,9 +52,11 @@ pub mod gzguts_h {
         // and counter state with the paired buffers.  `strm` remains the ABI
         // call projection until the codec owner can replace it completely.
         pub(crate) inflate_state: Option<crate::src::gzlib::GzEmbeddedInflateState>,
-        // Compressed write handles retain the scalar portion of their
-        // embedded deflater with the paired buffers. The ABI `strm` is still
-        // the temporary codec projection, not the persistent progress owner.
+        // Presence is the embedded-deflater lifecycle tag: it is installed
+        // immediately after successful initialization and consumed before
+        // the paired write buffers are released.  The ABI `strm` is still
+        // only the temporary codec projection, not persistent progress
+        // ownership.
         pub(crate) deflate_state: Option<crate::src::gzlib::GzEmbeddedDeflateState>,
         // A completed inflate pass produces bytes in `output`.  Retain that
         // checked output cursor with its owner as well, rather than making
