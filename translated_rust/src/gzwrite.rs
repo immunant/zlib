@@ -618,11 +618,14 @@ pub fn gzclose_w(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     ret = gz_close_write_prepare(state);
+    // Determine which resources this state owns before crossing into the raw
+    // teardown boundary. This selection only inspects ordinary state flags;
+    // the selected deflater and allocation releases remain below.
+    let cleanup = crate::src::gzlib::gz_write_close_cleanup(state);
     // SAFETY: this close path owns the initialized gzip allocations and the
     // descriptor. The cleanup plan is derived from that bound state, and no
     // pointer escapes after its selected allocation is released.
     unsafe {
-        let cleanup = crate::src::gzlib::gz_write_close_cleanup(state);
         match cleanup {
             crate::src::gzlib::GzWriteCloseCleanup::DeflaterAndBuffers => {
                 crate::src::deflate::deflateEnd(
