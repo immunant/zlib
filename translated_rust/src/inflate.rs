@@ -484,7 +484,20 @@ pub unsafe fn inflateReset2(
     }
     state.normal.wrap = wrap;
     state.normal.wbits = windowBits as ::core::ffi::c_uint;
-    return inflateReset(strm);
+    // This variant already owns the validated stream/state projection.  Do
+    // not re-enter `inflateReset()` merely to repeat that projection: apply
+    // the same pointer-free reset core and publish its stream scalars while
+    // both borrows are still in scope.
+    let update = inflate_reset_core(&mut state.normal);
+    strm.total_out = 0;
+    strm.total_in = strm.total_out;
+    strm.msg = ::core::ptr::null_mut();
+    strm.data_type = 0;
+    if let Some(adler) = update.adler {
+        strm.adler = adler;
+    }
+    state.head = None;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateReset2"]
 
