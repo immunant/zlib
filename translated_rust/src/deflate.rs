@@ -2785,17 +2785,18 @@ pub unsafe fn deflate(
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *state.head.wrapping_add(
-                        state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
-                    ) = NIL as crate::src::deflate::Posf;
-                    crate::stdlib::memset(
-                        state.head as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        (state.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                            as crate::__stddef_size_t_h::size_t)
-                            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                    );
-                    state.slid = 0 as ::core::ffi::c_int;
+                    let Ok(head_len) = usize::try_from(state.hash_size) else {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    };
+                    if head_len == 0 || state.head.is_null() {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    // This legacy stream boundary owns the callback-allocated
+                    // hash-table lend.  Full flush clears every entry (NIL is
+                    // zero) through the slice-only state core instead of libc
+                    // `memset` and its raw byte-count arithmetic.
+                    let head = ::core::slice::from_raw_parts_mut(state.head, head_len);
+                    clear_hash_state(head, &mut state.slid);
                     if state.lookahead == 0 as crate::stdlib::uInt {
                         state.strstart = 0 as crate::stdlib::uInt;
                         state.block_start = 0 as ::core::ffi::c_long;
