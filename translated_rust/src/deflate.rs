@@ -362,6 +362,79 @@ pub(crate) struct PendingStorageReadView<'a> {
     layout: PendingStorageLayout,
 }
 
+/// The callback-backed storage that a deflate call needs while it runs.
+///
+/// The pending bytes and symbols share one allocation, while the window and
+/// hash chains are separate callback allocations.  Exported boundaries are
+/// responsible for establishing the four slices from those allocations.  The
+/// algorithm can then use this value without retaining, rebasing, or
+/// reconstructing any raw pointer.
+///
+/// This deliberately borrows all storage for one call only.  In particular,
+/// it is not an owner and must never be stored in `internal_state`: custom
+/// allocators and `deflateCopy` still define the allocation lifetimes.
+pub(crate) struct DeflateWorkingSet<'a> {
+    pending: PendingStorageView<'a>,
+    window: &'a mut [crate::stdlib::Bytef],
+    head: &'a mut [crate::src::deflate::Posf],
+    prev: &'a mut [crate::src::deflate::Posf],
+}
+
+impl<'a> DeflateWorkingSet<'a> {
+    /// Build bounded views for one established deflate state.  Reject stale
+    /// scalar metadata before exposing any storage to the safe core.
+    pub(crate) fn new(
+        state: &internal_state,
+        pending: &'a mut [crate::stdlib::Bytef],
+        window: &'a mut [crate::stdlib::Bytef],
+        head: &'a mut [crate::src::deflate::Posf],
+        prev: &'a mut [crate::src::deflate::Posf],
+    ) -> Option<Self> {
+        let layout = pending_storage_layout_for_state(state)?;
+        let window_len = usize::try_from(state.window_size).ok()?;
+        let head_len = usize::try_from(state.hash_size).ok()?;
+        let prev_len = usize::try_from(state.w_size).ok()?;
+
+        Some(Self {
+            pending: PendingStorageView::new(pending, layout)?,
+            window: window.get_mut(..window_len)?,
+            head: head.get_mut(..head_len)?,
+            prev: prev.get_mut(..prev_len)?,
+        })
+    }
+
+    pub(crate) fn pending(&mut self) -> &mut PendingStorageView<'a> {
+        &mut self.pending
+    }
+
+    pub(crate) fn window(&self) -> &[crate::stdlib::Bytef] {
+        self.window
+    }
+
+    pub(crate) fn window_mut(&mut self) -> &mut [crate::stdlib::Bytef] {
+        self.window
+    }
+
+    /// Insert the current three-byte sequence into the bounded hash chains.
+    /// This is the slow strategy's first working-set operation; later
+    /// dispatch changes can use it without recreating window/head/prev views.
+    pub(crate) fn slow_insert_hash(
+        &mut self,
+        state: &mut internal_state,
+    ) -> Option<crate::src::deflate::IPos> {
+        deflate_slow_insert_hash_core(
+            self.window,
+            self.head,
+            self.prev,
+            state.strstart,
+            state.w_mask,
+            state.hash_shift,
+            state.hash_mask,
+            &mut state.ins_h,
+        )
+    }
+}
+
 /// The initialized portions of a pending/symbol allocation that `deflateCopy`
 /// must reproduce.  Pending output begins at its drain cursor, whereas symbol
 /// data always starts at the shared allocation's symbol offset.
@@ -5731,9 +5804,9 @@ mod tests {
         symbol_buffer_is_full, symbol_triplet_cursors, take_pending_header_len_override,
         with_pending_storage, zlib_header, DeflateBoundGzipHeader, DeflateBoundState,
         DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult,
-        LongestMatchResult, PendingDrainState, PendingStorageReadView, PendingStorageView,
-        ReadBufChecksum, ReadBufResult, StoredHistoryState,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, DeflateWorkingSet,
+        FlushPendingResult, LongestMatchResult, PendingDrainState, PendingStorageReadView,
+        PendingStorageView, ReadBufChecksum, ReadBufResult, StoredHistoryState,
     };
 
     #[test]
@@ -7261,6 +7334,84 @@ mod tests {
 
         state.pending_buf_size = state.pending_buf_size.wrapping_sub(1);
         assert_eq!(pending_storage_layout_for_state(&state), None);
+    }
+
+    #[test]
+    fn deflate_working_set_binds_pending_window_and_hash_storage() {
+        let mut state = super::internal_state::newly_allocated();
+        let layout = pending_storage_layout(4);
+        state.lit_bufsize = 4;
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        state.sym_buf_offset = layout.symbol_offset;
+        state.sym_end = layout.symbol_flush_threshold;
+        state.window_size = 8;
+        state.w_size = 4;
+        state.hash_size = 8;
+        state.w_mask = 3;
+        state.hash_shift = 5;
+        state.hash_mask = 7;
+
+        let mut pending = [0; 16];
+        let mut window = [0, 1, 2, 3, 4, 5, 6, 7];
+        let mut head = [0; 8];
+        let mut prev = [0; 4];
+        head[2] = 11;
+
+        let mut working =
+            DeflateWorkingSet::new(&state, &mut pending, &mut window, &mut head, &mut prev)
+                .unwrap();
+        assert!(working
+            .pending()
+            .append_pending(&mut state.pending, &[0xaa]));
+        assert_eq!(working.slow_insert_hash(&mut state), Some(11));
+        assert_eq!(working.window(), &[0, 1, 2, 3, 4, 5, 6, 7]);
+        working.window_mut()[0] = 9;
+        drop(working);
+
+        assert_eq!(pending[0], 0xaa);
+        assert_eq!(state.pending, 1);
+        assert_eq!(state.ins_h, 2);
+        assert_eq!(head[2], 0);
+        assert_eq!(prev[0], 11);
+        assert_eq!(window[0], 9);
+    }
+
+    #[test]
+    fn deflate_working_set_rejects_stale_or_short_storage_without_mutation() {
+        let mut state = super::internal_state::newly_allocated();
+        let layout = pending_storage_layout(4);
+        state.lit_bufsize = 4;
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        state.sym_buf_offset = layout.symbol_offset;
+        state.sym_end = layout.symbol_flush_threshold;
+        state.window_size = 8;
+        state.w_size = 4;
+        state.hash_size = 8;
+
+        let mut pending = [0xa1; 16];
+        let mut window = [0xb2; 8];
+        let mut head = [0xc3; 8];
+        let mut prev = [0xd4; 4];
+
+        state.pending_buf_size = state.pending_buf_size.wrapping_sub(1);
+        assert!(
+            DeflateWorkingSet::new(&state, &mut pending, &mut window, &mut head, &mut prev,)
+                .is_none()
+        );
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        assert!(DeflateWorkingSet::new(
+            &state,
+            &mut pending,
+            &mut window[..7],
+            &mut head,
+            &mut prev,
+        )
+        .is_none());
+
+        assert_eq!(pending, [0xa1; 16]);
+        assert_eq!(window, [0xb2; 8]);
+        assert_eq!(head, [0xc3; 8]);
+        assert_eq!(prev, [0xd4; 4]);
     }
 
     #[test]
