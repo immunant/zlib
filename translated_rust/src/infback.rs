@@ -1,6 +1,5 @@
 pub use crate::__stddef_size_t_h::size_t;
 
-
 pub use crate::src::inflate::inflate_mode;
 pub use crate::src::inflate::inflate_state;
 pub use crate::src::inflate::BAD;
@@ -43,9 +42,7 @@ pub use crate::src::inftrees::CODES;
 pub use crate::src::inftrees::DISTS;
 pub use crate::src::inftrees::LENS;
 
-
 pub use crate::src::deflate::internal_state;
-
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -933,13 +930,13 @@ pub unsafe extern "C" fn inflateBack(
                         bits = bits.wrapping_sub((*state).extra);
                     }
                     if (*state).offset
-                        > (*state).wsize.wrapping_sub(
-                            if (*state).whave < (*state).wsize {
+                        > (*state)
+                            .wsize
+                            .wrapping_sub(if (*state).whave < (*state).wsize {
                                 left
                             } else {
                                 0 as ::core::ffi::c_uint
-                            },
-                        )
+                            })
                     {
                         (*strm).msg = b"invalid distance too far back\0".as_ptr()
                             as *const ::core::ffi::c_char

@@ -4027,12 +4027,6 @@ pub mod trees_h {
         16384 as ::core::ffi::c_int,
         24576 as ::core::ffi::c_int,
     ];
-
-    
-    
-    
-    
-    
 }
 pub use crate::__stddef_size_t_h::size_t;
 pub use crate::src::deflate::ct_data;
@@ -4055,7 +4049,6 @@ pub use crate::src::deflate::LENGTH_CODES;
 pub use crate::src::deflate::LITERALS;
 pub use crate::src::deflate::L_CODES;
 pub use crate::src::deflate::MAX_BITS;
-
 
 pub use crate::src::trees::trees_h::base_dist;
 pub use crate::src::trees::trees_h::base_length;
@@ -4431,9 +4424,10 @@ unsafe extern "C" fn gen_bitlen(
     let Some(stat_desc) = (*desc).stat_desc else {
         return;
     };
-    let mut stree: *const crate::src::deflate::ct_data = stat_desc
-        .static_tree
-        .map_or(::core::ptr::null(), <[crate::src::deflate::ct_data]>::as_ptr);
+    let mut stree: *const crate::src::deflate::ct_data = stat_desc.static_tree.map_or(
+        ::core::ptr::null(),
+        <[crate::src::deflate::ct_data]>::as_ptr,
+    );
     let mut extra: *const crate::stdlib::intf = stat_desc.extra_bits.as_ptr();
     let mut base: ::core::ffi::c_int = stat_desc.extra_base;
     let mut max_length: ::core::ffi::c_int = stat_desc.max_length;
@@ -4539,9 +4533,10 @@ unsafe extern "C" fn build_tree(
     let Some(stat_desc) = (*desc).stat_desc else {
         return;
     };
-    let mut stree: *const crate::src::deflate::ct_data = stat_desc
-        .static_tree
-        .map_or(::core::ptr::null(), <[crate::src::deflate::ct_data]>::as_ptr);
+    let mut stree: *const crate::src::deflate::ct_data = stat_desc.static_tree.map_or(
+        ::core::ptr::null(),
+        <[crate::src::deflate::ct_data]>::as_ptr,
+    );
     let mut elems: ::core::ffi::c_int = stat_desc.elems;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;

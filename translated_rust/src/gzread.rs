@@ -14,19 +14,14 @@ pub use crate::stdlib::EWOULDBLOCK;
 
 pub use crate::stdlib::__off64_t;
 
-
-
-
 pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
-
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::src::inflate::inflateReset;
-
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;

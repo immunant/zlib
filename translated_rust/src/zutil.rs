@@ -1,8 +1,6 @@
 pub use crate::__stddef_size_t_h::size_t;
 pub use crate::stdlib::__off_t;
 
-
-
 pub use crate::stdlib::off_t;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -60,63 +58,137 @@ fn z_error_index(err: ::core::ffi::c_int) -> usize {
 }
 
 const NEED_DICT: [::core::ffi::c_char; 16] = [
-    b'n' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
-    b'd' as ::core::ffi::c_char, b' ' as ::core::ffi::c_char, b'd' as ::core::ffi::c_char,
-    b'i' as ::core::ffi::c_char, b'c' as ::core::ffi::c_char, b't' as ::core::ffi::c_char,
-    b'i' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char,
-    b'a' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char, b'y' as ::core::ffi::c_char,
+    b'n' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'd' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'd' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'c' as ::core::ffi::c_char,
+    b't' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'n' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'y' as ::core::ffi::c_char,
     0,
 ];
 const STREAM_END: [::core::ffi::c_char; 11] = [
-    b's' as ::core::ffi::c_char, b't' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
-    b'e' as ::core::ffi::c_char, b'a' as ::core::ffi::c_char, b'm' as ::core::ffi::c_char,
-    b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char,
-    b'd' as ::core::ffi::c_char, 0,
+    b's' as ::core::ffi::c_char,
+    b't' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char,
+    b'm' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'n' as ::core::ffi::c_char,
+    b'd' as ::core::ffi::c_char,
+    0,
 ];
 const EMPTY: [::core::ffi::c_char; 1] = [0];
 const FILE_ERROR: [::core::ffi::c_char; 11] = [
-    b'f' as ::core::ffi::c_char, b'i' as ::core::ffi::c_char, b'l' as ::core::ffi::c_char,
-    b'e' as ::core::ffi::c_char, b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
-    b'r' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char,
-    b'r' as ::core::ffi::c_char, 0,
+    b'f' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'l' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    0,
 ];
 const STREAM_ERROR: [::core::ffi::c_char; 13] = [
-    b's' as ::core::ffi::c_char, b't' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
-    b'e' as ::core::ffi::c_char, b'a' as ::core::ffi::c_char, b'm' as ::core::ffi::c_char,
-    b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
-    b'r' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    b's' as ::core::ffi::c_char,
+    b't' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char,
+    b'm' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
     0,
 ];
 const DATA_ERROR: [::core::ffi::c_char; 11] = [
-    b'd' as ::core::ffi::c_char, b'a' as ::core::ffi::c_char, b't' as ::core::ffi::c_char,
-    b'a' as ::core::ffi::c_char, b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
-    b'r' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char,
-    b'r' as ::core::ffi::c_char, 0,
+    b'd' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char,
+    b't' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    0,
 ];
 const MEM_ERROR: [::core::ffi::c_char; 20] = [
-    b'i' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char, b's' as ::core::ffi::c_char,
-    b'u' as ::core::ffi::c_char, b'f' as ::core::ffi::c_char, b'f' as ::core::ffi::c_char,
-    b'i' as ::core::ffi::c_char, b'c' as ::core::ffi::c_char, b'i' as ::core::ffi::c_char,
-    b'e' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char, b't' as ::core::ffi::c_char,
-    b' ' as ::core::ffi::c_char, b'm' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
-    b'm' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
-    b'y' as ::core::ffi::c_char, 0,
+    b'i' as ::core::ffi::c_char,
+    b'n' as ::core::ffi::c_char,
+    b's' as ::core::ffi::c_char,
+    b'u' as ::core::ffi::c_char,
+    b'f' as ::core::ffi::c_char,
+    b'f' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'c' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'n' as ::core::ffi::c_char,
+    b't' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'm' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'm' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'y' as ::core::ffi::c_char,
+    0,
 ];
 const BUF_ERROR: [::core::ffi::c_char; 13] = [
-    b'b' as ::core::ffi::c_char, b'u' as ::core::ffi::c_char, b'f' as ::core::ffi::c_char,
-    b'f' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
-    b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
-    b'r' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    b'b' as ::core::ffi::c_char,
+    b'u' as ::core::ffi::c_char,
+    b'f' as ::core::ffi::c_char,
+    b'f' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
     0,
 ];
 const VERSION_ERROR: [::core::ffi::c_char; 21] = [
-    b'i' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char, b'c' as ::core::ffi::c_char,
-    b'o' as ::core::ffi::c_char, b'm' as ::core::ffi::c_char, b'p' as ::core::ffi::c_char,
-    b'a' as ::core::ffi::c_char, b't' as ::core::ffi::c_char, b'i' as ::core::ffi::c_char,
-    b'b' as ::core::ffi::c_char, b'l' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
-    b' ' as ::core::ffi::c_char, b'v' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
-    b'r' as ::core::ffi::c_char, b's' as ::core::ffi::c_char, b'i' as ::core::ffi::c_char,
-    b'o' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char, 0,
+    b'i' as ::core::ffi::c_char,
+    b'n' as ::core::ffi::c_char,
+    b'c' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'm' as ::core::ffi::c_char,
+    b'p' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char,
+    b't' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'b' as ::core::ffi::c_char,
+    b'l' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'v' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b's' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'n' as ::core::ffi::c_char,
+    0,
 ];
 
 #[no_mangle]
@@ -162,9 +234,6 @@ pub unsafe extern "C" fn zcalloc_ffi(
     }
 }
 #[export_name = "zcfree"]
-pub unsafe extern "C" fn zcfree_ffi(
-    _opaque: crate::stdlib::voidpf,
-    ptr: crate::stdlib::voidpf,
-) {
+pub unsafe extern "C" fn zcfree_ffi(_opaque: crate::stdlib::voidpf, ptr: crate::stdlib::voidpf) {
     crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
 }

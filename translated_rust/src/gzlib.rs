@@ -15,9 +15,7 @@ pub use crate::internal::__INT_MAX__;
 pub use crate::limits_h::INT_MAX;
 pub use crate::stdlib::fcntl;
 
-
 pub use crate::stdlib::open;
-
 
 pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
