@@ -3840,16 +3840,16 @@ fn pqdownheap(
     heap[k as usize] = v;
 }
 
-unsafe fn gen_bitlen(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut desc: *mut crate::src::deflate::tree_desc,
+fn gen_bitlen(
+    s: &mut crate::src::deflate::deflate_state,
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    stat_desc: &crate::src::deflate::static_tree_desc,
 ) {
-    let mut tree: *mut crate::src::deflate::ct_data = (*desc).dyn_tree;
-    let mut max_code: ::core::ffi::c_int = (*desc).max_code;
-    let stree = (*(*desc).stat_desc).static_tree;
-    let extra = (*(*desc).stat_desc).extra_bits;
-    let mut base: ::core::ffi::c_int = (*(*desc).stat_desc).extra_base;
-    let mut max_length: ::core::ffi::c_int = (*(*desc).stat_desc).max_length;
+    let stree = stat_desc.static_tree;
+    let extra = stat_desc.extra_bits;
+    let base = stat_desc.extra_base;
+    let max_length = stat_desc.max_length;
     let mut h: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
@@ -3859,44 +3859,36 @@ unsafe fn gen_bitlen(
     let mut overflow: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     bits = 0 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
-        (*s).bl_count[bits as usize] = 0 as crate::zutil_h::ush;
+        s.bl_count[bits as usize] = 0 as crate::zutil_h::ush;
         bits += 1;
     }
-    (*tree.offset((*s).heap[(*s).heap_max as usize] as isize))
-        .dl
-        .dad = 0 as crate::zutil_h::ush;
-    h = (*s).heap_max + 1 as ::core::ffi::c_int;
+    tree[s.heap[s.heap_max as usize] as usize].dl.dad = 0 as crate::zutil_h::ush;
+    h = s.heap_max + 1 as ::core::ffi::c_int;
     while h < crate::src::deflate::HEAP_SIZE {
-        n = (*s).heap[h as usize];
-        bits = (*tree.offset((*tree.offset(n as isize)).dl.dad as isize))
-            .dl
-            .dad as ::core::ffi::c_int
+        n = s.heap[h as usize];
+        bits = tree[tree[n as usize].dl.dad as usize].dl.dad as ::core::ffi::c_int
             + 1 as ::core::ffi::c_int;
         if bits > max_length {
             bits = max_length;
             overflow += 1;
         }
-        (*tree.offset(n as isize)).dl.dad = bits as crate::zutil_h::ush;
+        tree[n as usize].dl.dad = bits as crate::zutil_h::ush;
         if n <= max_code {
-            (*s).bl_count[bits as usize] = (*s).bl_count[bits as usize].wrapping_add(1);
+            s.bl_count[bits as usize] = s.bl_count[bits as usize].wrapping_add(1);
             xbits = 0 as ::core::ffi::c_int;
             if n >= base {
                 xbits = extra[(n - base) as usize] as ::core::ffi::c_int;
             }
-            f = (*tree.offset(n as isize)).fc.freq;
-            (*s).opt_len =
-                (*s).opt_len
-                    .wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
-                        (bits + xbits) as ::core::ffi::c_uint as crate::zutil_h::ulg,
-                    ));
+            f = tree[n as usize].fc.freq;
+            s.opt_len = s.opt_len.wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
+                (bits + xbits) as ::core::ffi::c_uint as crate::zutil_h::ulg,
+            ));
             if let Some(stree) = stree {
-                (*s).static_len =
-                    (*s).static_len
-                        .wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
-                            (stree[n as usize].dl.dad as ::core::ffi::c_int + xbits)
-                                as ::core::ffi::c_uint
-                                as crate::zutil_h::ulg,
-                        ));
+                s.static_len = s.static_len.wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
+                    (stree[n as usize].dl.dad as ::core::ffi::c_int + xbits)
+                        as ::core::ffi::c_uint
+                        as crate::zutil_h::ulg,
+                ));
             }
         }
         h += 1;
@@ -3906,14 +3898,14 @@ unsafe fn gen_bitlen(
     }
     loop {
         bits = max_length - 1 as ::core::ffi::c_int;
-        while (*s).bl_count[bits as usize] as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+        while s.bl_count[bits as usize] as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
             bits -= 1;
         }
-        (*s).bl_count[bits as usize] = (*s).bl_count[bits as usize].wrapping_sub(1);
-        (*s).bl_count[(bits + 1 as ::core::ffi::c_int) as usize] =
-            ((*s).bl_count[(bits + 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_int
+        s.bl_count[bits as usize] = s.bl_count[bits as usize].wrapping_sub(1);
+        s.bl_count[(bits + 1 as ::core::ffi::c_int) as usize] =
+            (s.bl_count[(bits + 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_int
                 + 2 as ::core::ffi::c_int) as crate::zutil_h::ush;
-        (*s).bl_count[max_length as usize] = (*s).bl_count[max_length as usize].wrapping_sub(1);
+        s.bl_count[max_length as usize] = s.bl_count[max_length as usize].wrapping_sub(1);
         overflow -= 2 as ::core::ffi::c_int;
         if overflow <= 0 as ::core::ffi::c_int {
             break;
@@ -3921,22 +3913,20 @@ unsafe fn gen_bitlen(
     }
     bits = max_length;
     while bits != 0 as ::core::ffi::c_int {
-        n = (*s).bl_count[bits as usize] as ::core::ffi::c_int;
+        n = s.bl_count[bits as usize] as ::core::ffi::c_int;
         while n != 0 as ::core::ffi::c_int {
             h -= 1;
-            m = (*s).heap[h as usize];
+            m = s.heap[h as usize];
             if m > max_code {
                 continue;
             }
-            if (*tree.offset(m as isize)).dl.dad as ::core::ffi::c_uint
-                != bits as ::core::ffi::c_uint
-            {
-                (*s).opt_len = (*s).opt_len.wrapping_add(
+            if tree[m as usize].dl.dad as ::core::ffi::c_uint != bits as ::core::ffi::c_uint {
+                s.opt_len = s.opt_len.wrapping_add(
                     (bits as crate::zutil_h::ulg)
-                        .wrapping_sub((*tree.offset(m as isize)).dl.dad as crate::zutil_h::ulg)
-                        .wrapping_mul((*tree.offset(m as isize)).fc.freq as crate::zutil_h::ulg),
+                        .wrapping_sub(tree[m as usize].dl.dad as crate::zutil_h::ulg)
+                        .wrapping_mul(tree[m as usize].fc.freq as crate::zutil_h::ulg),
                 );
-                (*tree.offset(m as isize)).dl.dad = bits as crate::zutil_h::ush;
+                tree[m as usize].dl.dad = bits as crate::zutil_h::ush;
             }
             n -= 1;
         }
@@ -3949,9 +3939,11 @@ unsafe fn build_tree(
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
     let state = &mut *s;
-    let mut tree: *mut crate::src::deflate::ct_data = (*desc).dyn_tree;
-    let stree = (*(*desc).stat_desc).static_tree;
-    let mut elems: ::core::ffi::c_int = (*(*desc).stat_desc).elems;
+    let desc = &mut *desc;
+    let stat_desc = &*desc.stat_desc;
+    let mut tree: *mut crate::src::deflate::ct_data = desc.dyn_tree;
+    let stree = stat_desc.static_tree;
+    let mut elems: ::core::ffi::c_int = stat_desc.elems;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
     let mut max_code: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
@@ -3989,7 +3981,7 @@ unsafe fn build_tree(
                 .wrapping_sub(stree[node as usize].dl.dad as crate::zutil_h::ulg);
         }
     }
-    (*desc).max_code = max_code;
+    desc.max_code = max_code;
     n = state.heap_len / 2 as ::core::ffi::c_int;
     while n >= 1 as ::core::ffi::c_int {
         pqdownheap(
@@ -4048,9 +4040,9 @@ unsafe fn build_tree(
     }
     state.heap_max -= 1;
     state.heap[state.heap_max as usize] = state.heap[SMALLEST as usize];
-    gen_bitlen(s, desc);
-    let codes = ::core::slice::from_raw_parts_mut(tree, elems as usize);
-    gen_codes(codes, max_code, &state.bl_count);
+    let tree = ::core::slice::from_raw_parts_mut(tree, (elems * 2 + 1) as usize);
+    gen_bitlen(state, tree, desc.max_code, stat_desc);
+    gen_codes(&mut tree[..elems as usize], max_code, &state.bl_count);
 }
 
 unsafe fn scan_tree(
