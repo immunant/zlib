@@ -408,6 +408,30 @@ fn deflate_rle_can_scan_match(
     lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt && strstart > 0
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeflateRleRefillAction {
+    Continue,
+    NeedMore,
+    Done,
+}
+
+fn deflate_rle_refill_action(
+    lookahead: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> DeflateRleRefillAction {
+    if lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
+        if flush == crate::zlib_h::Z_NO_FLUSH {
+            DeflateRleRefillAction::NeedMore
+        } else if lookahead == 0 {
+            DeflateRleRefillAction::Done
+        } else {
+            DeflateRleRefillAction::Continue
+        }
+    } else {
+        DeflateRleRefillAction::Continue
+    }
+}
+
 fn deflate_rle_match_state_after_emit(
     lookahead: crate::stdlib::uInt,
     strstart: crate::stdlib::uInt,
@@ -3602,13 +3626,10 @@ unsafe fn deflate_rle(
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
-            if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
-                && flush == crate::zlib_h::Z_NO_FLUSH
-            {
-                return need_more;
-            }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
-                break;
+            match deflate_rle_refill_action((*s).lookahead, flush) {
+                DeflateRleRefillAction::Continue => {}
+                DeflateRleRefillAction::NeedMore => return need_more,
+                DeflateRleRefillAction::Done => break,
             }
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
@@ -3940,19 +3961,20 @@ mod tests {
         deflate_huff_literal_progress, deflate_pending_value, deflate_preflight,
         deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
         deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
-        deflate_rle_match_state_after_emit, deflate_set_dictionary_allowed,
-        deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
-        deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
-        dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
-        fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
-        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_match_parameters,
-        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
-        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
-        stored_block_is_last, stored_block_min_size, stored_block_should_wait,
-        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
+        deflate_rle_match_state_after_emit, deflate_rle_refill_action,
+        deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
+        deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
+        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
+        fill_window_cursor, fill_window_insert_after_slide, fill_window_should_refill,
+        fill_window_should_slide, fill_window_zero_range, flush_pending_accounting,
+        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        lm_match_parameters, longest_match_clamp_length, longest_match_limit,
+        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_len,
+        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
+        stored_block_available_output, stored_block_can_emit, stored_block_is_last,
+        stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
+        symbol_triplet_cursors, zlib_header, DeflatePreflight, DeflateRleRefillAction,
     };
 
     #[test]
@@ -3995,6 +4017,28 @@ mod tests {
         assert!(!deflate_rle_can_scan_match(min_match.wrapping_sub(1), 1));
         assert!(!deflate_rle_can_scan_match(min_match, 0));
         assert!(deflate_rle_can_scan_match(min_match, 1));
+    }
+
+    #[test]
+    fn deflate_rle_refill_action_preserves_flush_and_lookahead_boundaries() {
+        let max_match = crate::zutil_h::MAX_MATCH as crate::stdlib::uInt;
+
+        assert_eq!(
+            deflate_rle_refill_action(max_match, crate::zlib_h::Z_NO_FLUSH),
+            DeflateRleRefillAction::NeedMore
+        );
+        assert_eq!(
+            deflate_rle_refill_action(0, crate::zlib_h::Z_FINISH),
+            DeflateRleRefillAction::Done
+        );
+        assert_eq!(
+            deflate_rle_refill_action(max_match, crate::zlib_h::Z_FINISH),
+            DeflateRleRefillAction::Continue
+        );
+        assert_eq!(
+            deflate_rle_refill_action(max_match.wrapping_add(1), crate::zlib_h::Z_NO_FLUSH),
+            DeflateRleRefillAction::Continue
+        );
     }
 
     #[test]

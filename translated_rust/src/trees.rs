@@ -3550,7 +3550,9 @@ static extra_blbits: [::core::ffi::c_int; 19] = [
     7 as ::core::ffi::c_int,
 ];
 
-static bl_order: [crate::zutil_h::uch; 19] = [
+const BL_CODE_ORDER_LEN: usize = 19;
+
+static bl_order: [crate::zutil_h::uch; BL_CODE_ORDER_LEN] = [
     16 as ::core::ffi::c_int as crate::zutil_h::uch,
     17 as ::core::ffi::c_int as crate::zutil_h::uch,
     18 as ::core::ffi::c_int as crate::zutil_h::uch,
@@ -4266,6 +4268,15 @@ fn last_nonzero_bl_code_rank(
     rank
 }
 
+fn mark_bl_code_nonzero_at_rank(
+    code_lengths: &[crate::zutil_h::ush],
+    nonzero_at_rank: &mut [bool],
+) {
+    for (rank, is_nonzero) in nonzero_at_rank.iter_mut().enumerate() {
+        *is_nonzero = code_lengths[usize::from(bl_order[rank])] != 0;
+    }
+}
+
 fn bl_tree_header_bit_length(max_blindex: ::core::ffi::c_int) -> crate::zutil_h::ulg {
     (3 as crate::zutil_h::ulg)
         .wrapping_mul((max_blindex as crate::zutil_h::ulg).wrapping_add(1))
@@ -4625,11 +4636,11 @@ unsafe fn build_bl_tree(mut s: *mut crate::src::deflate::deflate_state) -> ::cor
         &raw mut (*s).bl_desc as *mut crate::src::deflate::tree_desc,
     );
     let mut nonzero_at_rank = [false; crate::src::deflate::BL_CODES as usize];
-    let mut rank = 0usize;
-    while rank < nonzero_at_rank.len() {
-        nonzero_at_rank[rank] = (*s).bl_tree[bl_order[rank] as usize].dl.len != 0;
-        rank += 1;
+    let mut code_lengths = [0; BL_CODE_ORDER_LEN];
+    for (code, length) in code_lengths.iter_mut().enumerate() {
+        *length = (*s).bl_tree[code].dl.len;
     }
+    mark_bl_code_nonzero_at_rank(&code_lengths, &mut nonzero_at_rank);
     max_blindex = last_nonzero_bl_code_rank(&nonzero_at_rank);
     (*s).opt_len = (*s)
         .opt_len
@@ -5337,13 +5348,13 @@ mod tests {
         bl_tree_header_bit_length, block_bit_length_bytes, block_header_bits,
         canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
         combined_tree_frequency, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
-        last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_block_trees,
-        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes,
+        pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
+        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_next_cursor,
         tree_run_continues, tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, END_BLOCK, MAX_BITS,
+        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5487,6 +5498,25 @@ mod tests {
         assert_eq!(
             last_nonzero_bl_code_rank(&nonzero_at_rank),
             crate::src::deflate::BL_CODES - 1
+        );
+    }
+
+    #[test]
+    fn bl_code_rank_flags_follow_deflate_order() {
+        let mut code_lengths = [0; BL_CODE_ORDER_LEN];
+        code_lengths[16] = 1;
+        code_lengths[0] = 1;
+        code_lengths[15] = 1;
+        let mut nonzero_at_rank = [false; BL_CODE_ORDER_LEN];
+
+        mark_bl_code_nonzero_at_rank(&code_lengths, &mut nonzero_at_rank);
+
+        assert_eq!(
+            nonzero_at_rank,
+            [
+                true, false, false, true, false, false, false, false, false, false, false, false,
+                false, false, false, false, false, false, true,
+            ]
         );
     }
 

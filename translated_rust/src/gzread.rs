@@ -1224,6 +1224,10 @@ fn gz_skip_should_continue(skip: crate::stdlib::off64_t) -> bool {
     skip != 0
 }
 
+fn gz_skip_fetch_failed(fetch_result: ::core::ffi::c_int) -> bool {
+    fetch_result == -1 as ::core::ffi::c_int
+}
+
 fn gz_skip_consume_buffered(state: &mut crate::gzguts_h::gz_state, n: ::core::ffi::c_uint) {
     let progress = gz_skip_consume_progress(state.x.have, state.x.pos, state.skip, n);
     state.x.have = progress.remaining_have;
@@ -1324,7 +1328,7 @@ unsafe fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
             GzSkipAction::ConsumeBuffered => {}
             GzSkipAction::StopAtEof => break,
             GzSkipAction::Fetch => {
-                if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                if gz_skip_fetch_failed(gz_fetch(state)) {
                     return -1 as ::core::ffi::c_int;
                 }
             }
@@ -2415,6 +2419,13 @@ mod tests {
         assert!(!gz_skip_should_continue(0));
         assert!(gz_skip_should_continue(1));
         assert!(gz_skip_should_continue(-1));
+    }
+
+    #[test]
+    fn gz_skip_fetch_failed_accepts_only_fetch_failures() {
+        assert!(gz_skip_fetch_failed(-1));
+        assert!(!gz_skip_fetch_failed(0));
+        assert!(!gz_skip_fetch_failed(1));
     }
 
     #[test]
