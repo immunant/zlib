@@ -227,11 +227,10 @@ unsafe fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
-    let state = &mut *state;
     if state.strm.avail_in != 0
         && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
@@ -298,7 +297,7 @@ unsafe extern "C" fn gz_write(
         return 0 as crate::stdlib::z_size_t;
     }
     if state.skip != 0
-        && gz_zero(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
+        && gz_zero(state) == -1 as ::core::ffi::c_int
     {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -559,7 +558,7 @@ pub unsafe extern "C" fn gzflush(
     if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).skip != 0 && gz_zero(state as *mut _) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return (*state).err;
     }
     gz_comp(state, flush);
@@ -597,7 +596,7 @@ pub unsafe extern "C" fn gzsetparams(
     if level == (*state).level && strategy == (*state).strategy {
         return crate::zlib_h::Z_OK;
     }
-    if (*state).skip != 0 && gz_zero(state as *mut _) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return (*state).err;
     }
     if (*state).size != 0 {
@@ -633,7 +632,7 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &mut *state;
-    if (*state).skip != 0 && gz_zero(state as *mut _) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         ret = (*state).err;
     }
     if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
