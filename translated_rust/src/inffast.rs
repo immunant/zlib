@@ -170,6 +170,12 @@ fn inflate_fast_u32_mask(bits: u32) -> Option<u32> {
 /// checked even though normal inflate state constrains the widths: the safe
 /// core must reject a malformed borrowed view before it consumes any input.
 fn inflate_fast_table_root(bits: u32) -> Option<usize> {
+    // Deflate codes are at most 15 bits wide.  Besides documenting the
+    // format limit, this prevents a future bounded caller from treating an
+    // arbitrarily wide (but machine-word-valid) shift as a table root.
+    if bits > 15 {
+        return None;
+    }
     1usize.checked_shl(bits)
 }
 
@@ -259,7 +265,11 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
         let mut here = mut_here;
         'code: loop {
             let here_bits = here.bits as u32;
-            if here_bits > bits {
+            // A zero-width table entry cannot make progress through a
+            // subtable chain.  Valid deflate entries always consume at least
+            // one bit; reject malformed borrowed tables rather than letting
+            // one loop indefinitely in this safe core.
+            if here_bits == 0 || here_bits > bits {
                 mode = Some(crate::src::inflate::BAD);
                 error = Some(14);
                 break 'fast;
@@ -320,7 +330,7 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
                 let mut dist_here = mut_dist_here;
                 let dist = loop {
                     let here_bits = dist_here.bits as u32;
-                    if here_bits > bits {
+                    if here_bits == 0 || here_bits > bits {
                         mode = Some(crate::src::inflate::BAD);
                         error = Some(15);
                         break 'fast;
