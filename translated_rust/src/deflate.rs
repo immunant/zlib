@@ -801,6 +801,85 @@ fn allocate_window(len: usize) -> Option<Vec<crate::stdlib::Bytef>> {
     Some(window)
 }
 
+/// Construct the valid empty Rust value installed in caller-allocated state
+/// storage by `deflateInit2_`.  This replaces the translated C `memset`: in
+/// particular, the `Option<Vec<_>>` owners must start as real `None` values,
+/// rather than merely bytes that happen to look zeroed on a given layout.
+fn new_deflate_state() -> crate::src::deflate::deflate_state {
+    let tree = crate::src::deflate::ct_data_s { fc: 0, dl: 0 };
+    crate::src::deflate::internal_state {
+        status: 0,
+        pending_buf: None,
+        pending_buf_size: 0,
+        pending_out: 0,
+        pending: 0,
+        wrap: 0,
+        gzhead: 0,
+        gzindex: 0,
+        method: 0,
+        last_flush: 0,
+        w_size: 0,
+        w_bits: 0,
+        w_mask: 0,
+        window: None,
+        window_size: 0,
+        prev: None,
+        head: None,
+        ins_h: 0,
+        hash_size: 0,
+        hash_bits: 0,
+        hash_mask: 0,
+        hash_shift: 0,
+        block_start: 0,
+        match_length: 0,
+        prev_match: 0,
+        match_available: 0,
+        strstart: 0,
+        match_start: 0,
+        lookahead: 0,
+        prev_length: 0,
+        max_chain_length: 0,
+        max_lazy_match: 0,
+        level: 0,
+        strategy: 0,
+        good_match: 0,
+        nice_match: 0,
+        dyn_ltree: [tree; 573],
+        dyn_dtree: [tree; 61],
+        bl_tree: [tree; 39],
+        l_desc: crate::src::deflate::tree_desc_s {
+            max_code: 0,
+            static_kind: 0,
+        },
+        d_desc: crate::src::deflate::tree_desc_s {
+            max_code: 0,
+            static_kind: 0,
+        },
+        bl_desc: crate::src::deflate::tree_desc_s {
+            max_code: 0,
+            static_kind: 0,
+        },
+        bl_count: [0; 16],
+        heap: [0; 573],
+        heap_len: 0,
+        heap_max: 0,
+        depth: [0; 573],
+        sym_buf: 0,
+        lit_bufsize: 0,
+        sym_next: 0,
+        sym_end: 0,
+        opt_len: 0,
+        static_len: 0,
+        matches: 0,
+        insert: 0,
+        bi_buf: 0,
+        bi_valid: 0,
+        bi_used: 0,
+        high_water: 0,
+        slid: 0,
+    }
+}
+
 fn clone_head_table(head: &[crate::src::deflate::Posf]) -> Option<Vec<crate::src::deflate::Posf>> {
     let mut copy = allocate_head_table(head.len())?;
     copy.copy_from_slice(head);
@@ -1194,13 +1273,10 @@ pub unsafe fn deflateInit2_(
         if s.is_null() {
             return crate::zlib_h::Z_MEM_ERROR;
         }
-        crate::stdlib::memset(
-            s as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-        );
+        let state_storage =
+            &mut *s.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>();
+        let s = state_storage.write(new_deflate_state());
         strm.state = s as *mut crate::src::deflate::internal_state;
-        let s = &mut *s;
         s.status = crate::src::deflate::INIT_STATE;
         s.wrap = wrap;
         s.gzhead = 0;
