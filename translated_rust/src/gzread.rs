@@ -467,48 +467,50 @@ unsafe extern "C" fn gz_read(
     }
     return got;
 }
-pub unsafe extern "C" fn gzread(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: crate::stdlib::voidp,
-    mut len: ::core::ffi::c_uint,
+fn gzread(
+    state: &mut crate::gzguts_h::gz_state,
+    buf: &mut [crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    let len = buf.len() as ::core::ffi::c_uint;
+    if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
         crate::src::gzlib::gz_static_error(
-            &mut *state,
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in an int\0",
         );
         return -1 as ::core::ffi::c_int;
     }
-    len = gz_read(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_uint;
+    let len = unsafe {
+        gz_read(
+            state,
+            buf.as_mut_ptr() as crate::stdlib::voidp,
+            len as crate::stdlib::z_size_t,
+        ) as ::core::ffi::c_uint
+    };
     if len == 0 as ::core::ffi::c_uint {
-        if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
+        if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
             return -1 as ::core::ffi::c_int;
         }
-        if (*state).again != 0 {
-            crate::src::gzlib::gz_error_state(
-                &mut *state,
-                crate::zlib_h::Z_ERRNO,
-                Some(::std::ffi::CStr::from_ptr(crate::stdlib::strerror(
-                    *crate::stdlib::__errno_location(),
-                ))),
-            );
+        if state.again != 0 {
+            unsafe {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_ERRNO,
+                    Some(::std::ffi::CStr::from_ptr(crate::stdlib::strerror(
+                        *crate::stdlib::__errno_location(),
+                    ))),
+                );
+            }
             return -1 as ::core::ffi::c_int;
         }
     }
@@ -521,42 +523,51 @@ pub unsafe extern "C" fn gzread_ffi(
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzread(file, buf, len)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    let buf = if len == 0 {
+        &mut []
+    } else {
+        if buf.is_null() {
+            return -1 as ::core::ffi::c_int;
+        }
+        ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len as usize)
+    };
+    gzread(state, buf)
 }
-pub unsafe extern "C" fn gzfread(
-    mut buf: crate::stdlib::voidp,
-    mut size: crate::stdlib::z_size_t,
-    mut nitems: crate::stdlib::z_size_t,
-    mut file: crate::zlib_h::gzFile,
+fn gzfread(
+    state: &mut crate::gzguts_h::gz_state,
+    buf: Result<&mut [crate::stdlib::Bytef], ()>,
+    size: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if state.mode != crate::gzguts_h::GZ_READ {
         return 0 as crate::stdlib::z_size_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
+    let Ok(buf) = buf else {
         crate::src::gzlib::gz_static_error(
-            &mut *state,
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in a size_t\0",
         );
         return 0 as crate::stdlib::z_size_t;
-    }
-    return if len != 0 {
-        gz_read(state, buf, len).wrapping_div(size)
+    };
+    return if !buf.is_empty() {
+        unsafe {
+            gz_read(
+                state,
+                buf.as_mut_ptr() as crate::stdlib::voidp,
+                buf.len(),
+            )
+        }
+        .wrapping_div(size)
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -569,7 +580,18 @@ pub unsafe extern "C" fn gzfread_ffi(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    gzfread(buf, size, nitems, file)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0 as crate::stdlib::z_size_t;
+    };
+    let buf = match size.checked_mul(nitems) {
+        Some(0) => Ok(&mut [][..]),
+        Some(len) if !buf.is_null() => Ok(::core::slice::from_raw_parts_mut(
+            buf as *mut crate::stdlib::Bytef,
+            len,
+        )),
+        Some(_) | None => Err(()),
+    };
+    gzfread(state, buf, size)
 }
 pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
