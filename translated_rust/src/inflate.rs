@@ -2170,33 +2170,30 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
 ) -> ::core::ffi::c_int {
     inflateGetHeader(strm, head)
 }
-unsafe extern "C" fn syncsearch(
-    mut have: *mut ::core::ffi::c_uint,
-    mut buf: *const ::core::ffi::c_uchar,
-    mut len: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
-    let mut got: ::core::ffi::c_uint = 0;
-    let mut next: ::core::ffi::c_uint = 0;
-    got = *have;
-    next = 0 as ::core::ffi::c_uint;
-    while next < len && got < 4 as ::core::ffi::c_uint {
-        if *buf.offset(next as isize) as ::core::ffi::c_int
-            == (if got < 2 as ::core::ffi::c_uint {
-                0 as ::core::ffi::c_int
-            } else {
-                0xff as ::core::ffi::c_int
-            })
-        {
+fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
+    let mut got = *have;
+    let mut next = 0_usize;
+    while next < buf.len() && got < 4 {
+        if buf[next] as ::core::ffi::c_int == (if got < 2 { 0 } else { 0xff }) {
             got = got.wrapping_add(1);
-        } else if *buf.offset(next as isize) != 0 {
-            got = 0 as ::core::ffi::c_uint;
+        } else if buf[next] != 0 {
+            got = 0;
         } else {
-            got = (4 as ::core::ffi::c_uint).wrapping_sub(got);
+            got = 4_u32.wrapping_sub(got);
         }
-        next = next.wrapping_add(1);
+        next += 1;
     }
     *have = got;
-    return next;
+    next
+}
+
+unsafe extern "C" fn syncsearch(
+    have: *mut ::core::ffi::c_uint,
+    buf: *const ::core::ffi::c_uchar,
+    len: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    syncsearch_safe(&mut *have, ::core::slice::from_raw_parts(buf, len as usize))
+        as ::core::ffi::c_uint
 }
 pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut len: ::core::ffi::c_uint = 0;
@@ -2487,4 +2484,25 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
     inflateCodesUsed(strm)
+}
+
+#[cfg(test)]
+mod syncsearch_tests {
+    use super::syncsearch_safe;
+
+    #[test]
+    fn syncsearch_preserves_partial_marker_across_chunks() {
+        let mut have = 0;
+        assert_eq!(syncsearch_safe(&mut have, &[0, 0]), 2);
+        assert_eq!(have, 2);
+        assert_eq!(syncsearch_safe(&mut have, &[0xff, 0xff]), 2);
+        assert_eq!(have, 4);
+    }
+
+    #[test]
+    fn syncsearch_restarts_after_non_marker_bytes() {
+        let mut have = 3;
+        assert_eq!(syncsearch_safe(&mut have, &[1, 0, 0, 0xff, 0xff]), 5);
+        assert_eq!(have, 4);
+    }
 }

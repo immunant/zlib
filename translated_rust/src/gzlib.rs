@@ -64,25 +64,29 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
-unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
-    (*state).x.have = 0 as ::core::ffi::c_uint;
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
-        (*state).how = crate::gzguts_h::LOOK;
-        (*state).junk = -1 as ::core::ffi::c_int;
+fn gz_reset_fields(state: &mut crate::gzguts_h::gz_state) {
+    state.x.have = 0;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0;
+        state.past = 0;
+        state.how = crate::gzguts_h::LOOK;
+        state.junk = -1;
     } else {
-        (*state).reset = 0 as ::core::ffi::c_int;
+        state.reset = 0;
     }
-    (*state).again = 0 as ::core::ffi::c_int;
-    (*state).skip = 0 as crate::stdlib::off64_t;
+    state.again = 0;
+    state.skip = 0;
+}
+
+unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
+    gz_reset_fields(&mut *state);
     gz_error(
         state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    (*state).x.pos = 0 as crate::stdlib::off64_t;
-    (*state).strm.avail_in = 0 as crate::stdlib::uInt;
+    (*state).x.pos = 0;
+    (*state).strm.avail_in = 0;
 }
 
 unsafe extern "C" fn gz_open(
