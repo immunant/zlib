@@ -3132,26 +3132,7 @@ fn deflate_slow(
                 <= s.w_size
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
         {
-            let (match_length, match_start) = {
-                let buffers = s.buffers.as_ref().expect("deflate buffers initialized");
-                longest_match_in_buffers(
-                    &buffers.window,
-                    &buffers.prev,
-                    s.strstart,
-                    s.lookahead,
-                    s.prev_length,
-                    s.max_chain_length,
-                    s.good_match,
-                    s.nice_match,
-                    s.w_size,
-                    s.w_mask,
-                    hash_head,
-                )
-            };
-            s.match_length = match_length;
-            if match_start != 0 {
-                s.match_start = match_start;
-            }
+            s.match_length = longest_match(s, hash_head);
             if s.match_length <= 5 as crate::stdlib::uInt
                 && (s.strategy == crate::zlib_h::Z_FILTERED
                     || s.match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
