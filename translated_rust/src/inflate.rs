@@ -672,6 +672,26 @@ pub(crate) enum InflateResetKind {
     WindowBits(::core::ffi::c_int),
 }
 
+// Reset policy is independent of the ABI stream and its opaque state
+// association. Keep the normal-state borrow in this pointer-free owner so
+// embedded callers can reuse the exact keep/full/window-bit selection without
+// reopening the stream projection.
+struct InflateResetOwner<'state> {
+    normal: &'state mut InflateNormalState,
+}
+
+impl InflateResetOwner<'_> {
+    fn reset(self, kind: InflateResetKind) -> Result<InflateResetUpdate, ::core::ffi::c_int> {
+        match kind {
+            InflateResetKind::Keep => Ok(inflate_reset_keep_core(self.normal)),
+            InflateResetKind::Full => Ok(inflate_reset_core(self.normal)),
+            InflateResetKind::WindowBits(window_bits) => {
+                inflate_reset2_normal(self.normal, window_bits)
+            }
+        }
+    }
+}
+
 pub(crate) unsafe fn inflate_reset_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     kind: InflateResetKind,
@@ -679,15 +699,13 @@ pub(crate) unsafe fn inflate_reset_from_stream(
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let update = match kind {
-        InflateResetKind::Keep => inflate_reset_keep_core(&mut state.normal),
-        InflateResetKind::Full => inflate_reset_core(&mut state.normal),
-        InflateResetKind::WindowBits(window_bits) => {
-            match inflate_reset2_normal(&mut state.normal, window_bits) {
-                Ok(update) => update,
-                Err(status) => return status,
-            }
-        }
+    let update = match (InflateResetOwner {
+        normal: &mut state.normal,
+    })
+    .reset(kind)
+    {
+        Ok(update) => update,
+        Err(status) => return status,
     };
     strm.total_out = 0;
     strm.total_in = strm.total_out;
