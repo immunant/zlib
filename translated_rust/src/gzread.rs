@@ -456,6 +456,16 @@ fn gz_read_marks_past_eof(len: crate::stdlib::z_size_t, eof: ::core::ffi::c_int)
     len != 0 && eof != 0
 }
 
+fn gz_read_note_past_eof(
+    past: &mut ::core::ffi::c_int,
+    len: crate::stdlib::z_size_t,
+    eof: ::core::ffi::c_int,
+) {
+    if gz_read_marks_past_eof(len, eof) {
+        *past = 1;
+    }
+}
+
 fn gzdirect_result(direct: ::core::ffi::c_int) -> ::core::ffi::c_int {
     (direct == 1) as ::core::ffi::c_int
 }
@@ -2426,6 +2436,20 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_note_past_eof_updates_only_for_unfilled_eof_requests() {
+        let mut past = 0;
+        gz_read_note_past_eof(&mut past, 1, 1);
+        assert_eq!(past, 1);
+
+        past = -1;
+        gz_read_note_past_eof(&mut past, 0, 1);
+        assert_eq!(past, -1);
+
+        gz_read_note_past_eof(&mut past, 1, 0);
+        assert_eq!(past, -1);
+    }
+
+    #[test]
     fn gz_read_load_status_maps_load_success_and_failure() {
         assert_eq!(gz_read_load_status(false), 0);
         assert_eq!(gz_read_load_status(true), -1);
@@ -2540,9 +2564,8 @@ unsafe fn gz_read(
             break;
         }
     }
-    if gz_read_marks_past_eof(len, (*state).eof) {
-        (*state).past = 1 as ::core::ffi::c_int;
-    }
+    let state_ref = &mut *state;
+    gz_read_note_past_eof(&mut state_ref.past, len, state_ref.eof);
     return got;
 }
 pub unsafe extern "C" fn gzread(

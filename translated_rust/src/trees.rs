@@ -3704,6 +3704,28 @@ fn rebalance_overflowed_bit_lengths(
     }
 }
 
+fn clamped_tree_bit_length(
+    parent_length: ::core::ffi::c_int,
+    max_length: ::core::ffi::c_int,
+) -> (::core::ffi::c_int, bool) {
+    let bit_length = parent_length + 1;
+    if bit_length > max_length {
+        (max_length, true)
+    } else {
+        (bit_length, false)
+    }
+}
+
+fn bit_length_correction(
+    target_length: crate::zutil_h::ulg,
+    current_length: crate::zutil_h::ulg,
+    frequency: crate::zutil_h::ulg,
+) -> crate::zutil_h::ulg {
+    target_length
+        .wrapping_sub(current_length)
+        .wrapping_mul(frequency)
+}
+
 fn tally_symbol_bytes(
     dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
@@ -3952,12 +3974,13 @@ unsafe fn gen_bitlen(
     h = (*s).heap_max + 1 as ::core::ffi::c_int;
     while h < crate::src::deflate::HEAP_SIZE {
         n = (*s).heap[h as usize];
-        bits = (*tree.offset((*tree.offset(n as isize)).dl.dad as isize))
-            .dl
-            .len as ::core::ffi::c_int
-            + 1 as ::core::ffi::c_int;
-        if bits > max_length {
-            bits = max_length;
+        let (bits, overflowed) = clamped_tree_bit_length(
+            (*tree.offset((*tree.offset(n as isize)).dl.dad as isize))
+                .dl
+                .len as ::core::ffi::c_int,
+            max_length,
+        );
+        if overflowed {
             overflow += 1;
         }
         (*tree.offset(n as isize)).dl.len = bits as crate::zutil_h::ush;
@@ -4001,11 +4024,11 @@ unsafe fn gen_bitlen(
             if (*tree.offset(m as isize)).dl.len as ::core::ffi::c_uint
                 != bits as ::core::ffi::c_uint
             {
-                (*s).opt_len = (*s).opt_len.wrapping_add(
-                    (bits as crate::zutil_h::ulg)
-                        .wrapping_sub((*tree.offset(m as isize)).dl.len as crate::zutil_h::ulg)
-                        .wrapping_mul((*tree.offset(m as isize)).fc.value as crate::zutil_h::ulg),
-                );
+                (*s).opt_len = (*s).opt_len.wrapping_add(bit_length_correction(
+                    bits as crate::zutil_h::ulg,
+                    (*tree.offset(m as isize)).dl.len as crate::zutil_h::ulg,
+                    (*tree.offset(m as isize)).fc.value as crate::zutil_h::ulg,
+                ));
                 (*tree.offset(m as isize)).dl.len = bits as crate::zutil_h::ush;
             }
             n -= 1;
@@ -5227,8 +5250,9 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        bi_flush_core, bi_reverse, bi_windup_core, bl_order, bl_tree_header_bit_length,
-        block_bit_length_bytes, block_header_bits, classify_tree_run, combined_tree_frequency,
+        bi_flush_core, bi_reverse, bi_windup_core, bit_length_correction, bl_order,
+        bl_tree_header_bit_length, block_bit_length_bytes, block_header_bits,
+        clamped_tree_bit_length, classify_tree_run, combined_tree_frequency,
         detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
         last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
         rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
@@ -5482,6 +5506,19 @@ mod tests {
         assert_eq!(pending_cursor_after_bytes(5, 0), 5);
         assert_eq!(pending_cursor_after_bytes(5, 2), 7);
         assert_eq!(pending_cursor_after_bytes(crate::zutil_h::ulg::MAX, 2), 1);
+    }
+
+    #[test]
+    fn tree_bit_length_clamping_reports_overflow() {
+        assert_eq!(clamped_tree_bit_length(4, 7), (5, false));
+        assert_eq!(clamped_tree_bit_length(7, 7), (7, true));
+        assert_eq!(clamped_tree_bit_length(12, 7), (7, true));
+    }
+
+    #[test]
+    fn bit_length_correction_preserves_unsigned_wrapping_delta() {
+        assert_eq!(bit_length_correction(7, 4, 3), 9);
+        assert_eq!(bit_length_correction(3, 5, 2), crate::zutil_h::ulg::MAX - 3);
     }
 
     #[test]

@@ -558,10 +558,7 @@ fn fill_window_should_refill(
     lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt && avail_in != 0
 }
 
-fn fill_window_should_slide(
-    strstart: crate::stdlib::uInt,
-    wsize: crate::stdlib::uInt,
-) -> bool {
+fn fill_window_should_slide(strstart: crate::stdlib::uInt, wsize: crate::stdlib::uInt) -> bool {
     strstart
         >= wsize.wrapping_add(
             wsize.wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
@@ -3848,12 +3845,11 @@ mod tests {
         deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
         fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
-        fill_window_zero_range,
-        flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, longest_match_limit, longest_match_search_parameters,
-        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
-        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, longest_match_limit,
+        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
+        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
         stored_block_is_last, stored_block_min_size, stored_block_should_wait,
         stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };

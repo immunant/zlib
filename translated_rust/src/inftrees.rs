@@ -3015,6 +3015,42 @@ fn next_huffman_code(mut huff: u32, length: u32) -> u32 {
     huff
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SymbolAdvance {
+    Next { symbol: usize, length: u32 },
+    Complete,
+}
+
+fn advance_symbol(
+    symbol: usize,
+    length: u32,
+    max: u32,
+    count: &mut [u16],
+    work: &[u16],
+    lens: &[u16],
+) -> Result<SymbolAdvance, ::core::ffi::c_int> {
+    let next_symbol = symbol.checked_add(1).ok_or(1)?;
+    let length_index = usize::try_from(length).map_err(|_| 1)?;
+    let remaining = count.get_mut(length_index).ok_or(1)?;
+    *remaining = remaining.wrapping_sub(1);
+    if *remaining != 0 {
+        return Ok(SymbolAdvance::Next {
+            symbol: next_symbol,
+            length,
+        });
+    }
+    if length == max {
+        return Ok(SymbolAdvance::Complete);
+    }
+
+    let next_work_code = *work.get(next_symbol).ok_or(1)?;
+    let next_length = *lens.get(usize::from(next_work_code)).ok_or(-1)?;
+    Ok(SymbolAdvance::Next {
+        symbol: next_symbol,
+        length: u32::from(next_length),
+    })
+}
+
 fn table_entry_for_symbol(
     type_0: CodeType,
     symbol: u16,
@@ -3218,19 +3254,16 @@ pub fn inflate_table_safe(
 
         huff = next_huffman_code(huff, length);
 
-        symbol += 1;
-        count[length as usize] = count[length as usize].wrapping_sub(1);
-        if count[length as usize] == 0 {
-            if length == max {
-                break;
+        match advance_symbol(symbol, length, max, &mut count, work, lens) {
+            Err(error) => return error,
+            Ok(SymbolAdvance::Complete) => break,
+            Ok(SymbolAdvance::Next {
+                symbol: next_symbol,
+                length: next_length,
+            }) => {
+                symbol = next_symbol;
+                length = next_length;
             }
-            let Some(&next_symbol) = work.get(symbol) else {
-                return 1;
-            };
-            let Some(&next_length) = lens.get(next_symbol as usize) else {
-                return -1;
-            };
-            length = next_length as u32;
         }
 
         if let Some(layout) =
@@ -3391,6 +3424,56 @@ mod tests {
     fn next_huffman_code_leaves_invalid_lengths_unchanged() {
         assert_eq!(next_huffman_code(0b1010, 0), 0b1010);
         assert_eq!(next_huffman_code(0b1010, 32), 0b1010);
+    }
+
+    #[test]
+    fn symbol_advance_preserves_wrapping_count_and_current_length() {
+        let mut count = [0u16; MAXBITS as usize + 1];
+        let work = [0u16, 1];
+        let lens = [3u16, 4];
+
+        assert_eq!(
+            advance_symbol(0, 3, 4, &mut count, &work, &lens),
+            Ok(SymbolAdvance::Next {
+                symbol: 1,
+                length: 3,
+            })
+        );
+        assert_eq!(count[3], u16::MAX);
+    }
+
+    #[test]
+    fn symbol_advance_selects_next_length_or_completes() {
+        let mut count = [0u16; MAXBITS as usize + 1];
+        count[3] = 1;
+        let work = [0u16, 1];
+        let lens = [3u16, 5];
+
+        assert_eq!(
+            advance_symbol(0, 3, 5, &mut count, &work, &lens),
+            Ok(SymbolAdvance::Next {
+                symbol: 1,
+                length: 5,
+            })
+        );
+        assert_eq!(count[3], 0);
+
+        count[5] = 1;
+        assert_eq!(
+            advance_symbol(1, 5, 5, &mut count, &work, &lens),
+            Ok(SymbolAdvance::Complete)
+        );
+        assert_eq!(count[5], 0);
+    }
+
+    #[test]
+    fn symbol_advance_reports_missing_next_symbol_or_length() {
+        let mut count = [0u16; MAXBITS as usize + 1];
+        count[3] = 1;
+        assert_eq!(advance_symbol(0, 3, 4, &mut count, &[0], &[3]), Err(1));
+
+        count[3] = 1;
+        assert_eq!(advance_symbol(0, 3, 4, &mut count, &[0, 2], &[3]), Err(-1));
     }
 
     #[test]
