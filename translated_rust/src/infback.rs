@@ -125,11 +125,13 @@ pub unsafe extern "C" fn inflateBackInit_(
     let strm = &mut *strm;
     let mut copied_state = None;
     crate::src::inflate::inflate_publish_callback_owner(
-        strm,
+        Some(strm),
         Some(crate::src::inflate::InflateCallbackInitRequest::Back {
             wbits: plan.wbits,
             wsize: plan.wsize,
         }),
+        None,
+        0,
         None,
         0,
         &mut copied_state,

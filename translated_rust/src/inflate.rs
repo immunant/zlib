@@ -737,12 +737,29 @@ impl InflateCallbackInitRequest {
 // state publication or matching zfree.  The owner it receives contains no
 // callback handle, stream pointer, or foreign registration.
 pub(crate) unsafe fn inflate_publish_callback_owner(
-    strm: &mut crate::zlib_h::z_stream_s,
+    strm: Option<&mut crate::zlib_h::z_stream_s>,
     request: Option<InflateCallbackInitRequest>,
+    version: Option<*const ::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
     copy_source: Option<&inflate_state>,
     destination_identity: usize,
     copied_state: &mut Option<::core::ptr::NonNull<inflate_state>>,
 ) -> ::core::ffi::c_int {
+    // Version/size validation belongs to the callback allocation seam.  It
+    // deliberately precedes nullable-stream selection, matching zlib's
+    // Z_VERSION_ERROR-before-Z_STREAM_ERROR behavior.
+    if version.is_some_and(|version| {
+        version.is_null()
+            || *version as ::core::ffi::c_int
+                != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
+            || stream_size
+                != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+    }) {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    }
+    let Some(strm) = strm else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     // Keep the caller's stream projection at the allocator boundary. The
     // callback-owned state is published only after it has been fully
     // initialized below, since zalloc() need not return initialized bytes.
@@ -1033,25 +1050,14 @@ pub unsafe extern "C" fn inflateInit2_(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // This seam observes just the leading version byte. After the null
-    // check, direct dereference expresses that one-byte ABI read without
-    // constructing an offset cursor.
-    if version.is_null()
-        || *version as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
-        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-    {
-        return crate::zlib_h::Z_VERSION_ERROR;
-    }
-    let Some(strm) = strm else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     let mut copied_state = None;
     inflate_publish_callback_owner(
         strm,
         Some(InflateCallbackInitRequest::Normal {
             window_bits: windowBits,
         }),
+        Some(version),
+        stream_size,
         None,
         0,
         &mut copied_state,
@@ -3428,8 +3434,10 @@ pub(crate) unsafe fn inflate_from_stream(
             return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
         };
         return InflateStreamResult::Status(inflate_publish_callback_owner(
-            strm,
+            Some(strm),
             None,
+            None,
+            0,
             Some(state),
             destination_identity,
             copied_state,
