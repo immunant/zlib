@@ -418,6 +418,18 @@ struct DeflateStorageLayout {
     pending: DeflateAllocation,
 }
 
+// The four backing allocations have an observable callback order: custom
+// zalloc implementations can fail or inspect the stream after each request.
+// Name that order independently of the raw allocation handles so the future
+// owner can retain the same transaction without reconstructing it from state
+// fields.
+enum DeflateStorageSlot {
+    Window,
+    Prev,
+    Head,
+    Pending,
+}
+
 // Keep the state record in the same pointer-free allocation plan as its four
 // backing regions.  The current ABI adapter still invokes zalloc directly,
 // but a future allocation broker can consume this complete plan and preserve
@@ -468,6 +480,15 @@ impl DeflateStorageLayout {
                 size: 4,
             },
         }
+    }
+
+    fn callback_requests(&self) -> [(DeflateStorageSlot, &DeflateAllocation); 4] {
+        [
+            (DeflateStorageSlot::Window, &self.window),
+            (DeflateStorageSlot::Prev, &self.prev),
+            (DeflateStorageSlot::Head, &self.head),
+            (DeflateStorageSlot::Pending, &self.pending),
+        ]
     }
 }
 
@@ -3510,26 +3531,31 @@ pub unsafe extern "C" fn deflateCopy(
         ss.sym_buf_start,
         ss.sym_next as usize,
     );
-    ds.window = ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest.opaque, storage.window.items, storage.window.size
-    ) as *mut crate::stdlib::Bytef);
-    ds.prev = ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest.opaque, storage.prev.items, storage.prev.size
-    ) as *mut crate::src::deflate::Posf);
-    ds.head = ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest.opaque, storage.head.items, storage.head.size
-    ) as *mut crate::src::deflate::Posf);
-    ds.pending_buf =
-        ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
+    // Preserve the source implementation's callback-visible order.  Reload
+    // the callback and opaque value for every request: a re-entrant custom
+    // allocator is allowed to inspect or update the stream between calls.
+    for (slot, request) in storage.callback_requests() {
+        let allocation = Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            dest.opaque,
-            storage.pending.items,
-            storage.pending.size,
-        ) as *mut crate::zutil_h::uchf
-            as *mut crate::stdlib::Bytef);
+                dest.opaque,
+                request.items,
+                request.size,
+            );
+        match slot {
+            DeflateStorageSlot::Window => {
+                ds.window = ::core::ptr::NonNull::new(allocation.cast());
+            }
+            DeflateStorageSlot::Prev => {
+                ds.prev = ::core::ptr::NonNull::new(allocation.cast());
+            }
+            DeflateStorageSlot::Head => {
+                ds.head = ::core::ptr::NonNull::new(allocation.cast());
+            }
+            DeflateStorageSlot::Pending => {
+                ds.pending_buf = ::core::ptr::NonNull::new(allocation.cast());
+            }
+        }
+    }
     if ds.window.is_none() || ds.prev.is_none() || ds.head.is_none() || ds.pending_buf.is_none() {
         deflateEnd(dest as *mut crate::zlib_h::z_stream_s);
         return crate::zlib_h::Z_MEM_ERROR;
