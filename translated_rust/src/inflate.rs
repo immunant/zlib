@@ -631,8 +631,6 @@ fn update_window_from_slice(
 // decoder-facing values pointer-free.  The registration itself remains a
 // provenance-carrying `NonNull` in `inflate_state` and is projected only at
 // the call boundary below.
-struct HeaderOutputScope;
-
 #[derive(Default)]
 struct HeaderPublication {
     text: Option<::core::ffi::c_int>,
@@ -730,92 +728,6 @@ impl InflateHeaderOutput<'_> {
     }
 }
 
-// The C API requires a registered `gz_header` and its selected output buffers
-// to remain valid until the decoder has finished with them.  This is the sole
-// projection point for that foreign storage.  It retains the original
-// `NonNull` provenance rather than round-tripping through an address token.
-unsafe fn registered_header_output<'scope>(
-    registered: Option<::core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
-    _scope: &'scope mut HeaderOutputScope,
-) -> Option<InflateHeaderOutput<'scope>> {
-    let registered = registered?;
-    let header = &mut *registered.as_ptr();
-    let extra = if header.extra.is_null() || header.extra_max == 0 {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts_mut(
-            header.extra,
-            header.extra_max as usize,
-        ))
-    };
-    let name = if header.name.is_null() || header.name_max == 0 {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts_mut(
-            header.name,
-            header.name_max as usize,
-        ))
-    };
-    let comment = if header.comment.is_null() || header.comm_max == 0 {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts_mut(
-            header.comment,
-            header.comm_max as usize,
-        ))
-    };
-    Some(InflateHeaderOutput {
-        extra,
-        name,
-        comment,
-        extra_len: header.extra_len as ::core::ffi::c_uint,
-        publication: HeaderPublication::default(),
-    })
-}
-
-// Publish only scalar/pointer-slot changes after the pointer-free decoder has
-// finished with its call-scoped slices.  `registered` is used directly, so its
-// provenance is preserved from `inflateGetHeader()` through this writeback.
-unsafe fn publish_registered_header(
-    registered: Option<::core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
-    output: Option<&mut InflateHeaderOutput<'_>>,
-) {
-    let (Some(registered), Some(output)) = (registered, output) else {
-        return;
-    };
-    let header = &mut *registered.as_ptr();
-    if let Some(value) = output.publication.text {
-        header.text = value;
-    }
-    if let Some(value) = output.publication.time {
-        header.time = value;
-    }
-    if let Some(value) = output.publication.xflags {
-        header.xflags = value;
-    }
-    if let Some(value) = output.publication.os {
-        header.os = value;
-    }
-    if let Some(value) = output.publication.extra_len {
-        header.extra_len = value;
-    }
-    if let Some(value) = output.publication.hcrc {
-        header.hcrc = value;
-    }
-    if let Some(value) = output.publication.done {
-        header.done = value;
-    }
-    if output.publication.clear_extra {
-        header.extra = ::core::ptr::null_mut();
-    }
-    if output.publication.clear_name {
-        header.name = ::core::ptr::null_mut();
-    }
-    if output.publication.clear_comment {
-        header.comment = ::core::ptr::null_mut();
-    }
-}
-
 #[inline]
 fn inflate_pull_byte(
     input: &[u8],
@@ -898,8 +810,44 @@ pub unsafe extern "C" fn inflate(
     // state.  Keep the registered `NonNull` itself in `inflate_state` so its
     // provenance survives until writeback.
     let registered_header = state.head;
-    let mut header_scope = HeaderOutputScope;
-    let mut header = registered_header_output(registered_header, &mut header_scope);
+    let mut header = None;
+    let result = '_inflate_result: {
+    // The registration retains `NonNull` provenance from `inflateGetHeader()`.
+    // Project its selected caller buffers only for this decoder invocation.
+    header = registered_header.map(|registered| {
+        let header = &mut *registered.as_ptr();
+        let extra = if header.extra.is_null() || header.extra_max == 0 {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(
+                header.extra,
+                header.extra_max as usize,
+            ))
+        };
+        let name = if header.name.is_null() || header.name_max == 0 {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(
+                header.name,
+                header.name_max as usize,
+            ))
+        };
+        let comment = if header.comment.is_null() || header.comm_max == 0 {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(
+                header.comment,
+                header.comm_max as usize,
+            ))
+        };
+        InflateHeaderOutput {
+            extra,
+            name,
+            comment,
+            extra_len: header.extra_len as ::core::ffi::c_uint,
+            publication: HeaderPublication::default(),
+        }
+    });
     if state.mode as ::core::ffi::c_uint
         == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
     {
@@ -1344,12 +1292,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                     break '_inf_leave;
                                                                                                 }
                                                                                                 16210 => {
-                                                                                                    publish_registered_header(registered_header, header.as_mut());
-                                                                                                    return crate::zlib_h::Z_MEM_ERROR;
+                                                                                                    break '_inflate_result crate::zlib_h::Z_MEM_ERROR;
                                                                                                 }
                                                                                                 16211 | _ => {
-                                                                                                    publish_registered_header(registered_header, header.as_mut());
-                                                                                                    return crate::zlib_h::Z_STREAM_ERROR;
+                                                                                                    break '_inflate_result crate::zlib_h::Z_STREAM_ERROR;
                                                                                                 }
                                                                                             }
                                                                                             if state.wrap != 0 && state.flags != 0 {
@@ -1452,8 +1398,7 @@ pub unsafe extern "C" fn inflate(
                                                                                         strm.avail_in = have as crate::stdlib::uInt;
                                                                                         state.hold = hold;
                                                                                         state.bits = bits;
-                                                                                        publish_registered_header(registered_header, header.as_mut());
-                                                                                        return crate::zlib_h::Z_NEED_DICT;
+                                                                                        break '_inflate_result crate::zlib_h::Z_NEED_DICT;
                                                                                     }
                                                                                     state.check = crate::src::adler32::adler32_z(
                                                                                         0 as crate::stdlib::uLong,
@@ -2563,8 +2508,7 @@ pub unsafe extern "C" fn inflate(
         ) != 0
         {
             state.mode = crate::src::inflate::MEM;
-            publish_registered_header(registered_header, header.as_mut());
-            return crate::zlib_h::Z_MEM_ERROR;
+            break '_inflate_result crate::zlib_h::Z_MEM_ERROR;
         }
     }
     in_0 = in_0.wrapping_sub(strm.avail_in as ::core::ffi::c_uint);
@@ -2609,8 +2553,45 @@ pub unsafe extern "C" fn inflate(
     {
         ret = crate::zlib_h::Z_BUF_ERROR;
     }
-    publish_registered_header(registered_header, header.as_mut());
-    return ret;
+    ret
+    };
+    // Publish only scalar/pointer-slot changes after the pointer-free decoder
+    // has finished with its call-scoped slices.  Use the retained `NonNull`
+    // directly so provenance is never reconstructed from an address token.
+    if let (Some(registered), Some(output)) = (registered_header, header.as_mut()) {
+        let header = &mut *registered.as_ptr();
+        if let Some(value) = output.publication.text {
+            header.text = value;
+        }
+        if let Some(value) = output.publication.time {
+            header.time = value;
+        }
+        if let Some(value) = output.publication.xflags {
+            header.xflags = value;
+        }
+        if let Some(value) = output.publication.os {
+            header.os = value;
+        }
+        if let Some(value) = output.publication.extra_len {
+            header.extra_len = value;
+        }
+        if let Some(value) = output.publication.hcrc {
+            header.hcrc = value;
+        }
+        if let Some(value) = output.publication.done {
+            header.done = value;
+        }
+        if output.publication.clear_extra {
+            header.extra = ::core::ptr::null_mut();
+        }
+        if output.publication.clear_name {
+            header.name = ::core::ptr::null_mut();
+        }
+        if output.publication.clear_comment {
+            header.comment = ::core::ptr::null_mut();
+        }
+    }
+    return result;
 }
 #[export_name = "inflate"]
 
