@@ -2301,35 +2301,49 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflateEnd(strm)
 }
-pub unsafe extern "C" fn inflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
+fn inflate_get_dictionary(
+    strm: Option<&crate::zlib_h::z_stream_s>,
+    state: Option<&crate::src::inflate::inflate_state>,
+    window: Option<&[crate::stdlib::Bytef]>,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let (Some(strm), Some(state)) = (strm, state) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !inflate_state_valid(strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).whave != 0 && !dictionary.is_null() {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*state).window.offset((*state).wnext as isize) as *const ::core::ffi::c_void,
-            (*state).whave.wrapping_sub((*state).wnext) as crate::__stddef_size_t_h::size_t,
-        );
-        crate::stdlib::memcpy(
-            dictionary
-                .offset((*state).whave as isize)
-                .offset(-((*state).wnext as isize)) as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).wnext as crate::__stddef_size_t_h::size_t,
-        );
+
+    let have = state.whave as usize;
+    let next = state.wnext as usize;
+    let wsize = state.wsize as usize;
+    if have > wsize || next > have {
+        return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if !dictLength.is_null() {
-        *dictLength = (*state).whave as crate::stdlib::uInt;
+    if let Some(dictionary) = dictionary {
+        let Some(destination) = dictionary.get_mut(..have) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if have != 0 {
+            let Some(window) = window else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let Some(tail) = window.get(next..have) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let Some(head) = window.get(..next) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let tail_len = tail.len();
+            destination[..tail_len].copy_from_slice(tail);
+            destination[tail_len..].copy_from_slice(head);
+        }
     }
-    return crate::zlib_h::Z_OK;
+    if let Some(dict_length) = dict_length {
+        *dict_length = state.whave;
+    }
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateGetDictionary"]
 
@@ -2338,7 +2352,26 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    inflateGetDictionary(strm, dictionary, dictLength)
+    let Some(strm) = strm.as_ref() else {
+        return inflate_get_dictionary(None, None, None, None, None);
+    };
+    let Some(state) = (strm.state as *const crate::src::inflate::inflate_state).as_ref() else {
+        return inflate_get_dictionary(Some(strm), None, None, None, dictLength.as_mut());
+    };
+    let window = if state.window.is_null() {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(
+            state.window,
+            state.wsize as usize,
+        ))
+    };
+    let dictionary = if dictionary.is_null() {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts_mut(dictionary, state.whave as usize))
+    };
+    inflate_get_dictionary(Some(strm), Some(state), window, dictionary, dictLength.as_mut())
 }
 pub unsafe extern "C" fn inflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
