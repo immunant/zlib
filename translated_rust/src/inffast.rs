@@ -213,6 +213,13 @@ fn inflate_fast_copy_output_match(
     dist: usize,
     len: usize,
 ) -> bool {
+    // A match can be satisfied entirely from the history window before this
+    // helper is reached.  In that case there is no output-relative source to
+    // validate or copy.  In particular, `output_at` may still be smaller
+    // than `dist`, which is valid because no overlapping output copy occurs.
+    if len == 0 {
+        return true;
+    }
     if dist == 0 || *output_at < dist || len > output.len().saturating_sub(*output_at) {
         return false;
     }
