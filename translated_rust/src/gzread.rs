@@ -395,6 +395,9 @@ macro_rules! gz_look_at_boundary {
 enum GzDecompInflateStep {
     Continue,
     Break(::core::ffi::c_int),
+    StreamError,
+    MemoryError,
+    EndOfMember,
     DataError,
 }
 
@@ -420,67 +423,50 @@ pub(crate) fn gz_codec_output_progress(
     before.checked_sub(after)
 }
 
+/// Decide the post-inflate gzip state transition using only codec progress
+/// and scalar gzip state.  The exported boundary applies the resulting
+/// cursor/error updates, so this core neither traverses opaque state nor
+/// handles a transient codec diagnostic pointer.
 fn gz_decomp_after_inflate(
-    state: &mut crate::gzguts_h::gz_state,
-    had: ::core::ffi::c_uint,
+    avail_out: crate::stdlib::uInt,
     ret: ::core::ffi::c_int,
+    junk: ::core::ffi::c_int,
 ) -> GzDecompInflateStep {
-    if state.strm.avail_out < had {
-        state.junk = 0;
-    }
     match ret {
         crate::zlib_h::Z_STREAM_ERROR | crate::zlib_h::Z_NEED_DICT => {
-            crate::src::gzlib::gz_error_static(
-                state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"internal error: inflate stream corrupt\0",
-            );
-            GzDecompInflateStep::Break(ret)
+            GzDecompInflateStep::StreamError
         }
-        crate::zlib_h::Z_MEM_ERROR => {
-            crate::src::gzlib::gz_error_static(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0",
-            );
-            GzDecompInflateStep::Break(ret)
-        }
-        crate::zlib_h::Z_DATA_ERROR if state.junk == 1 => {
-            state.strm.avail_in = 0;
-            state.eof = 1;
-            state.how = crate::gzguts_h::LOOK;
-            GzDecompInflateStep::Break(crate::zlib_h::Z_OK)
-        }
+        crate::zlib_h::Z_MEM_ERROR => GzDecompInflateStep::MemoryError,
+        crate::zlib_h::Z_DATA_ERROR if junk == 1 => GzDecompInflateStep::EndOfMember,
         crate::zlib_h::Z_DATA_ERROR => GzDecompInflateStep::DataError,
-        _ if state.strm.avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END => {
-            GzDecompInflateStep::Continue
-        }
+        _ if avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END => GzDecompInflateStep::Continue,
         _ => GzDecompInflateStep::Break(ret),
     }
 }
 
-/// Commit the common post-loop decompression result after a safe transition
-/// or the transitional codec boundary has stopped the loop.
+enum GzDecompFinish {
+    Continue { produced: ::core::ffi::c_uint },
+    StreamEnd { produced: ::core::ffi::c_uint },
+    Error,
+}
+
+/// Derive the final buffered-output result after the codec boundary has
+/// stopped its loop.  This keeps output accounting checked and independent
+/// of the opaque gzip handle.
 fn gz_decomp_finish(
-    state: &mut crate::gzguts_h::gz_state,
     had: ::core::ffi::c_uint,
+    avail_out: crate::stdlib::uInt,
     ret: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let Some(produced) = gz_codec_output_progress(had, state.strm.avail_out) else {
-        return -1;
+) -> GzDecompFinish {
+    let Some(produced) = gz_codec_output_progress(had, avail_out) else {
+        return GzDecompFinish::Error;
     };
-    state.x.have = produced as ::core::ffi::c_uint;
-    // Callers establish `x.next` as the start of this output span before
-    // entering the codec.  Keeping that origin avoids reconstructing it by
-    // subtracting from the raw post-inflate cursor.
     if ret == crate::zlib_h::Z_STREAM_END {
-        state.junk = 0;
-        state.how = crate::gzguts_h::LOOK;
-        0
+        GzDecompFinish::StreamEnd { produced }
     } else if ret != crate::zlib_h::Z_OK {
-        -1
+        GzDecompFinish::Error
     } else {
-        0
+        GzDecompFinish::Continue { produced }
     }
 }
 
@@ -511,10 +497,37 @@ macro_rules! gz_decomp_at_boundary {
                     &mut state.strm as *mut crate::zlib_h::z_stream_s,
                     crate::zlib_h::Z_NO_FLUSH,
                 );
-                match gz_decomp_after_inflate(state, had, ret) {
+                let step = gz_decomp_after_inflate(state.strm.avail_out, ret, state.junk);
+                if state.strm.avail_out < had {
+                    state.junk = 0;
+                }
+                match step {
                     GzDecompInflateStep::Continue => {}
                     GzDecompInflateStep::Break(next_ret) => {
                         ret = next_ret;
+                        break;
+                    }
+                    GzDecompInflateStep::StreamError => {
+                        crate::src::gzlib::gz_error_static(
+                            state,
+                            crate::zlib_h::Z_STREAM_ERROR,
+                            b"internal error: inflate stream corrupt\0",
+                        );
+                        break;
+                    }
+                    GzDecompInflateStep::MemoryError => {
+                        crate::src::gzlib::gz_error_static(
+                            state,
+                            crate::zlib_h::Z_MEM_ERROR,
+                            b"out of memory\0",
+                        );
+                        break;
+                    }
+                    GzDecompInflateStep::EndOfMember => {
+                        state.strm.avail_in = 0;
+                        state.eof = 1;
+                        state.how = crate::gzguts_h::LOOK;
+                        ret = crate::zlib_h::Z_OK;
                         break;
                     }
                     GzDecompInflateStep::DataError => {
@@ -532,7 +545,22 @@ macro_rules! gz_decomp_at_boundary {
                 }
             }
         }
-        gz_decomp_finish(state, had, ret)
+        match gz_decomp_finish(had, state.strm.avail_out, ret) {
+            GzDecompFinish::Continue { produced } => {
+                state.x.have = produced;
+                0
+            }
+            GzDecompFinish::StreamEnd { produced } => {
+                state.x.have = produced;
+                // Callers establish `x.next` as the start of this output span
+                // before entering the codec, so no post-call pointer
+                // reconstruction is needed here.
+                state.junk = 0;
+                state.how = crate::gzguts_h::LOOK;
+                0
+            }
+            GzDecompFinish::Error => -1,
+        }
     }};
 }
 
