@@ -3197,7 +3197,7 @@ pub fn inflateCopy(
     // slice-based.
     let copy = unsafe { &mut *copy };
     if window.is_null() {
-        inflate_copy_state(dest, &source_stream, copy, &source_state, &plan, None);
+        inflate_copy_state(dest, &source_stream, copy, &source_state, &plan);
     } else {
         updatewindow(
             source,
@@ -3206,7 +3206,7 @@ pub fn inflateCopy(
             |source_state, source_window| {
                 let source_history = &source_window
                     .expect("source copy window is bound")[..plan.window_copy_len];
-                inflate_copy_state(dest, &source_stream, copy, source_state, &plan, None);
+                inflate_copy_state(dest, &source_stream, copy, source_state, &plan);
                 // Preserve the copied state's exact window metadata, then
                 // populate its already-allocated storage through the shared
                 // owned-window binder. This avoids reopening `window` here
@@ -3422,7 +3422,6 @@ fn inflate_copy_state(
     copy: &mut crate::src::inflate::inflate_state,
     state: &crate::src::inflate::inflate_state,
     plan: &InflateCopyPlan,
-    window: Option<(&[crate::stdlib::Bytef], &mut [crate::stdlib::Bytef])>,
 ) {
     *dest = *source;
     *copy = *state;
@@ -3441,11 +3440,6 @@ fn inflate_copy_state(
         InflateCopyTableCursor::Codes(index) => copy.codes[index..].as_ptr(),
     };
     copy.next = copy.codes[plan.next..].as_mut_ptr();
-
-    if let Some((source_window, dest_window)) = window {
-        dest_window[..source_window.len()].copy_from_slice(source_window);
-        copy.window = dest_window.as_mut_ptr();
-    }
 }
 #[export_name = "inflateCopy"]
 
