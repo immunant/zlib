@@ -2308,8 +2308,30 @@ pub fn inflate(
                                                         state.wsize as usize,
                                                     ))
                                                 };
+                                                // `input` remains the one checked span for this
+                                                // inflate call. `next` and `have` select its live
+                                                // suffix, while `out` is the original caller output
+                                                // capacity and therefore bounds the fast loop's
+                                                // temporary full-output view.
+                                                let Some(fast_input) = input.slice_at(
+                                                    next.addr(),
+                                                    have as usize,
+                                                ) else {
+                                                    state.mode = crate::src::inflate::BAD;
+                                                    break 'c_2322;
+                                                };
+                                                let fast_output = ::core::slice::from_raw_parts_mut(
+                                                    output_start,
+                                                    out as usize,
+                                                );
                                                 crate::src::inffast::inflate_fast(
-                                                    strm, state, out, history, false,
+                                                    strm,
+                                                    state,
+                                                    out,
+                                                    history,
+                                                    false,
+                                                    fast_input,
+                                                    fast_output,
                                                 );
                                                 put = strm.next_out as *mut ::core::ffi::c_uchar;
                                                 left = strm.avail_out as ::core::ffi::c_uint;

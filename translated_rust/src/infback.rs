@@ -842,7 +842,24 @@ pub fn inflateBack(
             strm.avail_in = have as crate::stdlib::uInt;
             state.hold = hold;
             state.bits = bits;
-            crate::src::inffast::inflate_fast(strm, state, state.wsize, None, true);
+            // `window` is this mode's validated output/history span. The
+            // input callback remains an unsafe ABI boundary, so verify its
+            // non-null cursor before borrowing precisely the bytes it
+            // advertised for the shared slice-only fast loop.
+            if next.is_null() {
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break '_inf_leave;
+            }
+            let fast_input = ::core::slice::from_raw_parts(next, have as usize);
+            crate::src::inffast::inflate_fast(
+                strm,
+                state,
+                state.wsize,
+                None,
+                true,
+                fast_input,
+                window,
+            );
             left = strm.avail_out as ::core::ffi::c_uint;
             let Some(produced) = usize::try_from(state.wsize.wrapping_sub(left)).ok() else {
                 ret = crate::zlib_h::Z_STREAM_ERROR;

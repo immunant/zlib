@@ -609,26 +609,42 @@ fn inflate_fast_slices(
     })
 }
 
-/// Bridge the ABI stream cursors to the bounded fast-loop core.
+/// Run the fast loop over the caller's already-validated stream spans.
 ///
-/// The caller has already established the fast path's five-input-byte and
-/// 257-output-byte bounds. Keep raw slice construction here, so the decoder
-/// itself operates solely on ordinary Rust slices and indexes.
+/// The callers establish the fast path's five-input-byte and 257-output-byte
+/// bounds before borrowing these slices. Keeping that ABI conversion at those
+/// boundaries leaves this resumable cursor update entirely slice based.
 pub fn inflate_fast(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
     start: ::core::ffi::c_uint,
     history: Option<&[crate::stdlib::Bytef]>,
     history_may_alias_output: bool,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
 ) {
-    let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) };
-    let out_index = (start as usize).wrapping_sub(strm.avail_out as usize);
-    let output_start = strm.next_out.wrapping_sub(out_index);
-    let end_index = out_index.wrapping_add(
-        strm.avail_out
-            .wrapping_sub(257 as crate::stdlib::uInt) as usize,
-    );
-    let output = unsafe { ::core::slice::from_raw_parts_mut(output_start, start as usize) };
+    let Some(start) = usize::try_from(start).ok() else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let available_input = strm.avail_in as usize;
+    let available_output = strm.avail_out as usize;
+    let Some(out_index) = start.checked_sub(available_output) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let Some(fast_available) = available_output.checked_sub(257) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let Some(end_index) = out_index.checked_add(fast_available) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    if input.len() != available_input || output.len() != start || end_index > output.len() {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    }
     let Some(progress) = inflate_fast_slices(
         state,
         history,
@@ -674,13 +690,39 @@ pub unsafe extern "C" fn inflate_fast_ffi(
         return;
     };
     let state = unsafe { &mut *(strm.state as *mut crate::src::inflate::inflate_state) };
+    let available_input = strm.avail_in as usize;
+    let available_output = strm.avail_out as usize;
+    let start_len = start as usize;
+    let Some(output_offset) = start_len.checked_sub(available_output) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    if strm.next_in.is_null() && available_input != 0
+        || strm.next_out.is_null()
+        || available_output < 257
+    {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    }
+    // `start` is the caller's original output span. The checked offset above
+    // proves that the current cursor and remaining availability still fit in
+    // that one span before it is borrowed below.
+    let output_start = strm.next_out.wrapping_sub(output_offset);
+    let input = if available_input == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(strm.next_in, available_input) }
+    };
+    let output = unsafe { ::core::slice::from_raw_parts_mut(output_start, start_len) };
     let history = if state.window.is_none() || state.wsize == 0 {
         None
     } else {
-        Some(::core::slice::from_raw_parts(
-            state.window.expect("checked non-null window").as_ptr(),
-            state.wsize as usize,
-        ))
+        Some(unsafe {
+            ::core::slice::from_raw_parts(
+                state.window.expect("checked non-null window").as_ptr(),
+                state.wsize as usize,
+            )
+        })
     };
-    inflate_fast(strm, state, start, history, false)
+    inflate_fast(strm, state, start, history, false, input, output)
 }
