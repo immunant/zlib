@@ -18,8 +18,6 @@ pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
-pub use crate::src::inflate::inflateInit2_;
-pub use crate::src::inflate::inflateReset;
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -301,7 +299,7 @@ macro_rules! gz_look_at_boundary {
                 state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
                 state_ref.strm.avail_in = 0 as crate::stdlib::uInt;
                 state_ref.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-                if crate::src::inflate::inflateInit2_(
+                if crate::src::inflate::inflate_init2_at_boundary!(
                     &raw mut state_ref.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
                     15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
                     crate::zlib_h::ZLIB_VERSION.as_ptr(),
@@ -352,7 +350,7 @@ macro_rules! gz_look_at_boundary {
                 input_is_gzip.then_some(1)
             };
             if let Some(junk) = reset_junk {
-                crate::src::inflate::inflateReset(&raw mut state_ref.strm);
+                crate::src::inflate::inflate_reset_at_boundary!(&raw mut state_ref.strm);
                 state_ref.how = crate::gzguts_h::GZIP;
                 state_ref.junk = junk;
                 state_ref.direct = 0;
