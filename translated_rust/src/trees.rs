@@ -2635,24 +2635,29 @@ unsafe extern "C" fn gen_bitlen(
     }
 }
 
-unsafe extern "C" fn build_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut desc: *mut crate::src::deflate::tree_desc,
+unsafe fn build_tree(mut s: &mut crate::src::deflate::deflate_state, tree_kind: u8) {
+    // Tree selection is part of the deflate state, not a caller-owned raw
+    // descriptor.  Keep the raw tree work in the narrow implementation below
+    // until the surrounding tree representation is converted to slices.
+    unsafe { build_tree_impl(s, tree_kind) }
+}
+
+unsafe fn build_tree_impl(
+    s: &mut crate::src::deflate::deflate_state,
+    tree_kind: u8,
 ) {
-    let tree_kind = (*desc).static_kind;
     let mut tree: *mut crate::src::deflate::ct_data = {
-        let state = &mut *s;
         match tree_kind {
             crate::src::deflate::STATIC_TREE_LITERAL => {
-                &raw mut state.dyn_ltree as *mut crate::src::deflate::ct_data_s
+                &raw mut s.dyn_ltree as *mut crate::src::deflate::ct_data_s
                     as *mut crate::src::deflate::ct_data
             }
             crate::src::deflate::STATIC_TREE_DISTANCE => {
-                &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
+                &raw mut s.dyn_dtree as *mut crate::src::deflate::ct_data_s
                     as *mut crate::src::deflate::ct_data
             }
             _ => {
-                &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
+                &raw mut s.bl_tree as *mut crate::src::deflate::ct_data_s
                     as *mut crate::src::deflate::ct_data
             }
         }
@@ -2666,85 +2671,94 @@ unsafe extern "C" fn build_tree(
     let mut m: ::core::ffi::c_int = 0;
     let mut max_code: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut node: ::core::ffi::c_int = 0;
-    (*s).heap_len = 0 as ::core::ffi::c_int;
-    (*s).heap_max = crate::src::deflate::HEAP_SIZE;
+    s.heap_len = 0 as ::core::ffi::c_int;
+    s.heap_max = crate::src::deflate::HEAP_SIZE;
     n = 0 as ::core::ffi::c_int;
     while n < elems {
         if (*tree.offset(n as isize)).fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             max_code = n;
-            (*s).heap_len += 1;
-            (*s).heap[(*s).heap_len as usize] = max_code;
-            (*s).depth[n as usize] = 0 as crate::zutil_h::uch;
+            s.heap_len += 1;
+            s.heap[s.heap_len as usize] = max_code;
+            s.depth[n as usize] = 0 as crate::zutil_h::uch;
         } else {
             (*tree.offset(n as isize)).dl.len = 0 as crate::zutil_h::ush;
         }
         n += 1;
     }
-    while (*s).heap_len < 2 as ::core::ffi::c_int {
-        (*s).heap_len += 1;
-        let c2rust_lvalue_ptr = &raw mut (*s).heap[(*s).heap_len as usize];
-        *c2rust_lvalue_ptr = if max_code < 2 as ::core::ffi::c_int {
+    while s.heap_len < 2 as ::core::ffi::c_int {
+        s.heap_len += 1;
+        let heap_index = s.heap_len as usize;
+        s.heap[heap_index] = if max_code < 2 as ::core::ffi::c_int {
             max_code += 1;
             max_code
         } else {
             0 as ::core::ffi::c_int
         };
-        node = *c2rust_lvalue_ptr;
+        node = s.heap[heap_index];
         (*tree.offset(node as isize)).fc.freq = 1 as crate::zutil_h::ush;
-        (*s).depth[node as usize] = 0 as crate::zutil_h::uch;
-        (*s).opt_len = (*s).opt_len.wrapping_sub(1);
+        s.depth[node as usize] = 0 as crate::zutil_h::uch;
+        s.opt_len = s.opt_len.wrapping_sub(1);
         if !stree.is_null() {
-            (*s).static_len = (*s)
+            s.static_len = s
                 .static_len
                 .wrapping_sub((*stree.offset(node as isize)).len as crate::zutil_h::ulg);
         }
     }
-    (*desc).max_code = max_code;
-    n = (*s).heap_len / 2 as ::core::ffi::c_int;
+    match tree_kind {
+        crate::src::deflate::STATIC_TREE_LITERAL => s.l_desc.max_code = max_code,
+        crate::src::deflate::STATIC_TREE_DISTANCE => s.d_desc.max_code = max_code,
+        _ => s.bl_desc.max_code = max_code,
+    }
+    n = s.heap_len / 2 as ::core::ffi::c_int;
     while n >= 1 as ::core::ffi::c_int {
-        pqdownheap(s, tree, n);
+        pqdownheap(s as *mut crate::src::deflate::deflate_state, tree, n);
         n -= 1;
     }
     node = elems;
     loop {
-        n = (*s).heap[SMALLEST as usize];
-        let c2rust_fresh55 = (*s).heap_len;
-        (*s).heap_len = (*s).heap_len - 1;
-        (*s).heap[SMALLEST as usize] = (*s).heap[c2rust_fresh55 as usize];
-        pqdownheap(s, tree, SMALLEST);
-        m = (*s).heap[SMALLEST as usize];
-        (*s).heap_max -= 1;
-        (*s).heap[(*s).heap_max as usize] = n;
-        (*s).heap_max -= 1;
-        (*s).heap[(*s).heap_max as usize] = m;
+        n = s.heap[SMALLEST as usize];
+        let heap_len = s.heap_len;
+        s.heap_len -= 1;
+        s.heap[SMALLEST as usize] = s.heap[heap_len as usize];
+        pqdownheap(s as *mut crate::src::deflate::deflate_state, tree, SMALLEST);
+        m = s.heap[SMALLEST as usize];
+        s.heap_max -= 1;
+        s.heap[s.heap_max as usize] = n;
+        s.heap_max -= 1;
+        s.heap[s.heap_max as usize] = m;
         (*tree.offset(node as isize)).fc.freq = ((*tree.offset(n as isize)).fc.freq
             as ::core::ffi::c_int
             + (*tree.offset(m as isize)).fc.freq as ::core::ffi::c_int)
             as crate::zutil_h::ush;
-        (*s).depth[node as usize] = ((if (*s).depth[n as usize] as ::core::ffi::c_int
-            >= (*s).depth[m as usize] as ::core::ffi::c_int
+        s.depth[node as usize] = ((if s.depth[n as usize] as ::core::ffi::c_int
+            >= s.depth[m as usize] as ::core::ffi::c_int
         {
-            (*s).depth[n as usize] as ::core::ffi::c_int
+            s.depth[n as usize] as ::core::ffi::c_int
         } else {
-            (*s).depth[m as usize] as ::core::ffi::c_int
+            s.depth[m as usize] as ::core::ffi::c_int
         }) + 1 as ::core::ffi::c_int) as crate::zutil_h::uch;
         (*tree.offset(m as isize)).dl.dad = node as crate::zutil_h::ush;
         (*tree.offset(n as isize)).dl.dad = (*tree.offset(m as isize)).dl.dad;
         let c2rust_fresh56 = node;
         node = node + 1;
-        (*s).heap[SMALLEST as usize] = c2rust_fresh56;
-        pqdownheap(s, tree, SMALLEST);
-        if (*s).heap_len < 2 as ::core::ffi::c_int {
+        s.heap[SMALLEST as usize] = c2rust_fresh56;
+        pqdownheap(s as *mut crate::src::deflate::deflate_state, tree, SMALLEST);
+        if s.heap_len < 2 as ::core::ffi::c_int {
             break;
         }
     }
-    (*s).heap_max -= 1;
-    (*s).heap[(*s).heap_max as usize] = (*s).heap[SMALLEST as usize];
-    gen_bitlen(s, desc);
+    s.heap_max -= 1;
+    s.heap[s.heap_max as usize] = s.heap[SMALLEST as usize];
+    let desc = match tree_kind {
+        crate::src::deflate::STATIC_TREE_LITERAL => &raw mut s.l_desc,
+        crate::src::deflate::STATIC_TREE_DISTANCE => &raw mut s.d_desc,
+        _ => &raw mut s.bl_desc,
+    };
+    gen_bitlen(s as *mut crate::src::deflate::deflate_state, desc);
     gen_codes(
         tree,
         max_code,
-        &raw mut (*s).bl_count as *mut crate::zutil_h::ushf,
+        &raw mut s.bl_count as *mut crate::zutil_h::ushf,
     );
 }
 
@@ -2922,10 +2936,7 @@ unsafe extern "C" fn build_bl_tree(
             as *mut crate::src::deflate::ct_data,
         (*s).d_desc.max_code,
     );
-    build_tree(
-        s,
-        &raw mut (*s).bl_desc as *mut crate::src::deflate::tree_desc,
-    );
+    build_tree(&mut *s, crate::src::deflate::STATIC_TREE_BIT_LENGTH);
     max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
     while max_blindex >= 3 as ::core::ffi::c_int {
         if (*s).bl_tree[bl_order[max_blindex as usize] as usize].dl.len as ::core::ffi::c_int
@@ -3479,14 +3490,8 @@ pub unsafe extern "C" fn _tr_flush_block(
         if (*(*s).strm).data_type == crate::zlib_h::Z_UNKNOWN {
             (*(*s).strm).data_type = detect_data_type(s);
         }
-        build_tree(
-            s,
-            &raw mut (*s).l_desc as *mut crate::src::deflate::tree_desc,
-        );
-        build_tree(
-            s,
-            &raw mut (*s).d_desc as *mut crate::src::deflate::tree_desc,
-        );
+        build_tree(&mut *s, crate::src::deflate::STATIC_TREE_LITERAL);
+        build_tree(&mut *s, crate::src::deflate::STATIC_TREE_DISTANCE);
         max_blindex = build_bl_tree(s);
         opt_lenb = (*s)
             .opt_len
