@@ -526,41 +526,34 @@ pub unsafe extern "C" fn gzseek_ffi(
 ) -> crate::stdlib::off_t {
     gzseek(file, offset, whence)
 }
-pub unsafe extern "C" fn gztell64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+fn gztell_state(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
+    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
         return -1 as crate::stdlib::off64_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return -1 as crate::stdlib::off64_t;
-    }
-    return (*state).x.pos
-        + (if (*state).past != 0 {
+    state.x.pos
+        + if state.past != 0 {
             0 as crate::stdlib::off64_t
         } else {
-            (*state).skip
-        });
+            state.skip
+        }
 }
 #[export_name = "gztell64"]
 
 pub unsafe extern "C" fn gztell64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    gztell64(file)
-}
-pub unsafe extern "C" fn gztell(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gztell64(file);
-    return if ret == ret {
-        ret
-    } else {
+    if file.is_null() {
         -1 as crate::stdlib::off_t
-    };
+    } else {
+        gztell_state(&*(file as *const crate::gzguts_h::gz_state))
+    }
 }
 #[export_name = "gztell"]
 
 pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gztell(file)
+    if file.is_null() {
+        -1 as crate::stdlib::off_t
+    } else {
+        gztell_state(&*(file as *const crate::gzguts_h::gz_state)) as crate::stdlib::off_t
+    }
 }
 pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
     let mut offset: crate::stdlib::off64_t = 0;
