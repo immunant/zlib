@@ -508,6 +508,31 @@ fn inflate_back_push_repeated_code_length(
     *have = end as ::core::ffi::c_uint;
 }
 
+// The caller has validated the stream binding before reaching this helper.
+// Default allocator selection and error-message reset are ordinary stream
+// state transitions; keep them reference-based so the allocation boundary in
+// `inflateBackInit_` only handles the still-uninitialized state object.
+fn inflate_back_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
+            crate::src::zutil::zcalloc
+                as unsafe extern "C" fn(
+                    crate::stdlib::voidpf,
+                    ::core::ffi::c_uint,
+                    ::core::ffi::c_uint,
+                ) -> crate::stdlib::voidpf,
+        ) as crate::zlib_h::alloc_func;
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
+            crate::src::zutil::zcfree
+                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+        ) as crate::zlib_h::free_func;
+    }
+}
+
 pub unsafe fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -529,34 +554,18 @@ pub unsafe fn inflateBackInit_(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
+    let strm_ref = &mut *strm;
+    inflate_back_prepare_stream(strm_ref);
+    state = Some(strm_ref.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm_ref.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
+    strm_ref.state = state as *mut crate::src::deflate::internal_state;
     let config = inflate_back_state_config(windowBits);
     (*state).dmax = config.dmax;
     (*state).wbits = config.wbits;
