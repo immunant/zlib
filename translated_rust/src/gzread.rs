@@ -974,59 +974,6 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
     }
 }
 
-unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    loop {
-        let cursor = if state.x.have == 0 {
-            0
-        } else {
-            let Some(cursor) = state.buffers.output.as_deref().and_then(|buffer| {
-                crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                    buffer,
-                    state.x.next.addr(),
-                    state.x.have,
-                )
-                .and_then(|cursor| cursor.advance(0))
-                .map(|(next, _)| next)
-            }) else {
-                return -1 as ::core::ffi::c_int;
-            };
-            cursor
-        };
-        let mut skip = GzSkipState {
-            buffer: state.buffers.output.as_deref(),
-            cursor,
-            have: state.x.have,
-            pos: state.x.pos,
-            skip: state.skip,
-            eof: state.eof,
-            avail_in: state.strm.avail_in,
-        };
-        match gz_skip_step(&mut skip) {
-            Ok(GzSkipStep::Fetch) => {
-                if gz_fetch(state) == -1 as ::core::ffi::c_int {
-                    return -1 as ::core::ffi::c_int;
-                }
-            }
-            Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
-                if skip.have != 0 {
-                    let Some(buffer) = state.buffers.output.as_deref() else {
-                        return -1 as ::core::ffi::c_int;
-                    };
-                    state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
-                }
-                state.x.have = skip.have;
-                state.x.pos = skip.pos;
-                state.skip = skip.skip;
-                if matches!(step, GzSkipStep::Done) {
-                    break;
-                }
-            }
-            Err(()) => return -1 as ::core::ffi::c_int,
-        }
-    }
-    return 0 as ::core::ffi::c_int;
-}
-
 unsafe fn gz_read(
     state: &mut crate::gzguts_h::gz_state,
     output: &mut [u8],
@@ -1038,8 +985,56 @@ unsafe fn gz_read(
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
+    if state.skip != 0 {
+        loop {
+            let cursor = if state.x.have == 0 {
+                0
+            } else {
+                let Some(cursor) = state.buffers.output.as_deref().and_then(|buffer| {
+                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                        buffer,
+                        state.x.next.addr(),
+                        state.x.have,
+                    )
+                    .and_then(|cursor| cursor.advance(0))
+                    .map(|(next, _)| next)
+                }) else {
+                    return 0;
+                };
+                cursor
+            };
+            let mut skip = GzSkipState {
+                buffer: state.buffers.output.as_deref(),
+                cursor,
+                have: state.x.have,
+                pos: state.x.pos,
+                skip: state.skip,
+                eof: state.eof,
+                avail_in: state.strm.avail_in,
+            };
+            match gz_skip_step(&mut skip) {
+                Ok(GzSkipStep::Fetch) => {
+                    if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                        return 0;
+                    }
+                }
+                Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
+                    if skip.have != 0 {
+                        let Some(buffer) = state.buffers.output.as_deref() else {
+                            return 0;
+                        };
+                        state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
+                    }
+                    state.x.have = skip.have;
+                    state.x.pos = skip.pos;
+                    state.skip = skip.skip;
+                    if matches!(step, GzSkipStep::Done) {
+                        break;
+                    }
+                }
+                Err(()) => return 0,
+            }
+        }
     }
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
@@ -1331,8 +1326,56 @@ unsafe fn gzungetc(
         return -1 as ::core::ffi::c_int;
     }
     drop(error);
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
+    if state.skip != 0 {
+        loop {
+            let cursor = if state.x.have == 0 {
+                0
+            } else {
+                let Some(cursor) = state.buffers.output.as_deref().and_then(|buffer| {
+                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                        buffer,
+                        state.x.next.addr(),
+                        state.x.have,
+                    )
+                    .and_then(|cursor| cursor.advance(0))
+                    .map(|(next, _)| next)
+                }) else {
+                    return -1;
+                };
+                cursor
+            };
+            let mut skip = GzSkipState {
+                buffer: state.buffers.output.as_deref(),
+                cursor,
+                have: state.x.have,
+                pos: state.x.pos,
+                skip: state.skip,
+                eof: state.eof,
+                avail_in: state.strm.avail_in,
+            };
+            match gz_skip_step(&mut skip) {
+                Ok(GzSkipStep::Fetch) => {
+                    if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                        return -1;
+                    }
+                }
+                Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
+                    if skip.have != 0 {
+                        let Some(buffer) = state.buffers.output.as_deref() else {
+                            return -1;
+                        };
+                        state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
+                    }
+                    state.x.have = skip.have;
+                    state.x.pos = skip.pos;
+                    state.skip = skip.skip;
+                    if matches!(step, GzSkipStep::Done) {
+                        break;
+                    }
+                }
+                Err(()) => return -1,
+            }
+        }
     }
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
@@ -1406,8 +1449,56 @@ unsafe fn gzgets(
         path: state.path.as_deref(),
     }
     .clear();
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if state.skip != 0 {
+        loop {
+            let cursor = if state.x.have == 0 {
+                0
+            } else {
+                let Some(cursor) = state.buffers.output.as_deref().and_then(|buffer| {
+                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                        buffer,
+                        state.x.next.addr(),
+                        state.x.have,
+                    )
+                    .and_then(|cursor| cursor.advance(0))
+                    .map(|(next, _)| next)
+                }) else {
+                    return ::core::ptr::null_mut();
+                };
+                cursor
+            };
+            let mut skip = GzSkipState {
+                buffer: state.buffers.output.as_deref(),
+                cursor,
+                have: state.x.have,
+                pos: state.x.pos,
+                skip: state.skip,
+                eof: state.eof,
+                avail_in: state.strm.avail_in,
+            };
+            match gz_skip_step(&mut skip) {
+                Ok(GzSkipStep::Fetch) => {
+                    if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                        return ::core::ptr::null_mut();
+                    }
+                }
+                Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
+                    if skip.have != 0 {
+                        let Some(buffer) = state.buffers.output.as_deref() else {
+                            return ::core::ptr::null_mut();
+                        };
+                        state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
+                    }
+                    state.x.have = skip.have;
+                    state.x.pos = skip.pos;
+                    state.skip = skip.skip;
+                    if matches!(step, GzSkipStep::Done) {
+                        break;
+                    }
+                }
+                Err(()) => return ::core::ptr::null_mut(),
+            }
+        }
     }
     let str = output.as_mut_ptr().cast::<::core::ffi::c_char>();
     let mut left = output.len() - 1;
