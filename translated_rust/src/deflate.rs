@@ -1766,37 +1766,85 @@ fn put_short_msb(
     true
 }
 
+fn flush_pending_impl(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending_start: usize,
+    output: &mut [crate::stdlib::Bytef],
+) -> bool {
+    let pending_before = match usize::try_from(state.pending) {
+        Ok(pending) => pending,
+        Err(_) => return false,
+    };
+    let flush_bytes = if state.bi_valid == 16 {
+        2
+    } else if state.bi_valid >= 8 {
+        1
+    } else {
+        0
+    };
+    let Some(flush_end) = pending_before.checked_add(flush_bytes) else {
+        return false;
+    };
+    if flush_end > pending_buf.len() || pending_start > pending_buf.len() {
+        return false;
+    }
+    crate::src::trees::_tr_flush_bits(state, pending_buf);
+
+    let pending = match usize::try_from(state.pending) {
+        Ok(pending) => pending,
+        Err(_) => return false,
+    };
+    let available = match usize::try_from(strm.avail_out) {
+        Ok(available) => available,
+        Err(_) => return false,
+    };
+    if output.len() != available || pending > pending_buf.len().saturating_sub(pending_start) {
+        return false;
+    }
+    let len = pending.min(available);
+    if len == 0 {
+        return true;
+    }
+    let Some(source_end) = pending_start.checked_add(len) else {
+        return false;
+    };
+    output[..len].copy_from_slice(&pending_buf[pending_start..source_end]);
+    strm.next_out = output.as_mut_ptr().wrapping_add(len);
+    state.pending_out = pending_buf.as_mut_ptr().wrapping_add(source_end);
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm.avail_out -= len as crate::stdlib::uInt;
+    state.pending -= len as crate::zutil_h::ulg;
+    if state.pending == 0 {
+        state.pending_out = pending_buf.as_mut_ptr();
+    }
+    true
+}
+
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let mut len: ::core::ffi::c_uint = 0;
-    let mut s: *mut crate::src::deflate::deflate_state =
-        (*strm).state as *mut crate::src::deflate::deflate_state;
-    let state = &mut *s;
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    if state.pending_buf.is_null()
+        || state.pending_out.is_null()
+        || strm.avail_out != 0 && strm.next_out.is_null()
+    {
+        return;
+    }
     let pending_buf = ::core::slice::from_raw_parts_mut(
         state.pending_buf,
         state.pending_buf_size as usize,
     );
-    crate::src::trees::_tr_flush_bits(state, pending_buf);
-    len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
-        (*strm).avail_out as ::core::ffi::c_uint
-    } else {
-        (*s).pending as ::core::ffi::c_uint
-    };
-    if len == 0 as ::core::ffi::c_uint {
+    let Some(pending_start) = state.pending_out.addr().checked_sub(pending_buf.as_ptr().addr())
+    else {
         return;
-    }
-    crate::stdlib::memcpy(
-        (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_out as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
-    );
-    (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*s).pending_out = (*s).pending_out.offset(len as isize);
-    (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
-    (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
-    (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if (*s).pending == 0 as crate::zutil_h::ulg {
-        (*s).pending_out = (*s).pending_buf;
-    }
+    };
+    let output = if strm.avail_out == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
+    };
+    let _ = flush_pending_impl(strm, state, pending_buf, pending_start, output);
 }
 pub unsafe fn deflate(
     strm: &mut crate::zlib_h::z_stream,
