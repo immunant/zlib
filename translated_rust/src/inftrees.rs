@@ -3212,7 +3212,9 @@ pub unsafe extern "C" fn inflate_table(
             (*(*table).offset(low as isize)).op = curr as ::core::ffi::c_uchar;
             (*(*table).offset(low as isize)).bits = root as ::core::ffi::c_uchar;
             (*(*table).offset(low as isize)).val =
-                next.offset_from(*table) as ::core::ffi::c_ushort;
+                (next.addr().wrapping_sub((*table).addr())
+                    / ::core::mem::size_of::<crate::src::inftrees::code>())
+                    as ::core::ffi::c_ushort;
         }
     }
     if huff != 0 as ::core::ffi::c_uint {
