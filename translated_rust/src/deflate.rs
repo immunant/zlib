@@ -392,6 +392,31 @@ fn read_buf_state(
     (len as ::core::ffi::c_uint, adler)
 }
 
+/// Copy available stream input into the deflate window and calculate the
+/// corresponding stream counters.  The raw adapter owns only the temporary
+/// caller/window lends and pointer cursor updates.
+fn read_buf_progress_state(
+    input: &[crate::stdlib::Byte],
+    output: &mut [crate::stdlib::Byte],
+    wrap: ::core::ffi::c_int,
+    adler: crate::stdlib::uLong,
+    avail_in: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+) -> (
+    ::core::ffi::c_uint,
+    crate::stdlib::uLong,
+    crate::stdlib::uInt,
+    crate::stdlib::uLong,
+) {
+    let (len, adler) = read_buf_state(input, output, wrap, adler);
+    (
+        len,
+        adler,
+        avail_in.wrapping_sub(len),
+        total_in.wrapping_add(len as crate::stdlib::uLong),
+    )
+}
+
 fn insert_pending_strings_state(
     window: &[crate::stdlib::Byte],
     head: &mut [crate::src::deflate::Posf],
@@ -635,21 +660,32 @@ unsafe extern "C" fn read_buf(
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let mut len: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-    if len > size {
-        len = size;
-    }
-    if len == 0 as ::core::ffi::c_uint {
+    if strm.is_null() {
         return 0 as ::core::ffi::c_uint;
     }
-    let input = ::core::slice::from_raw_parts((*strm).next_in, len as usize);
+    let strm = &mut *strm;
+    let len = strm.avail_in.min(size);
+    if len == 0 {
+        return 0;
+    }
+    if strm.next_in.is_null() || buf.is_null() || strm.state.is_null() {
+        return 0;
+    }
+    let input = ::core::slice::from_raw_parts(strm.next_in, len as usize);
     let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
-    let (len, adler) = read_buf_state(input, output, (*(*strm).state).wrap, (*strm).adler);
-    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    (*strm).adler = adler;
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
-    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
-    return len;
+    let (len, adler, avail_in, total_in) = read_buf_progress_state(
+        input,
+        output,
+        (*(strm.state as *const crate::src::deflate::deflate_state)).wrap,
+        strm.adler,
+        strm.avail_in,
+        strm.total_in,
+    );
+    strm.avail_in = avail_in;
+    strm.adler = adler;
+    strm.next_in = strm.next_in.offset(len as isize);
+    strm.total_in = total_in;
+    len
 }
 
 fn fill_window_space_state(
