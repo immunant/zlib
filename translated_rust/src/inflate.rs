@@ -1654,7 +1654,14 @@ pub unsafe fn inflate(
                                                                                                 16210 => return crate::zlib_h::Z_MEM_ERROR,
                                                                                                 16211 | _ => return crate::zlib_h::Z_STREAM_ERROR,
                                                                                             }
-                                                                                            if (*state).wrap != 0 && (*state).flags != 0 {
+                                                                                            // This gzip-length and code-length-table
+                                                                                            // transition only updates decoder scalars
+                                                                                            // after consuming its local cursor. Adopt
+                                                                                            // the compatibility records once rather
+                                                                                            // than repeatedly traversing raw state.
+                                                                                            let strm_ref = &mut *strm;
+                                                                                            let state_ref = &mut *state;
+                                                                                            if state_ref.wrap != 0 && state_ref.flags != 0 {
                                                                                                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                                 {
                                                                                                     if have == 0 as ::core::ffi::c_uint {
@@ -1669,23 +1676,23 @@ pub unsafe fn inflate(
                                                                                                         );
                                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                 }
-                                                                                                if (*state).wrap & 4 as ::core::ffi::c_int != 0
+                                                                                                if state_ref.wrap & 4 as ::core::ffi::c_int != 0
                                                                                                     && hold
-                                                                                                        != (*state).total & 0xffffffff as ::core::ffi::c_ulong
+                                                                                                        != state_ref.total & 0xffffffff as ::core::ffi::c_ulong
                                                                                                 {
-                                                                                                    (*strm).msg = INFLATE_ERROR_MESSAGES[7].as_ptr()
+                                                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[7].as_ptr()
                                                                                                         as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                    (*state).mode = crate::src::inflate::BAD;
+                                                                                                    state_ref.mode = crate::src::inflate::BAD;
                                                                                                     continue '_inf_leave;
                                                                                                 } else {
                                                                                                     hold = 0 as ::core::ffi::c_ulong;
                                                                                                     bits = 0 as ::core::ffi::c_uint;
                                                                                                 }
                                                                                             }
-                                                                                            (*state).mode = crate::src::inflate::DONE;
+                                                                                            state_ref.mode = crate::src::inflate::DONE;
                                                                                             break 'c_2443;
                                                                                         }
-                                                                                        while (*state).have < (*state).ncode {
+                                                                                        while state_ref.have < state_ref.ncode {
                                                                                             while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                             {
                                                                                                 if have == 0 as ::core::ffi::c_uint {
@@ -1700,9 +1707,9 @@ pub unsafe fn inflate(
                                                                                                     );
                                                                                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                             }
-                                                                                            let c2rust_fresh15 = (*state).have;
-                                                                                            (*state).have = (*state).have.wrapping_add(1);
-                                                                                            (*state).lens[order[c2rust_fresh15 as usize] as usize] = (hold
+                                                                                            let c2rust_fresh15 = state_ref.have;
+                                                                                            state_ref.have = state_ref.have.wrapping_add(1);
+                                                                                            state_ref.lens[order[c2rust_fresh15 as usize] as usize] = (hold
                                                                                                 as ::core::ffi::c_uint
                                                                                                 & ((1 as ::core::ffi::c_uint) << 3 as ::core::ffi::c_int)
                                                                                                     .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -1713,28 +1720,27 @@ pub unsafe fn inflate(
                                                                                                     3 as ::core::ffi::c_int as ::core::ffi::c_uint,
                                                                                                 );
                                                                                         }
-                                                                                        while (*state).have < 19 as ::core::ffi::c_uint {
-                                                                                            let c2rust_fresh16 = (*state).have;
-                                                                                            (*state).have = (*state).have.wrapping_add(1);
-                                                                                            (*state).lens[order[c2rust_fresh16 as usize] as usize] = 0
+                                                                                        while state_ref.have < 19 as ::core::ffi::c_uint {
+                                                                                            let c2rust_fresh16 = state_ref.have;
+                                                                                            state_ref.have = state_ref.have.wrapping_add(1);
+                                                                                            state_ref.lens[order[c2rust_fresh16 as usize] as usize] = 0
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
                                                                                         ret = {
-                                                                                            let state = &mut *state;
-                                                                                            state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
-                                                                                            state.distcode = state.next as *const crate::src::inftrees::code;
-                                                                                            state.lencode = state.distcode;
-                                                                                            state.lenbits = 7 as ::core::ffi::c_uint;
+                                                                                            state_ref.next = &raw mut state_ref.codes as *mut crate::src::inftrees::code;
+                                                                                            state_ref.distcode = state_ref.next as *const crate::src::inftrees::code;
+                                                                                            state_ref.lencode = state_ref.distcode;
+                                                                                            state_ref.lenbits = 7 as ::core::ffi::c_uint;
                                                                                             match crate::src::inftrees::inflate_table_into(
                                                                                                 crate::src::inftrees::CODES,
-                                                                                                &state.lens[..19],
-                                                                                                &mut state.codes[..crate::src::inftrees::ENOUGH as usize],
-                                                                                                &mut state.work,
-                                                                                                state.lenbits,
+                                                                                                &state_ref.lens[..19],
+                                                                                                &mut state_ref.codes[..crate::src::inftrees::ENOUGH as usize],
+                                                                                                &mut state_ref.work,
+                                                                                                state_ref.lenbits,
                                                                                             ) {
                                                                                                 Ok((used, root)) => {
-                                                                                                    state.next = state.next.wrapping_add(used);
-                                                                                                    state.lenbits = root;
+                                                                                                    state_ref.next = state_ref.next.wrapping_add(used);
+                                                                                                    state_ref.lenbits = root;
                                                                                                     0
                                                                                                 }
                                                                                                 Err(status) => status,
@@ -1742,13 +1748,13 @@ pub unsafe fn inflate(
                                                                                         };
                                                                                         if ret != 0
                                                                                         {
-                                                                                            (*strm).msg = INFLATE_ERROR_MESSAGES[8].as_ptr()
+                                                                                            strm_ref.msg = INFLATE_ERROR_MESSAGES[8].as_ptr()
                                                                                                 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                            (*state).mode = crate::src::inflate::BAD;
+                                                                                            state_ref.mode = crate::src::inflate::BAD;
                                                                                             continue '_inf_leave;
                                                                                         } else {
-                                                                                            (*state).have = 0 as ::core::ffi::c_uint;
-                                                                                            (*state).mode = crate::src::inflate::CODELENS;
+                                                                                            state_ref.have = 0 as ::core::ffi::c_uint;
+                                                                                            state_ref.mode = crate::src::inflate::CODELENS;
                                                                                             break 's_1689;
                                                                                         }
                                                                                     }
