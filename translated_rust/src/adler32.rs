@@ -41,15 +41,33 @@ pub(crate) fn adler32_bytes(
     adler | (sum2 as crate::stdlib::uLong) << 16 as ::core::ffi::c_int
 }
 
+// Keep checksum calculation independent of the FFI byte-buffer boundary.
+// A null buffer has the documented reset meaning, even when its length is
+// nonzero.
+fn adler32_buffer(
+    adler: crate::stdlib::uLong,
+    buf: Option<&[crate::stdlib::Bytef]>,
+) -> crate::stdlib::uLong {
+    match buf {
+        Some(buf) => adler32_bytes(adler, buf),
+        None => 1 as crate::stdlib::uLong,
+    }
+}
+
 pub unsafe extern "C" fn adler32_z(
     adler: crate::stdlib::uLong,
     buf: *const crate::stdlib::Bytef,
     len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
     if buf.is_null() {
-        return 1 as crate::stdlib::uLong;
+        return adler32_buffer(adler, None);
     }
-    adler32_bytes(adler, unsafe { ::core::slice::from_raw_parts(buf, len) })
+    let buf = if len == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(buf, len) }
+    };
+    adler32_buffer(adler, Some(buf))
 }
 #[export_name = "adler32_z"]
 pub unsafe extern "C" fn adler32_z_ffi(
@@ -57,7 +75,15 @@ pub unsafe extern "C" fn adler32_z_ffi(
     mut buf: *const crate::stdlib::Bytef,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
-    adler32_z(adler, buf, len)
+    if buf.is_null() {
+        return adler32_buffer(adler, None);
+    }
+    let buf = if len == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(buf, len) }
+    };
+    adler32_buffer(adler, Some(buf))
 }
 pub unsafe extern "C" fn adler32(
     mut adler: crate::stdlib::uLong,
@@ -72,7 +98,15 @@ pub unsafe extern "C" fn adler32_ffi(
     mut buf: *const crate::stdlib::Bytef,
     mut len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    adler32(adler, buf, len)
+    if buf.is_null() {
+        return adler32_buffer(adler, None);
+    }
+    let buf = if len == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t) }
+    };
+    adler32_buffer(adler, Some(buf))
 }
 fn adler32_combine_(
     mut adler1: crate::stdlib::uLong,

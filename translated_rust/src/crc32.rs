@@ -4889,15 +4889,30 @@ pub(crate) fn crc32_bytes(mut crc: crate::stdlib::uLong, mut bytes: &[u8]) -> cr
     crc ^ 0xffffffff as crate::stdlib::uLong
 }
 
+// Keep checksum calculation independent of the FFI byte-buffer boundary.
+// A null buffer has the documented reset meaning, even when its length is
+// nonzero.
+fn crc32_buffer(crc: crate::stdlib::uLong, buf: Option<&[u8]>) -> crate::stdlib::uLong {
+    match buf {
+        Some(buf) => crc32_bytes(crc, buf),
+        None => 0,
+    }
+}
+
 pub unsafe extern "C" fn crc32_z(
     crc: crate::stdlib::uLong,
     buf: *const ::core::ffi::c_uchar,
     len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
     if buf.is_null() {
-        return 0;
+        return crc32_buffer(crc, None);
     }
-    crc32_bytes(crc, unsafe { ::core::slice::from_raw_parts(buf, len) })
+    let buf = if len == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(buf, len) }
+    };
+    crc32_buffer(crc, Some(buf))
 }
 #[export_name = "crc32_z"]
 
@@ -4906,7 +4921,15 @@ pub unsafe extern "C" fn crc32_z_ffi(
     mut buf: *const ::core::ffi::c_uchar,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
-    crc32_z(crc, buf, len)
+    if buf.is_null() {
+        return crc32_buffer(crc, None);
+    }
+    let buf = if len == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(buf, len) }
+    };
+    crc32_buffer(crc, Some(buf))
 }
 pub unsafe extern "C" fn crc32(
     mut crc: crate::stdlib::uLong,
@@ -4922,7 +4945,15 @@ pub unsafe extern "C" fn crc32_ffi(
     mut buf: *const ::core::ffi::c_uchar,
     mut len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    crc32(crc, buf, len)
+    if buf.is_null() {
+        return crc32_buffer(crc, None);
+    }
+    let buf = if len == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t) }
+    };
+    crc32_buffer(crc, Some(buf))
 }
 pub extern "C" fn crc32_combine_gen64(mut len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
     if len2 < 0 as crate::stdlib::off64_t {
