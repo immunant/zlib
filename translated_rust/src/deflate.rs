@@ -1659,6 +1659,14 @@ fn gzip_header_crc_pending_range(
     Some(usize::try_from(begin).ok()?..usize::try_from(end).ok()?)
 }
 
+fn pending_buffer_needs_flush(
+    pending: crate::zutil_h::ulg,
+    required: crate::zutil_h::ulg,
+    pending_buf_size: crate::zutil_h::ulg,
+) -> bool {
+    pending.wrapping_add(required) > pending_buf_size
+}
+
 fn zlib_header(
     w_bits: crate::stdlib::uInt,
     strategy: ::core::ffi::c_int,
@@ -1973,7 +1981,7 @@ pub unsafe extern "C" fn deflate(
             let mut left: crate::zutil_h::ulg =
                 (((*(*s).gzhead).extra_len & 0xffff as crate::stdlib::uInt) as crate::zutil_h::ulg)
                     .wrapping_sub((*s).gzindex);
-            while (*s).pending.wrapping_add(left) > (*s).pending_buf_size {
+            while pending_buffer_needs_flush((*s).pending, left, (*s).pending_buf_size) {
                 let mut copy: crate::zutil_h::ulg =
                     (*s).pending_buf_size.wrapping_sub((*s).pending);
                 crate::stdlib::memcpy(
@@ -2100,7 +2108,11 @@ pub unsafe extern "C" fn deflate(
     }
     if (*s).status == crate::src::deflate::HCRC_STATE {
         if (*(*s).gzhead).hcrc != 0 {
-            if (*s).pending.wrapping_add(2 as crate::zutil_h::ulg) > (*s).pending_buf_size {
+            if pending_buffer_needs_flush(
+                (*s).pending,
+                2 as crate::zutil_h::ulg,
+                (*s).pending_buf_size,
+            ) {
                 flush_pending(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
@@ -3731,9 +3743,10 @@ mod tests {
         fill_window_available_space, fill_window_cursor, fill_window_insert_after_slide,
         fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
-        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_min_size,
-        stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_len,
+        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
+        stored_block_available_output, stored_block_min_size, stored_block_should_wait,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header,
     };
 
     #[test]
@@ -3862,6 +3875,18 @@ mod tests {
         assert_eq!(gzip_header_crc_pending_range(0, 2, 5), None);
         assert_eq!(gzip_header_crc_pending_range(1, 5, 5), None);
         assert_eq!(gzip_header_crc_pending_range(1, 5, 2), None);
+    }
+
+    #[test]
+    fn pending_buffer_needs_flush_preserves_wrapping_capacity_checks() {
+        assert!(!pending_buffer_needs_flush(3, 5, 8));
+        assert!(pending_buffer_needs_flush(3, 6, 8));
+        assert!(!pending_buffer_needs_flush(0, 0, 0));
+        assert!(!pending_buffer_needs_flush(
+            crate::zutil_h::ulg::MAX,
+            1,
+            crate::zutil_h::ulg::MAX,
+        ));
     }
 
     #[test]

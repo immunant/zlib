@@ -4794,6 +4794,13 @@ pub fn crc32(crc: crate::stdlib::uLong, buf: &[u8]) -> crate::stdlib::uLong {
     crc32_z(crc, buf)
 }
 
+fn crc32_optional_buffer(crc: crate::stdlib::uLong, buf: Option<&[u8]>) -> crate::stdlib::uLong {
+    match buf {
+        Some(buf) => crc32_z(crc, buf),
+        None => 0,
+    }
+}
+
 #[export_name = "crc32_z"]
 pub unsafe extern "C" fn crc32_z_ffi(
     crc: crate::stdlib::uLong,
@@ -4801,13 +4808,13 @@ pub unsafe extern "C" fn crc32_z_ffi(
     len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
     if buf.is_null() {
-        return 0;
+        return crc32_optional_buffer(crc, None);
     }
     if len == 0 {
-        return crc32_z(crc, &[]);
+        return crc32_optional_buffer(crc, Some(&[]));
     }
 
-    crc32_z(crc, unsafe { core::slice::from_raw_parts(buf, len) })
+    crc32_optional_buffer(crc, Some(unsafe { core::slice::from_raw_parts(buf, len) }))
 }
 
 #[export_name = "crc32"]
@@ -4817,15 +4824,16 @@ pub unsafe extern "C" fn crc32_ffi(
     len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
     if buf.is_null() {
-        return 0;
+        return crc32_optional_buffer(crc, None);
     }
     if len == 0 {
-        return crc32(crc, &[]);
+        return crc32_optional_buffer(crc, Some(&[]));
     }
 
-    crc32(crc, unsafe {
-        core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t)
-    })
+    crc32_optional_buffer(
+        crc,
+        Some(unsafe { core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t) }),
+    )
 }
 pub fn crc32_combine_gen64(len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
     if len2 < 0 {
@@ -4906,8 +4914,8 @@ pub unsafe extern "C" fn crc32_combine_ffi(
 mod tests {
     use super::{
         crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_from_state,
-        crc32_initial_state, crc32_update_byte, crc32_update_bytes, crc32_z, crc_table_ref,
-        multmodp, next_poly_term, x2n_table, x2nmodp, CRC32_MASK, POLY,
+        crc32_initial_state, crc32_optional_buffer, crc32_update_byte, crc32_update_bytes, crc32_z,
+        crc_table_ref, multmodp, next_poly_term, x2n_table, x2nmodp, CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -4929,6 +4937,18 @@ mod tests {
         );
         assert_eq!(unsafe { super::crc32_z_ffi(seed, core::ptr::null(), 0) }, 0);
         assert_eq!(unsafe { super::crc32_ffi(seed, core::ptr::null(), 0) }, 0);
+    }
+
+    #[test]
+    fn optional_buffer_dispatch_preserves_null_and_empty_behavior() {
+        let seed = 0x1234_5678;
+
+        assert_eq!(crc32_optional_buffer(seed, None), 0);
+        assert_eq!(crc32_optional_buffer(seed, Some(&[])), crc32_z(seed, &[]));
+        assert_eq!(
+            crc32_optional_buffer(seed, Some(b"123456789")),
+            crc32_z(seed, b"123456789")
+        );
     }
 
     #[test]

@@ -304,6 +304,11 @@ enum GzReadAction {
     Decompress,
 }
 
+struct GzReadStep {
+    chunk_len: ::core::ffi::c_uint,
+    action: GzReadAction,
+}
+
 fn gz_read_action(
     have: ::core::ffi::c_uint,
     eof: ::core::ffi::c_int,
@@ -322,6 +327,21 @@ fn gz_read_action(
         GzReadAction::Load
     } else {
         GzReadAction::Decompress
+    }
+}
+
+fn gz_read_step(
+    len: crate::stdlib::z_size_t,
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    how: ::core::ffi::c_int,
+    size: ::core::ffi::c_uint,
+) -> GzReadStep {
+    let chunk_len = gz_read_chunk_len(len, have);
+    GzReadStep {
+        chunk_len,
+        action: gz_read_action(have, eof, avail_in, how, chunk_len, size),
     }
 }
 
@@ -1712,6 +1732,17 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_step_pairs_chunk_length_with_its_control_action() {
+        let buffered = gz_read_step(17, 5, 1, 0, crate::gzguts_h::LOOK, 8);
+        assert_eq!(buffered.chunk_len, 5);
+        assert!(matches!(buffered.action, GzReadAction::DrainBuffered));
+
+        let unbuffered = gz_read_step(17, 0, 0, 0, crate::gzguts_h::COPY, 8);
+        assert_eq!(unbuffered.chunk_len, 17);
+        assert!(matches!(unbuffered.action, GzReadAction::Load));
+    }
+
+    #[test]
     fn gz_read_progress_updates_remaining_total_and_position() {
         assert_eq!(gz_read_progress(10, 4, 42, 3), (7, 7, 45));
     }
@@ -2179,15 +2210,16 @@ unsafe extern "C" fn gz_read(
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
     loop {
-        n = gz_read_chunk_len(len, (*state).x.have);
-        let advance = match gz_read_action(
+        let step = gz_read_step(
+            len,
             (*state).x.have,
             (*state).eof,
             (*state).strm.avail_in,
             (*state).how,
-            n,
             (*state).size,
-        ) {
+        );
+        n = step.chunk_len;
+        let advance = match step.action {
             GzReadAction::DrainBuffered => {
                 let (next, have, state_err) = {
                     let state_ref = &mut *state;
