@@ -573,8 +573,6 @@ pub(crate) fn inflateInit2_(
     version: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if !inflate_init_version_and_size_valid(version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
@@ -584,30 +582,30 @@ pub(crate) fn inflateInit2_(
     // Preparation chose either zlib's default allocator or the caller's
     // callback. Keep the state request on that published stream callback.
     inflate_prepare_stream(strm);
-    state = inflate_allocate!(
+    let state_storage = inflate_allocate!(
         strm,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
+    ) as *mut ::core::mem::MaybeUninit<crate::src::inflate::inflate_state>;
+    let Some(mut state_storage) = ::core::ptr::NonNull::new(state_storage) else {
         return crate::zlib_h::Z_MEM_ERROR;
-    }
+    };
     // SAFETY: the allocator returned a non-null allocation large enough for
     // one `inflate_state`. Bind it as uninitialized storage only long enough
     // to write the complete safe zero value, then retain the initialized
     // reference for the rest of this function.
-    let state_ref = unsafe {
-        (&mut *state.cast::<::core::mem::MaybeUninit<crate::src::inflate::inflate_state>>())
-            .write(inflate_state_zero_value())
-    };
-    strm.state = state as *mut crate::src::deflate::internal_state;
+    let state_ref = unsafe { (&mut *state_storage.as_ptr()).write(inflate_state_zero_value()) };
+    strm.state = ::core::ptr::from_mut(state_ref).cast::<crate::src::deflate::internal_state>();
     // The allocator returned a non-null `inflate_state` above. It is owned by
     // this stream until the matching release below.
     state_ref.strm = strm;
     let ret = inflate_initialize_state(strm, state_ref, windowBits);
     if ret != crate::zlib_h::Z_OK {
         Some(strm.zfree.expect("non-null function pointer"))
-            .expect("non-null function pointer")(strm.opaque, state as crate::stdlib::voidpf);
+            .expect("non-null function pointer")(
+                strm.opaque,
+                ::core::ptr::from_mut(state_ref) as crate::stdlib::voidpf,
+            );
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     ret

@@ -903,8 +903,6 @@ pub fn deflateInit2_(
     version: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if !deflate_init_version_and_size_valid(version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
@@ -919,23 +917,20 @@ pub fn deflateInit2_(
     // Preparation above chose either zlib's default allocator or the
     // caller's callback. Keep all requests below on that published stream
     // callback path.
-    s = deflate_allocate!(
+    let state_storage = deflate_allocate!(
         stream,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
-    if s.is_null() {
+    ) as *mut ::core::mem::MaybeUninit<crate::src::deflate::deflate_state>;
+    let Some(mut state_storage) = ::core::ptr::NonNull::new(state_storage) else {
         return crate::zlib_h::Z_MEM_ERROR;
-    }
+    };
     // SAFETY: the allocator returned a non-null allocation large enough for
     // one `deflate_state`. Bind it as uninitialized storage only long enough
     // to write the complete safe zero value, then retain the initialized
     // reference for the rest of this function.
-    let state = unsafe {
-        (&mut *s.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>())
-            .write(deflate_state_zero_value())
-    };
-    stream.state = s as *mut crate::src::deflate::internal_state;
+    let state = unsafe { (&mut *state_storage.as_ptr()).write(deflate_state_zero_value()) };
+    stream.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
     // The allocator returned a non-null `deflate_state` above. It is owned by
     // this stream until `deflateEnd()` handles the failure path below.
     state.strm = stream;
