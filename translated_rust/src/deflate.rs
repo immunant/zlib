@@ -1867,6 +1867,36 @@ fn write_default_gzip_header_tail(
     true
 }
 
+fn write_gzip_trailer(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    checksum: crate::stdlib::uLong,
+    total_in: crate::stdlib::uLong,
+) -> bool {
+    let Ok(start) = usize::try_from(state.pending) else {
+        return false;
+    };
+    let trailer = [
+        checksum as crate::stdlib::Bytef,
+        (checksum >> 8) as crate::stdlib::Bytef,
+        (checksum >> 16) as crate::stdlib::Bytef,
+        (checksum >> 24) as crate::stdlib::Bytef,
+        total_in as crate::stdlib::Bytef,
+        (total_in >> 8) as crate::stdlib::Bytef,
+        (total_in >> 16) as crate::stdlib::Bytef,
+        (total_in >> 24) as crate::stdlib::Bytef,
+    ];
+    let Some(end) = start.checked_add(trailer.len()) else {
+        return false;
+    };
+    let Some(destination) = pending_buf.get_mut(start..end) else {
+        return false;
+    };
+    destination.copy_from_slice(&trailer);
+    state.pending = state.pending.wrapping_add(trailer.len() as crate::zutil_h::ulg);
+    true
+}
+
 fn flush_pending_impl(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::deflate::deflate_state,
@@ -2456,44 +2486,14 @@ pub unsafe fn deflate(
         return crate::zlib_h::Z_STREAM_END;
     }
     if (*s).wrap == 2 as ::core::ffi::c_int {
-        let c2rust_fresh25 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh25 as isize) =
-            ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh26 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh26 as isize) =
-            ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh27 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh27 as isize) =
-            ((*strm).adler >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh28 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh28 as isize) =
-            ((*strm).adler >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh29 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh29 as isize) =
-            ((*strm).total_in & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh30 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh30 as isize) =
-            ((*strm).total_in >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh31 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh31 as isize) =
-            ((*strm).total_in >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh32 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh32 as isize) =
-            ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        if !write_gzip_trailer(state, pending_buf, (*strm).adler, (*strm).total_in) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
     } else {
         let state = &mut *s;
         let pending_buf = ::core::slice::from_raw_parts_mut(
