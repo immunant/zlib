@@ -494,17 +494,13 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                     (*state).mode = crate::src::inflate::BAD;
                                     break;
                                 } else {
-                                    loop {
-                                        let c2rust_fresh11 = copy;
-                                        copy = copy.wrapping_sub(1);
-                                        if !(c2rust_fresh11 != 0) {
-                                            break;
-                                        }
-                                        let c2rust_fresh12 = (*state).have;
-                                        (*state).have = (*state).have.wrapping_add(1);
-                                        (*state).lens[c2rust_fresh12 as usize] =
-                                            len as ::core::ffi::c_ushort;
-                                    }
+                                    let state_ref = &mut *state;
+                                    let start = state_ref.have as usize;
+                                    let end = start + copy as usize;
+                                    state_ref.lens[start..end].fill(len as ::core::ffi::c_ushort);
+                                    state_ref.have = state_ref.have.wrapping_add(copy);
+                                    copy = 0 as ::core::ffi::c_uint;
+                                    copy = copy.wrapping_sub(1);
                                 }
                             }
                         }

@@ -2110,7 +2110,7 @@ pub unsafe extern "C" fn inflate_ffi(
                             ) as ::core::ffi::c_ulong;
                         }
                         have = have.wrapping_sub(copy);
-                        next = next.offset(copy as isize);
+                        next = next.wrapping_add(copy as usize);
                         (*state).length = (*state).length.wrapping_sub(copy);
                     }
                     if (*state).length != 0 {
@@ -2179,7 +2179,7 @@ pub unsafe extern "C" fn inflate_ffi(
                         ) as ::core::ffi::c_ulong;
                     }
                     have = have.wrapping_sub(copy);
-                    next = next.offset(copy as isize);
+                    next = next.wrapping_add(copy as usize);
                     if !scan.terminated {
                         break;
                     }
@@ -2292,7 +2292,7 @@ pub unsafe extern "C" fn inflate_ffi(
                         ) as ::core::ffi::c_ulong;
                     }
                     have = have.wrapping_sub(copy);
-                    next = next.offset(copy as isize);
+                    next = next.wrapping_add(copy as usize);
                     if !scan.terminated {
                         break;
                     }
