@@ -1800,32 +1800,8 @@ fn deflate_bound_z(
     }
 }
 
-// Header length accounting is ordinary, reference-bound state inspection.
-// The exported adapter below is solely responsible for binding optional C
-// strings before this helper sees them.
-fn deflate_bound_gzip_header(
-    header: &crate::zlib_h::gz_header,
-    name: Option<&::core::ffi::CStr>,
-    comment: Option<&::core::ffi::CStr>,
-) -> DeflateBoundGzipHeader {
-    DeflateBoundGzipHeader {
-        has_extra: !header.extra.is_null(),
-        extra_len: header.extra_len,
-        // zlib's bound includes each terminating nul when a name or comment
-        // is present. `to_bytes_with_nul()` preserves that exact count.
-        name_len: name
-            .map(|name| name.to_bytes_with_nul().len() as crate::stdlib::z_size_t)
-            .unwrap_or(0),
-        comment_len: comment
-            .map(|comment| comment.to_bytes_with_nul().len() as crate::stdlib::z_size_t)
-            .unwrap_or(0),
-        hcrc: header.hcrc,
-    }
-}
-
 // The numeric bound is defined solely by a bound deflater state and its
-// already-decoded gzip-header lengths. The raw adapter retains the C-pointer
-// conversions needed to obtain those inputs.
+// already-decoded gzip-header lengths.
 fn deflate_bound_from_state(
     source_len: crate::stdlib::z_size_t,
     state: Option<&crate::src::deflate::deflate_state>,
@@ -1834,10 +1810,12 @@ fn deflate_bound_from_state(
     deflate_bound_z(source_len, state.map(deflate_bound_state), gzip_header)
 }
 
-// The raw stream and retained gzip-header cursors are inspected only while
-// producing a value snapshot for the bound calculation. Keep that localized
-// here so Rust callers do not inherit an unsafe-function contract; the C ABI
-// wrapper below remains the thin exported dispatcher.
+// The raw stream and retained gzip-header cursor are inspected only while
+// producing a value snapshot for the bound calculation. A non-null name or
+// comment has no accompanying length, so traversing it would require an
+// unbounded foreign-memory read. `deflateBound()` promises an upper bound,
+// not the tightest one; use the representable maximum in that case instead.
+// The C ABI wrapper below remains a thin exported dispatcher.
 pub fn deflateBound_z(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut sourceLen: crate::stdlib::z_size_t,
@@ -1854,21 +1832,16 @@ pub fn deflateBound_z(
                         None
                     } else {
                         let header = &*state.gzhead;
-                        let name = if header.name.is_null() {
-                            None
-                        } else {
-                            Some(::core::ffi::CStr::from_ptr(
-                                header.name as *const ::core::ffi::c_char,
-                            ))
-                        };
-                        let comment = if header.comment.is_null() {
-                            None
-                        } else {
-                            Some(::core::ffi::CStr::from_ptr(
-                                header.comment as *const ::core::ffi::c_char,
-                            ))
-                        };
-                        Some(deflate_bound_gzip_header(header, name, comment))
+                        if !header.name.is_null() || !header.comment.is_null() {
+                            return crate::stdlib::z_size_t::MAX;
+                        }
+                        Some(DeflateBoundGzipHeader {
+                            has_extra: !header.extra.is_null(),
+                            extra_len: header.extra_len,
+                            name_len: 0,
+                            comment_len: 0,
+                            hcrc: header.hcrc,
+                        })
                     };
                     (Some(state), gzip_header)
                 }
