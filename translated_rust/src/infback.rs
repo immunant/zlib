@@ -134,66 +134,58 @@ fn copy_inflate_back_match(
     Some(())
 }
 
-/// Allocate, initialize, and install the opaque inflateBack state through one
-/// named implementation boundary. The stream takes ownership only after its
-/// ABI state field has been installed.
-fn initialize_allocated_inflate_back_state(
-    strm: &mut crate::zlib_h::z_stream,
+/// Initialize allocator-provided storage without observing its prior bytes.
+/// The ABI wrapper owns allocating the slot and installing its raw handle only
+/// after this initialization succeeds.
+fn initialize_inflate_back_state_slot(
+    state: &mut ::core::mem::MaybeUninit<crate::src::inflate::inflate_state>,
     window_bits: ::core::ffi::c_int,
     window: &mut [::core::ffi::c_uchar],
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
-) -> ::core::ffi::c_int {
-    // The ABI allocator and its returned raw storage remain confined to this
-    // ownership boundary. Initialize the allocation before exposing it via the
-    // stream's ABI state field.
-    let state = unsafe {
-        Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    };
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    unsafe {
-        let state = &mut *state;
-        *state = crate::src::inflate::empty_inflate_state();
-        state.allocator_provenance = allocator_provenance;
-        initialize_inflate_back_state(state, window_bits);
-        state.window = ::core::ptr::NonNull::new(window.as_mut_ptr());
-    }
-    strm.state = state.cast::<crate::src::deflate::internal_state>();
-    crate::zlib_h::Z_OK
+) {
+    let state = state.write(crate::src::inflate::empty_inflate_state());
+    state.allocator_provenance = allocator_provenance;
+    initialize_inflate_back_state(state, window_bits);
+    state.window = ::core::ptr::NonNull::new(window.as_mut_ptr());
 }
 
-pub fn inflateBackInit_(
+struct InflateBackInit {
+    allocator_provenance: crate::src::zutil::AllocatorProvenance,
+}
+
+/// Validate ABI-independent initialization inputs before the wrapper invokes
+/// the caller's allocator callback.
+fn prepare_inflate_back_init(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut windowBits: ::core::ffi::c_int,
     window: Option<&mut [::core::ffi::c_uchar]>,
     version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+) -> Result<InflateBackInit, ::core::ffi::c_int> {
     if version.is_none()
         || *version.expect("checked non-null version") as ::core::ffi::c_int
             != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
-        return crate::zlib_h::Z_VERSION_ERROR;
+        return Err(crate::zlib_h::Z_VERSION_ERROR);
     }
     if strm.is_none()
         || window.is_none()
         || windowBits < 8 as ::core::ffi::c_int
         || windowBits > 15 as ::core::ffi::c_int
     {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
     let strm = strm.expect("checked non-null stream");
     let window = window.expect("checked non-null window");
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     let allocator_provenance = crate::src::zutil::install_default_allocators(strm);
-    initialize_allocated_inflate_back_state(strm, windowBits, window, allocator_provenance)
+    // The full window span was validated at the FFI boundary. It remains the
+    // single output/history span installed after the callback allocation.
+    let _ = window;
+    Ok(InflateBackInit {
+        allocator_provenance,
+    })
 }
 #[export_name = "inflateBackInit_"]
 
@@ -205,8 +197,8 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let version = version.as_ref();
-    let strm = strm.as_mut();
-    let window = if windowBits >= 8 as ::core::ffi::c_int
+    let mut strm = strm.as_mut();
+    let mut window = if windowBits >= 8 as ::core::ffi::c_int
         && windowBits <= 15 as ::core::ffi::c_int
         && !window.is_null()
     {
@@ -217,7 +209,38 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     } else {
         None
     };
-    inflateBackInit_(strm, windowBits, window, version, stream_size)
+    let init = match prepare_inflate_back_init(
+        strm.as_deref_mut(),
+        windowBits,
+        window.as_deref_mut(),
+        version,
+        stream_size,
+    ) {
+        Ok(init) => init,
+        Err(error) => return error,
+    };
+    let Some(strm) = strm else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(window) = window else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(zalloc) = strm.zalloc else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // Callback allocation and the raw stream-state handle are ABI boundary
+    // work. The safe core below only writes a fully initialized Rust value.
+    let state = zalloc(
+        strm.opaque,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+    ) as *mut ::core::mem::MaybeUninit<crate::src::inflate::inflate_state>;
+    let Some(slot) = state.as_mut() else {
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    initialize_inflate_back_state_slot(slot, windowBits, window, init.allocator_provenance);
+    strm.state = state.cast::<crate::src::deflate::internal_state>();
+    crate::zlib_h::Z_OK
 }
 pub fn inflateBack(
     strm: &mut crate::zlib_h::z_stream,
