@@ -63,6 +63,20 @@ struct GzLoadResult {
     failed: bool,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum GzLoadTransition {
+    Error {
+        have: ::core::ffi::c_uint,
+        errno: ::core::ffi::c_int,
+    },
+    Continue {
+        have: ::core::ffi::c_uint,
+    },
+    Complete {
+        have: ::core::ffi::c_uint,
+    },
+}
+
 fn gz_load_checked_have(
     have: ::core::ffi::c_uint,
     failed: bool,
@@ -160,6 +174,24 @@ fn gz_load_apply_state(
     *eof = load.eof;
     *again = load.again;
     load.error.map_or(Ok(()), Err)
+}
+
+fn gz_load_transition(
+    len: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+    eof: &mut ::core::ffi::c_int,
+    again: &mut ::core::ffi::c_int,
+    read: Result<::core::ffi::c_uint, ::core::ffi::c_int>,
+) -> GzLoadTransition {
+    let load = gz_load_with_reader(len, have, *eof, *again, || read);
+    match gz_load_apply_state(eof, again, &load) {
+        Err(errno) => GzLoadTransition::Error {
+            have: load.have,
+            errno,
+        },
+        Ok(()) if load.more => GzLoadTransition::Continue { have: load.have },
+        Ok(()) => GzLoadTransition::Complete { have: load.have },
+    }
 }
 
 fn gz_load_read_result(
@@ -833,27 +865,28 @@ unsafe fn gz_load(
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
         let errno = gz_load_errno(ret, std::io::Error::last_os_error().raw_os_error());
-        let load = gz_load_with_reader(len, have, state.eof, state.again, || {
-            gz_load_read_result(ret, errno)
-        });
-        if let Err(errno) = gz_load_apply_state(&mut state.eof, &mut state.again, &load) {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(errno),
-            );
-            return GzLoadResult {
-                have: load.have,
-                failed: true,
-            };
-        }
-        if load.more {
-            have = load.have;
-        } else {
-            return GzLoadResult {
-                have: load.have,
-                failed: false,
-            };
+        match gz_load_transition(
+            len,
+            have,
+            &mut state.eof,
+            &mut state.again,
+            gz_load_read_result(ret, errno),
+        ) {
+            GzLoadTransition::Error { have, errno } => {
+                crate::src::gzlib::gz_error(
+                    state as *mut crate::gzguts_h::gz_state,
+                    crate::zlib_h::Z_ERRNO,
+                    crate::stdlib::strerror(errno),
+                );
+                return GzLoadResult { have, failed: true };
+            }
+            GzLoadTransition::Continue { have: next_have } => have = next_have,
+            GzLoadTransition::Complete { have } => {
+                return GzLoadResult {
+                    have,
+                    failed: false,
+                };
+            }
         }
     }
 }
@@ -2607,6 +2640,48 @@ mod tests {
             Err(crate::stdlib::EAGAIN)
         );
         assert_eq!(eof, -1);
+        assert_eq!(again, 1);
+    }
+
+    #[test]
+    fn gz_load_transition_commits_partial_read_and_continues() {
+        let mut eof = 0;
+        let mut again = 1;
+
+        assert_eq!(
+            gz_load_transition(5, 2, &mut eof, &mut again, Ok(1)),
+            GzLoadTransition::Continue { have: 3 }
+        );
+        assert_eq!(eof, 0);
+        assert_eq!(again, 0);
+    }
+
+    #[test]
+    fn gz_load_transition_completes_on_eof() {
+        let mut eof = 0;
+        let mut again = 1;
+
+        assert_eq!(
+            gz_load_transition(5, 2, &mut eof, &mut again, Ok(0)),
+            GzLoadTransition::Complete { have: 2 }
+        );
+        assert_eq!(eof, 1);
+        assert_eq!(again, 0);
+    }
+
+    #[test]
+    fn gz_load_transition_commits_retryable_error_before_returning_it() {
+        let mut eof = 0;
+        let mut again = 0;
+
+        assert_eq!(
+            gz_load_transition(5, 0, &mut eof, &mut again, Err(crate::stdlib::EAGAIN)),
+            GzLoadTransition::Error {
+                have: 0,
+                errno: crate::stdlib::EAGAIN,
+            }
+        );
+        assert_eq!(eof, 0);
         assert_eq!(again, 1);
     }
 

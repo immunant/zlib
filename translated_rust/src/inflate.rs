@@ -2455,14 +2455,18 @@ pub unsafe extern "C" fn inflate(
                         bits = 0 as ::core::ffi::c_uint;
                     }
                 }
-                let completion = inflate_gzip_header_completion((*state).flags);
-                if !(*state).head.is_null() {
-                    (*(*state).head).hcrc = completion.header_crc_present;
-                    (*(*state).head).done = 1 as ::core::ffi::c_int;
-                }
-                (*state).check = completion.check;
-                (*strm).adler = (*state).check as crate::stdlib::uLong;
-                (*state).mode = completion.next_mode;
+                let head = if (*state).head.is_null() {
+                    None
+                } else {
+                    Some(&mut *(*state).head)
+                };
+                inflate_apply_gzip_header_completion(
+                    (*state).flags,
+                    &mut (*state).check,
+                    &mut (*strm).adler,
+                    &mut (*state).mode,
+                    head,
+                );
                 continue;
             }
             _ => {}
@@ -2807,6 +2811,23 @@ fn inflate_gzip_header_completion(flags: ::core::ffi::c_int) -> InflateGzipHeade
         check: crate::src::crc32::CRC32_INITIAL as crate::stdlib::uLong,
         next_mode: TYPE,
     }
+}
+
+fn inflate_apply_gzip_header_completion(
+    flags: ::core::ffi::c_int,
+    check: &mut crate::stdlib::uLong,
+    adler: &mut crate::stdlib::uLong,
+    mode: &mut inflate_mode,
+    head: Option<&mut crate::zlib_h::gz_header>,
+) {
+    let completion = inflate_gzip_header_completion(flags);
+    if let Some(head) = head {
+        head.hcrc = completion.header_crc_present;
+        head.done = 1;
+    }
+    *check = completion.check;
+    *adler = *check;
+    *mode = completion.next_mode;
 }
 
 fn inflate_gzip_header_has_name(flags: ::core::ffi::c_int) -> bool {
@@ -3339,14 +3360,14 @@ mod tests {
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_code_length_repeat_spec, dynamic_header_counts, gzip_extra_copy_bounds,
         inflateSyncPoint_ffi, inflate_accumulate_totals, inflate_add_and_consume_extra_bits,
-        inflate_align_to_byte_boundary, inflate_assign_data_type, inflate_block_header,
-        inflate_call_progress, inflate_can_use_fast_path, inflate_codes_used_offset_value,
-        inflate_copy_match_from_output, inflate_copy_progress, inflate_data_type_value,
-        inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_distance_extra_update, inflate_flush_stops_after_fixed_trees,
-        inflate_flush_stops_at_block_boundary, inflate_get_dictionary_result,
-        inflate_gzip_extra_progress, inflate_gzip_flags, inflate_gzip_flags_error,
-        inflate_gzip_flags_validation, inflate_gzip_header_completion,
+        inflate_align_to_byte_boundary, inflate_apply_gzip_header_completion,
+        inflate_assign_data_type, inflate_block_header, inflate_call_progress,
+        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
+        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
+        inflate_dictionary_is_allowed, inflate_distance_extra_update,
+        inflate_flush_stops_after_fixed_trees, inflate_flush_stops_at_block_boundary,
+        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
+        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_completion,
         inflate_gzip_header_crc_bytes, inflate_gzip_header_crc_is_valid,
         inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
         inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
@@ -3536,6 +3557,54 @@ mod tests {
                 next_mode: TYPE,
             }
         );
+    }
+
+    #[test]
+    fn inflate_apply_gzip_header_completion_updates_state_and_optional_header() {
+        let mut head = crate::zlib_h::gz_header {
+            text: 0,
+            time: 0,
+            xflags: 0,
+            os: 0,
+            extra: ::core::ptr::null_mut(),
+            extra_len: 0,
+            extra_max: 0,
+            name: ::core::ptr::null_mut(),
+            name_max: 0,
+            comment: ::core::ptr::null_mut(),
+            comm_max: 0,
+            hcrc: 0,
+            done: 0,
+        };
+        let mut check = 123;
+        let mut adler = 456;
+        let mut mode = BAD;
+
+        inflate_apply_gzip_header_completion(
+            0x200,
+            &mut check,
+            &mut adler,
+            &mut mode,
+            Some(&mut head),
+        );
+
+        assert_eq!(head.hcrc, 1);
+        assert_eq!(head.done, 1);
+        assert_eq!(
+            check,
+            crate::src::crc32::CRC32_INITIAL as crate::stdlib::uLong
+        );
+        assert_eq!(adler, check);
+        assert_eq!(mode, TYPE);
+
+        inflate_apply_gzip_header_completion(0, &mut check, &mut adler, &mut mode, None);
+
+        assert_eq!(
+            check,
+            crate::src::crc32::CRC32_INITIAL as crate::stdlib::uLong
+        );
+        assert_eq!(adler, check);
+        assert_eq!(mode, TYPE);
     }
 
     #[test]

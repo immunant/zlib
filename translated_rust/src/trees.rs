@@ -4659,6 +4659,13 @@ fn bl_code_index_at_rank(rank: ::core::ffi::c_int) -> usize {
     bl_order[rank as usize] as usize
 }
 
+fn bl_tree_code_at_rank(
+    bl_tree: &[crate::src::deflate::ct_data; (2 * crate::src::deflate::BL_CODES + 1) as usize],
+    rank: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    bl_tree[bl_code_index_at_rank(rank)].dl.value as ::core::ffi::c_int
+}
+
 fn last_nonzero_bl_tree_rank(code_lengths: &[crate::zutil_h::ush]) -> ::core::ffi::c_int {
     let mut rank = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
     while rank >= 3 as ::core::ffi::c_int
@@ -5125,11 +5132,10 @@ unsafe fn send_all_trees(
     }
     rank = 0 as ::core::ffi::c_int;
     while rank < blcodes {
-        let code_index = bl_code_index_at_rank(rank);
+        let bl_code = bl_tree_code_at_rank(&(*s).bl_tree, rank);
         let mut len_2: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if bit_buffer_would_overflow((*s).bi_valid, len_2) {
-            let mut val_2: ::core::ffi::c_int =
-                (*s).bl_tree[code_index].dl.value as ::core::ffi::c_int;
+            let mut val_2: ::core::ffi::c_int = bl_code;
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                 | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                 as crate::zutil_h::ush;
@@ -5149,7 +5155,7 @@ unsafe fn send_all_trees(
             (*s).bi_valid += len_2 - crate::src::deflate::Buf_size;
         } else {
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | ((*s).bl_tree[code_index].dl.value as ::core::ffi::c_int) << (*s).bi_valid)
+                | (bl_code as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                 as crate::zutil_h::ush;
             (*s).bi_valid += len_2;
         }
@@ -5752,10 +5758,10 @@ mod tests {
     use super::{
         assign_canonical_codes, bi_flush_core, bi_reverse, bi_windup_core,
         bit_buffer_would_overflow, bit_length_correction, bl_code_index_at_rank, bl_order,
-        bl_tree_header_bit_length, bl_tree_header_cost_update, bl_tree_header_update,
-        block_bit_length_bytes, block_header_bits, canonical_code_assignments,
-        canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
-        combined_tree_frequency, compress_block_symbol, decode_symbol_triplet,
+        bl_tree_code_at_rank, bl_tree_header_bit_length, bl_tree_header_cost_update,
+        bl_tree_header_update, block_bit_length_bytes, block_header_bits,
+        canonical_code_assignments, canonical_codes_for_lengths, clamped_tree_bit_length,
+        classify_tree_run, combined_tree_frequency, compress_block_symbol, decode_symbol_triplet,
         detect_data_type_from_ltree, dist_code_index, dynamic_tree_header_counts,
         gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
         initial_tree_run_state, last_nonzero_bl_tree_rank, length_extra_bits, match_tree_codes,
@@ -6706,5 +6712,19 @@ mod tests {
         assert_eq!(bl_code_index_at_rank(0), 16);
         assert_eq!(bl_code_index_at_rank(3), 0);
         assert_eq!(bl_code_index_at_rank(crate::src::deflate::BL_CODES - 1), 15);
+    }
+
+    #[test]
+    fn bl_tree_code_at_rank_reads_the_code_for_deflate_order() {
+        let empty = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { value: 0 },
+        };
+        let mut bl_tree = [empty; (2 * crate::src::deflate::BL_CODES + 1) as usize];
+        bl_tree[16].dl.value = 3;
+        bl_tree[0].dl.value = 7;
+
+        assert_eq!(bl_tree_code_at_rank(&bl_tree, 0), 3);
+        assert_eq!(bl_tree_code_at_rank(&bl_tree, 3), 7);
     }
 }
