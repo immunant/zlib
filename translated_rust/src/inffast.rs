@@ -58,6 +58,37 @@ struct InflateFastProgress {
     error: Option<usize>,
 }
 
+impl InflateFastProgress {
+    /// The fast loop is optional: callers fall back to the regular decoder
+    /// when either of its documented six-input-byte or 258-output-byte
+    /// reserves is unavailable.
+    fn no_progress(hold: u64, bits: u32) -> Self {
+        Self {
+            input_used: 0,
+            output_used: 0,
+            hold,
+            bits,
+            mode: None,
+            error: None,
+        }
+    }
+
+    /// Reject inconsistent bounded-core inputs before any table or history
+    /// lookup.  The raw adapter currently establishes these invariants; the
+    /// checks keep this core safe when a future stream boundary lends it
+    /// ordinary slices instead.
+    fn invalid(hold: u64, bits: u32, error: usize) -> Self {
+        Self {
+            input_used: 0,
+            output_used: 0,
+            hold,
+            bits,
+            mode: Some(crate::src::inflate::BAD),
+            error: Some(error),
+        }
+    }
+}
+
 /// Decode the fast-path portion of a deflate stream using only bounded
 /// buffers.  The ABI adapter owns construction of these views and commits the
 /// resulting cursors, so this core cannot retain or dereference foreign
@@ -78,6 +109,23 @@ fn inflate_fast_core(
     sane: bool,
     start: u32,
 ) -> InflateFastProgress {
+    // The translated raw loop relies on these reserves before it reads ahead.
+    // A bounded caller with less space should use the normal decoder instead.
+    if input.len() < 6 || output.len() < 258 {
+        return InflateFastProgress::no_progress(hold, bits);
+    }
+    if lenbits >= u32::BITS || distbits >= u32::BITS {
+        return InflateFastProgress::invalid(hold, bits, 14);
+    }
+    if wsize > window.len() || whave > wsize || wnext > wsize {
+        return InflateFastProgress::invalid(hold, bits, 17);
+    }
+    let Ok(output_capacity) = u32::try_from(output.len()) else {
+        return InflateFastProgress::invalid(hold, bits, 17);
+    };
+    let Some(output_origin) = start.checked_sub(output_capacity) else {
+        return InflateFastProgress::invalid(hold, bits, 17);
+    };
     let mut input_at = 0usize;
     let mut output_at = 0usize;
     let lmask = (1u32 << lenbits).wrapping_sub(1) as u64;
@@ -195,8 +243,7 @@ fn inflate_fast_core(
                     dist_here = next;
                 };
 
-                let produced =
-                    start.wrapping_sub(output.len().wrapping_sub(output_at) as u32) as usize;
+                let produced = output_origin.wrapping_add(output_at as u32) as usize;
                 if dist > produced {
                     let mut back = dist - produced;
                     if back > whave || back > wsize || wsize > window.len() {
