@@ -2672,20 +2672,15 @@ fn inflate_sync(
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflateSync(strm)
 }
-pub unsafe extern "C" fn inflateSyncPoint(
+#[export_name = "inflateSyncPoint"]
+
+pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
     let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_sync_point(state)
-}
-#[export_name = "inflateSyncPoint"]
-
-pub unsafe extern "C" fn inflateSyncPoint_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    inflateSyncPoint(strm)
 }
 pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
