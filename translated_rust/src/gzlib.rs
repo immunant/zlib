@@ -1019,6 +1019,16 @@ fn gz_error_state(
     has_message && err != crate::zlib_h::Z_MEM_ERROR
 }
 
+/// Calculate the storage required for the legacy `"path: message"` error
+/// text.  The allocator and C-string boundary remain in `gz_error`, but the
+/// C-size wrapping rule is now kept in one safe scalar helper.
+fn gz_error_storage_len(
+    path_len: crate::__stddef_size_t_h::size_t,
+    message_len: crate::__stddef_size_t_h::size_t,
+) -> crate::__stddef_size_t_h::size_t {
+    path_len.wrapping_add(message_len).wrapping_add(3)
+}
+
 pub unsafe extern "C" fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
     mut err: ::core::ffi::c_int,
@@ -1033,20 +1043,18 @@ pub unsafe extern "C" fn gz_error(
     if !gz_error_state(&mut *state, err, !msg.is_null()) {
         return;
     }
-    (*state).msg = crate::stdlib::malloc(
-        crate::stdlib::strlen((*state).path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_char;
+    let storage_len = gz_error_storage_len(
+        crate::stdlib::strlen((*state).path),
+        crate::stdlib::strlen(msg),
+    );
+    (*state).msg = crate::stdlib::malloc(storage_len) as *mut ::core::ffi::c_char;
     if (*state).msg.is_null() {
         (*state).err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
     crate::stdlib::snprintf(
         (*state).msg,
-        crate::stdlib::strlen((*state).path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
+        storage_len,
         b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
         (*state).path,
         b": \0".as_ptr() as *const ::core::ffi::c_char,
