@@ -165,10 +165,6 @@ fn gz_has_pending_input(avail_in: crate::stdlib::uInt) -> bool {
     avail_in != 0
 }
 
-fn gz_write_needs_input_reset(avail_in: crate::stdlib::uInt) -> bool {
-    avail_in == 0
-}
-
 fn gz_has_pending_skip(skip: crate::stdlib::off64_t) -> bool {
     skip != 0
 }
@@ -647,7 +643,7 @@ unsafe fn gz_write(
         loop {
             let mut have: ::core::ffi::c_uint = 0;
             let mut copy: ::core::ffi::c_uint = 0;
-            if gz_write_needs_input_reset((*state).strm.avail_in) {
+            if !gz_has_pending_input((*state).strm.avail_in) {
                 (*state).strm.next_in = (*state).in_0;
                 (*state).x.have = 0;
             }
@@ -1012,12 +1008,11 @@ mod tests {
         gz_write_apply_direct_progress, gz_write_buffered_copy_len,
         gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
-        gz_write_needs_input_reset, gz_write_state_is_usable, gz_write_uses_buffered_path,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
-        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len,
-        gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
-        GzCompWriteFailure,
+        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_apply_progress,
+        gz_zero_chunk_len, gz_zero_needs_initialization, gzclose_mode_is_writable,
+        gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result,
+        gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
+        gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompWriteFailure,
     };
 
     #[test]
@@ -1498,13 +1493,6 @@ mod tests {
     #[test]
     fn gz_write_error_result_discards_partial_count_when_not_retryable() {
         assert_eq!(gz_write_error_result(0, 10, 4), 0);
-    }
-
-    #[test]
-    fn gz_write_needs_input_reset_only_when_input_is_exhausted() {
-        assert!(gz_write_needs_input_reset(0));
-        assert!(!gz_write_needs_input_reset(1));
-        assert!(!gz_write_needs_input_reset(crate::stdlib::uInt::MAX));
     }
 
     #[test]

@@ -4089,6 +4089,15 @@ fn tree_run_limits(
     }
 }
 
+fn tree_run_continues(
+    count: ::core::ffi::c_int,
+    max_count: ::core::ffi::c_int,
+    current_len: ::core::ffi::c_int,
+    next_len: ::core::ffi::c_int,
+) -> bool {
+    count < max_count && current_len == next_len
+}
+
 fn tree_next_cursor(index: ::core::ffi::c_int) -> usize {
     index.wrapping_add(1) as usize
 }
@@ -4111,7 +4120,7 @@ unsafe extern "C" fn scan_tree(
         curlen = nextlen;
         nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
         count += 1;
-        if !(count < max_count && curlen == nextlen) {
+        if !tree_run_continues(count, max_count, curlen, nextlen) {
             if count < min_count {
                 (*s).bl_tree[curlen as usize].fc.value = ((*s).bl_tree[curlen as usize].fc.value
                     as ::core::ffi::c_int
@@ -4155,7 +4164,7 @@ unsafe extern "C" fn send_tree(
         curlen = nextlen;
         nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
         count += 1;
-        if !(count < max_count && curlen == nextlen) {
+        if !tree_run_continues(count, max_count, curlen, nextlen) {
             if count < min_count {
                 loop {
                     let mut len: ::core::ffi::c_int =
@@ -5154,8 +5163,8 @@ mod tests {
         detect_data_type_from_ltree, dist_code_index, heap_node_precedes, next_code_for_len,
         next_codes, pending_cursor_after_bytes, reset_block_trees, select_block_encoding,
         static_bl_desc, static_d_desc, static_l_desc, symbol_triplet_cursors,
-        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_limits,
-        BlockEncoding, END_BLOCK, MAX_BITS,
+        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_continues,
+        tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5235,6 +5244,14 @@ mod tests {
         assert_eq!(tree_run_limits(7, 7), (6, 3));
         assert_eq!(tree_run_limits(7, 8), (7, 4));
         assert_eq!(tree_run_limits(0, 1), (7, 4));
+    }
+
+    #[test]
+    fn tree_runs_continue_only_within_the_limit_and_same_length() {
+        assert!(tree_run_continues(2, 3, 7, 7));
+        assert!(!tree_run_continues(3, 3, 7, 7));
+        assert!(!tree_run_continues(2, 3, 7, 8));
+        assert!(tree_run_continues(-1, 0, 0, 0));
     }
 
     #[test]

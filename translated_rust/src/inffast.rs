@@ -81,13 +81,15 @@ fn subtable_offset(entry: code, hold: ::core::ffi::c_ulong) -> isize {
         + (hold & bit_mask(entry.op as ::core::ffi::c_uint) as ::core::ffi::c_ulong) as isize
 }
 
-fn unread_bit_state(
+fn unread_input_state(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
+    input_remaining: crate::stdlib::uInt,
 ) -> (
     ::core::ffi::c_ulong,
     ::core::ffi::c_uint,
     ::core::ffi::c_uint,
+    crate::stdlib::uInt,
 ) {
     let unread_bytes = bits >> 3 as ::core::ffi::c_int;
     let unread_bits = bits.wrapping_sub(unread_bytes << 3 as ::core::ffi::c_int);
@@ -95,6 +97,7 @@ fn unread_bit_state(
         hold & bit_mask(unread_bits) as ::core::ffi::c_ulong,
         unread_bits,
         unread_bytes,
+        input_remaining.wrapping_add(unread_bytes as crate::stdlib::uInt),
     )
 }
 
@@ -114,13 +117,6 @@ fn output_cursor_after_write(
         output_produced.wrapping_add(1),
         output_remaining.wrapping_sub(1),
     )
-}
-
-fn input_remaining_after_unread(
-    input_remaining: crate::stdlib::uInt,
-    unread_bytes: ::core::ffi::c_uint,
-) -> crate::stdlib::uInt {
-    input_remaining.wrapping_add(unread_bytes as crate::stdlib::uInt)
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -531,11 +527,11 @@ pub unsafe extern "C" fn inflate_fast(
             break;
         }
     }
-    (hold, bits, len) = unread_bit_state(hold, bits);
+    (hold, bits, len, input_remaining) = unread_input_state(hold, bits, input_remaining);
     in_0 = in_0.wrapping_sub(len as usize);
     (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = input_remaining_after_unread(input_remaining, len);
+    (*strm).avail_in = input_remaining;
     (*strm).avail_out = output_remaining;
     (*state).hold = hold;
     (*state).bits = bits;
@@ -553,9 +549,8 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         append_input_byte, bit_mask, code, consume_bits, fast_dist_action, fast_input_available,
-        fast_litlen_action, fast_output_available, input_remaining_after_unread, low_bits,
-        output_cursor_after_write, subtable_offset, unread_bit_state, FastDistAction,
-        FastLitLenAction,
+        fast_litlen_action, fast_output_available, low_bits, output_cursor_after_write,
+        subtable_offset, unread_input_state, FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -647,22 +642,28 @@ mod tests {
     }
 
     #[test]
-    fn unread_bit_state_rewinds_full_bytes_and_retains_remaining_bits() {
-        assert_eq!(unread_bit_state(0xdead_beef, 21), (0x0f, 5, 2));
+    fn unread_input_state_rewinds_full_bytes_and_restores_input() {
+        assert_eq!(unread_input_state(0xdead_beef, 21, 4), (0x0f, 5, 2, 6));
     }
 
     #[test]
-    fn unread_bit_state_clears_aligned_and_preserves_sub_byte_buffers() {
-        assert_eq!(unread_bit_state(0xfeed, 16), (0, 0, 2));
-        assert_eq!(unread_bit_state(0xff, 7), (0x7f, 7, 0));
+    fn unread_input_state_clears_aligned_and_preserves_sub_byte_buffers() {
+        assert_eq!(unread_input_state(0xfeed, 16, 4), (0, 0, 2, 6));
+        assert_eq!(unread_input_state(0xff, 7, 4), (0x7f, 7, 0, 4));
     }
 
     #[test]
-    fn fast_input_cursor_reserves_five_bytes_and_restores_unread_bytes() {
+    fn fast_input_cursor_reserves_five_bytes() {
         assert!(!fast_input_available(5));
         assert!(fast_input_available(6));
-        assert_eq!(input_remaining_after_unread(4, 2), 6);
-        assert_eq!(input_remaining_after_unread(::core::ffi::c_uint::MAX, 1), 0);
+    }
+
+    #[test]
+    fn unread_input_state_wraps_restored_input() {
+        assert_eq!(
+            unread_input_state(::core::ffi::c_ulong::MAX, 8, ::core::ffi::c_uint::MAX),
+            (0, 0, 1, 0),
+        );
     }
 
     #[test]
