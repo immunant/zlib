@@ -938,28 +938,6 @@ fn input_prefix(
     Some(unsafe { core::slice::from_raw_parts(strm.next_in, len as usize) })
 }
 
-unsafe extern "C" fn read_buf(
-    strm: crate::zlib_h::z_streamp,
-    buf: *mut crate::stdlib::Bytef,
-    size: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
-    let strm = &mut *strm;
-    let len = strm.avail_in.min(size);
-    if len == 0 {
-        return 0;
-    }
-
-    // `len` is bounded by both the caller-provided destination capacity and
-    // the stream's available input above, so each view covers exactly the
-    // bytes transferred by this call.
-    let input = ::core::slice::from_raw_parts(strm.next_in, len as usize);
-    let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
-    let wrap = (&*strm.state).wrap;
-    read_buf_impl(strm, input, output, wrap);
-    strm.next_in = strm.next_in.add(len as usize);
-    len
-}
-
 unsafe fn fill_window(s: *mut crate::src::deflate::deflate_state) {
     let Some(s) = (unsafe { s.as_mut() }) else {
         return;
