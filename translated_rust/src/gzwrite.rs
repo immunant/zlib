@@ -225,6 +225,32 @@ unsafe extern "C" fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
+/// Choose one zero-fill chunk without converting the gzip handle or its
+/// buffers.  The narrowing cast deliberately matches zlib's `unsigned`
+/// chunk size when a malformed negative skip reaches this private adapter.
+fn gz_zero_chunk_plan(
+    size: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
+) -> ::core::ffi::c_uint {
+    if (::core::mem::size_of::<::core::ffi::c_int>()
+        == ::core::mem::size_of::<crate::stdlib::off64_t>()
+        && size > crate::src::gzlib::gz_intmax())
+        || size as crate::stdlib::off64_t > skip
+    {
+        skip as ::core::ffi::c_uint
+    } else {
+        size
+    }
+}
+
+/// Record the number of zero bytes consumed by a completed compression step.
+/// The raw adapter owns the input cursor and compressor call; this only keeps
+/// the C-style logical-position and pending-seek arithmetic together.
+fn gz_zero_commit_state(state: &mut crate::gzguts_h::gz_state, consumed: ::core::ffi::c_uint) {
+    state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
+    state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
+}
+
 unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
@@ -237,15 +263,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>()
-            == ::core::mem::size_of::<crate::stdlib::off64_t>()
-            && (*state).size > crate::src::gzlib::gz_intmax()
-            || (*state).size as crate::stdlib::off64_t > (*state).skip
-        {
-            (*state).skip as ::core::ffi::c_uint
-        } else {
-            (*state).size
-        };
+        n = gz_zero_chunk_plan((*state).size, (*state).skip);
         if first != 0 {
             crate::stdlib::memset(
                 (*state).in_0 as *mut ::core::ffi::c_void,
@@ -258,8 +276,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         n = n.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-        (*state).x.pos += n as crate::stdlib::off64_t;
-        (*state).skip -= n as crate::stdlib::off64_t;
+        gz_zero_commit_state(&mut *state, n);
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
