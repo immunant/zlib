@@ -514,6 +514,23 @@ impl DeflateCallbackStorageOwner {
         plan
     }
 
+    // Pending output has the same callback lifecycle as the three history
+    // regions, but tree output does not need to borrow those regions.  Make
+    // the lifecycle owner the sole place that admits a pending-only view, so
+    // every caller uses the recorded completion flag and immutable callback
+    // geometry instead of recovering a length from opaque state.
+    fn pending_storage<'storage>(
+        &self,
+        pending: Option<&'storage mut [crate::stdlib::Bytef]>,
+    ) -> Option<DeflatePendingStorage<'storage>> {
+        if !self.pending {
+            return None;
+        }
+        let pending_buf = pending?;
+        (pending_buf.len() == self.storage.pending.byte_len()?)
+            .then_some(DeflatePendingStorage { pending_buf })
+    }
+
     // The owner persists with the callback lifecycle, while this operation
     // view borrows only the three regions needed by dictionary installation.
     // Verify the view against the immutable callback requests here so no
@@ -551,12 +568,11 @@ impl DeflateCallbackStorageOwner {
             return None;
         }
         let layout = self.storage;
-        let pending_buf = storage.pending?;
+        let pending_buf = self.pending_storage(storage.pending)?.pending_buf;
         let window = storage.window?;
         let prev = storage.prev?;
         let head = storage.head?;
-        if pending_buf.len() != layout.pending.byte_len()?
-            || window.len() != layout.window.byte_len()?
+        if window.len() != layout.window.byte_len()?
             || prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()?
             || head.len() != layout.head.element_len::<crate::src::deflate::Posf>()?
         {
@@ -631,12 +647,21 @@ pub(crate) unsafe fn deflate_tree_bit_output(
     state: &mut crate::src::deflate::deflate_state,
     action: crate::src::trees::BitOutputAction<'_>,
 ) -> ::core::ffi::c_int {
-    let pending_len = state.callback_storage.pending_len();
     let pending_ptr = state
         .pending_buf
         .expect("initialized pending buffer")
         .as_ptr();
-    let pending_buf = unsafe { ::core::slice::from_raw_parts_mut(pending_ptr, pending_len) };
+    // This is the legacy opaque-state projection boundary.  It forms the one
+    // callback-backed slice required by tree output; the persistent C4 owner
+    // admits the borrow using its lifecycle ledger and immutable geometry.
+    let pending = unsafe {
+        ::core::slice::from_raw_parts_mut(pending_ptr, state.callback_storage.pending_len())
+    };
+    let pending_buf = state
+        .callback_storage
+        .pending_storage(Some(pending))
+        .expect("initialized pending storage projection")
+        .pending_buf;
     match action {
         action @ (crate::src::trees::BitOutputAction::Flush
         | crate::src::trees::BitOutputAction::Windup
@@ -1720,6 +1745,14 @@ struct DeflateDictionaryStorage<'stream> {
     window: &'stream mut [crate::stdlib::Bytef],
     prev: &'stream mut [crate::src::deflate::Posf],
     head: &'stream mut [crate::src::deflate::Posf],
+}
+
+// A C4 operation that needs only pending bytes still receives a checked,
+// pointer-free borrow from the lifecycle owner.  Keeping this smaller view
+// separate from dispatch lets legacy tree calls share the same completion and
+// geometry rule without borrowing unrelated history tables.
+struct DeflatePendingStorage<'storage> {
+    pending_buf: &'storage mut [crate::stdlib::Bytef],
 }
 
 enum DeflateStorageProjection<'request> {
