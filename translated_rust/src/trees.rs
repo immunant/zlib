@@ -3678,6 +3678,25 @@ fn pending_cursor_after_bytes(pending: crate::zutil_h::ulg, count: usize) -> cra
     pending.wrapping_add(count as crate::zutil_h::ulg)
 }
 
+fn tr_flush_bits_core(
+    storage: &mut crate::src::deflate::PendingStorageView<'_>,
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+) -> bool {
+    let mut next_bi_buf = *bi_buf;
+    let mut next_bi_valid = *bi_valid;
+    let (count, bytes) = bi_flush_core(&mut next_bi_buf, &mut next_bi_valid);
+
+    if !storage.append_pending(pending, &bytes[..count]) {
+        return false;
+    }
+
+    *bi_buf = next_bi_buf;
+    *bi_valid = next_bi_valid;
+    true
+}
+
 fn heap_node_precedes(
     left_frequency: crate::zutil_h::ush,
     left_depth: crate::zutil_h::uch,
@@ -5103,13 +5122,18 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    let (count, bytes) = bi_flush_core(&mut (*s).bi_buf, &mut (*s).bi_valid);
-    let pending = (*s).pending;
-    for (index, byte) in bytes.into_iter().take(count).enumerate() {
-        let cursor = pending.wrapping_add(index as crate::zutil_h::ulg);
-        *(*s).pending_buf.wrapping_add(cursor as usize) = byte;
-    }
-    (*s).pending = pending_cursor_after_bytes(pending, count);
+    let state = &mut *s;
+    let pending_buffer =
+        core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
+    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, layout)
+        .expect("pending storage layout matches its allocation");
+    assert!(tr_flush_bits_core(
+        &mut storage,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+    ));
 }
 fn tr_align_core(
     storage: &mut crate::src::deflate::PendingStorageView<'_>,
@@ -5469,7 +5493,7 @@ mod tests {
         supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
-        tr_align_core, tr_tally_core, tree_bit_emissions, tree_bit_length_cost,
+        tr_align_core, tr_flush_bits_core, tr_tally_core, tree_bit_emissions, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_code_count, tree_heap_has_pair,
         tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth, tree_run_continues,
         tree_run_emissions, tree_run_extra_bits, tree_run_limits, tree_run_step,
@@ -5509,6 +5533,98 @@ mod tests {
         assert_eq!(pending, 2);
         assert_eq!(bi_buf, 1);
         assert_eq!(bi_valid, 1);
+    }
+
+    #[test]
+    fn tr_flush_bits_core_keeps_partial_bytes_buffered() {
+        let layout = crate::src::deflate::pending_storage_layout(1);
+        let mut pending_bytes = [0xa5; 4];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_bytes, layout).unwrap();
+        let mut pending = 1;
+        let mut bi_buf = 0xbeef;
+        let mut bi_valid = 7;
+
+        assert!(tr_flush_bits_core(
+            &mut storage,
+            &mut pending,
+            &mut bi_buf,
+            &mut bi_valid,
+        ));
+        drop(storage);
+        assert_eq!(pending_bytes, [0xa5; 4]);
+        assert_eq!(pending, 1);
+        assert_eq!(bi_buf, 0xbeef);
+        assert_eq!(bi_valid, 7);
+    }
+
+    #[test]
+    fn tr_flush_bits_core_flushes_one_byte() {
+        let layout = crate::src::deflate::pending_storage_layout(1);
+        let mut pending_bytes = [0xa5; 4];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_bytes, layout).unwrap();
+        let mut pending = 1;
+        let mut bi_buf = 0x12ab;
+        let mut bi_valid = 8;
+
+        assert!(tr_flush_bits_core(
+            &mut storage,
+            &mut pending,
+            &mut bi_buf,
+            &mut bi_valid,
+        ));
+        drop(storage);
+        assert_eq!(pending_bytes, [0xa5, 0xab, 0xa5, 0xa5]);
+        assert_eq!(pending, 2);
+        assert_eq!(bi_buf, 0x12);
+        assert_eq!(bi_valid, 0);
+    }
+
+    #[test]
+    fn tr_flush_bits_core_flushes_two_bytes() {
+        let layout = crate::src::deflate::pending_storage_layout(1);
+        let mut pending_bytes = [0xa5; 4];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_bytes, layout).unwrap();
+        let mut pending = 1;
+        let mut bi_buf = 0xbeef;
+        let mut bi_valid = 16;
+
+        assert!(tr_flush_bits_core(
+            &mut storage,
+            &mut pending,
+            &mut bi_buf,
+            &mut bi_valid,
+        ));
+        drop(storage);
+        assert_eq!(pending_bytes, [0xa5, 0xef, 0xbe, 0xa5]);
+        assert_eq!(pending, 3);
+        assert_eq!(bi_buf, 0);
+        assert_eq!(bi_valid, 0);
+    }
+
+    #[test]
+    fn tr_flush_bits_core_rejects_insufficient_capacity_without_mutation() {
+        let layout = crate::src::deflate::pending_storage_layout(1);
+        let mut pending_bytes = [0xa5; 4];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_bytes, layout).unwrap();
+        let mut pending = 3;
+        let mut bi_buf = 0xbeef;
+        let mut bi_valid = 16;
+
+        assert!(!tr_flush_bits_core(
+            &mut storage,
+            &mut pending,
+            &mut bi_buf,
+            &mut bi_valid,
+        ));
+        drop(storage);
+        assert_eq!(pending_bytes, [0xa5; 4]);
+        assert_eq!(pending, 3);
+        assert_eq!(bi_buf, 0xbeef);
+        assert_eq!(bi_valid, 16);
     }
 
     #[test]
