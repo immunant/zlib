@@ -330,6 +330,21 @@ fn gz_avail_should_compact(compact_input: bool, input_is_buffer_start: bool) -> 
     compact_input && !input_is_buffer_start
 }
 
+fn gz_avail_input_offset(
+    input_start: usize,
+    next_in: usize,
+    avail_in: crate::stdlib::uInt,
+) -> Option<usize> {
+    if avail_in == 0 {
+        // zlib permits a null `next_in` when no input remains.  There is no
+        // cursor to preserve in that state, so normalize it to the buffer
+        // start before constructing the safe storage view.
+        Some(0)
+    } else {
+        next_in.checked_sub(input_start)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct GzAvailRefillStep {
     compact_input: bool,
@@ -1000,13 +1015,9 @@ unsafe fn gz_avail(
     }
     let q = state.strm.next_in;
     let input = core::slice::from_raw_parts_mut(p, state.size as usize);
-    // zlib permits a null `next_in` while `avail_in` is zero.  In that
-    // empty-input state there is no cursor to preserve, so normalize it to
-    // the input buffer's start before establishing the safe view.
-    let input_offset = if state.strm.avail_in == 0 {
-        0
-    } else {
-        (q as usize).wrapping_sub(p as usize)
+    let Some(input_offset) = gz_avail_input_offset(p as usize, q as usize, state.strm.avail_in)
+    else {
+        return -1 as ::core::ffi::c_int;
     };
     let Some(mut input) = GzInputStorage::new(input, input_offset, state.strm.avail_in) else {
         return -1 as ::core::ffi::c_int;
@@ -2220,6 +2231,13 @@ mod tests {
         assert!(!gz_avail_should_compact(false, true));
         assert!(gz_avail_should_compact(true, false));
         assert!(!gz_avail_should_compact(true, true));
+    }
+
+    #[test]
+    fn gz_avail_input_offset_normalizes_empty_input_and_rejects_underflow() {
+        assert_eq!(gz_avail_input_offset(100, 0, 0), Some(0));
+        assert_eq!(gz_avail_input_offset(100, 108, 1), Some(8));
+        assert_eq!(gz_avail_input_offset(100, 99, 1), None);
     }
 
     #[test]
