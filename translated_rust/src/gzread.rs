@@ -57,6 +57,21 @@ enum GzFetchOutput<'a> {
     Direct(&'a mut [u8]),
 }
 
+/// Private adapter for read-side operations over the opaque gzip state.
+///
+/// `gz_state` still carries ABI stream fields, but the read implementation
+/// never needs a raw pointer argument.  Keeping that carrier behind this
+/// borrowed adapter lets the state machine use ordinary safe methods.
+struct GzReadState<'a> {
+    state: &'a mut crate::gzguts_h::gz_state,
+}
+
+impl<'a> GzReadState<'a> {
+    fn new(state: &'a mut crate::gzguts_h::gz_state) -> Self {
+        Self { state }
+    }
+}
+
 /// The owned output-buffer cursor used by the read side of a gzip handle.
 ///
 /// `gzFile_s::next` remains the ABI-visible cursor, but pushback only needs
@@ -317,7 +332,9 @@ fn gz_avail_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+impl GzReadState<'_> {
+fn look(&mut self) -> ::core::ffi::c_int {
+    let state = &mut *self.state;
     if state.size == 0 as ::core::ffi::c_uint {
         let input_len = state.want as usize;
         let Some(output_len) = (state.want as usize).checked_mul(2) else {
@@ -417,10 +434,11 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_decomp(
-    state: &mut crate::gzguts_h::gz_state,
+fn decomp(
+    &mut self,
     output: &mut [u8],
 ) -> ::core::ffi::c_int {
+    let state = &mut *self.state;
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let had = state.strm.avail_out as ::core::ffi::c_uint;
     loop {
@@ -548,16 +566,21 @@ unsafe fn gz_decomp(
     };
 }
 
-unsafe fn gz_fetch(
-    state: &mut crate::gzguts_h::gz_state,
+fn fetch(
+    &mut self,
     mut output: GzFetchOutput<'_>,
 ) -> ::core::ffi::c_int {
+    let mut state = &mut *self.state;
     loop {
         match state.how {
             crate::gzguts_h::LOOK => {
-                if gz_look(state) == -1 as ::core::ffi::c_int {
+                // Release the temporary state borrow before advancing the
+                // nested state machine through this adapter.
+                let _ = state;
+                if self.look() == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
+                state = &mut *self.state;
                 if state.how == crate::gzguts_h::LOOK {
                     return 0 as ::core::ffi::c_int;
                 }
@@ -595,7 +618,9 @@ unsafe fn gz_fetch(
                 };
                 state.strm.avail_out = output.len() as crate::stdlib::uInt;
                 state.strm.next_out = output.as_mut_ptr();
-                let result = gz_decomp(state, output);
+                let _ = state;
+                let result = self.decomp(output);
+                state = &mut *self.state;
                 if let Some(output) = state_output {
                     state.out = output;
                 }
@@ -624,7 +649,8 @@ unsafe fn gz_fetch(
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn skip(&mut self) -> ::core::ffi::c_int {
+    let mut state = &mut *self.state;
     let mut n: ::core::ffi::c_uint = 0;
     loop {
         if state.x.have != 0 {
@@ -676,15 +702,18 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
-            if gz_fetch(state, GzFetchOutput::StateOutput) == -1 as ::core::ffi::c_int {
+            let _ = state;
+            if self.fetch(GzFetchOutput::StateOutput) == -1 as ::core::ffi::c_int {
                 return -1 as ::core::ffi::c_int;
             }
+            state = &mut *self.state;
         }
         if state.skip == 0 {
             break;
         }
     }
     return 0 as ::core::ffi::c_int;
+}
 }
 
 /// Read into a caller-bounded buffer while keeping the legacy state
@@ -701,7 +730,7 @@ fn gz_read_buffer(
     let mut err: ::core::ffi::c_int = 0;
     let mut len = buf.len();
     let mut out = 0usize;
-    if state.skip != 0 && unsafe { gz_skip(state) } == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && GzReadState::new(state).skip() == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -768,7 +797,7 @@ fn gz_read_buffer(
                     Some(GzFetchOutput::Direct(&mut buf[out..out + n as usize]))
                 };
                 if let Some(fetch_output) = fetch_output {
-                    let fetched = unsafe { gz_fetch(state, fetch_output) };
+                    let fetched = GzReadState::new(state).fetch(fetch_output);
                     if direct {
                         err = fetched;
                         n = state.x.have;
@@ -1007,7 +1036,7 @@ fn gzungetc_state(
         return -1 as ::core::ffi::c_int;
     }
     if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
-        unsafe { gz_look(state) };
+        GzReadState::new(state).look();
     }
     if state.err != crate::zlib_h::Z_OK
         && state.err != crate::zlib_h::Z_BUF_ERROR
@@ -1016,7 +1045,7 @@ fn gzungetc_state(
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    if state.skip != 0 && unsafe { gz_skip(state) } == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && GzReadState::new(state).skip() == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if c < 0 as ::core::ffi::c_int {
@@ -1107,14 +1136,14 @@ fn gzgets_impl(state: &mut crate::gzguts_h::gz_state, buf: &mut [u8]) -> bool {
         return false;
     }
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    if state.skip != 0 && unsafe { gz_skip(state) } == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && GzReadState::new(state).skip() == -1 as ::core::ffi::c_int {
         return false;
     }
 
     let mut written = 0usize;
     while written + 1 < buf.len() {
         if state.x.have == 0 {
-            if unsafe { gz_fetch(state, GzFetchOutput::StateOutput) } == -1 as ::core::ffi::c_int {
+            if GzReadState::new(state).fetch(GzFetchOutput::StateOutput) == -1 as ::core::ffi::c_int {
                 break;
             }
             if state.x.have == 0 {
@@ -1191,7 +1220,7 @@ fn gzdirect_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         && state.how == crate::gzguts_h::LOOK
         && state.x.have == 0 as ::core::ffi::c_uint
     {
-        unsafe { gz_look(state) };
+        GzReadState::new(state).look();
     }
     (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int
 }
