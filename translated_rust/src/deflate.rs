@@ -1033,13 +1033,11 @@ fn initialize_allocated_deflate_state(
     let Some(storage) = DeflateStorageLayout::from_init(config.window_bits, mem_level) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state = unsafe {
-        Some(strm.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
+    let state = Some(strm.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
             strm.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::deflate_state
-    };
+        ) as *mut crate::src::deflate::deflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -3305,10 +3303,8 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int 
     };
     for allocation in allocations {
         if !allocation.is_null() {
-            unsafe {
-                Some(stream.zfree.expect("non-null function pointer"))
-                    .expect("non-null function pointer")(stream.opaque, allocation);
-            }
+            Some(stream.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(stream.opaque, allocation);
         }
     }
     stream.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
@@ -3392,14 +3388,12 @@ pub fn deflateCopy(
         None => None,
     };
     crate::zlib_h::copy_z_stream(dest_stream, source_stream);
-    ds = unsafe {
-        Some(dest_stream.zalloc.expect("non-null function pointer"))
+    ds = Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::deflate_state
-    };
+        ) as *mut crate::src::deflate::deflate_state;
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -3433,39 +3427,31 @@ pub fn deflateCopy(
         return crate::zlib_h::Z_OK;
     }
     let storage = DeflateStorageLayout::from_state(dest_state);
-    dest_state.window = unsafe {
-        Some(dest_stream.zalloc.expect("non-null function pointer"))
+    dest_state.window = Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
             storage.window_items,
             (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
                 as crate::stdlib::uInt,
-        ) as *mut crate::stdlib::Bytef
-    };
-    dest_state.prev = unsafe {
-        Some(dest_stream.zalloc.expect("non-null function pointer"))
+        ) as *mut crate::stdlib::Bytef;
+    dest_state.prev = Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
             storage.window_items,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf
-    };
-    dest_state.head = unsafe {
-        Some(dest_stream.zalloc.expect("non-null function pointer"))
+        ) as *mut crate::src::deflate::Posf;
+    dest_state.head = Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
             storage.hash_items,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf
-    };
-    dest_state.pending_buf = unsafe {
-        Some(dest_stream.zalloc.expect("non-null function pointer"))
+        ) as *mut crate::src::deflate::Posf;
+    dest_state.pending_buf = Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
             storage.pending_items,
             4 as crate::stdlib::uInt,
-        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
-    };
+        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     if dest_state.window.is_null()
         || dest_state.prev.is_null()
         || dest_state.head.is_null()

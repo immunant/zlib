@@ -106,7 +106,7 @@ pub mod zlib_h {
     ];
 
     pub type alloc_func = Option<
-        unsafe extern "C" fn(
+        extern "C" fn(
             crate::stdlib::voidpf,
             crate::stdlib::uInt,
             crate::stdlib::uInt,
@@ -114,7 +114,7 @@ pub mod zlib_h {
     >;
 
     pub type free_func =
-        Option<unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
+        Option<extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 

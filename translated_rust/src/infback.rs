@@ -1262,7 +1262,7 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     let free = strm.zfree.map(|free| {
         let opaque = strm.opaque;
         let state = state_ptr as crate::stdlib::voidpf;
-        move || unsafe { free(opaque, state) }
+        move || free(opaque, state)
     });
     inflate_back_end(strm, state, free)
 }

@@ -682,14 +682,12 @@ fn initialize_allocated_inflate_state(
     window_bits: ::core::ffi::c_int,
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
-    let state = unsafe {
-        Some(strm.zalloc.expect("non-null function pointer"))
+    let state = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    };
+        ) as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -701,10 +699,8 @@ fn initialize_allocated_inflate_state(
     };
     let ret = initialize_inflate_state_slot(strm, state_slot, window_bits, allocator_provenance);
     if ret != crate::zlib_h::Z_OK {
-        unsafe {
-            Some(strm.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(strm.opaque, state.cast());
-        }
+        Some(strm.zfree.expect("non-null function pointer"))
+            .expect("non-null function pointer")(strm.opaque, state.cast());
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     ret
@@ -921,13 +917,13 @@ fn updatewindow(
             let Some(zalloc) = strm.zalloc else {
                 return 1 as ::core::ffi::c_int;
             };
-            state.window = ::core::ptr::NonNull::new(unsafe {
+            state.window = ::core::ptr::NonNull::new(
                 zalloc(
                     strm.opaque,
                     layout.allocation_items,
                     ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
                 ) as *mut ::core::ffi::c_uchar
-            });
+            );
             if state.window.is_none() {
                 return 1 as ::core::ffi::c_int;
             }
@@ -2949,10 +2945,8 @@ fn release_inflate_allocations(
     let allocations = [window, strm.state as crate::stdlib::voidpf];
     for allocation in allocations {
         if !allocation.is_null() {
-            unsafe {
-                Some(strm.zfree.expect("non-null function pointer"))
-                    .expect("non-null function pointer")(strm.opaque, allocation);
-            }
+            Some(strm.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(strm.opaque, allocation);
         }
     }
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
@@ -3321,14 +3315,12 @@ fn initialize_inflate_copy(
     source: &crate::zlib_h::z_stream,
     source_state: &crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
-    let copy = unsafe {
-        Some(source.zalloc.expect("validated allocator"))
+    let copy = Some(source.zalloc.expect("validated allocator"))
             .expect("validated allocator")(
             source.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    };
+        ) as *mut crate::src::inflate::inflate_state;
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -3342,20 +3334,16 @@ fn initialize_inflate_copy(
     if source_state.window.is_some() && owned_window.is_none() && !owned_window_failed {
         let layout = InflateWindowLayout::from_state(source_state)
             .expect("inflateCopy validated the source window layout");
-        window = unsafe {
-            Some(source.zalloc.expect("validated allocator"))
+        window = Some(source.zalloc.expect("validated allocator"))
                 .expect("validated allocator")(
                 source.opaque,
                 layout.allocation_items,
                 ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-            ) as *mut ::core::ffi::c_uchar
-        };
+            ) as *mut ::core::ffi::c_uchar;
     }
     if owned_window_failed || (source_state.window.is_some() && window.is_null() && owned_window.is_none()) {
-        unsafe {
-            Some(source.zfree.expect("validated allocator"))
-                .expect("validated allocator")(source.opaque, copy.cast());
-        }
+        Some(source.zfree.expect("validated allocator"))
+            .expect("validated allocator")(source.opaque, copy.cast());
         return crate::zlib_h::Z_MEM_ERROR;
     }
     crate::zlib_h::copy_z_stream(dest, source);
