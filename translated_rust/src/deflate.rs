@@ -998,6 +998,115 @@ fn insert_hash(
     (next_hash, hash_head)
 }
 
+// The slow matcher emits either a length/distance pair or one delayed literal
+// into the deferred-symbol suffix of the pending allocation.  Keep the tree
+// accounting itself independent of the ABI-backed deflate state so the block
+// algorithm only has to project the bounded symbol view at its boundary.
+fn tally_slow_symbol(
+    sym_buf: &mut [crate::stdlib::Bytef],
+    sym_next: &mut crate::stdlib::uInt,
+    sym_end: crate::stdlib::uInt,
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    matches: &mut crate::stdlib::uInt,
+    dist: ::core::ffi::c_uint,
+    len: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    crate::src::trees::tally_symbol(
+        sym_buf, sym_next, sym_end, dyn_ltree, dyn_dtree, matches, dist, len,
+    )
+}
+
+// The lazy matcher keeps a one-byte delayed decision.  Its policy and symbol
+// accounting are entirely scalar/slice based; only the caller performs the
+// raw allocation projections needed to refill, search, or flush a block.
+struct SlowMatchState {
+    prev_length: crate::stdlib::uInt,
+    match_length: crate::stdlib::uInt,
+    prev_match: crate::src::deflate::IPos,
+    match_available: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+}
+
+enum SlowMatchAction {
+    Match {
+        insert_start: crate::stdlib::uInt,
+        insert_count: crate::stdlib::uInt,
+        bflush: ::core::ffi::c_int,
+    },
+    Literal(::core::ffi::c_int),
+    Defer,
+}
+
+fn advance_slow_match(
+    state: &mut SlowMatchState,
+    sym_buf: &mut [crate::stdlib::Bytef],
+    sym_next: &mut crate::stdlib::uInt,
+    sym_end: crate::stdlib::uInt,
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    matches: &mut crate::stdlib::uInt,
+    delayed_literal: Option<crate::zutil_h::uch>,
+) -> SlowMatchAction {
+    if state.prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+        && state.match_length <= state.prev_length
+    {
+        let max_insert = state
+            .strstart
+            .wrapping_add(state.lookahead)
+            .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+        let len = state.prev_length.wrapping_sub(3) as crate::zutil_h::uch;
+        let dist = (state.strstart as crate::src::deflate::IPos)
+            .wrapping_sub(1)
+            .wrapping_sub(state.prev_match) as crate::zutil_h::ush;
+        let bflush = tally_slow_symbol(
+            sym_buf,
+            sym_next,
+            sym_end,
+            dyn_ltree,
+            dyn_dtree,
+            matches,
+            dist as ::core::ffi::c_uint,
+            len as ::core::ffi::c_uint,
+        );
+        let insert_count = state
+            .prev_length
+            .wrapping_sub(2)
+            .min(max_insert.wrapping_sub(state.strstart));
+        let insert_start = state.strstart.wrapping_add(1);
+        state.lookahead = state
+            .lookahead
+            .wrapping_sub(state.prev_length.wrapping_sub(1));
+        state.strstart = state.strstart.wrapping_add(state.prev_length.wrapping_sub(1));
+        state.prev_length = 0;
+        state.match_available = 0;
+        state.match_length = crate::zutil_h::MIN_MATCH as crate::stdlib::uInt - 1;
+        SlowMatchAction::Match {
+            insert_start,
+            insert_count,
+            bflush,
+        }
+    } else if state.match_available != 0 {
+        let bflush = tally_slow_symbol(
+            sym_buf,
+            sym_next,
+            sym_end,
+            dyn_ltree,
+            dyn_dtree,
+            matches,
+            0,
+            delayed_literal.expect("delayed literal is available") as ::core::ffi::c_uint,
+        );
+        SlowMatchAction::Literal(bflush)
+    } else {
+        state.match_available = 1;
+        state.strstart = state.strstart.wrapping_add(1);
+        state.lookahead = state.lookahead.wrapping_sub(1);
+        SlowMatchAction::Defer
+    }
+}
+
 fn initial_hash(
     window: &[crate::stdlib::Bytef],
     strstart: crate::stdlib::uInt,
@@ -3572,36 +3681,49 @@ unsafe extern "C" fn deflate_slow(
                     (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
             }
         }
-        if (*s).prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            && (*s).match_length <= (*s).prev_length
-        {
-            let mut max_insert: crate::stdlib::uInt = (*s)
-                .strstart
-                .wrapping_add((*s).lookahead)
-                .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-            let len: crate::zutil_h::uch =
-                (*s).prev_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-            let dist: crate::zutil_h::ush = ((*s).strstart as crate::src::deflate::IPos)
-                .wrapping_sub(1 as crate::src::deflate::IPos)
-                .wrapping_sub((*s).prev_match)
-                as crate::zutil_h::ush;
-            bflush = crate::src::trees::tally_symbol(
-                sym_buf,
-                &mut (*s).sym_next,
-                (*s).sym_end,
-                &mut (*s).dyn_ltree,
-                &mut (*s).dyn_dtree,
-                &mut (*s).matches,
-                dist as ::core::ffi::c_uint,
-                len as ::core::ffi::c_uint,
-            );
-            (*s).lookahead = (*s)
-                .lookahead
-                .wrapping_sub((*s).prev_length.wrapping_sub(1 as crate::stdlib::uInt));
-            (*s).prev_length = (*s).prev_length.wrapping_sub(2 as crate::stdlib::uInt);
-            loop {
-                (*s).strstart = (*s).strstart.wrapping_add(1);
-                if (*s).strstart <= max_insert {
+        let delayed_literal = if (*s).match_available != 0 {
+            Some(
+                *(*s)
+                    .window
+                    .expect("initialized window")
+                    .as_ptr()
+                    .wrapping_add((*s).strstart.wrapping_sub(1) as usize)
+                    as crate::zutil_h::uch,
+            )
+        } else {
+            None
+        };
+        let mut slow_state = SlowMatchState {
+            prev_length: (*s).prev_length,
+            match_length: (*s).match_length,
+            prev_match: (*s).prev_match,
+            match_available: (*s).match_available,
+            strstart: (*s).strstart,
+            lookahead: (*s).lookahead,
+        };
+        let action = advance_slow_match(
+            &mut slow_state,
+            sym_buf,
+            &mut (*s).sym_next,
+            (*s).sym_end,
+            &mut (*s).dyn_ltree,
+            &mut (*s).dyn_dtree,
+            &mut (*s).matches,
+            delayed_literal,
+        );
+        (*s).prev_length = slow_state.prev_length;
+        (*s).match_length = slow_state.match_length;
+        (*s).match_available = slow_state.match_available;
+        (*s).strstart = slow_state.strstart;
+        (*s).lookahead = slow_state.lookahead;
+        match action {
+            SlowMatchAction::Match {
+                insert_start,
+                insert_count,
+                bflush: next_bflush,
+            } => {
+                bflush = next_bflush;
+                for offset in 0..insert_count {
                     let window = ::core::slice::from_raw_parts(
                         (*s).window.expect("initialized window").as_ptr(),
                         (*s).window_size as usize,
@@ -3622,89 +3744,60 @@ unsafe extern "C" fn deflate_slow(
                         (*s).hash_shift,
                         (*s).hash_mask,
                         (*s).w_mask,
-                        (*s).strstart,
+                        insert_start.wrapping_add(offset),
                     );
                 }
-                (*s).prev_length = (*s).prev_length.wrapping_sub(1);
-                if (*s).prev_length == 0 as crate::stdlib::uInt {
-                    break;
+                if bflush != 0 {
+                    crate::src::trees::_tr_flush_block(
+                        s as *mut crate::src::deflate::internal_state,
+                        if (*s).block_start >= 0 as ::core::ffi::c_long {
+                            (*s).window
+                                .expect("initialized window")
+                                .as_ptr()
+                                .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
+                                as *mut crate::stdlib::charf
+                        } else {
+                            ::core::ptr::null_mut::<crate::stdlib::charf>()
+                        },
+                        ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
+                            as crate::zutil_h::ulg,
+                        0,
+                    );
+                    (*s).block_start = (*s).strstart as ::core::ffi::c_long;
+                    flush_pending((*s).strm.as_ptr());
+                    if (*(*s).strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+                        return need_more;
+                    }
                 }
             }
-            (*s).match_available = 0 as ::core::ffi::c_int;
-            (*s).match_length =
-                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-            (*s).strstart = (*s).strstart.wrapping_add(1);
-            if bflush != 0 {
-                crate::src::trees::_tr_flush_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    if (*s).block_start >= 0 as ::core::ffi::c_long {
-                        (*s).window
-                            .expect("initialized window")
-                            .as_ptr()
-                            .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
-                            as *mut crate::stdlib::charf
-                    } else {
-                        ::core::ptr::null_mut::<crate::stdlib::charf>()
-                    },
-                    ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
-                        as crate::zutil_h::ulg,
-                    0 as ::core::ffi::c_int,
-                );
-                (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending((*s).strm.as_ptr());
+            SlowMatchAction::Literal(next_bflush) => {
+                bflush = next_bflush;
+                if bflush != 0 {
+                    crate::src::trees::_tr_flush_block(
+                        s as *mut crate::src::deflate::internal_state,
+                        if (*s).block_start >= 0 as ::core::ffi::c_long {
+                            (*s).window
+                                .expect("initialized window")
+                                .as_ptr()
+                                .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
+                                as *mut crate::stdlib::charf
+                        } else {
+                            ::core::ptr::null_mut::<crate::stdlib::charf>()
+                        },
+                        ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
+                            as crate::zutil_h::ulg,
+                        0,
+                    );
+                    (*s).block_start = (*s).strstart as ::core::ffi::c_long;
+                    flush_pending((*s).strm.as_ptr());
+                }
+                (*s).strstart = (*s).strstart.wrapping_add(1);
+                (*s).lookahead = (*s).lookahead.wrapping_sub(1);
                 if (*(*s).strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
-                    return (if false {
-                        finish_started as ::core::ffi::c_int
-                    } else {
-                        need_more as ::core::ffi::c_int
-                    }) as block_state;
+                    return need_more;
                 }
             }
-        } else if (*s).match_available != 0 {
-            let mut cc: crate::zutil_h::uch = *(*s)
-                .window
-                .expect("initialized window")
-                .as_ptr()
-                .wrapping_add((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize)
-                as crate::zutil_h::uch;
-            bflush = crate::src::trees::tally_symbol(
-                sym_buf,
-                &mut (*s).sym_next,
-                (*s).sym_end,
-                &mut (*s).dyn_ltree,
-                &mut (*s).dyn_dtree,
-                &mut (*s).matches,
-                0,
-                cc as ::core::ffi::c_uint,
-            );
-            if bflush != 0 {
-                crate::src::trees::_tr_flush_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    if (*s).block_start >= 0 as ::core::ffi::c_long {
-                        (*s).window
-                            .expect("initialized window")
-                            .as_ptr()
-                            .wrapping_add((*s).block_start as ::core::ffi::c_uint as usize)
-                            as *mut crate::stdlib::charf
-                    } else {
-                        ::core::ptr::null_mut::<crate::stdlib::charf>()
-                    },
-                    ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
-                        as crate::zutil_h::ulg,
-                    0 as ::core::ffi::c_int,
-                );
-                (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending((*s).strm.as_ptr());
-            }
-            (*s).strstart = (*s).strstart.wrapping_add(1);
-            (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            if (*(*s).strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
-                return need_more;
-            }
-        } else {
-            (*s).match_available = 1 as ::core::ffi::c_int;
-            (*s).strstart = (*s).strstart.wrapping_add(1);
-            (*s).lookahead = (*s).lookahead.wrapping_sub(1);
+            SlowMatchAction::Defer => {}
         }
     }
     if (*s).match_available != 0 {
@@ -3714,7 +3807,7 @@ unsafe extern "C" fn deflate_slow(
             .as_ptr()
             .wrapping_add((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize)
             as crate::zutil_h::uch;
-        bflush = crate::src::trees::tally_symbol(
+        bflush = tally_slow_symbol(
             sym_buf,
             &mut (*s).sym_next,
             (*s).sym_end,
