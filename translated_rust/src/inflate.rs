@@ -661,30 +661,46 @@ fn inflate_window_len(wbits: ::core::ffi::c_uint, wsize: ::core::ffi::c_uint) ->
     }
 }
 
-/// Update the circular history window after a decoder call.  Allocation and
+/// The scalar state to publish after a successful circular history update.
+/// Keeping this separate from the copy lets the safe core validate and copy
+/// before its caller commits any compatibility-state fields.
+#[derive(Copy, Clone)]
+struct InflateWindowUpdate {
+    wsize: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+}
+
+/// Update the circular history window after a decoder call. Allocation and
 /// ABI-owned buffer lending stay at the codec boundary; this core owns the
-/// window sizing, cursor planning, and bounded copies.
+/// window sizing, cursor planning, and bounded copies, returning the scalar
+/// state to commit only after all validation and copying succeeds.
 fn inflate_window_update(
-    state: &mut inflate_state,
     window: &mut [u8],
     produced: &[u8],
-) -> Option<()> {
-    if state.wsize == 0 {
-        state.wsize = ::core::ffi::c_uint::try_from(inflate_window_len(state.wbits, 0)?).ok()?;
-        state.wnext = 0;
-        state.whave = 0;
-    }
-    let wsize = inflate_window_len(state.wbits, state.wsize)?;
-    if window.len() != wsize {
+    wbits: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+) -> Option<InflateWindowUpdate> {
+    let wsize = if wsize == 0 {
+        ::core::ffi::c_uint::try_from(inflate_window_len(wbits, 0)?).ok()?
+    } else {
+        wsize
+    };
+    let wsize_len = inflate_window_len(wbits, wsize)?;
+    if window.len() != wsize_len {
         return None;
     }
     let copy = ::core::ffi::c_uint::try_from(produced.len()).ok()?;
-    let plan = inflate_window_copy_plan(state.wsize, state.wnext, state.whave, copy)?;
+    let plan = inflate_window_copy_plan(wsize, wnext, whave, copy)?;
     let (next, have) = plan.cursor_values()?;
     inflate_window_copy(window, produced, plan)?;
-    state.wnext = next;
-    state.whave = have;
-    Some(())
+    Some(InflateWindowUpdate {
+        wsize,
+        wnext: next,
+        whave: have,
+    })
 }
 
 /// Resolve a dynamic decode-table cursor to a bounded tail of `codes`.
@@ -1018,9 +1034,19 @@ unsafe fn updatewindow(
         // `copy_len` span only after validating the source pointer above.
         ::core::slice::from_raw_parts(end.wrapping_sub(copy_len), copy_len)
     };
-    if inflate_window_update(state, window, produced).is_none() {
+    let Some(update) = inflate_window_update(
+        window,
+        produced,
+        state.wbits,
+        state.wsize,
+        state.wnext,
+        state.whave,
+    ) else {
         return 1 as ::core::ffi::c_int;
-    }
+    };
+    state.wsize = update.wsize;
+    state.wnext = update.wnext;
+    state.whave = update.whave;
     return 0 as ::core::ffi::c_int;
 }
 
