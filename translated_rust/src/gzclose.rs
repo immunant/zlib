@@ -38,8 +38,6 @@ macro_rules! gzclose_read_at_boundary {
                     );
                 }
                 (*state).buffers = None;
-                (*state).in_0 = ::core::ptr::null_mut();
-                (*state).out = ::core::ptr::null_mut();
                 let state_err = (*state).err;
                 (*state).msg = None;
                 (*state).err = crate::zlib_h::Z_OK;
@@ -82,8 +80,6 @@ macro_rules! gzclose_write_at_boundary {
                     }
                 }
                 (*state).buffers = None;
-                (*state).in_0 = ::core::ptr::null_mut();
-                (*state).out = ::core::ptr::null_mut();
                 (*state).msg = None;
                 (*state).err = crate::zlib_h::Z_OK;
                 let close_result = crate::stdlib::close((*state).fd);

@@ -377,8 +377,6 @@ macro_rules! gz_open_at_boundary {
                 size: 0,
                 want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
                 buffers: None,
-                in_0: ::core::ptr::null_mut(),
-                out: ::core::ptr::null_mut(),
                 direct: 0,
                 junk: 0,
                 how: crate::gzguts_h::LOOK,
