@@ -612,12 +612,7 @@ pub(crate) fn deflate_one_shot(
         if stream.avail_in == 0 {
             stream.avail_in = owner.next_input_chunk(max);
         }
-        status = unsafe {
-            deflate(
-                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-                owner.flush(),
-            )
-        };
+        status = unsafe { deflate(&mut stream, owner.flush()) };
         if status != crate::zlib_h::Z_OK {
             break;
         }
@@ -2243,7 +2238,7 @@ fn update_deflate_parameters(
 }
 
 pub unsafe extern "C" fn deflateParams(
-    mut strm: crate::zlib_h::z_streamp,
+    strm: &mut crate::zlib_h::z_stream_s,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -2262,10 +2257,7 @@ pub unsafe extern "C" fn deflateParams(
     // borrow across that call; reproject afterwards instead of indexing the
     // raw cursors throughout the parameter policy.
     let needs_flush = {
-        let Some((_stream, state)) = strm
-            .as_mut()
-            .and_then(|strm| deflate_stream_and_state(strm))
-        else {
+        let Some((_stream, state)) = deflate_stream_and_state(strm) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         let algorithm = configuration_table[state.level as usize].algorithm;
@@ -2278,10 +2270,7 @@ pub unsafe extern "C" fn deflateParams(
             return err;
         }
         let flush_left_input = {
-            let Some((stream, state)) = strm
-                .as_mut()
-                .and_then(|strm| deflate_stream_and_state(strm))
-            else {
+            let Some((stream, state)) = deflate_stream_and_state(strm) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             stream.avail_in != 0
@@ -2293,10 +2282,7 @@ pub unsafe extern "C" fn deflateParams(
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    let Some((_stream, state)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
-    else {
+    let Some((_stream, state)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let tables = if state.level != level && state.level == 0 && state.matches != 0 {
@@ -2341,6 +2327,9 @@ pub unsafe extern "C" fn deflateParams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateParams(strm, level, strategy)
 }
 fn deflate_tune_values(
@@ -2372,8 +2361,7 @@ pub unsafe fn deflateTune(
     nice_length: ::core::ffi::c_int,
     max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, s)) = deflate_stream_and_state(strm)
-    else {
+    let Some((_strm, s)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let (good_match, max_lazy_match, nice_match, max_chain_length) =
@@ -3404,8 +3392,11 @@ fn flush_pending(
     *output_pos += len as usize;
     len
 }
+// The export wrapper owns the nullable ABI-stream conversion.  This adapter
+// keeps the opaque-state and callback-backed storage projections together,
+// so the lower-level codecs continue to receive only bounded views.
 pub unsafe extern "C" fn deflate(
-    mut strm: crate::zlib_h::z_streamp,
+    strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut old_flush: ::core::ffi::c_int = 0;
@@ -3414,10 +3405,7 @@ pub unsafe extern "C" fn deflate(
     }
     // Keep the ABI projections at this boundary. The lower-level block
     // routines receive these scoped stream/state borrows directly.
-    let Some((strm, s)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
-    else {
+    let Some((strm, s)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if strm.next_out.is_null()
@@ -4130,6 +4118,9 @@ pub unsafe extern "C" fn deflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflate(strm, flush)
 }
 pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {

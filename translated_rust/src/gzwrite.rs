@@ -470,8 +470,7 @@ unsafe fn gz_comp(
                 strm.avail_in = input_available;
                 strm.next_out = output.as_mut_ptr();
                 strm.avail_out = output_available;
-                let result =
-                    crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
+                let result = crate::src::deflate::deflate(strm, flush);
                 crate::src::gzlib::GzEmbeddedDeflateResult {
                     result,
                     remaining_input: strm.avail_in,
@@ -993,11 +992,7 @@ unsafe fn gzsetparams(
         {
             return state.err;
         }
-        crate::src::deflate::deflateParams(
-            &mut state.strm as *mut crate::zlib_h::z_stream_s,
-            level,
-            strategy,
-        );
+        crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
     }
     state.level = level;
     state.strategy = strategy;
