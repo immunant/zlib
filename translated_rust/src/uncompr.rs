@@ -26,6 +26,8 @@ pub use crate::zlib_h::Z_NULL;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+use crate::src::compress::OneShotCursor;
+
 pub unsafe extern "C" fn uncompress2_z(
     mut dest: *mut crate::stdlib::Bytef,
     mut destLen: *mut crate::stdlib::z_size_t,
@@ -50,8 +52,6 @@ pub unsafe extern "C" fn uncompress2_z(
     };
     let mut err: ::core::ffi::c_int = 0;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut left: crate::stdlib::z_size_t = 0;
     if sourceLen.is_null() || destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -62,9 +62,9 @@ pub unsafe extern "C" fn uncompress2_z(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    len = source_capacity;
-    left = dest_capacity;
-    if left == 0 as crate::stdlib::z_size_t && dest.is_null() {
+    let mut input = OneShotCursor::new(source_capacity);
+    let mut output = OneShotCursor::new(dest_capacity);
+    if output.remaining() == 0 as crate::stdlib::z_size_t && dest.is_null() {
         dest = &raw mut stream.reserved as *mut crate::stdlib::Bytef;
     }
     stream.next_in = source as *mut crate::stdlib::Bytef;
@@ -84,20 +84,10 @@ pub unsafe extern "C" fn uncompress2_z(
     stream.avail_out = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
+            stream.avail_out = output.next_chunk(max);
         }
         if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if len > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                len as crate::stdlib::uInt
-            };
-            len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
+            stream.avail_in = input.next_chunk(max);
         }
         err = crate::src::inflate::inflate(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
@@ -107,8 +97,12 @@ pub unsafe extern "C" fn uncompress2_z(
             break;
         }
     }
-    len = len.wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
-    left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
+    let len = input
+        .remaining()
+        .wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
+    let left = output
+        .remaining()
+        .wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
     if sourceLen == destLen {
         // Preserve the C write order when callers alias the two length outputs.
         *sourceLen = source_capacity.wrapping_sub(len).wrapping_sub(left);

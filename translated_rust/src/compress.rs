@@ -24,6 +24,37 @@ pub use crate::zlib_h::Z_NO_FLUSH;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+// The one-shot APIs feed z_stream in uInt-sized pieces.  Keep this cursor
+// pointer-free so a later slice-backed stream facade can retain the exact
+// chunking and progress accounting without carrying ABI pointers into its
+// core.
+pub(crate) struct OneShotCursor {
+    remaining: crate::stdlib::z_size_t,
+}
+
+impl OneShotCursor {
+    pub(crate) fn new(remaining: crate::stdlib::z_size_t) -> Self {
+        Self { remaining }
+    }
+
+    pub(crate) fn remaining(&self) -> crate::stdlib::z_size_t {
+        self.remaining
+    }
+
+    pub(crate) fn next_chunk(&mut self, max: crate::stdlib::uInt) -> crate::stdlib::uInt {
+        let chunk = if self.remaining > max as crate::stdlib::z_size_t {
+            max
+        } else {
+            self.remaining as crate::stdlib::uInt
+        };
+        self.remaining = self
+            .remaining
+            .wrapping_sub(chunk as crate::stdlib::z_size_t);
+        chunk
+    }
+}
+
 pub unsafe extern "C" fn compress2_z(
     mut dest: *mut crate::stdlib::Bytef,
     mut destLen: *mut crate::stdlib::z_size_t,
@@ -49,7 +80,7 @@ pub unsafe extern "C" fn compress2_z(
     };
     let mut err: ::core::ffi::c_int = 0;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut left: crate::stdlib::z_size_t = 0;
+    let mut output = OneShotCursor::new(0);
     let mut out_capacity: crate::stdlib::z_size_t = 0;
     if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null() || destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -58,7 +89,8 @@ pub unsafe extern "C" fn compress2_z(
     if out_capacity > 0 as crate::stdlib::z_size_t && dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    left = out_capacity;
+    output = OneShotCursor::new(out_capacity);
+    let mut input = OneShotCursor::new(sourceLen);
     *destLen = 0 as crate::stdlib::z_size_t;
     stream.zalloc = None;
     stream.zfree = None;
@@ -78,24 +110,14 @@ pub unsafe extern "C" fn compress2_z(
     stream.avail_in = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
+            stream.avail_out = output.next_chunk(max);
         }
         if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if sourceLen > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                sourceLen as crate::stdlib::uInt
-            };
-            sourceLen = sourceLen.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
+            stream.avail_in = input.next_chunk(max);
         }
         err = crate::src::deflate::deflate(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            if sourceLen != 0 {
+            if input.remaining() != 0 {
                 crate::zlib_h::Z_NO_FLUSH
             } else {
                 crate::zlib_h::Z_FINISH
@@ -106,7 +128,9 @@ pub unsafe extern "C" fn compress2_z(
         }
     }
     *destLen = out_capacity.wrapping_sub(
-        left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t),
+        output
+            .remaining()
+            .wrapping_add(stream.avail_out as crate::stdlib::z_size_t),
     );
     crate::src::deflate::deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
     return if err == crate::zlib_h::Z_STREAM_END {
