@@ -200,22 +200,29 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
-// This raw-state adapter is used only by translated Rust implementations;
-// exported wrappers bind their own ABI arguments.
-unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+// This raw-state adapter is used only by translated Rust implementations.
+// It validates the two associated allocations and then returns their bound
+// references, so small inflater operations do not need to repeat raw stream
+// and state dereferences after checking them.
+unsafe fn inflateStateCheck<'a>(
+    mut strm: crate::zlib_h::z_streamp,
+) -> Option<(
+    &'a mut crate::zlib_h::z_stream,
+    &'a mut crate::src::inflate::inflate_state,
+)> {
     if strm.is_null() {
-        return 1 as ::core::ffi::c_int;
+        return None;
     }
-    let strm_ref = &*strm;
+    let strm_ref = &mut *strm;
     let state_ptr = strm_ref.state as *mut crate::src::inflate::inflate_state;
     if state_ptr.is_null() {
-        return 1 as ::core::ffi::c_int;
+        return None;
     }
-    let state = &*state_ptr;
+    let state = &mut *state_ptr;
     if !inflate_state_is_valid(strm_ref, state, state.strm == strm) {
-        return 1 as ::core::ffi::c_int;
+        return None;
     }
-    return 0 as ::core::ffi::c_int;
+    Some((strm_ref, state))
 }
 
 fn inflate_state_is_valid(
@@ -281,23 +288,15 @@ pub(crate) fn inflate_reset_bound(
 pub unsafe extern "C" fn inflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // SAFETY: `inflateStateCheck` established that `strm` and its state are
-    // live, mutually associated objects. The reset operation itself only
-    // needs these bound references.
-    inflate_reset_keep(
-        unsafe { &mut *strm },
-        unsafe { &mut *((*strm).state as *mut crate::src::inflate::inflate_state) },
-    )
+    };
+    inflate_reset_keep(strm, state)
 }
 pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    };
     inflate_reset_bound(strm, state)
 }
 #[export_name = "inflateReset"]
@@ -311,15 +310,13 @@ pub unsafe extern "C" fn inflateReset2(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
     let (wrap, window_bits) = match inflate_window_bits(windowBits) {
         Ok(window_bits) => window_bits,
         Err(error) => return error,
     };
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     if !state.window.is_null() && state.wbits != window_bits as ::core::ffi::c_uint {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             strm.opaque,
@@ -481,13 +478,10 @@ pub unsafe extern "C" fn inflatePrime(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_prime(&mut *state, bits, value);
+    };
+    inflate_prime(state, bits, value)
 }
 #[export_name = "inflatePrime"]
 
@@ -671,7 +665,7 @@ pub unsafe extern "C" fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if inflateStateCheck(strm) != 0
+    if inflateStateCheck(strm).is_none()
         || (*strm).next_out.is_null()
         || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
     {
@@ -2363,7 +2357,7 @@ pub unsafe extern "C" fn inflate_ffi(
 pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if inflateStateCheck(strm).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2398,7 +2392,7 @@ pub unsafe extern "C" fn inflateGetDictionary(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if inflateStateCheck(strm).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2459,7 +2453,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    if inflateStateCheck(strm).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm = &mut *strm;
@@ -2536,7 +2530,7 @@ pub unsafe extern "C" fn inflateGetHeader(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if inflateStateCheck(strm).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2597,7 +2591,7 @@ fn syncsearch_bytes(
     next as ::core::ffi::c_uint
 }
 pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    if inflateStateCheck(strm).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm = &mut *strm;
@@ -2669,13 +2663,10 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
 pub unsafe extern "C" fn inflateSyncPoint(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_sync_point(&*state);
+    };
+    inflate_sync_point(state)
 }
 #[export_name = "inflateSyncPoint"]
 
@@ -2693,7 +2684,7 @@ pub unsafe extern "C" fn inflateCopy(
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if inflateStateCheck(source) != 0 || dest.is_null() {
+    if inflateStateCheck(source).is_none() || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*source).state as *mut crate::src::inflate::inflate_state;
@@ -2798,13 +2789,10 @@ pub unsafe extern "C" fn inflateUndermine(
     mut strm: crate::zlib_h::z_streamp,
     _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_undermine(&mut *state);
+    };
+    inflate_undermine(state)
 }
 #[export_name = "inflateUndermine"]
 
@@ -2818,13 +2806,10 @@ pub unsafe extern "C" fn inflateValidate(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_validate(&mut *state, check);
+    };
+    inflate_validate(state, check)
 }
 #[export_name = "inflateValidate"]
 
@@ -2835,13 +2820,10 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     inflateValidate(strm, check)
 }
 pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_long {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_mark(&*state);
+    };
+    inflate_mark(state)
 }
 
 fn inflate_sync_point(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
@@ -2894,13 +2876,10 @@ pub unsafe extern "C" fn inflateMark_ffi(
 pub unsafe extern "C" fn inflateCodesUsed(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_codes_used(&*state);
+    };
+    inflate_codes_used(state)
 }
 #[export_name = "inflateCodesUsed"]
 
