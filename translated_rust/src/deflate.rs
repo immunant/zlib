@@ -2884,18 +2884,7 @@ unsafe extern "C" fn deflate_fast(
         } else {
             let mut cc: crate::zutil_h::uch =
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-            let c2rust_fresh47 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh47 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh48 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh48 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh49 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh49 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc.freq =
-                (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
         }
@@ -3158,18 +3147,7 @@ unsafe extern "C" fn deflate_slow(
                 .window
                 .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
                 as crate::zutil_h::uch;
-            let c2rust_fresh38 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh38 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh39 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh39 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh40 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh40 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc.freq =
-                (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
                     s as *mut crate::src::deflate::internal_state,
@@ -3203,18 +3181,7 @@ unsafe extern "C" fn deflate_slow(
             .window
             .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
             as crate::zutil_h::uch;
-        let c2rust_fresh41 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh41 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh42 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh42 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh43 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh43 as isize) = cc_0 as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc_0 as usize].fc.freq =
-            (*s).dyn_ltree[cc_0 as usize].fc.freq.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+        bflush = crate::src::trees::_tr_tally(s, 0, cc_0 as ::core::ffi::c_uint);
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
     (*s).insert = if (*s).strstart
@@ -3385,18 +3352,7 @@ unsafe extern "C" fn deflate_rle(
         } else {
             let mut cc: crate::zutil_h::uch =
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-            let c2rust_fresh53 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh53 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh54 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh54 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh55 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh55 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc.freq =
-                (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
         }
@@ -3493,17 +3449,7 @@ unsafe extern "C" fn deflate_huff(
         (*s).match_length = 0 as crate::stdlib::uInt;
         let mut cc: crate::zutil_h::uch =
             *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        let c2rust_fresh56 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh56 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh57 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh57 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh58 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh58 as isize) = cc as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc as usize].fc.freq = (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+        bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);
         (*s).strstart = (*s).strstart.wrapping_add(1);
         if bflush != 0 {
