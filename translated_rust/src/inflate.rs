@@ -3340,6 +3340,12 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     if inflate_state_check_at_ffi_boundary!(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    // A null dictionary is only meaningful for the zero-length C special
+    // case.  Reject it before the checksum or window-update boundary can
+    // derive a non-empty view from it.
+    if dictLength != 0 && dictionary.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if !inflate_dictionary_is_allowed((*state).wrap, (*state).mode) {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3943,6 +3949,9 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     let avail_in = strm.avail_in;
+    if avail_in != 0 && strm.next_in.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let input = if avail_in == 0 {
         &[]
     } else {
@@ -5172,6 +5181,51 @@ mod tests {
     }
 
     #[test]
+    fn inflate_set_dictionary_ffi_rejects_nonempty_null_input() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: core::ptr::null_mut(),
+            state: core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+        unsafe {
+            (*(stream.state as *mut crate::src::inflate::inflate_state)).wrap = 0;
+        }
+
+        assert_eq!(
+            unsafe { super::inflateSetDictionary_ffi(&mut stream, core::ptr::null(), 1) },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut stream) },
+            crate::zlib_h::Z_OK
+        );
+    }
+
+    #[test]
     fn dictionary_result_rejects_invalid_window_metadata_without_reporting_a_length() {
         let window = *b"abc_____";
         let mut dictionary = *b"keep";
@@ -5377,6 +5431,51 @@ mod tests {
         assert_eq!(
             unsafe { inflateSyncPoint_ffi(::core::ptr::null_mut()) },
             crate::zlib_h::Z_STREAM_ERROR
+        );
+    }
+
+    #[test]
+    fn inflate_sync_ffi_rejects_nonempty_null_input() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: core::ptr::null_mut(),
+            state: core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+        stream.avail_in = 1;
+
+        assert_eq!(
+            unsafe { super::inflateSync_ffi(&mut stream) },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+        assert_eq!(stream.avail_in, 1);
+        assert_eq!(stream.total_in, 0);
+
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut stream) },
+            crate::zlib_h::Z_OK
         );
     }
 
