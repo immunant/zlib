@@ -1643,9 +1643,7 @@ pub unsafe fn deflateInit2_(
         high_water: 0,
         slid: 0,
     });
-    stream.state = Some(
-        s.cast(),
-    );
+    stream.state = Some(s.cast());
     // Do not keep a Rust borrow of the installed state across an allocator
     // callback: a caller allocator may observe the stream re-entrantly.
     // Each callback result is instead published through a short projection,
@@ -1919,8 +1917,8 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         &projection,
         DeflateStorageProjection::Complete | DeflateStorageProjection::Dispatch
     ) || parameter_requires_flush;
-    let dispatch_cursors = matches!(&projection, DeflateStorageProjection::Dispatch)
-        || parameter_requires_flush;
+    let dispatch_cursors =
+        matches!(&projection, DeflateStorageProjection::Dispatch) || parameter_requires_flush;
     let mut storage = match projection {
         DeflateStorageProjection::None => DeflateCallbackStorage {
             window: None,
@@ -1939,7 +1937,10 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             // the view below their completed-state boundary.
             head: state.callback_storage.is_complete().then(|| {
                 ::core::slice::from_raw_parts_mut(
-                    state.head.expect("complete callback storage has a hash table").as_ptr(),
+                    state
+                        .head
+                        .expect("complete callback storage has a hash table")
+                        .as_ptr(),
                     storage_layout
                         .head
                         .element_len::<crate::src::deflate::Posf>()
@@ -2635,7 +2636,7 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_scalar_from_abi_stream(strm, DeflateScalarAction::Reset(DeflateResetKind::Keep))
+    deflate_scalar_from_abi_stream(strm, DeflateAbiAction::Reset(DeflateResetKind::Keep))
 }
 #[export_name = "deflateReset"]
 
@@ -2645,7 +2646,7 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_scalar_from_abi_stream(strm, DeflateScalarAction::Reset(DeflateResetKind::Full))
+    deflate_scalar_from_abi_stream(strm, DeflateAbiAction::Reset(DeflateResetKind::Full))
 }
 // Header registration is ordinary owned-state policy once the ABI header has
 // been copied.  Keeping the mode check and replacement here lets the boundary
@@ -2746,7 +2747,7 @@ pub unsafe extern "C" fn deflatePending_ffi(
     };
     deflate_scalar_from_abi_stream(
         strm,
-        DeflateScalarAction::Pending {
+        DeflateAbiAction::Pending {
             pending: pending.as_mut(),
             bits: bits.as_mut(),
         },
@@ -2774,7 +2775,7 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     };
     deflate_scalar_from_abi_stream(
         strm,
-        DeflateScalarAction::Used {
+        DeflateAbiAction::Used {
             bits: bits.as_mut(),
         },
     )
@@ -2826,7 +2827,7 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_scalar_from_abi_stream(strm, DeflateScalarAction::Prime { bits, value })
+    deflate_scalar_from_abi_stream(strm, DeflateAbiAction::Prime { bits, value })
 }
 
 // Level changes have a small amount of hash-table cleanup policy, but none
@@ -2997,7 +2998,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_scalar_from_abi_stream(strm, DeflateScalarAction::Params { level, strategy })
+    deflate_scalar_from_abi_stream(strm, DeflateAbiAction::Params { level, strategy })
 }
 fn deflate_tune_values(
     good_length: ::core::ffi::c_int,
@@ -3049,7 +3050,15 @@ fn deflateTune(
 // validated opaque state. Each action carries only scalar inputs or an
 // optional scalar output borrow, so it cannot retain the ABI stream or any
 // callback-backed storage.
-pub(crate) enum DeflateScalarAction<'a> {
+// Every deflate request crosses the same ABI stream/state projection.  Keep
+// scalar controls and byte dispatch under that one boundary so a scalar
+// wrapper cannot accidentally reopen the callback-backed state after a
+// dispatch preflight.
+pub(crate) enum DeflateAbiAction<'a> {
+    Dispatch {
+        flush: ::core::ffi::c_int,
+        parameter_update: Option<DeflateParameterPlan>,
+    },
     // Reset shares the established opaque-state association used by the
     // scalar controls. Its full variant additionally selects the bounded
     // hash-table view before entering the pointer-free reset cores.
@@ -3077,139 +3086,6 @@ pub(crate) enum DeflateScalarAction<'a> {
     },
 }
 
-// Scalar controls, including the two-phase parameter transition, retain their
-// stream/state and callback-storage projection in this ABI adapter while
-// their policy stays over ordinary values and bounded slices. The public tune
-// operation itself is the pointer-free `deflateTune()` owner above.
-pub(crate) unsafe fn deflate_scalar_from_abi_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    action: DeflateScalarAction<'_>,
-) -> ::core::ffi::c_int {
-    if let DeflateScalarAction::Params { level, strategy } = &action {
-        let Ok(plan) = DeflateParameterPlan::parse(*level, *strategy) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        // Parameter admission and its possible block flush share the
-        // dispatch boundary. That boundary owns both state transactions, so
-        // this scalar adapter only routes the pointer-free request.
-        return deflate_dispatch_from_abi_stream(strm, crate::zlib_h::Z_BLOCK, Some(plan));
-    }
-    let projection = match action {
-        DeflateScalarAction::Reset(DeflateResetKind::Keep) => DeflateStorageProjection::None,
-        DeflateScalarAction::Reset(DeflateResetKind::Full) => DeflateStorageProjection::Hash,
-        DeflateScalarAction::Params { .. } => unreachable!("handled before stream projection"),
-        DeflateScalarAction::Prime { .. } => DeflateStorageProjection::Complete,
-        DeflateScalarAction::Pending { .. }
-        | DeflateScalarAction::Used { .. }
-        | DeflateScalarAction::Tune { .. } => DeflateStorageProjection::None,
-    };
-    let Some((strm, s, mut storage)) = deflate_stream_and_state(strm, projection) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    match action {
-        DeflateScalarAction::Reset(kind) => {
-            let adler = deflateResetKeep(DeflateResetKeepOwner {
-                data_type: &mut s.data_type,
-                pending: &mut s.pending,
-                pending_out: &mut s.pending_out,
-                wrap: &mut s.wrap,
-                status: &mut s.status,
-                last_flush: &mut s.last_flush,
-                dyn_ltree: &mut s.dyn_ltree,
-                dyn_dtree: &mut s.dyn_dtree,
-                bl_tree: &mut s.bl_tree,
-                l_desc: &mut s.l_desc,
-                d_desc: &mut s.d_desc,
-                bl_desc: &mut s.bl_desc,
-                static_len: &mut s.static_len,
-                opt_len: &mut s.opt_len,
-                matches: &mut s.matches,
-                sym_next: &mut s.sym_next,
-                bi_buf: &mut s.bi_buf,
-                bi_valid: &mut s.bi_valid,
-                bi_used: &mut s.bi_used,
-            });
-            strm.total_out = 0;
-            strm.total_in = 0;
-            strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-            strm.data_type = crate::zlib_h::Z_UNKNOWN;
-            strm.adler = adler;
-            if matches!(kind, DeflateResetKind::Full) {
-                // The shared projection validates this callback-backed table
-                // before the pointer-free full-reset core receives it.
-                let head = storage.head.take().expect("full-reset hash projection");
-                let w_size = s.w_size;
-                let config = &configuration_table[s.level as usize];
-                DeflateResetCore {
-                    window_size: &mut s.window_size,
-                    slid: &mut s.slid,
-                    max_lazy_match: &mut s.max_lazy_match,
-                    good_match: &mut s.good_match,
-                    nice_match: &mut s.nice_match,
-                    max_chain_length: &mut s.max_chain_length,
-                    strstart: &mut s.strstart,
-                    block_start: &mut s.block_start,
-                    lookahead: &mut s.lookahead,
-                    insert: &mut s.insert,
-                    prev_length: &mut s.prev_length,
-                    match_length: &mut s.match_length,
-                    match_available: &mut s.match_available,
-                    ins_h: &mut s.ins_h,
-                }
-                .reset_after_keep(head, w_size, config);
-            }
-            crate::zlib_h::Z_OK
-        }
-        DeflateScalarAction::Params { .. } => unreachable!("handled before stream projection"),
-        DeflateScalarAction::Prime { bits, value } => {
-            let pending_buf = s
-                .callback_storage
-                .dispatch_storage(storage)
-                .expect("complete pending storage projection")
-                .pending_buf;
-            deflate_prime_bits(
-                pending_buf,
-                &mut s.pending,
-                &mut s.bi_buf,
-                &mut s.bi_valid,
-                s.pending_out,
-                s.lit_bufsize,
-                bits,
-                value,
-            )
-        }
-        DeflateScalarAction::Pending { pending, bits } => {
-            let (pending_value, bits_value, status) = deflate_pending_impl(s.pending, s.bi_valid);
-            if let Some(bits) = bits {
-                *bits = bits_value;
-            }
-            if let Some(pending) = pending {
-                *pending = pending_value;
-                status
-            } else {
-                crate::zlib_h::Z_OK
-            }
-        }
-        DeflateScalarAction::Used { bits } => deflate_used_impl(s.bi_used, bits),
-        DeflateScalarAction::Tune {
-            good_length,
-            max_lazy,
-            nice_length,
-            max_chain,
-        } => deflateTune(
-            DeflateTuneOwner {
-                good_match: &mut s.good_match,
-                max_lazy_match: &mut s.max_lazy_match,
-                nice_match: &mut s.nice_match,
-                max_chain_length: &mut s.max_chain_length,
-            },
-            good_length,
-            max_lazy,
-            nice_length,
-            max_chain,
-        ),
-    }
-}
 #[export_name = "deflateTune"]
 
 pub unsafe extern "C" fn deflateTune_ffi(
@@ -3224,7 +3100,7 @@ pub unsafe extern "C" fn deflateTune_ffi(
     };
     deflate_scalar_from_abi_stream(
         strm,
-        DeflateScalarAction::Tune {
+        DeflateAbiAction::Tune {
             good_length,
             max_lazy,
             nice_length,
@@ -3353,9 +3229,7 @@ unsafe fn deflate_bound_state_for_stream(
     if !has_allocators {
         return None;
     }
-    let state = state?
-        .cast::<crate::src::deflate::deflate_state>()
-        .as_ref();
+    let state = state?.cast::<crate::src::deflate::deflate_state>().as_ref();
     if state.status != crate::src::deflate::INIT_STATE
         && state.status != crate::src::deflate::GZIP_STATE
         && state.status != crate::src::deflate::EXTRA_STATE
@@ -3406,14 +3280,12 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let state = strm
-        .as_ref()
-        .and_then(|stream| {
-            deflate_bound_state_for_stream(
-                stream.state,
-                stream.zalloc.is_some() && stream.zfree.is_some(),
-            )
-        });
+    let state = strm.as_ref().and_then(|stream| {
+        deflate_bound_state_for_stream(
+            stream.state,
+            stream.zalloc.is_some() && stream.zfree.is_some(),
+        )
+    });
     deflateBound_z(sourceLen, state)
 }
 #[export_name = "deflateBound"]
@@ -3422,14 +3294,12 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    let state = strm
-        .as_ref()
-        .and_then(|stream| {
-            deflate_bound_state_for_stream(
-                stream.state,
-                stream.zalloc.is_some() && stream.zfree.is_some(),
-            )
-        });
+    let state = strm.as_ref().and_then(|stream| {
+        deflate_bound_state_for_stream(
+            stream.state,
+            stream.zalloc.is_some() && stream.zfree.is_some(),
+        )
+    });
     deflateBound_z(sourceLen as crate::stdlib::z_size_t, state) as crate::stdlib::uLong
 }
 
@@ -5568,241 +5438,418 @@ impl DeflateOneShotCodec {
 // This is the only raw deflate-call boundary. It validates the ABI cursors,
 // forms the callback-paired dispatch owner once, and publishes its scalar
 // completion only after every temporary slice borrow has ended.
-pub unsafe fn deflate_dispatch_from_abi_stream(
+pub(crate) unsafe fn deflate_scalar_from_abi_stream(
     strm: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
-    parameter_update: Option<DeflateParameterPlan>,
+    action: DeflateAbiAction<'_>,
 ) -> ::core::ffi::c_int {
-    let Some(flush) = DeflateFlush::parse(flush) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // Parameter changes share the same projection as normal dispatch.  The
-    // projection decides whether a block flush is necessary before forming
-    // any caller cursor views, preserving the direct-update path's original
-    // cursor-insensitive behavior.
-    let projection = match parameter_update {
-        Some(plan) => DeflateStorageProjection::ParameterDispatch(plan),
-        None => DeflateStorageProjection::Dispatch,
-    };
-    let Some((strm, state, storage)) = deflate_stream_and_state(strm, projection)
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if let Some(plan) = parameter_update {
-        if storage.cursors.is_none() {
-            let needs_table_cleanup =
-                state.level != plan.level && state.level == 0 && state.matches != 0;
-            let tables = if needs_table_cleanup {
-                let prev = if state.matches == 1 {
-                    Some(storage.prev.expect("parameter previous-table projection"))
-                } else {
-                    None
-                };
-                Some(DeflateCallbackHashStorage {
-                    head: storage.head.expect("parameter hash-table projection"),
-                    prev,
-                })
-            } else {
-                None
+    enum Operation<'a> {
+        Dispatch {
+            flush: DeflateFlush,
+            parameter_update: Option<DeflateParameterPlan>,
+        },
+        Scalar(DeflateAbiAction<'a>),
+    }
+
+    // Plan before projection so parameter admission retains its original
+    // cursor-insensitive path.  Both byte dispatch and scalar controls then
+    // consume the one checked stream/state projection below.
+    let (projection, operation) = match action {
+        DeflateAbiAction::Dispatch {
+            flush,
+            parameter_update,
+        } => {
+            let Some(flush) = DeflateFlush::parse(flush) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
             };
-            let scalars = DeflateParameterScalars {
-                current_level: &mut state.level,
-                current_strategy: &mut state.strategy,
+            let projection = match parameter_update {
+                Some(plan) => DeflateStorageProjection::ParameterDispatch(plan),
+                None => DeflateStorageProjection::Dispatch,
+            };
+            (
+                projection,
+                Operation::Dispatch {
+                    flush,
+                    parameter_update,
+                },
+            )
+        }
+        DeflateAbiAction::Params { level, strategy } => {
+            let Ok(plan) = DeflateParameterPlan::parse(level, strategy) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            (
+                DeflateStorageProjection::ParameterDispatch(plan),
+                Operation::Dispatch {
+                    flush: DeflateFlush(crate::zlib_h::Z_BLOCK),
+                    parameter_update: Some(plan),
+                },
+            )
+        }
+        DeflateAbiAction::Reset(DeflateResetKind::Keep) => (
+            DeflateStorageProjection::None,
+            Operation::Scalar(DeflateAbiAction::Reset(DeflateResetKind::Keep)),
+        ),
+        DeflateAbiAction::Reset(DeflateResetKind::Full) => (
+            DeflateStorageProjection::Hash,
+            Operation::Scalar(DeflateAbiAction::Reset(DeflateResetKind::Full)),
+        ),
+        DeflateAbiAction::Prime { bits, value } => (
+            DeflateStorageProjection::Complete,
+            Operation::Scalar(DeflateAbiAction::Prime { bits, value }),
+        ),
+        DeflateAbiAction::Pending { pending, bits } => (
+            DeflateStorageProjection::None,
+            Operation::Scalar(DeflateAbiAction::Pending { pending, bits }),
+        ),
+        DeflateAbiAction::Used { bits } => (
+            DeflateStorageProjection::None,
+            Operation::Scalar(DeflateAbiAction::Used { bits }),
+        ),
+        DeflateAbiAction::Tune {
+            good_length,
+            max_lazy,
+            nice_length,
+            max_chain,
+        } => (
+            DeflateStorageProjection::None,
+            Operation::Scalar(DeflateAbiAction::Tune {
+                good_length,
+                max_lazy,
+                nice_length,
+                max_chain,
+            }),
+        ),
+    };
+    let Some((strm, state, storage)) = deflate_stream_and_state(strm, projection) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    match operation {
+        Operation::Scalar(DeflateAbiAction::Reset(kind)) => {
+            let adler = deflateResetKeep(DeflateResetKeepOwner {
+                data_type: &mut state.data_type,
+                pending: &mut state.pending,
+                pending_out: &mut state.pending_out,
+                wrap: &mut state.wrap,
+                status: &mut state.status,
+                last_flush: &mut state.last_flush,
+                dyn_ltree: &mut state.dyn_ltree,
+                dyn_dtree: &mut state.dyn_dtree,
+                bl_tree: &mut state.bl_tree,
+                l_desc: &mut state.l_desc,
+                d_desc: &mut state.d_desc,
+                bl_desc: &mut state.bl_desc,
+                static_len: &mut state.static_len,
+                opt_len: &mut state.opt_len,
                 matches: &mut state.matches,
-                slid: &mut state.slid,
-                max_lazy_match: &mut state.max_lazy_match,
+                sym_next: &mut state.sym_next,
+                bi_buf: &mut state.bi_buf,
+                bi_valid: &mut state.bi_valid,
+                bi_used: &mut state.bi_used,
+            });
+            strm.total_out = 0;
+            strm.total_in = 0;
+            strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+            strm.data_type = crate::zlib_h::Z_UNKNOWN;
+            strm.adler = adler;
+            if matches!(kind, DeflateResetKind::Full) {
+                let head = storage.head.expect("full-reset hash projection");
+                let w_size = state.w_size;
+                let config = &configuration_table[state.level as usize];
+                DeflateResetCore {
+                    window_size: &mut state.window_size,
+                    slid: &mut state.slid,
+                    max_lazy_match: &mut state.max_lazy_match,
+                    good_match: &mut state.good_match,
+                    nice_match: &mut state.nice_match,
+                    max_chain_length: &mut state.max_chain_length,
+                    strstart: &mut state.strstart,
+                    block_start: &mut state.block_start,
+                    lookahead: &mut state.lookahead,
+                    insert: &mut state.insert,
+                    prev_length: &mut state.prev_length,
+                    match_length: &mut state.match_length,
+                    match_available: &mut state.match_available,
+                    ins_h: &mut state.ins_h,
+                }
+                .reset_after_keep(head, w_size, config);
+            }
+            crate::zlib_h::Z_OK
+        }
+        Operation::Scalar(DeflateAbiAction::Prime { bits, value }) => {
+            let pending_buf = state
+                .callback_storage
+                .dispatch_storage(storage)
+                .expect("complete pending storage projection")
+                .pending_buf;
+            deflate_prime_bits(
+                pending_buf,
+                &mut state.pending,
+                &mut state.bi_buf,
+                &mut state.bi_valid,
+                state.pending_out,
+                state.lit_bufsize,
+                bits,
+                value,
+            )
+        }
+        Operation::Scalar(DeflateAbiAction::Pending { pending, bits }) => {
+            let (pending_value, bits_value, status) =
+                deflate_pending_impl(state.pending, state.bi_valid);
+            if let Some(bits) = bits {
+                *bits = bits_value;
+            }
+            if let Some(pending) = pending {
+                *pending = pending_value;
+                status
+            } else {
+                crate::zlib_h::Z_OK
+            }
+        }
+        Operation::Scalar(DeflateAbiAction::Used { bits }) => {
+            deflate_used_impl(state.bi_used, bits)
+        }
+        Operation::Scalar(DeflateAbiAction::Tune {
+            good_length,
+            max_lazy,
+            nice_length,
+            max_chain,
+        }) => deflateTune(
+            DeflateTuneOwner {
                 good_match: &mut state.good_match,
+                max_lazy_match: &mut state.max_lazy_match,
                 nice_match: &mut state.nice_match,
                 max_chain_length: &mut state.max_chain_length,
-                w_size: state.w_size,
+            },
+            good_length,
+            max_lazy,
+            nice_length,
+            max_chain,
+        ),
+        Operation::Scalar(DeflateAbiAction::Dispatch { .. })
+        | Operation::Scalar(DeflateAbiAction::Params { .. }) => {
+            unreachable!("dispatch actions are planned before stream projection")
+        }
+        Operation::Dispatch {
+            flush,
+            parameter_update,
+        } => {
+            if let Some(plan) = parameter_update {
+                if storage.cursors.is_none() {
+                    let needs_table_cleanup =
+                        state.level != plan.level && state.level == 0 && state.matches != 0;
+                    let tables = if needs_table_cleanup {
+                        let prev = if state.matches == 1 {
+                            Some(storage.prev.expect("parameter previous-table projection"))
+                        } else {
+                            None
+                        };
+                        Some(DeflateCallbackHashStorage {
+                            head: storage.head.expect("parameter hash-table projection"),
+                            prev,
+                        })
+                    } else {
+                        None
+                    };
+                    let scalars = DeflateParameterScalars {
+                        current_level: &mut state.level,
+                        current_strategy: &mut state.strategy,
+                        matches: &mut state.matches,
+                        slid: &mut state.slid,
+                        max_lazy_match: &mut state.max_lazy_match,
+                        good_match: &mut state.good_match,
+                        nice_match: &mut state.nice_match,
+                        max_chain_length: &mut state.max_chain_length,
+                        w_size: state.w_size,
+                    };
+                    return deflateParams(
+                        DeflateParameterOwner::from_callback_storage(scalars, tables),
+                        plan.level,
+                        plan.strategy,
+                    );
+                }
+            }
+            // Dispatch needs the same three bounded history views as dictionary
+            // handling, plus pending bytes and the caller cursors. The parameter
+            // projection has formed those only after it admitted the block flush.
+            let Some((storage, DeflateAbiCursors { input, output })) =
+                state.callback_storage.dispatch_request(storage)
+            else {
+                return crate::zlib_h::Z_STREAM_ERROR;
             };
-            return deflateParams(
-                DeflateParameterOwner::from_callback_storage(scalars, tables),
-                plan.level,
-                plan.strategy,
-            );
+            let dispatch = DeflateDispatch {
+                flush,
+                stream: DeflateDispatchStream {
+                    input,
+                    output,
+                    next_in: 0,
+                    next_out: 0,
+                    avail_in: strm.avail_in,
+                    avail_out: strm.avail_out,
+                    total_in: strm.total_in,
+                    total_out: strm.total_out,
+                    adler: strm.adler,
+                    data_type: strm.data_type,
+                    message: None,
+                },
+                state: DeflateDispatchState {
+                    storage,
+                    status: state.status,
+                    pending_buf_size: state.pending_buf_size,
+                    pending_out: state.pending_out,
+                    pending: state.pending,
+                    wrap: state.wrap,
+                    gzhead: &mut state.gzhead,
+                    gzindex: state.gzindex,
+                    last_flush: state.last_flush,
+                    w_size: state.w_size,
+                    w_bits: state.w_bits,
+                    w_mask: state.w_mask,
+                    hash_size: state.hash_size,
+                    hash_mask: state.hash_mask,
+                    hash_shift: state.hash_shift,
+                    block_start: state.block_start,
+                    match_length: state.match_length,
+                    prev_match: state.prev_match,
+                    match_available: state.match_available,
+                    strstart: state.strstart,
+                    match_start: state.match_start,
+                    lookahead: state.lookahead,
+                    prev_length: state.prev_length,
+                    max_chain_length: state.max_chain_length,
+                    max_lazy_match: state.max_lazy_match,
+                    level: state.level,
+                    strategy: state.strategy,
+                    good_match: state.good_match,
+                    nice_match: state.nice_match,
+                    dyn_ltree: &mut state.dyn_ltree,
+                    dyn_dtree: &mut state.dyn_dtree,
+                    bl_tree: &mut state.bl_tree,
+                    l_desc: &mut state.l_desc,
+                    d_desc: &mut state.d_desc,
+                    bl_desc: &mut state.bl_desc,
+                    bl_count: &mut state.bl_count,
+                    heap: &mut state.heap,
+                    heap_len: state.heap_len,
+                    heap_max: state.heap_max,
+                    depth: &mut state.depth,
+                    sym_buf_start: state.sym_buf_start,
+                    sym_next: state.sym_next,
+                    sym_end: state.sym_end,
+                    opt_len: state.opt_len,
+                    static_len: state.static_len,
+                    matches: state.matches,
+                    insert: state.insert,
+                    ins_h: state.ins_h,
+                    bi_buf: state.bi_buf,
+                    bi_valid: state.bi_valid,
+                    bi_used: state.bi_used,
+                    high_water: state.high_water,
+                    slid: state.slid,
+                },
+            };
+            let DeflateDispatchCompletion {
+                result,
+                stream:
+                    DeflateDispatchStreamUpdate {
+                        next_in,
+                        next_out,
+                        avail_in,
+                        avail_out,
+                        total_in,
+                        total_out,
+                        adler,
+                        data_type,
+                        message,
+                    },
+                state:
+                    DeflateDispatchStateUpdate {
+                        status,
+                        pending_out,
+                        pending,
+                        wrap,
+                        gzindex,
+                        last_flush,
+                        block_start,
+                        match_length,
+                        prev_match,
+                        match_available,
+                        strstart,
+                        match_start,
+                        lookahead,
+                        prev_length,
+                        max_chain_length,
+                        max_lazy_match,
+                        level,
+                        strategy,
+                        good_match,
+                        nice_match,
+                        heap_len,
+                        heap_max,
+                        sym_next,
+                        sym_end,
+                        opt_len,
+                        static_len,
+                        matches,
+                        insert,
+                        ins_h,
+                        bi_buf,
+                        bi_valid,
+                        bi_used,
+                        high_water,
+                        slid,
+                    },
+            } = deflate_from_stream(dispatch, parameter_update);
+            strm.next_in = strm.next_in.wrapping_add(next_in);
+            strm.next_out = strm.next_out.wrapping_add(next_out);
+            strm.avail_in = avail_in;
+            strm.avail_out = avail_out;
+            strm.total_in = total_in;
+            strm.total_out = total_out;
+            strm.adler = adler;
+            strm.data_type = data_type;
+            if let Some(message) = message {
+                strm.msg = crate::src::zutil::zError(message)
+                    .as_ptr()
+                    .cast_mut()
+                    .cast();
+            }
+            state.status = status;
+            state.pending_out = pending_out;
+            state.pending = pending;
+            state.wrap = wrap;
+            state.gzindex = gzindex;
+            state.last_flush = last_flush;
+            state.block_start = block_start;
+            state.match_length = match_length;
+            state.prev_match = prev_match;
+            state.match_available = match_available;
+            state.strstart = strstart;
+            state.match_start = match_start;
+            state.lookahead = lookahead;
+            state.prev_length = prev_length;
+            state.max_chain_length = max_chain_length;
+            state.max_lazy_match = max_lazy_match;
+            state.level = level;
+            state.strategy = strategy;
+            state.good_match = good_match;
+            state.nice_match = nice_match;
+            state.heap_len = heap_len;
+            state.heap_max = heap_max;
+            state.sym_next = sym_next;
+            state.sym_end = sym_end;
+            state.opt_len = opt_len;
+            state.static_len = static_len;
+            state.matches = matches;
+            state.insert = insert;
+            state.ins_h = ins_h;
+            state.bi_buf = bi_buf;
+            state.bi_valid = bi_valid;
+            state.bi_used = bi_used;
+            state.high_water = high_water;
+            state.slid = slid;
+            result
         }
     }
-    // Dispatch needs the same three bounded history views as dictionary
-    // handling, plus pending bytes and the caller cursors. The parameter
-    // projection has formed those only after it admitted the block flush.
-    let Some((storage, DeflateAbiCursors { input, output })) =
-        state.callback_storage.dispatch_request(storage)
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let dispatch = DeflateDispatch {
-        flush,
-        stream: DeflateDispatchStream {
-            input,
-            output,
-            next_in: 0,
-            next_out: 0,
-            avail_in: strm.avail_in,
-            avail_out: strm.avail_out,
-            total_in: strm.total_in,
-            total_out: strm.total_out,
-            adler: strm.adler,
-            data_type: strm.data_type,
-            message: None,
-        },
-        state: DeflateDispatchState {
-            storage,
-            status: state.status,
-            pending_buf_size: state.pending_buf_size,
-            pending_out: state.pending_out,
-            pending: state.pending,
-            wrap: state.wrap,
-            gzhead: &mut state.gzhead,
-            gzindex: state.gzindex,
-            last_flush: state.last_flush,
-            w_size: state.w_size,
-            w_bits: state.w_bits,
-            w_mask: state.w_mask,
-            hash_size: state.hash_size,
-            hash_mask: state.hash_mask,
-            hash_shift: state.hash_shift,
-            block_start: state.block_start,
-            match_length: state.match_length,
-            prev_match: state.prev_match,
-            match_available: state.match_available,
-            strstart: state.strstart,
-            match_start: state.match_start,
-            lookahead: state.lookahead,
-            prev_length: state.prev_length,
-            max_chain_length: state.max_chain_length,
-            max_lazy_match: state.max_lazy_match,
-            level: state.level,
-            strategy: state.strategy,
-            good_match: state.good_match,
-            nice_match: state.nice_match,
-            dyn_ltree: &mut state.dyn_ltree,
-            dyn_dtree: &mut state.dyn_dtree,
-            bl_tree: &mut state.bl_tree,
-            l_desc: &mut state.l_desc,
-            d_desc: &mut state.d_desc,
-            bl_desc: &mut state.bl_desc,
-            bl_count: &mut state.bl_count,
-            heap: &mut state.heap,
-            heap_len: state.heap_len,
-            heap_max: state.heap_max,
-            depth: &mut state.depth,
-            sym_buf_start: state.sym_buf_start,
-            sym_next: state.sym_next,
-            sym_end: state.sym_end,
-            opt_len: state.opt_len,
-            static_len: state.static_len,
-            matches: state.matches,
-            insert: state.insert,
-            ins_h: state.ins_h,
-            bi_buf: state.bi_buf,
-            bi_valid: state.bi_valid,
-            bi_used: state.bi_used,
-            high_water: state.high_water,
-            slid: state.slid,
-        },
-    };
-    let DeflateDispatchCompletion {
-        result,
-        stream:
-            DeflateDispatchStreamUpdate {
-                next_in,
-                next_out,
-                avail_in,
-                avail_out,
-                total_in,
-                total_out,
-                adler,
-                data_type,
-                message,
-            },
-        state:
-            DeflateDispatchStateUpdate {
-                status,
-                pending_out,
-                pending,
-                wrap,
-                gzindex,
-                last_flush,
-                block_start,
-                match_length,
-                prev_match,
-                match_available,
-                strstart,
-                match_start,
-                lookahead,
-                prev_length,
-                max_chain_length,
-                max_lazy_match,
-                level,
-                strategy,
-                good_match,
-                nice_match,
-                heap_len,
-                heap_max,
-                sym_next,
-                sym_end,
-                opt_len,
-                static_len,
-                matches,
-                insert,
-                ins_h,
-                bi_buf,
-                bi_valid,
-                bi_used,
-                high_water,
-                slid,
-            },
-    } = deflate_from_stream(dispatch, parameter_update);
-    strm.next_in = strm.next_in.wrapping_add(next_in);
-    strm.next_out = strm.next_out.wrapping_add(next_out);
-    strm.avail_in = avail_in;
-    strm.avail_out = avail_out;
-    strm.total_in = total_in;
-    strm.total_out = total_out;
-    strm.adler = adler;
-    strm.data_type = data_type;
-    if let Some(message) = message {
-        strm.msg = crate::src::zutil::zError(message)
-            .as_ptr()
-            .cast_mut()
-            .cast();
-    }
-    state.status = status;
-    state.pending_out = pending_out;
-    state.pending = pending;
-    state.wrap = wrap;
-    state.gzindex = gzindex;
-    state.last_flush = last_flush;
-    state.block_start = block_start;
-    state.match_length = match_length;
-    state.prev_match = prev_match;
-    state.match_available = match_available;
-    state.strstart = strstart;
-    state.match_start = match_start;
-    state.lookahead = lookahead;
-    state.prev_length = prev_length;
-    state.max_chain_length = max_chain_length;
-    state.max_lazy_match = max_lazy_match;
-    state.level = level;
-    state.strategy = strategy;
-    state.good_match = good_match;
-    state.nice_match = nice_match;
-    state.heap_len = heap_len;
-    state.heap_max = heap_max;
-    state.sym_next = sym_next;
-    state.sym_end = sym_end;
-    state.opt_len = opt_len;
-    state.static_len = static_len;
-    state.matches = matches;
-    state.insert = insert;
-    state.ins_h = ins_h;
-    state.bi_buf = bi_buf;
-    state.bi_valid = bi_valid;
-    state.bi_used = bi_used;
-    state.high_water = high_water;
-    state.slid = slid;
-    result
 }
 #[export_name = "deflate"]
 
@@ -5814,6 +5861,22 @@ pub unsafe extern "C" fn deflate_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     deflate_dispatch_from_abi_stream(strm, flush, None)
+}
+
+// Retain the internal stream-dispatch surface used by the one-shot and gzip
+// callers.  Scalar controls use the shared action boundary above directly.
+pub unsafe fn deflate_dispatch_from_abi_stream(
+    strm: &mut crate::zlib_h::z_stream_s,
+    flush: ::core::ffi::c_int,
+    parameter_update: Option<DeflateParameterPlan>,
+) -> ::core::ffi::c_int {
+    deflate_scalar_from_abi_stream(
+        strm,
+        DeflateAbiAction::Dispatch {
+            flush,
+            parameter_update,
+        },
+    )
 }
 // The callback-backed release transaction consumes a validated stream handle.
 // Embedded users (notably gzip close) can form that handle from their existing

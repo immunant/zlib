@@ -16,7 +16,7 @@ pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflate_dispatch_from_abi_stream as deflate;
 pub use crate::src::deflate::internal_state;
 use crate::src::deflate::DeflateResetKind;
-use crate::src::deflate::{deflate_scalar_from_abi_stream, DeflateScalarAction};
+use crate::src::deflate::{deflate_scalar_from_abi_stream, DeflateAbiAction};
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpc;
@@ -1702,14 +1702,14 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                             GzCompCodecAction::Reset => {
                                 deflate_scalar_from_abi_stream(
                                     strm,
-                                    DeflateScalarAction::Reset(DeflateResetKind::Full),
+                                    DeflateAbiAction::Reset(DeflateResetKind::Full),
                                 );
                                 GzCompCodecResult::Complete
                             }
                             GzCompCodecAction::Retune(retune) => {
                                 deflate_scalar_from_abi_stream(
                                     strm,
-                                    DeflateScalarAction::Params {
+                                    DeflateAbiAction::Params {
                                         level: retune.level,
                                         strategy: retune.strategy,
                                     },
