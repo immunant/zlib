@@ -144,7 +144,10 @@ pub struct inflate_state {
     pub dmax: ::core::ffi::c_uint,
     pub check: ::core::ffi::c_ulong,
     pub total: ::core::ffi::c_ulong,
-    pub head: crate::zlib_h::gz_headerp,
+    // `inflateGetHeader()` registers a caller-owned ABI header for later
+    // `inflate()` calls.  Retain only a checked non-null handle here; the
+    // boundary that dereferences it is the exported `inflate()` wrapper.
+    pub head: Option<core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
     pub wbits: ::core::ffi::c_uint,
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
@@ -187,7 +190,7 @@ pub(crate) fn new_inflate_state() -> inflate_state {
         dmax: 0,
         check: 0,
         total: 0,
-        head: ::core::ptr::null_mut(),
+        head: None,
         wbits: 0,
         wsize: 0,
         whave: 0,
@@ -288,7 +291,7 @@ fn inflate_reset_keep_state(
     state.havedict = 0 as ::core::ffi::c_int;
     state.flags = -1 as ::core::ffi::c_int;
     state.dmax = 32768 as ::core::ffi::c_uint;
-    state.head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+    state.head = None;
     state.hold = 0 as ::core::ffi::c_ulong;
     state.bits = 0 as ::core::ffi::c_uint;
     state.next = 0;
@@ -2570,9 +2573,8 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(state) = (unsafe { state.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let head = state.head;
-    let header = unsafe {
-        head.as_mut().map(|header| {
+    let header = state.head.map(|mut head| unsafe {
+        let header = head.as_mut();
                 let extra = (!header.extra.is_null()).then(|| {
                     ::core::slice::from_raw_parts_mut(header.extra, header.extra_max as usize)
                 });
@@ -2588,8 +2590,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     name,
                     comment,
                 }
-            })
-    };
+    });
     let mut message = None;
     inflate_impl(strm, state, flush, input, output, header, &mut message)
 }
@@ -2838,7 +2839,7 @@ fn inflate_get_header_impl(
     if state.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state.head = head;
+    state.head = Some(core::ptr::NonNull::from(&mut *head));
     head.done = 0 as ::core::ffi::c_int;
     crate::zlib_h::Z_OK
 }
