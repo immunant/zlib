@@ -2936,10 +2936,18 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     };
     inflate_sync_point(state)
 }
-pub unsafe extern "C" fn inflateCopy(
+// The exported adapter below owns the foreign-call boundary. Keep this
+// implementation callable through that dispatcher without exposing its raw
+// allocation and cursor work as an unsafe-function contract to Rust callers.
+pub fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this implementation preserves zlib's raw stream and allocator
+    // protocol. Each raw allocation or stream binding is validated before it
+    // is turned into a reference, and no such reference spans an allocator
+    // callback that may inspect the stream.
+    unsafe {
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -3014,6 +3022,7 @@ pub unsafe extern "C" fn inflateCopy(
     dest.state =
         copy as *mut crate::src::inflate::inflate_state as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
+    }
 }
 
 struct InflateCopyPlan {
