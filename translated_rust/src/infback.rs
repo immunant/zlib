@@ -1261,13 +1261,13 @@ mod tests {
         inflate_back_copy_count, inflate_back_copy_match, inflate_back_discard_bits,
         inflate_back_distance_exceeds_window, inflate_back_fill_code_length_run,
         inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
-        inflate_back_initialize_state,
-        inflate_back_init_plan, inflate_back_initial_input_count, inflate_back_litlen_action,
-        inflate_back_low_bits, inflate_back_match_copy_plan, inflate_back_root_table_index,
-        inflate_back_stored_block_length, inflate_back_subtable_index, inflate_back_take_bits,
-        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
-        InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan, InflateBackInitPlan,
-        InflateBackLitLenAction, InflateBackMatchSource,
+        inflate_back_init_plan, inflate_back_initial_input_count, inflate_back_initialize_state,
+        inflate_back_litlen_action, inflate_back_low_bits, inflate_back_match_copy_plan,
+        inflate_back_root_table_index, inflate_back_stored_block_length,
+        inflate_back_subtable_index, inflate_back_take_bits, inflate_back_window_bits_are_valid,
+        inflate_back_window_size, InflateBackBlockKind, InflateBackCodeLengthRepeat,
+        InflateBackCodeLengthRepeatPlan, InflateBackInitPlan, InflateBackLitLenAction,
+        InflateBackMatchSource,
     };
 
     #[test]

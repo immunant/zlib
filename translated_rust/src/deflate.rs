@@ -482,7 +482,9 @@ impl<'a> PendingStorageView<'a> {
         // Preflight both destination ranges before copying either one.  The
         // ranges may overlap temporally, so preserve the C copy order: pending
         // bytes first, then the current symbol prefix.
-        if self.pending_range_usize(plan.pending_out_offset, plan.pending_len).is_none()
+        if self
+            .pending_range_usize(plan.pending_out_offset, plan.pending_len)
+            .is_none()
             || self.symbol_prefix(plan.symbol_len).is_none()
         {
             return false;
@@ -625,12 +627,16 @@ pub const finish_started: block_state = 2;
 
 pub const need_more: block_state = 0;
 
-pub type compress_func = Option<
-    unsafe extern "C" fn(
-        *mut crate::src::deflate::deflate_state,
-        ::core::ffi::c_int,
-    ) -> block_state,
->;
+// zlib's configuration table selects one of three compressor routines. Keep
+// that policy as data instead of storing raw function pointers: function
+// pointer equality is not a stable Rust abstraction, and the table is an
+// internal implementation detail rather than an ABI record.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum DeflateCompressionFunction {
+    Stored,
+    Fast,
+    Slow,
+}
 
 pub type config = config_s;
 #[derive(Copy, Clone)]
@@ -641,7 +647,7 @@ pub struct config_s {
     pub max_lazy: crate::zutil_h::ush,
     pub nice_length: crate::zutil_h::ush,
     pub max_chain: crate::zutil_h::ush,
-    pub func: compress_func,
+    function: DeflateCompressionFunction,
 }
 #[no_mangle]
 pub static deflate_copyright: [u8; 70] =
@@ -657,130 +663,70 @@ static configuration_table: [config; 10] = [
         max_lazy: 0 as crate::zutil_h::ush,
         nice_length: 0 as crate::zutil_h::ush,
         max_chain: 0 as crate::zutil_h::ush,
-        func: Some(
-            deflate_stored
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Stored,
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 4 as crate::zutil_h::ush,
         nice_length: 8 as crate::zutil_h::ush,
         max_chain: 4 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Fast,
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 5 as crate::zutil_h::ush,
         nice_length: 16 as crate::zutil_h::ush,
         max_chain: 8 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Fast,
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 6 as crate::zutil_h::ush,
         nice_length: 32 as crate::zutil_h::ush,
         max_chain: 32 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Fast,
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 4 as crate::zutil_h::ush,
         nice_length: 16 as crate::zutil_h::ush,
         max_chain: 16 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Slow,
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 16 as crate::zutil_h::ush,
         nice_length: 32 as crate::zutil_h::ush,
         max_chain: 32 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Slow,
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 16 as crate::zutil_h::ush,
         nice_length: 128 as crate::zutil_h::ush,
         max_chain: 128 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Slow,
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 32 as crate::zutil_h::ush,
         nice_length: 128 as crate::zutil_h::ush,
         max_chain: 256 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Slow,
     },
     config_s {
         good_length: 32 as crate::zutil_h::ush,
         max_lazy: 128 as crate::zutil_h::ush,
         nice_length: 258 as crate::zutil_h::ush,
         max_chain: 1024 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Slow,
     },
     config_s {
         good_length: 32 as crate::zutil_h::ush,
         max_lazy: 258 as crate::zutil_h::ush,
         nice_length: 258 as crate::zutil_h::ush,
         max_chain: 4096 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        function: DeflateCompressionFunction::Slow,
     },
 ];
 
@@ -1622,10 +1568,8 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     }
     // The callback allocation has exactly these lengths.  This boundary
     // creates short-lived views; the refill algorithm itself is slice-based.
-    let window = &mut *::core::ptr::slice_from_raw_parts_mut(
-        state.window,
-        state.window_size as usize,
-    );
+    let window =
+        &mut *::core::ptr::slice_from_raw_parts_mut(state.window, state.window_size as usize);
     let head = &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
     let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
     let input = if stream.avail_in == 0 {
@@ -1795,8 +1739,8 @@ pub unsafe extern "C" fn deflateInit2_(
     // `memLevel` was constrained to 1..=MAX_MEM_LEVEL above, so this fixed
     // C-width request is representable.  Keep the checked-plan derivation as
     // the single allocation/layout source of truth.
-    let pending_plan = pending_storage_allocation_plan(lit_bufsize)
-        .expect("validated deflate pending allocation");
+    let pending_plan =
+        pending_storage_allocation_plan(lit_bufsize).expect("validated deflate pending allocation");
     let pending_layout = pending_plan.layout();
     let pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
@@ -2511,16 +2455,6 @@ enum DeflateParamsHashAction {
     Clear,
 }
 
-// zlib's configuration table selects one of three compressor routines.  Keep
-// that policy as data instead of comparing function addresses: Rust does not
-// promise meaningful equality for function pointers across codegen units.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum DeflateCompressionFunction {
-    Stored,
-    Fast,
-    Slow,
-}
-
 fn deflate_compression_function_for_level(
     level: ::core::ffi::c_int,
 ) -> Option<DeflateCompressionFunction> {
@@ -2548,13 +2482,9 @@ fn deflate_params_plan(
     let (level, strategy) = normalize_deflate_params(level, strategy)?;
     let current_function = deflate_compression_function_for_level(state.level)?;
     let requested_function = deflate_compression_function_for_level(level)?;
-    let flush_before_apply = (strategy != state.strategy
-        || current_function != requested_function)
+    let flush_before_apply = (strategy != state.strategy || current_function != requested_function)
         && state.last_flush != -2;
-    let hash_action = if state.level != level
-        && state.level == 0
-        && state.matches != 0
-    {
+    let hash_action = if state.level != level && state.level == 0 && state.matches != 0 {
         if state.matches == 1 {
             DeflateParamsHashAction::Rebase
         } else {
@@ -2599,10 +2529,7 @@ fn deflate_params_apply_hash_action(
     }
 }
 
-fn deflate_params_apply(
-    state: &mut crate::src::deflate::deflate_state,
-    plan: DeflateParamsPlan,
-) {
+fn deflate_params_apply(state: &mut crate::src::deflate::deflate_state, plan: DeflateParamsPlan) {
     if state.level != plan.level {
         if state.level == 0 && state.matches != 0 {
             state.slid = match plan.hash_action {
@@ -2612,10 +2539,14 @@ fn deflate_params_apply(
             state.matches = 0;
         }
         state.level = plan.level;
-        state.max_lazy_match = configuration_table[plan.level as usize].max_lazy as crate::stdlib::uInt;
-        state.good_match = configuration_table[plan.level as usize].good_length as crate::stdlib::uInt;
-        state.nice_match = configuration_table[plan.level as usize].nice_length as ::core::ffi::c_int;
-        state.max_chain_length = configuration_table[plan.level as usize].max_chain as crate::stdlib::uInt;
+        state.max_lazy_match =
+            configuration_table[plan.level as usize].max_lazy as crate::stdlib::uInt;
+        state.good_match =
+            configuration_table[plan.level as usize].good_length as crate::stdlib::uInt;
+        state.nice_match =
+            configuration_table[plan.level as usize].nice_length as ::core::ffi::c_int;
+        state.max_chain_length =
+            configuration_table[plan.level as usize].max_chain as crate::stdlib::uInt;
     }
     state.strategy = plan.strategy;
 }
@@ -2656,21 +2587,15 @@ pub unsafe extern "C" fn deflateParams_ffi(
     match plan.hash_action {
         DeflateParamsHashAction::None => {}
         DeflateParamsHashAction::Rebase => {
-            let head = &mut *::core::ptr::slice_from_raw_parts_mut(
-                state.head,
-                state.hash_size as usize,
-            );
-            let prev = &mut *::core::ptr::slice_from_raw_parts_mut(
-                state.prev,
-                state.w_size as usize,
-            );
+            let head =
+                &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
+            let prev =
+                &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
             deflate_params_apply_hash_action(plan.hash_action, head, Some(prev), state.w_size);
         }
         DeflateParamsHashAction::Clear => {
-            let head = &mut *::core::ptr::slice_from_raw_parts_mut(
-                state.head,
-                state.hash_size as usize,
-            );
+            let head =
+                &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
             deflate_params_apply_hash_action(plan.hash_action, head, None, state.w_size);
         }
     }
@@ -2779,7 +2704,9 @@ fn deflate_bound_gzip_wrapper_len(
 
     let mut length = 18_usize;
     if header.has_extra {
-        length = length.wrapping_add(2).wrapping_add(header.extra_len as usize);
+        length = length
+            .wrapping_add(2)
+            .wrapping_add(header.extra_len as usize);
     }
     if let Some(name_len) = header.name_len {
         length = length.wrapping_add(name_len).wrapping_add(1);
@@ -3026,7 +2953,10 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let stream = &mut *strm;
     let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
     let pending_storage = core::slice::from_raw_parts_mut(
-        state.pending_buf.expect("validated pending storage").as_ptr(),
+        state
+            .pending_buf
+            .expect("validated pending storage")
+            .as_ptr(),
         state.pending_buf_size as usize,
     );
     let layout = pending_storage_layout(state.lit_bufsize);
@@ -3224,7 +3154,18 @@ fn gzip_default_header_bytes(
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> [crate::stdlib::Bytef; 10] {
-    [31, 139, 8, 0, 0, 0, 0, 0, gzip_default_xfl(level, strategy), 3]
+    [
+        31,
+        139,
+        8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        gzip_default_xfl(level, strategy),
+        3,
+    ]
 }
 
 fn gzip_custom_header_bytes(
@@ -3267,7 +3208,10 @@ fn gzip_custom_header_bytes(
 }
 
 fn gzip_header_crc_bytes(crc: crate::stdlib::uLong) -> [crate::stdlib::Bytef; 2] {
-    [crc as crate::stdlib::Byte, (crc >> 8) as crate::stdlib::Byte]
+    [
+        crc as crate::stdlib::Byte,
+        (crc >> 8) as crate::stdlib::Byte,
+    ]
 }
 
 fn gzip_trailer_bytes(
@@ -3371,7 +3315,9 @@ pub unsafe extern "C" fn deflate_ffi(
     }
     let pending_buffer = {
         core::slice::from_raw_parts(
-            (*s).pending_buf.expect("validated pending storage").as_ptr(),
+            (*s).pending_buf
+                .expect("validated pending storage")
+                .as_ptr(),
             pending_layout.total_len,
         )
     };
@@ -3428,7 +3374,10 @@ pub unsafe extern "C" fn deflate_ffi(
             state.strstart != 0,
         );
         let pending_buffer = core::slice::from_raw_parts_mut(
-            state.pending_buf.expect("validated pending storage").as_ptr(),
+            state
+                .pending_buf
+                .expect("validated pending storage")
+                .as_ptr(),
             state.pending_buf_size as usize,
         );
         let _ = put_short_msb_core(pending_buffer, &mut state.pending, header);
@@ -3458,7 +3407,10 @@ pub unsafe extern "C" fn deflate_ffi(
         (*strm).adler = 0 as crate::stdlib::uLong;
         let state = &mut *s;
         let pending_buffer = core::slice::from_raw_parts_mut(
-            state.pending_buf.expect("validated pending storage").as_ptr(),
+            state
+                .pending_buf
+                .expect("validated pending storage")
+                .as_ptr(),
             state.pending_buf_size as usize,
         );
         let layout = pending_storage_layout(state.lit_bufsize);
@@ -3469,7 +3421,10 @@ pub unsafe extern "C" fn deflate_ffi(
         if (*s).gzhead.is_null() {
             let state = &mut *s;
             let pending_buffer = core::slice::from_raw_parts_mut(
-                state.pending_buf.expect("validated pending storage").as_ptr(),
+                state
+                    .pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr(),
                 state.pending_buf_size as usize,
             );
             let layout = pending_storage_layout(state.lit_bufsize);
@@ -3499,7 +3454,9 @@ pub unsafe extern "C" fn deflate_ffi(
                 gzhead.extra_len,
             );
             let pending_buffer = core::slice::from_raw_parts_mut(
-                (*s).pending_buf.expect("validated pending storage").as_ptr(),
+                (*s).pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr(),
                 (*s).pending_buf_size as usize,
             );
             let layout = pending_storage_layout((*s).lit_bufsize);
@@ -3541,10 +3498,11 @@ pub unsafe extern "C" fn deflate_ffi(
                 (((*(*s).gzhead).extra_len & 0xffff as crate::stdlib::uInt) as crate::zutil_h::ulg)
                     .wrapping_sub((*s).gzindex);
             while pending_buffer_needs_flush((*s).pending, left, (*s).pending_buf_size) {
-                let copy: crate::zutil_h::ulg =
-                    (*s).pending_buf_size.wrapping_sub((*s).pending);
+                let copy: crate::zutil_h::ulg = (*s).pending_buf_size.wrapping_sub((*s).pending);
                 let pending = core::slice::from_raw_parts_mut(
-                    (*s).pending_buf.expect("validated pending storage").as_ptr(),
+                    (*s).pending_buf
+                        .expect("validated pending storage")
+                        .as_ptr(),
                     (*s).pending_buf_size as usize,
                 );
                 let Some(next_pending) =
@@ -3570,7 +3528,9 @@ pub unsafe extern "C" fn deflate_ffi(
                 left = left.wrapping_sub(copy);
             }
             let pending = core::slice::from_raw_parts_mut(
-                (*s).pending_buf.expect("validated pending storage").as_ptr(),
+                (*s).pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr(),
                 (*s).pending_buf_size as usize,
             );
             let Some(next_pending) =
@@ -3694,7 +3654,9 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
             }
             let pending_buffer = core::slice::from_raw_parts_mut(
-                (*s).pending_buf.expect("validated pending storage").as_ptr(),
+                (*s).pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr(),
                 (*s).pending_buf_size as usize,
             );
             let layout = pending_storage_layout((*s).lit_bufsize);
@@ -3726,9 +3688,11 @@ pub unsafe extern "C" fn deflate_ffi(
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, flush) as ::core::ffi::c_uint
         } else {
-            configuration_table[(*s).level as usize]
-                .func
-                .expect("non-null function pointer")(s, flush) as ::core::ffi::c_uint
+            (match configuration_table[(*s).level as usize].function {
+                DeflateCompressionFunction::Stored => deflate_stored(s, flush),
+                DeflateCompressionFunction::Fast => deflate_fast(s, flush),
+                DeflateCompressionFunction::Slow => deflate_slow(s, flush),
+            }) as ::core::ffi::c_uint
         }) as block_state;
         let (set_finish_state, return_ok) = deflate_block_state_actions(bstate);
         if set_finish_state {
@@ -3787,7 +3751,10 @@ pub unsafe extern "C" fn deflate_ffi(
     if (*s).wrap == 2 as ::core::ffi::c_int {
         let state = &mut *s;
         let pending_buffer = core::slice::from_raw_parts_mut(
-            state.pending_buf.expect("validated pending storage").as_ptr(),
+            state
+                .pending_buf
+                .expect("validated pending storage")
+                .as_ptr(),
             state.pending_buf_size as usize,
         );
         let layout = pending_storage_layout(state.lit_bufsize);
@@ -3799,7 +3766,10 @@ pub unsafe extern "C" fn deflate_ffi(
     } else {
         let state = &mut *s;
         let pending_buffer = core::slice::from_raw_parts_mut(
-            state.pending_buf.expect("validated pending storage").as_ptr(),
+            state
+                .pending_buf
+                .expect("validated pending storage")
+                .as_ptr(),
             state.pending_buf_size as usize,
         );
         let _ = put_short_msb_core(
@@ -3825,9 +3795,7 @@ pub unsafe extern "C" fn deflate_ffi(
 }
 #[export_name = "deflateEnd"]
 
-pub unsafe extern "C" fn deflateEnd_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut status: ::core::ffi::c_int = 0;
     if !deflate_state_is_valid_at_ffi_boundary!(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -4039,11 +4007,17 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     // The safe storage core below preserves the historical copy order for
     // the pending/symbol temporal overlay.
     let source_pending = core::slice::from_raw_parts(
-        (*ss).pending_buf.expect("validated source pending storage").as_ptr(),
+        (*ss)
+            .pending_buf
+            .expect("validated source pending storage")
+            .as_ptr(),
         pending_layout.total_len,
     );
     let destination_pending = core::slice::from_raw_parts_mut(
-        (*ds).pending_buf.expect("validated destination pending storage").as_ptr(),
+        (*ds)
+            .pending_buf
+            .expect("validated destination pending storage")
+            .as_ptr(),
         pending_layout.total_len,
     );
     let Some(source_storage) = PendingStorageReadView::new(source_pending, pending_layout) else {
@@ -4400,7 +4374,10 @@ pub(crate) fn take_pending_header_len_override(
     state: &mut crate::src::deflate::deflate_state,
     stored_len: crate::zutil_h::ulg,
 ) -> crate::zutil_h::ulg {
-    state.pending_header_len_override.take().unwrap_or(stored_len)
+    state
+        .pending_header_len_override
+        .take()
+        .unwrap_or(stored_len)
 }
 
 unsafe extern "C" fn deflate_stored(
@@ -5356,49 +5333,44 @@ unsafe fn deflate_huff(
 mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_len, deflate_block_state_actions,
-        deflate_bound_lengths, deflate_bound_z_core, deflate_copy_prev_len,
-        deflate_copyright, deflate_dictionary_len,
-        deflate_dictionary_state_after_load, deflate_distance_tree_code, deflate_fast_match_codes,
-        deflate_fast_match_progress, deflate_fast_should_insert_match, deflate_final_flush_action,
-        deflate_flush_block_state_after_output, deflate_flush_rank, deflate_huff_literal_progress,
-        deflate_insert_after_block, deflate_literal_state_after_emit, deflate_literal_tally_plan,
-        deflate_match_refill_action, deflate_pending_value, deflate_preflight,
-        deflate_prime_bits_valid, deflate_prime_has_pending_space, deflate_prime_insert_bits,
-        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
-        deflate_rle_clamp_match_length, deflate_rle_match_length,
-        deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
+        deflate_bound_lengths, deflate_bound_z_core, deflate_copy_prev_len, deflate_copyright,
+        deflate_dictionary_len, deflate_dictionary_state_after_load, deflate_distance_tree_code,
+        deflate_fast_match_codes, deflate_fast_match_progress, deflate_fast_should_insert_match,
+        deflate_final_flush_action, deflate_flush_block_state_after_output, deflate_flush_rank,
+        deflate_huff_literal_progress, deflate_insert_after_block,
+        deflate_literal_state_after_emit, deflate_literal_tally_plan, deflate_match_refill_action,
+        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
+        deflate_prime_has_pending_space, deflate_prime_insert_bits, deflate_request_is_invalid,
+        deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
+        deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_next_scan_indices, deflate_rle_refill_action, deflate_rle_scan_indices,
         deflate_rle_tally_plan, deflate_set_dictionary_allowed, deflate_should_return_buf_error,
         deflate_slow_can_search_match, deflate_state_is_usable, deflate_state_status_valid,
-        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
-        fill_window_cursor, fill_window_has_insertable_match,
-        fill_window_hash_update,
-        fill_window_high_water_after_zero, fill_window_insert_after_slide,
-        fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
-        fill_window_reinsert, fill_window_slide, fill_window_state_after_slide, fill_window_zero,
-        fill_window_zero_range,
-        drain_pending, flush_pending_core,
-        gzip_default_header_bytes, gzip_default_xfl, gzip_extra_copy_chunk, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_bytes, gzip_header_crc_pending_range, gzip_custom_header_bytes,
-        gzip_trailer_bytes,
-        lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
-        longest_match_candidate_update, longest_match_clamp_length, longest_match_core,
-        longest_match_limit, longest_match_next_chain_length, longest_match_search_parameters,
-        normalize_deflate_params,
+        deflate_version_matches, dictionary_tail_offset, drain_pending,
+        fill_window_available_space, fill_window_cursor, fill_window_has_insertable_match,
+        fill_window_hash_update, fill_window_high_water_after_zero, fill_window_insert_after_slide,
+        fill_window_lookahead_after_read, fill_window_reinsert, fill_window_should_refill,
+        fill_window_should_slide, fill_window_slide, fill_window_state_after_slide,
+        fill_window_zero, fill_window_zero_range, flush_pending_core, gzip_custom_header_bytes,
+        gzip_default_header_bytes, gzip_default_xfl, gzip_extra_copy_chunk, gzip_header_crc,
+        gzip_header_crc_bytes, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        gzip_trailer_bytes, lm_head_reset_plan, lm_init_plan, lm_initial_state,
+        lm_match_parameters, lm_reset_plan, longest_match_candidate_update,
+        longest_match_clamp_length, longest_match_core, longest_match_limit,
+        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors,
-        pending_storage_copy_plan, pending_storage_layout,
-        pending_storage_layout_from_metadata, put_short_msb_core, read_buf_checksum, read_buf_core,
-        read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
-        stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
-        stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
-        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
-        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors,
-        take_pending_header_len_override, zlib_header,
-        DeflateBoundGzipHeader, DeflateBoundState, DeflateFastMatchProgress,
+        pending_storage_copy_plan, pending_storage_layout, pending_storage_layout_from_metadata,
+        put_short_msb_core, read_buf_checksum, read_buf_core, read_buf_input_progress_after_copy,
+        read_buf_len, read_buf_total_in_after_copy, short_msb_bytes, slide_hash_core,
+        slide_hash_entry, stored_block_available_output, stored_block_buffered_len,
+        stored_block_can_emit, stored_block_copy_lengths, stored_block_header_bytes,
+        stored_block_is_last, stored_block_length_bytes, stored_block_min_size,
+        stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
+        symbol_buffer_is_full, symbol_triplet_cursors, take_pending_header_len_override,
+        zlib_header, DeflateBoundGzipHeader, DeflateBoundState, DeflateFastMatchProgress,
         DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
-        DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, PendingDrainState,
-        LongestMatchResult, PendingStorageReadView, PendingStorageView, ReadBufChecksum,
+        DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, LongestMatchResult,
+        PendingDrainState, PendingStorageReadView, PendingStorageView, ReadBufChecksum,
         ReadBufResult,
     };
 
@@ -5464,12 +5436,21 @@ mod tests {
     fn deflate_params_plan_uses_configuration_function_groups() {
         use super::DeflateCompressionFunction::{Fast, Slow, Stored};
 
-        assert_eq!(super::deflate_compression_function_for_level(0), Some(Stored));
+        assert_eq!(
+            super::deflate_compression_function_for_level(0),
+            Some(Stored)
+        );
         for level in 1..=3 {
-            assert_eq!(super::deflate_compression_function_for_level(level), Some(Fast));
+            assert_eq!(
+                super::deflate_compression_function_for_level(level),
+                Some(Fast)
+            );
         }
         for level in 4..=9 {
-            assert_eq!(super::deflate_compression_function_for_level(level), Some(Slow));
+            assert_eq!(
+                super::deflate_compression_function_for_level(level),
+                Some(Slow)
+            );
         }
         assert_eq!(super::deflate_compression_function_for_level(-1), None);
         assert_eq!(super::deflate_compression_function_for_level(10), None);
@@ -5479,17 +5460,33 @@ mod tests {
         state.strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
         state.last_flush = crate::zlib_h::Z_NO_FLUSH;
 
-        assert!(!super::deflate_params_plan(&state, 3, state.strategy)
-            .expect("valid parameters must produce a plan")
-            .flush_before_apply);
-        assert!(super::deflate_params_plan(&state, 4, state.strategy)
-            .expect("valid parameters must produce a plan")
-            .flush_before_apply);
+        assert!(
+            !super::deflate_params_plan(&state, 3, state.strategy)
+                .expect("valid parameters must produce a plan")
+                .flush_before_apply
+        );
+        assert!(
+            super::deflate_params_plan(&state, 4, state.strategy)
+                .expect("valid parameters must produce a plan")
+                .flush_before_apply
+        );
 
         state.level = 0;
-        assert!(super::deflate_params_plan(&state, 1, state.strategy)
-            .expect("valid parameters must produce a plan")
-            .flush_before_apply);
+        assert!(
+            super::deflate_params_plan(&state, 1, state.strategy)
+                .expect("valid parameters must produce a plan")
+                .flush_before_apply
+        );
+    }
+
+    #[test]
+    fn configuration_table_encodes_compression_policy_without_function_pointers() {
+        use super::DeflateCompressionFunction::{Fast, Slow, Stored};
+
+        let expected = [Stored, Fast, Fast, Fast, Slow, Slow, Slow, Slow, Slow, Slow];
+        for (config, function) in super::configuration_table.iter().zip(expected) {
+            assert_eq!(config.function, function);
+        }
     }
 
     #[test]
@@ -6757,8 +6754,8 @@ mod tests {
     fn pending_storage_copy_plan_preserves_pending_cursor_and_symbol_prefix() {
         let layout = pending_storage_layout(4);
         let source = [
-            0x00, 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-            0x18, 0x19, 0x1a, 0x1b,
+            0x00, 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
+            0x1a, 0x1b,
         ];
         let mut destination = [0xaa; 16];
         let plan = pending_storage_copy_plan(layout, 3, 5, 4).unwrap();
@@ -6785,7 +6782,10 @@ mod tests {
         let mut pending = [0xaa; 8];
         let extra = *b"abcdef";
 
-        assert_eq!(gzip_extra_copy_chunk(&mut pending, 2, &extra, 1, 3), Some(5));
+        assert_eq!(
+            gzip_extra_copy_chunk(&mut pending, 2, &extra, 1, 3),
+            Some(5)
+        );
         assert_eq!(pending, [0xaa, 0xaa, b'b', b'c', b'd', 0xaa, 0xaa, 0xaa]);
     }
 
@@ -6969,8 +6969,17 @@ mod tests {
 
         assert_eq!(
             longest_match_core(
-                &window, &prev, 200, 8, 3, 4, 258, 258, scan_start as crate::stdlib::uInt,
-                256, 255,
+                &window,
+                &prev,
+                200,
+                8,
+                3,
+                4,
+                258,
+                258,
+                scan_start as crate::stdlib::uInt,
+                256,
+                255,
             ),
             Some(LongestMatchResult {
                 match_start: 180,
@@ -7243,7 +7252,9 @@ mod tests {
         let mut head = [0; 8];
         let mut prev = [0; 4];
 
-        assert!(fill_window_reinsert(&mut state, &window, &mut head, &mut prev));
+        assert!(fill_window_reinsert(
+            &mut state, &window, &mut head, &mut prev
+        ));
         assert_eq!(state.insert, 0);
         assert_eq!(head[3], 0);
         assert_eq!(head[2], 1);
@@ -7252,7 +7263,9 @@ mod tests {
 
         state.insert = 1;
         state.strstart = 0;
-        assert!(!fill_window_reinsert(&mut state, &window, &mut head, &mut prev));
+        assert!(!fill_window_reinsert(
+            &mut state, &window, &mut head, &mut prev
+        ));
     }
 
     #[test]

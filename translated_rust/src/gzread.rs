@@ -18,10 +18,10 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate_ffi as inflate;
 pub use crate::src::inflate::inflateEnd_ffi as inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::src::inflate::inflateReset;
+pub use crate::src::inflate::inflate_ffi as inflate;
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -943,11 +943,7 @@ fn gz_ungetc_progress(
     (gz_ungetc_next_have(have), gz_cursor_rewind(pos, 1), 0)
 }
 
-fn gz_output_cursor_offset(
-    output_start: usize,
-    cursor: usize,
-    output_len: usize,
-) -> Option<usize> {
+fn gz_output_cursor_offset(output_start: usize, cursor: usize, output_len: usize) -> Option<usize> {
     cursor
         .checked_sub(output_start)
         .filter(|offset| *offset <= output_len)

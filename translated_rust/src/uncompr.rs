@@ -2,9 +2,9 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate_ffi as inflate;
 pub use crate::src::inflate::inflateEnd_ffi as inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
+pub use crate::src::inflate::inflate_ffi as inflate;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::uLongf;

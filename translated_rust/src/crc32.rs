@@ -4696,16 +4696,16 @@ pub use crate::src::crc32::crc32_h::crc_braid_big_table;
 pub use crate::src::crc32::crc32_h::crc_braid_table;
 pub use crate::src::crc32::crc32_h::crc_table;
 pub use crate::src::crc32::crc32_h::x2n_table;
-pub use crate::stdlib::__off_t;
 pub use crate::stdlib::__off64_t;
-pub use crate::stdlib::Byte;
-pub use crate::stdlib::Bytef;
-pub use crate::stdlib::off_t;
+pub use crate::stdlib::__off_t;
 pub use crate::stdlib::off64_t;
+pub use crate::stdlib::off_t;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::z_crc_t;
 pub use crate::stdlib::z_size_t;
+pub use crate::stdlib::Byte;
+pub use crate::stdlib::Bytef;
 pub use crate::zlib_h::Z_NULL;
 
 use crate::src::safe_types::FfiInputKind;
@@ -4942,11 +4942,11 @@ pub extern "C" fn crc32_combine_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        CRC32_INITIAL, CRC32_MASK, CRC32_MASK_U32, Crc32State, FfiInputKind, POLY,
-        checksum_for_ffi_input, crc_table_ref, crc32, crc32_combine, crc32_combine_gen64,
-        crc32_combine_op, crc32_combine_operator, crc32_combine64, crc32_from_state,
-        crc32_initial_state, crc32_update_byte, crc32_update_bytes, crc32_z, multmodp,
-        next_poly_term, x2n_table, x2nmodp,
+        checksum_for_ffi_input, crc32, crc32_combine, crc32_combine64, crc32_combine_gen64,
+        crc32_combine_op, crc32_combine_operator, crc32_from_state, crc32_initial_state,
+        crc32_update_byte, crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term,
+        x2n_table, x2nmodp, Crc32State, FfiInputKind, CRC32_INITIAL, CRC32_MASK, CRC32_MASK_U32,
+        POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -5085,9 +5085,7 @@ mod tests {
                 "z-size FFI offset {offset}"
             );
             assert_eq!(
-                unsafe {
-                    super::crc32_ffi(seed, pointer, input.len() as crate::stdlib::uInt)
-                },
+                unsafe { super::crc32_ffi(seed, pointer, input.len() as crate::stdlib::uInt) },
                 expected,
                 "uInt FFI offset {offset}"
             );

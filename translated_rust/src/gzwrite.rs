@@ -14,10 +14,10 @@ pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
-pub use crate::src::deflate::deflate_ffi as deflate;
 pub use crate::src::deflate::deflateEnd_ffi as deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflateReset_ffi as deflateReset;
+pub use crate::src::deflate::deflate_ffi as deflate;
 pub use crate::src::deflate::internal_state;
 
 pub use crate::stdlib::uInt;
@@ -1195,10 +1195,7 @@ fn gz_comp(
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int
             };
-            let errno = gz_comp_write_errno(
-                writ,
-                std::io::Error::last_os_error().raw_os_error(),
-            );
+            let errno = gz_comp_write_errno(writ, std::io::Error::last_os_error().raw_os_error());
             match gz_comp_direct_write_result(state.strm.avail_in, writ, errno) {
                 GzCompDirectWriteResult::Error { again } => {
                     state.again = again;
@@ -1223,13 +1220,11 @@ fn gz_comp(
         gz_comp_reset_transition(state.reset, state.strm.avail_in, flush);
     match reset_action {
         GzCompResetAction::Skip => return 0 as ::core::ffi::c_int,
-        GzCompResetAction::Reset => {
-            unsafe {
-                crate::src::deflate::deflateReset_ffi(
-                    &mut state.strm as *mut crate::zlib_h::z_stream_s,
-                );
-            }
-        }
+        GzCompResetAction::Reset => unsafe {
+            crate::src::deflate::deflateReset_ffi(
+                &mut state.strm as *mut crate::zlib_h::z_stream_s,
+            );
+        },
         GzCompResetAction::Continue => {}
     }
     state.reset = next_reset;
@@ -2969,7 +2964,10 @@ mod tests {
 
     #[test]
     fn gz_comp_write_errno_only_observes_failed_writes() {
-        assert_eq!(gz_comp_write_errno(-1, Some(crate::stdlib::EAGAIN)), crate::stdlib::EAGAIN);
+        assert_eq!(
+            gz_comp_write_errno(-1, Some(crate::stdlib::EAGAIN)),
+            crate::stdlib::EAGAIN
+        );
         assert_eq!(gz_comp_write_errno(-1, None), 0);
         assert_eq!(gz_comp_write_errno(0, Some(crate::stdlib::EAGAIN)), 0);
         assert_eq!(gz_comp_write_errno(24, Some(crate::stdlib::EAGAIN)), 0);

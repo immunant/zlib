@@ -1,8 +1,8 @@
 pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::deflate::deflate_ffi as deflate;
 pub use crate::src::deflate::deflateEnd_ffi as deflateEnd;
+pub use crate::src::deflate::deflate_ffi as deflate;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -340,9 +340,9 @@ pub extern "C" fn compressBound_ffi(sourceLen: crate::stdlib::uLong) -> crate::s
 #[cfg(test)]
 mod tests {
     use super::{
-        compress2_ffi, compress2_z_ffi, compress_bound, compressBound_z_ffi,
-        compress_bound_z_impl, finish_compress, next_compress_chunk, plan_compress2_buffers,
-        CompressBufferPlan, CompressProgress, LegacyCompressLengths, MAX_CHUNK,
+        compress2_ffi, compress2_z_ffi, compressBound_z_ffi, compress_bound, compress_bound_z_impl,
+        finish_compress, next_compress_chunk, plan_compress2_buffers, CompressBufferPlan,
+        CompressProgress, LegacyCompressLengths, MAX_CHUNK,
     };
 
     #[test]

@@ -917,8 +917,7 @@ impl WindowHistory {
         let segment = self.match_segment(index, requested)?;
         let copied = ::core::ffi::c_uint::try_from(segment.len).ok()?;
         let remaining = requested.checked_sub(copied)?;
-        let next_index = (remaining != 0 && self.have == self.size)
-            .then_some(0);
+        let next_index = (remaining != 0 && self.have == self.size).then_some(0);
 
         Some(WindowMatchStep {
             segment,
@@ -991,7 +990,11 @@ impl<'a> WindowStorage<'a> {
         &self,
         index: ::core::ffi::c_uint,
         requested: ::core::ffi::c_uint,
-    ) -> Option<(&[crate::stdlib::Bytef], ::core::ffi::c_uint, Option<::core::ffi::c_uint>)> {
+    ) -> Option<(
+        &[crate::stdlib::Bytef],
+        ::core::ffi::c_uint,
+        Option<::core::ffi::c_uint>,
+    )> {
         let step = self.history.match_step(index, requested)?;
         let bytes = self
             .bytes
@@ -1232,8 +1235,7 @@ fn window_allocation_request_for_plan(
 }
 
 fn window_allocation_failed(plan: WindowAllocationPlan, ownership: WindowOwnership) -> bool {
-    matches!(plan, WindowAllocationPlan::Allocate { .. })
-        && ownership.needs_callback_allocation()
+    matches!(plan, WindowAllocationPlan::Allocate { .. }) && ownership.needs_callback_allocation()
 }
 
 /// The callback allocation and initialized prefix needed to clone a history
@@ -1617,7 +1619,8 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     };
     if inflate_reset2_discards_window(window_ownership, (*state).wbits, window_bits) {
         if window_should_release(window_ownership) {
-            Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            Some((*strm).zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
                 (*strm).opaque,
                 (*state).window as crate::stdlib::voidpf,
             );
@@ -1647,8 +1650,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null()
-        || strm.align_offset(::core::mem::align_of::<crate::zlib_h::z_stream>()) != 0
+    if strm.is_null() || strm.align_offset(::core::mem::align_of::<crate::zlib_h::z_stream>()) != 0
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1901,7 +1903,9 @@ fn update_window_state_core(
     } else {
         None
     };
-    let expected_size = initial.map(|metadata| metadata.wsize).unwrap_or(state.wsize);
+    let expected_size = initial
+        .map(|metadata| metadata.wsize)
+        .unwrap_or(state.wsize);
     if window.len() != expected_size as usize {
         return None;
     }
@@ -3173,10 +3177,10 @@ pub unsafe extern "C" fn inflate_ffi(
                 // caller output range.  One mutable view is therefore enough
                 // to preserve the byte-at-a-time overlap semantics without
                 // creating aliased Rust references.
-                let output =
-                    core::slice::from_raw_parts_mut(output_start as *mut _, out as usize);
+                let output = core::slice::from_raw_parts_mut(output_start as *mut _, out as usize);
                 let written = inflate_cursor_progress(out, left) as usize;
-                if !inflate_copy_match_from_output(output, written, offset as usize, count as usize) {
+                if !inflate_copy_match_from_output(output, written, offset as usize, count as usize)
+                {
                     (*strm).msg = b"invalid distance too far back\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
@@ -3242,10 +3246,7 @@ pub unsafe extern "C" fn inflate_ffi(
         };
         let window = core::slice::from_raw_parts_mut((*state).window, slices.window_len);
         let produced = match slices.produced_len {
-            Some(produced_len) => core::slice::from_raw_parts(
-                put.sub(produced_len),
-                produced_len,
-            ),
+            Some(produced_len) => core::slice::from_raw_parts(put.sub(produced_len), produced_len),
             None => update_window_produced_slice(None),
         };
         if update_window_state_core(&mut *state, window, produced).is_none() {
@@ -3789,10 +3790,7 @@ fn inflate_match_plan_from_state(
 }
 
 /// Commit the portion of a match consumed by the raw cursor boundary.
-fn inflate_apply_match_progress(
-    state: &mut inflate_state,
-    remaining_length: ::core::ffi::c_uint,
-) {
+fn inflate_apply_match_progress(state: &mut inflate_state, remaining_length: ::core::ffi::c_uint) {
     state.length = remaining_length;
     if inflate_match_is_complete(state.length) {
         state.mode = crate::src::inflate::LEN;
@@ -4078,11 +4076,8 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if let Some((items, size)) = window_plan.allocation_request() {
         window = Some(source_stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            source_stream.opaque,
-            items,
-            size,
-        ) as *mut ::core::ffi::c_uchar;
+            .expect("non-null function pointer")(source_stream.opaque, items, size)
+            as *mut ::core::ffi::c_uchar;
         if window.is_null() {
             Some(source_stream.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
@@ -4204,32 +4199,30 @@ mod tests {
         dynamic_code_length_repeat_spec, dynamic_header_counts, gzip_extra_copy_bounds,
         inflateSyncPoint_ffi, inflate_accumulate_totals, inflate_add_and_consume_extra_bits,
         inflate_align_to_byte_boundary, inflate_apply_gzip_header_completion,
-        inflate_assign_data_type, inflate_block_header, inflate_call_progress,
-        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
-        inflate_copy_match_from_window,
-        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_checksum,
-        inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_distance_extra_update, inflate_flush_stops_after_fixed_trees,
-        inflate_flush_stops_at_block_boundary, inflate_get_dictionary_result,
-        inflate_gzip_extra_progress, inflate_gzip_flags, inflate_gzip_flags_error,
-        inflate_gzip_flags_validation, inflate_gzip_header_completion,
+        inflate_apply_match_progress, inflate_assign_data_type, inflate_block_header,
+        inflate_call_progress, inflate_can_use_fast_path, inflate_codes_used_offset_value,
+        inflate_copy_match_from_output, inflate_copy_match_from_window, inflate_copy_progress,
+        inflate_data_type_value, inflate_dictionary_checksum, inflate_dictionary_id_from_hold,
+        inflate_dictionary_is_allowed, inflate_distance_extra_update,
+        inflate_flush_stops_after_fixed_trees, inflate_flush_stops_at_block_boundary,
+        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
+        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_completion,
         inflate_gzip_header_crc_bytes, inflate_gzip_header_crc_is_valid,
         inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
         inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_text_field_should_continue,
         inflate_gzip_window_bits, inflate_head_skip_mode, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
-        inflate_apply_match_progress, inflate_mark_value, inflate_match_copy_plan,
-        inflate_match_is_complete, inflate_match_plan_from_state,
-        inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_mode_on_entry,
-        inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
-        inflate_reset2_discards_window, inflate_reset2_params, inflate_reset_keep_adler,
-        inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
-        inflate_state_is_usable, inflate_state_metadata_check_result,
-        inflate_state_references_are_valid,
-        inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_core, inflate_sync_finish_core,
-        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point, inflate_sync_point_value,
+        inflate_mark_value, inflate_match_copy_plan, inflate_match_is_complete,
+        inflate_match_plan_from_state, inflate_mode_data_type_flags, inflate_mode_is_valid,
+        inflate_mode_on_entry, inflate_needs_buffer_error, inflate_output_checksum,
+        inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
+        inflate_reset_keep_adler, inflate_should_update_window, inflate_state_check_impl,
+        inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_check_result,
+        inflate_state_metadata_is_valid, inflate_state_references_are_valid,
+        inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
+        inflate_sync_core, inflate_sync_finish_core, inflate_sync_input_progress,
+        inflate_sync_normalized_wrap, inflate_sync_point, inflate_sync_point_value,
         inflate_sync_remaining_input, inflate_sync_search_core, inflate_trailer_checksum_from_hold,
         inflate_trailer_checksum_is_valid, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
@@ -4237,14 +4230,15 @@ mod tests {
         stored_block_length, syncsearch_safe, update_window_buffer_len, update_window_core,
         update_window_history, update_window_slice_plan, update_window_slices_after_allocation,
         window_allocation_failed, window_allocation_plan, window_allocation_request,
-        window_allocation_request_for_plan, window_clone_plan, window_metadata_update_plan, window_needs_allocation,
-        window_ownership_for_state, window_should_release, window_update_plan,
-        DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress,
+        window_allocation_request_for_plan, window_clone_plan, window_metadata_update_plan,
+        window_needs_allocation, window_ownership_for_state, window_should_release,
+        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress,
         InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
         InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
         InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, WindowAllocationPlan, WindowClonePlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO, WindowOwnership,
+        InflateZlibWindowParams, WindowAllocationPlan, WindowClonePlan, WindowOwnership, BAD,
+        CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN, LEN_, MATCH, STORED,
+        SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4860,7 +4854,10 @@ mod tests {
         let window = *b"abc_____";
         let mut output = *b"__";
 
-        assert_eq!(inflate_copy_match_from_window(&window, 2, 3, 0, 2, &mut output), None);
+        assert_eq!(
+            inflate_copy_match_from_window(&window, 2, 3, 0, 2, &mut output),
+            None
+        );
         assert_eq!(output, *b"__");
     }
 
@@ -5746,9 +5743,8 @@ mod tests {
         assert_eq!(destination.zfree.is_some(), source.zfree.is_some());
         assert_ne!(destination.state, source.state);
 
-        let destination_state = unsafe {
-            &*(destination.state as *const crate::src::inflate::inflate_state)
-        };
+        let destination_state =
+            unsafe { &*(destination.state as *const crate::src::inflate::inflate_state) };
         assert_eq!(destination_state.strm, &mut destination as *mut _);
 
         assert_eq!(
@@ -6420,7 +6416,10 @@ mod tests {
     #[test]
     fn window_allocation_failure_requires_a_missing_allocated_window() {
         let allocation = window_allocation_plan(WindowOwnership::Missing, 15).unwrap();
-        assert!(window_allocation_failed(allocation, WindowOwnership::Missing));
+        assert!(window_allocation_failed(
+            allocation,
+            WindowOwnership::Missing
+        ));
         assert!(!window_allocation_failed(
             allocation,
             WindowOwnership::CallbackOwned
@@ -6669,14 +6668,8 @@ mod tests {
         let wrapped_window = *b"abcdefgh";
         let wrapped = super::WindowStorage::new(&wrapped_window, 3, 8).unwrap();
 
-        assert_eq!(
-            wrapped.match_step(6, 5),
-            Some((&b"gh"[..], 3, Some(0)))
-        );
-        assert_eq!(
-            wrapped.match_step(0, 3),
-            Some((&b"abc"[..], 0, None))
-        );
+        assert_eq!(wrapped.match_step(6, 5), Some((&b"gh"[..], 3, Some(0))));
+        assert_eq!(wrapped.match_step(0, 3), Some((&b"abc"[..], 0, None)));
 
         let partial_window = *b"abc_____";
         let partial = super::WindowStorage::new(&partial_window, 3, 3).unwrap();
@@ -6719,7 +6712,10 @@ mod tests {
         let storage = super::WindowStorage::new(&window, 3, 8).unwrap();
         let mut destination = *b"_____";
 
-        assert_eq!(storage.copy_match_prefix_to(6, 5, &mut destination), Some(()));
+        assert_eq!(
+            storage.copy_match_prefix_to(6, 5, &mut destination),
+            Some(())
+        );
         assert_eq!(destination, *b"ghabc");
     }
 
@@ -6894,12 +6890,8 @@ mod tests {
             val: 42,
         };
         assert_eq!(
-            super::inflate_decode_table_entry(
-                &state,
-                super::DecodeTableLocation::dynamic(2),
-                0,
-            )
-            .val,
+            super::inflate_decode_table_entry(&state, super::DecodeTableLocation::dynamic(2), 0,)
+                .val,
             42
         );
         assert_eq!(
@@ -7068,10 +7060,7 @@ mod tests {
     fn update_window_slices_after_allocation_preserves_ready_slice_lengths() {
         let allocation_plan = super::update_window_plan(WindowOwnership::Missing, 0, 3, 5).unwrap();
         assert_eq!(
-            update_window_slices_after_allocation(
-                allocation_plan,
-                WindowOwnership::CallbackOwned,
-            ),
+            update_window_slices_after_allocation(allocation_plan, WindowOwnership::CallbackOwned,),
             Ok(super::UpdateWindowSlicePlan {
                 window_len: 8,
                 produced_len: Some(5),

@@ -615,11 +615,8 @@ pub unsafe extern "C" fn inflate_fast(
             (hold, bits, input_remaining) =
                 refill_input_byte(hold, bits, input_remaining, *input_byte);
         }
-        here = crate::src::inflate::inflate_decode_table_entry(
-            state,
-            lcode,
-            table_index(hold, lmask),
-        );
+        here =
+            crate::src::inflate::inflate_decode_table_entry(state, lcode, table_index(hold, lmask));
         loop {
             let entry = fast_code_entry(here);
             op = entry.bits;
@@ -909,15 +906,15 @@ mod tests {
         fast_code_entry, fast_copy_from_output, fast_decode_error_message, fast_decode_failure,
         fast_decode_needs_prefetch, fast_decode_prefetch_byte_count, fast_dist_action,
         fast_distance_requires_window_copy, fast_length_extra_bits_refill_byte_count,
-        fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
-        fast_window_distance_back, fast_window_distance_is_invalid, finish_fast_distance,
-        input_bytes_needed, input_remaining_after_read, low_bits, output_cursor_after_write,
-        output_cursor_after_writes, output_produced_at_fast_path_start, refill_input_byte,
-        subtable_index, table_index, trailing_match_copy_byte_count,
+        fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_path_commit,
+        fast_window_copy_plan, fast_window_distance_back, fast_window_distance_is_invalid,
+        finish_fast_distance, input_bytes_needed, input_remaining_after_read, low_bits,
+        output_cursor_after_write, output_cursor_after_writes, output_produced_at_fast_path_start,
+        refill_input_byte, subtable_index, table_index, trailing_match_copy_byte_count,
         trailing_match_copy_needs_second_byte, unread_input_state, validate_fast_window_distance,
         FastCodeEntry, FastDecodeError, FastDecodeFailure, FastDistAction, FastDistance,
         FastDistanceSource, FastLitLenAction, FastMatchCopyLayout, FastWindowContinuationSource,
-        FastWindowCopyPlan, FastWindowDistance, fast_path_commit,
+        FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]

@@ -63,7 +63,6 @@ pub mod gzguts_h {
         pub out_pending: crate::stdlib::uInt,
     }
 
-
     pub type gz_statep = *mut crate::gzguts_h::gz_state;
 }
 pub mod zutil_h {

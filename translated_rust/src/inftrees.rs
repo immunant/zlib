@@ -2791,7 +2791,10 @@ pub use crate::src::inflate::TYPEDO;
 pub use crate::src::inftrees::inffixed_h::distfix;
 pub use crate::src::inftrees::inffixed_h::lenfix;
 pub(crate) fn fixed_len_code(index: usize) -> crate::src::inftrees::code {
-    lenfix.get(index).copied().unwrap_or(crate::src::inflate::INVALID_DECODE_CODE)
+    lenfix
+        .get(index)
+        .copied()
+        .unwrap_or(crate::src::inflate::INVALID_DECODE_CODE)
 }
 
 pub(crate) fn fixed_dist_code(index: usize) -> crate::src::inftrees::code {

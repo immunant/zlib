@@ -822,10 +822,7 @@ fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::
     gz_reset_state(state);
 }
 
-fn gz_open(
-    state: &mut crate::gzguts_h::gz_state,
-    mode: &[u8],
-) -> Option<GzOpenPlan> {
+fn gz_open(state: &mut crate::gzguts_h::gz_state, mode: &[u8]) -> Option<GzOpenPlan> {
     gz_open_initialize_state(state, mode)
 }
 
@@ -840,7 +837,7 @@ pub unsafe extern "C" fn gzopen_ffi(
     let path = unsafe { ::core::ffi::CStr::from_ptr(path) };
     let mode = unsafe { ::core::ffi::CStr::from_ptr(mode) };
     let state = crate::stdlib::malloc(
-        ::core::mem::size_of::<crate::gzguts_h::gz_state>() as crate::__stddef_size_t_h::size_t,
+        ::core::mem::size_of::<crate::gzguts_h::gz_state>() as crate::__stddef_size_t_h::size_t
     ) as crate::gzguts_h::gz_statep;
     if state.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
@@ -849,13 +846,15 @@ pub unsafe extern "C" fn gzopen_ffi(
     let plan = match gz_open(state, mode.to_bytes()) {
         Some(plan) => plan,
         None => {
-            crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
+            crate::stdlib::free(
+                state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void,
+            );
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     };
     let len = path.to_bytes().len() as crate::stdlib::z_size_t;
-    state.path = unsafe { crate::stdlib::malloc(gz_open_path_buffer_len(len)) }
-        as *mut ::core::ffi::c_char;
+    state.path =
+        unsafe { crate::stdlib::malloc(gz_open_path_buffer_len(len)) } as *mut ::core::ffi::c_char;
     if state.path.is_null() {
         crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
@@ -930,8 +929,8 @@ pub unsafe extern "C" fn gzdopen_ffi(
     if !gzdopen_has_valid_descriptor(fd) {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    let path = unsafe { crate::stdlib::malloc(gzdopen_path_buffer_len()) }
-        as *mut ::core::ffi::c_char;
+    let path =
+        unsafe { crate::stdlib::malloc(gzdopen_path_buffer_len()) } as *mut ::core::ffi::c_char;
     if path.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -951,8 +950,7 @@ pub unsafe extern "C" fn gzdopen_ffi(
     let mode = unsafe { ::core::ffi::CStr::from_ptr(mode) };
     let state = unsafe {
         crate::stdlib::malloc(
-            ::core::mem::size_of::<crate::gzguts_h::gz_state>()
-                as crate::__stddef_size_t_h::size_t,
+            ::core::mem::size_of::<crate::gzguts_h::gz_state>() as crate::__stddef_size_t_h::size_t
         )
     } as crate::gzguts_h::gz_statep;
     if state.is_null() {
@@ -964,13 +962,15 @@ pub unsafe extern "C" fn gzdopen_ffi(
         Some(plan) => plan,
         None => {
             crate::stdlib::free(path.as_ptr() as *mut ::core::ffi::c_void);
-            crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
+            crate::stdlib::free(
+                state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void,
+            );
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     };
     let len = path.to_bytes().len() as crate::stdlib::z_size_t;
-    state.path = unsafe { crate::stdlib::malloc(gz_open_path_buffer_len(len)) }
-        as *mut ::core::ffi::c_char;
+    state.path =
+        unsafe { crate::stdlib::malloc(gz_open_path_buffer_len(len)) } as *mut ::core::ffi::c_char;
     if state.path.is_null() {
         crate::stdlib::free(path.as_ptr() as *mut ::core::ffi::c_void);
         crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
@@ -1005,8 +1005,7 @@ pub unsafe extern "C" fn gzdopen_ffi(
                     crate::stdlib::fcntl(
                         fd,
                         crate::stdlib::F_SETFD,
-                        crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD)
-                            | crate::stdlib::O_CLOEXEC,
+                        crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
                     );
                 }
             }
@@ -1451,22 +1450,20 @@ mod tests {
         gz_open_fd_plan, gz_open_fd_succeeded, gz_open_has_required_inputs, gz_open_offset_plan,
         gz_open_path_buffer_len, gz_open_recorded_offset, gz_parse_open_mode,
         gz_position_after_skip, gz_post_open_metadata, gz_prepare_open, gz_request_len,
-        gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzbuffer_ffi,
-        gzclearerr_core, gzclearerr_ffi,
-        gzclearerr_state_core, gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result,
-        gzerror_core, gzerror_ffi, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
-        gzrewind_request_is_valid, gzrewind_start_offset, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
-        gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
-        gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan,
+        gz_reset_core, gzbuffer_can_set_want, gzbuffer_ffi, gzbuffer_normalized_want,
+        gzclearerr_core, gzclearerr_ffi, gzclearerr_state_core, gzdopen_has_valid_descriptor,
+        gzdopen_path_buffer_len, gzeof_ffi, gzeof_result, gzerror_core, gzerror_ffi,
+        gzoffset64_adjust_for_buffered_read, gzoffset64_ffi, gzoffset64_result, gzoffset_ffi,
+        gzrewind_ffi, gzrewind_request_is_valid, gzrewind_start_offset, gzseek64_ffi,
+        gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
+        gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
+        gzseek_fast_forward_reset, gzseek_ffi, gzseek_finish_fast_forward, gzseek_plan,
         gzseek_plan_fast_forward, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_plan_request, gzseek_read_buffer_consumed,
         gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
-        gzseek_request_is_valid, gzseek_uses_read_buffer, gzseek64_ffi, gzseek_ffi,
-        gzrewind_ffi, gztell64_core, gztell64_result, gzeof_ffi, gzoffset64_ffi,
-        gzoffset_ffi, gztell64_ffi, gztell_ffi, GzErrorMessage,
-        GzErrorPlan, GzOpenFdPlan, GzOpenOffsetPlan, GzResetFields,
-        GzSeekFastForwardPlan, GzSeekOffsetPlan, GzSeekPlan, GzSeekReadBufferPlan,
+        gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_ffi,
+        gztell64_result, gztell_ffi, GzErrorMessage, GzErrorPlan, GzOpenFdPlan, GzOpenOffsetPlan,
+        GzResetFields, GzSeekFastForwardPlan, GzSeekOffsetPlan, GzSeekPlan, GzSeekReadBufferPlan,
         GzSeekRequestPlan,
     };
 
@@ -2057,7 +2054,8 @@ mod tests {
         } else {
             0
         };
-        let misaligned_file = bytes.as_mut_ptr().wrapping_add(state_offset) as crate::zlib_h::gzFile;
+        let misaligned_file =
+            bytes.as_mut_ptr().wrapping_add(state_offset) as crate::zlib_h::gzFile;
 
         assert!(unsafe { gzerror_ffi(misaligned_file, core::ptr::null_mut()) }.is_null());
 
@@ -2070,11 +2068,14 @@ mod tests {
         } else {
             0
         };
-        let misaligned_errnum = errnum_bytes.as_mut_ptr().wrapping_add(errnum_offset)
-            as *mut ::core::ffi::c_int;
+        let misaligned_errnum =
+            errnum_bytes.as_mut_ptr().wrapping_add(errnum_offset) as *mut ::core::ffi::c_int;
 
         assert!(unsafe {
-            gzerror_ffi(&mut state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile, misaligned_errnum)
+            gzerror_ffi(
+                &mut state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile,
+                misaligned_errnum,
+            )
         }
         .is_null());
     }
