@@ -273,6 +273,17 @@ pub(crate) struct GzEmbeddedDeflateProgress {
     pub(crate) total_out: crate::stdlib::uLong,
 }
 
+// The scalar portion of gzip's embedded-deflate stream.  Keep it with the
+// bounded request/result handoff rather than having gzip state recompute
+// cursor progress after every ABI projection.  A future codec owner can hold
+// this directly while its boundary adapter alone publishes `z_stream`.
+pub(crate) struct GzEmbeddedDeflateState {
+    input_available: crate::stdlib::uInt,
+    output_available: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+}
+
 pub(crate) struct GzCodecOutputView<'a> {
     bytes: &'a mut [u8],
 }
@@ -705,6 +716,60 @@ impl<'input, 'output> GzEmbeddedDeflateCall<'input, 'output> {
                 total_in: snapshot.total_in,
                 total_out: snapshot.total_out,
             })
+    }
+
+    // Consume both the bounded request and its pre-call scalar stream state.
+    // The resulting state is entirely pointer-free, so callers do not need
+    // to infer consumption from advanced ABI cursors once this projection
+    // ends.
+    pub(crate) fn finish_state(
+        self,
+        state: GzEmbeddedDeflateState,
+        snapshot: GzEmbeddedDeflateResult,
+    ) -> Option<(GzEmbeddedDeflateState, GzEmbeddedDeflateProgress)> {
+        let progress = self.finish(snapshot)?;
+        let input_available = state.input_available.checked_sub(progress.input_used)?;
+        (input_available == progress.remaining_input).then_some((
+            GzEmbeddedDeflateState {
+                input_available,
+                output_available: progress.output_available,
+                total_in: progress.total_in,
+                total_out: progress.total_out,
+            },
+            progress,
+        ))
+    }
+}
+
+impl GzEmbeddedDeflateState {
+    pub(crate) fn new(
+        input_available: crate::stdlib::uInt,
+        output_available: crate::stdlib::uInt,
+        total_in: crate::stdlib::uLong,
+        total_out: crate::stdlib::uLong,
+    ) -> Self {
+        Self {
+            input_available,
+            output_available,
+            total_in,
+            total_out,
+        }
+    }
+
+    pub(crate) fn input_available(&self) -> crate::stdlib::uInt {
+        self.input_available
+    }
+
+    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
+        self.output_available
+    }
+
+    pub(crate) fn total_in(&self) -> crate::stdlib::uLong {
+        self.total_in
+    }
+
+    pub(crate) fn total_out(&self) -> crate::stdlib::uLong {
+        self.total_out
     }
 }
 

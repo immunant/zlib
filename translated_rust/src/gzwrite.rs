@@ -396,6 +396,12 @@ unsafe fn gz_comp(
         let input_cursor = state.strm.next_in.addr();
         let output_available = state.strm.avail_out;
         let output_cursor = state.strm.next_out.addr();
+        let codec_state = crate::src::gzlib::GzEmbeddedDeflateState::new(
+            input_available,
+            output_available,
+            state.strm.total_in,
+            state.strm.total_out,
+        );
         let input = match external_input {
             Some(input) => input,
             None => match state.buffers.input.as_deref() {
@@ -451,14 +457,14 @@ unsafe fn gz_comp(
                 total_out: strm.total_out,
             }
         };
-        let Some(snapshot) = call.finish(snapshot) else {
+        let Some((codec_state, snapshot)) = call.finish_state(codec_state, snapshot) else {
             return -1;
         };
         ret = snapshot.result;
-        state.strm.avail_in = input_available.wrapping_sub(snapshot.input_used);
-        state.strm.avail_out = snapshot.output_available;
-        state.strm.total_in = snapshot.total_in;
-        state.strm.total_out = snapshot.total_out;
+        state.strm.avail_in = codec_state.input_available();
+        state.strm.avail_out = codec_state.output_available();
+        state.strm.total_in = codec_state.total_in();
+        state.strm.total_out = codec_state.total_out();
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
