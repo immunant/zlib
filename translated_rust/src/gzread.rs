@@ -1492,6 +1492,7 @@ fn gz_skip_len(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum GzSkipAction {
     ConsumeBuffered,
     StopAtEof,
@@ -1635,37 +1636,46 @@ fn gzclose_r_result(
     }
 }
 
-unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    loop {
-        let (action, fetch_result) = match gz_skip_step(
-            state.x.have,
-            state.x.pos,
-            state.skip,
-            state.eof,
-            state.strm.avail_in,
-            crate::src::gzlib::gz_intmax(),
-        ) {
-            GzSkipStep::ConsumeBuffered(progress) => {
-                gz_skip_apply_progress(
-                    &mut state.x.have,
-                    &mut state.x.pos,
-                    &mut state.skip,
-                    &progress,
-                );
-                state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
-                (GzSkipAction::ConsumeBuffered, None)
-            }
-            GzSkipStep::StopAtEof => (GzSkipAction::StopAtEof, None),
-            GzSkipStep::Fetch => (GzSkipAction::Fetch, Some(gz_fetch(state))),
-        };
-        let fetch_failed = gz_skip_fetch_failed(&action, fetch_result);
-        match gz_skip_loop_decision(action, fetch_failed, state.skip) {
-            GzSkipLoopDecision::Error => return -1 as ::core::ffi::c_int,
-            GzSkipLoopDecision::Done => break,
-            GzSkipLoopDecision::Continue => {}
+fn gz_skip_apply_step(state: &mut crate::gzguts_h::gz_state) -> GzSkipAction {
+    match gz_skip_step(
+        state.x.have,
+        state.x.pos,
+        state.skip,
+        state.eof,
+        state.strm.avail_in,
+        crate::src::gzlib::gz_intmax(),
+    ) {
+        GzSkipStep::ConsumeBuffered(progress) => {
+            gz_skip_apply_progress(
+                &mut state.x.have,
+                &mut state.x.pos,
+                &mut state.skip,
+                &progress,
+            );
+            state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
+            GzSkipAction::ConsumeBuffered
         }
+        GzSkipStep::StopAtEof => GzSkipAction::StopAtEof,
+        GzSkipStep::Fetch => GzSkipAction::Fetch,
     }
-    return 0 as ::core::ffi::c_int;
+}
+
+macro_rules! gz_skip {
+    ($state:expr) => {{
+        loop {
+            let action = gz_skip_apply_step($state);
+            let fetch_result = match action {
+                GzSkipAction::Fetch => Some(gz_fetch($state)),
+                _ => None,
+            };
+            let fetch_failed = gz_skip_fetch_failed(&action, fetch_result);
+            match gz_skip_loop_decision(action, fetch_failed, $state.skip) {
+                GzSkipLoopDecision::Error => break true,
+                GzSkipLoopDecision::Done => break false,
+                GzSkipLoopDecision::Continue => {}
+            }
+        }
+    }};
 }
 
 #[cfg(test)]
@@ -3579,7 +3589,7 @@ unsafe fn gz_read(
     match gz_read_setup(len, state_ref.skip) {
         GzReadSetup::ReturnEmpty => return 0 as crate::stdlib::z_size_t,
         GzReadSetup::Skip => {
-            if gz_skip(state_ref) == -1 as ::core::ffi::c_int {
+            if gz_skip!(state_ref) {
                 return 0 as crate::stdlib::z_size_t;
             }
         }
@@ -3817,7 +3827,7 @@ pub unsafe extern "C" fn gzungetc(
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     let state_ref = &mut *state;
-    if gz_read_has_pending_skip(state_ref.skip) && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
+    if gz_read_has_pending_skip(state_ref.skip) && gz_skip!(state_ref) {
         return -1 as ::core::ffi::c_int;
     }
     if !gz_ungetc_accepts_byte(c) {
@@ -3899,7 +3909,7 @@ pub unsafe extern "C" fn gzgets(
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     let state_ref = &mut *state;
-    if gz_read_has_pending_skip(state_ref.skip) && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
+    if gz_read_has_pending_skip(state_ref.skip) && gz_skip!(state_ref) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
