@@ -277,6 +277,10 @@ fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> WindowMetadata {
     }
 }
 
+fn window_needs_allocation(has_window: bool) -> bool {
+    !has_window
+}
+
 fn window_update_plan(
     wsize: ::core::ffi::c_uint,
     wnext: ::core::ffi::c_uint,
@@ -647,7 +651,7 @@ unsafe extern "C" fn updatewindow(
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let plan: WindowUpdate;
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).window.is_null() {
+    if window_needs_allocation(!(*state).window.is_null()) {
         (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*strm).opaque,
@@ -2656,8 +2660,9 @@ mod tests {
         inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
         inflate_sync_point_value, inflate_sync_search_core, inflate_undermine_core,
         inflate_validate_wrap, initial_window_metadata, stored_block_lengths_are_valid,
-        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        syncsearch_safe, window_needs_allocation, window_update_plan, InflatePrimeUpdate,
+        InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED,
+        SYNC, TYPE,
     };
 
     #[test]
@@ -3102,6 +3107,12 @@ mod tests {
                 whave: 0,
             }
         );
+    }
+
+    #[test]
+    fn window_allocation_is_needed_only_without_a_window() {
+        assert!(window_needs_allocation(false));
+        assert!(!window_needs_allocation(true));
     }
 
     #[test]

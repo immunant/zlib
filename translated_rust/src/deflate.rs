@@ -486,6 +486,17 @@ fn fill_window_available_space(
     available
 }
 
+fn fill_window_insert_after_slide(
+    insert: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    if insert > strstart {
+        strstart
+    } else {
+        insert
+    }
+}
+
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
@@ -512,9 +523,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             (*s).match_start = (*s).match_start.wrapping_sub(wsize);
             (*s).strstart = (*s).strstart.wrapping_sub(wsize);
             (*s).block_start -= wsize as ::core::ffi::c_long;
-            if (*s).insert > (*s).strstart {
-                (*s).insert = (*s).strstart;
-            }
+            (*s).insert = fill_window_insert_after_slide((*s).insert, (*s).strstart);
             slide_hash(s);
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
@@ -3649,10 +3658,10 @@ mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_pending_value, deflate_prime_bits_valid, deflate_state_status_valid,
-        deflate_version_matches, fill_window_available_space, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
-        pending_output_len, read_buf_len, short_msb_bytes, slide_hash_entry, stored_block_min_size,
-        zlib_header,
+        deflate_version_matches, fill_window_available_space, fill_window_insert_after_slide,
+        gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        normalize_deflate_params, pending_output_len, read_buf_len, short_msb_bytes,
+        slide_hash_entry, stored_block_min_size, zlib_header,
     };
 
     #[test]
@@ -3838,6 +3847,18 @@ mod tests {
         assert_eq!(
             fill_window_available_space(0, 1, 0, 32, true),
             ::core::ffi::c_uint::MAX - 1,
+        );
+    }
+
+    #[test]
+    fn fill_window_insert_after_slide_clamps_only_past_the_cursor() {
+        assert_eq!(fill_window_insert_after_slide(0, 0), 0);
+        assert_eq!(fill_window_insert_after_slide(12, 12), 12);
+        assert_eq!(fill_window_insert_after_slide(11, 12), 11);
+        assert_eq!(fill_window_insert_after_slide(13, 12), 12);
+        assert_eq!(
+            fill_window_insert_after_slide(crate::stdlib::uInt::MAX, 42),
+            42,
         );
     }
 

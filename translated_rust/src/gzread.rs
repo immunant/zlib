@@ -623,6 +623,10 @@ fn gz_decomp_output_len(
     (had as crate::stdlib::uInt).wrapping_sub(avail_out) as ::core::ffi::c_uint
 }
 
+fn gz_decomp_output_start_offset(have: ::core::ffi::c_uint) -> isize {
+    -(have as isize)
+}
+
 enum GzDecompResult {
     RestartLook,
     Error,
@@ -747,8 +751,10 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
         }
     }
     (*state).x.have = gz_decomp_output_len(had, (*strm).avail_out);
-    (*state).x.next =
-        (*strm).next_out.offset(-((*state).x.have as isize)) as *mut ::core::ffi::c_uchar;
+    (*state).x.next = (*strm)
+        .next_out
+        .offset(gz_decomp_output_start_offset((*state).x.have))
+        as *mut ::core::ffi::c_uchar;
     match gz_decomp_result(ret) {
         GzDecompResult::RestartLook => {
             (*state).junk = 0 as ::core::ffi::c_int;
@@ -1023,6 +1029,17 @@ mod tests {
     fn gz_decomp_output_len_tracks_produced_bytes_with_wrapping() {
         assert_eq!(gz_decomp_output_len(10, 4), 6);
         assert_eq!(gz_decomp_output_len(0, 1), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn gz_decomp_output_start_offset_preserves_the_cursor_without_output() {
+        assert_eq!(gz_decomp_output_start_offset(0), 0);
+    }
+
+    #[test]
+    fn gz_decomp_output_start_offset_rewinds_by_produced_output() {
+        assert_eq!(gz_decomp_output_start_offset(1), -1);
+        assert_eq!(gz_decomp_output_start_offset(42), -42);
     }
 
     #[test]
