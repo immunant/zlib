@@ -995,8 +995,9 @@ unsafe fn gz_comp(
                         strm.avail_in = input_available;
                         strm.next_out = output.as_mut_ptr();
                         strm.avail_out = output_available;
-                        let result =
-                            crate::src::deflate::deflate_dispatch_from_abi_stream(strm, flush);
+                        let result = crate::src::deflate::deflate_dispatch_from_abi_stream(
+                            strm, flush, None,
+                        );
                         crate::src::gzlib::GzEmbeddedDeflateResult {
                             result,
                             remaining_input: strm.avail_in,
