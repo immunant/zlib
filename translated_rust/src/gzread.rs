@@ -137,7 +137,13 @@ fn gz_load(file: &mut ::std::fs::File, buf: &mut [u8]) -> GzLoad {
                 again: false,
             };
         }
-        match file.read(&mut buf[have..have + get]) {
+        let Some(end) = have.checked_add(get) else {
+            return GzLoad::Error(0);
+        };
+        let Some(chunk) = buf.get_mut(have..end) else {
+            return GzLoad::Error(0);
+        };
+        match file.read(chunk) {
             Ok(0) => {
                 return GzLoad::Loaded {
                     have: have as ::core::ffi::c_uint,

@@ -367,7 +367,10 @@ fn gz_direct_write_file(
     let mut written = 0usize;
     while written != source.len() {
         let end = written.saturating_add(max).min(source.len());
-        match file.write(&source[written..end]) {
+        let Some(chunk) = source.get(written..end) else {
+            return Err((written, 0));
+        };
+        match file.write(chunk) {
             Ok(0) => return Err((written, 0)),
             Ok(count) => written += count,
             Err(error) => return Err((written, error.raw_os_error().unwrap_or(0))),
@@ -881,7 +884,6 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let strm = &raw mut state.strm as crate::zlib_h::z_streamp;
     if !gzsetparams_state_is_valid(state.mode, state.err, state.again, state.direct) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -889,6 +891,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     if !gzsetparams_needs_update(state.level, state.strategy, level, strategy) {
         return crate::zlib_h::Z_OK;
     }
+    let strm = &raw mut state.strm as crate::zlib_h::z_streamp;
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
