@@ -464,6 +464,164 @@ struct GzReadState {
     avail_in: crate::stdlib::uInt,
 }
 
+// This is the persistent half of the read action boundary.  It contains all
+// fields an action may update, but deliberately excludes `gzFile_s::next` and
+// the embedded stream's raw cursors.  The outer ABI adapter publishes those
+// only after the bounded read has finished, while individual Fetch/COPY/GZIP
+// actions can exchange this pointer-free owner with `GzReadState`.
+struct GzReadDispatch<'a> {
+    buffers: &'a mut crate::gzguts_h::GzBuffers,
+    have: &'a mut crate::stdlib::uInt,
+    pos: &'a mut crate::stdlib::off64_t,
+    skip: &'a mut crate::stdlib::off64_t,
+    how: &'a mut ::core::ffi::c_int,
+    eof: &'a mut ::core::ffi::c_int,
+    past: &'a mut ::core::ffi::c_int,
+    err: &'a mut ::core::ffi::c_int,
+    want: ::core::ffi::c_uint,
+    direct: &'a mut ::core::ffi::c_int,
+    junk: &'a mut ::core::ffi::c_int,
+    again: &'a mut ::core::ffi::c_int,
+    message: &'a mut Option<Box<[u8]>>,
+    fd: &'a rustix::fd::OwnedFd,
+    path: Option<&'a [u8]>,
+    avail_in: &'a mut crate::stdlib::uInt,
+    avail_out: &'a mut crate::stdlib::uInt,
+    total_in: &'a mut crate::stdlib::uLong,
+    total_out: &'a mut crate::stdlib::uLong,
+}
+
+impl GzReadDispatch<'_> {
+    // Move the owned buffer transaction and its scalar snapshot into the
+    // action facade.  No ABI pointer is consulted to validate the output
+    // cursor: the owned cursor is the authoritative proof of that range.
+    fn project_from_read(&mut self, read: &mut GzReadState) {
+        *self.buffers =
+            ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
+        *self.have = read.have;
+        *self.pos = read.pos;
+        *self.skip = read.skip;
+        *self.how = read.how;
+        *self.eof = read.eof;
+        *self.past = read.past;
+        *self.err = read.err;
+        *self.avail_in = read.avail_in;
+    }
+
+    // Return the post-action transaction to the pointer-free state machine.
+    fn snapshot_into_read(&mut self, read: &mut GzReadState) {
+        read.buffers = ::core::mem::replace(self.buffers, crate::gzguts_h::GzBuffers::empty());
+        read.have = *self.have;
+        read.pos = *self.pos;
+        read.skip = *self.skip;
+        read.how = *self.how;
+        read.eof = *self.eof;
+        read.past = *self.past;
+        read.err = *self.err;
+        read.avail_in = *self.avail_in;
+    }
+
+    fn output_cursor_is_valid(&mut self) -> bool {
+        match self
+            .buffers
+            .output_cursor()
+            .map(|cursor| (cursor.start(), cursor.have()))
+        {
+            Some((start, have)) if have == *self.have => self
+                .buffers
+                .output
+                .as_deref()
+                .and_then(|buffer| buffer.get(start..))
+                .is_some(),
+            None if *self.have == 0 => true,
+            _ => false,
+        }
+    }
+
+    fn dispatch(
+        &mut self,
+        action: GzReadAction,
+        read: &mut GzReadState,
+        destination: &mut [u8],
+    ) -> GzReadStep {
+        self.project_from_read(read);
+        let step = if !self.output_cursor_is_valid() {
+            GzReadStep {
+                count: 0,
+                failed: true,
+            }
+        } else {
+            match action {
+                GzReadAction::Fetch => GzReadStep {
+                    count: 0,
+                    failed: gz_fetch_from_state(&mut GzFetchOwner::new(
+                        self.buffers,
+                        self.want,
+                        self.direct,
+                        self.junk,
+                        self.how,
+                        self.again,
+                        self.eof,
+                        self.err,
+                        self.message,
+                        self.have,
+                        self.fd,
+                        self.path,
+                        self.avail_in,
+                        self.avail_out,
+                        self.total_in,
+                        self.total_out,
+                    )) == -1,
+                },
+                GzReadAction::Copy => match gz_copy_load_into(
+                    self.fd,
+                    destination,
+                    GzLoadTarget {
+                        again: self.again,
+                        eof: self.eof,
+                        message: self.message,
+                        error: self.err,
+                        buffered: self.have,
+                        path: self.path,
+                    },
+                ) {
+                    Ok(count) => GzReadStep {
+                        count,
+                        failed: false,
+                    },
+                    Err(count) => GzReadStep {
+                        count,
+                        failed: true,
+                    },
+                },
+                GzReadAction::Decompress => GzReadStep {
+                    count: *self.have,
+                    failed: gz_decomp(&mut GzFetchOwner::new(
+                        self.buffers,
+                        self.want,
+                        self.direct,
+                        self.junk,
+                        self.how,
+                        self.again,
+                        self.eof,
+                        self.err,
+                        self.message,
+                        self.have,
+                        self.fd,
+                        self.path,
+                        self.avail_in,
+                        self.avail_out,
+                        self.total_in,
+                        self.total_out,
+                    )) == -1,
+                },
+            }
+        };
+        self.snapshot_into_read(read);
+        step
+    }
+}
+
 enum GzReadAction {
     Fetch,
     Copy,
@@ -1256,130 +1414,34 @@ unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::
         err: state.err,
         avail_in: state.strm.avail_in,
     };
-    let len = gz_read(&mut read, output, |action, read, destination| {
-        state.buffers =
-            ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
-        state.x.have = read.have;
-        state.x.pos = read.pos;
-        state.skip = read.skip;
-        state.how = read.how;
-        state.eof = read.eof;
-        state.past = read.past;
-        state.err = read.err;
-        state.strm.avail_in = read.avail_in;
-        let cursor_is_valid = match state
-            .buffers
-            .output_cursor()
-            .map(|cursor| (cursor.start(), cursor.have()))
-        {
-            Some((start, have)) if have == state.x.have => state
-                .buffers
-                .output
-                .as_deref_mut()
-                .and_then(|buffer| buffer.get_mut(start..))
-                .map(|buffer| state.x.next = buffer.as_mut_ptr())
-                .is_some(),
-            None if state.x.have == 0 => {
-                state.x.next = ::core::ptr::null_mut();
-                true
-            }
-            _ => false,
+    let len = {
+        let mut dispatch = GzReadDispatch {
+            buffers: &mut state.buffers,
+            have: &mut state.x.have,
+            pos: &mut state.x.pos,
+            skip: &mut state.skip,
+            how: &mut state.how,
+            eof: &mut state.eof,
+            past: &mut state.past,
+            err: &mut state.err,
+            want: state.want,
+            direct: &mut state.direct,
+            junk: &mut state.junk,
+            again: &mut state.again,
+            message: &mut state.msg,
+            fd: state.fd.as_ref().expect("gzip state has an open file"),
+            path: state.path.as_deref(),
+            avail_in: &mut state.strm.avail_in,
+            avail_out: &mut state.strm.avail_out,
+            total_in: &mut state.strm.total_in,
+            total_out: &mut state.strm.total_out,
         };
-        let step = if !cursor_is_valid {
-            GzReadStep {
-                count: 0,
-                failed: true,
-            }
-        } else {
-            match action {
-                GzReadAction::Fetch => GzReadStep {
-                    count: 0,
-                    failed: gz_fetch_from_state(&mut GzFetchOwner::new(
-                        &mut state.buffers,
-                        state.want,
-                        &mut state.direct,
-                        &mut state.junk,
-                        &mut state.how,
-                        &mut state.again,
-                        &mut state.eof,
-                        &mut state.err,
-                        &mut state.msg,
-                        &mut state.x.have,
-                        state.fd.as_ref().expect("gzip state has an open file"),
-                        state.path.as_deref(),
-                        &mut state.strm.avail_in,
-                        &mut state.strm.avail_out,
-                        &mut state.strm.total_in,
-                        &mut state.strm.total_out,
-                    )) == -1,
-                },
-                GzReadAction::Copy => match gz_copy_load_into(
-                    state.fd.as_ref().expect("gzip state has an open file"),
-                    destination,
-                    GzLoadTarget {
-                        again: &mut state.again,
-                        eof: &mut state.eof,
-                        message: &mut state.msg,
-                        error: &mut state.err,
-                        buffered: &mut state.x.have,
-                        path: state.path.as_deref(),
-                    },
-                ) {
-                    Ok(count) => GzReadStep {
-                        count,
-                        failed: false,
-                    },
-                    Err(count) => GzReadStep {
-                        count,
-                        failed: true,
-                    },
-                },
-                GzReadAction::Decompress => {
-                    GzReadStep {
-                        count: state.x.have,
-                        failed: gz_decomp(&mut GzFetchOwner::new(
-                            &mut state.buffers,
-                            state.want,
-                            &mut state.direct,
-                            &mut state.junk,
-                            &mut state.how,
-                            &mut state.again,
-                            &mut state.eof,
-                            &mut state.err,
-                            &mut state.msg,
-                            &mut state.x.have,
-                            state.fd.as_ref().expect("gzip state has an open file"),
-                            state.path.as_deref(),
-                            &mut state.strm.avail_in,
-                            &mut state.strm.avail_out,
-                            &mut state.strm.total_in,
-                            &mut state.strm.total_out,
-                        )) == -1,
-                    }
-                }
-            }
-        };
-        read.buffers =
-            ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
-        read.have = state.x.have;
-        read.pos = state.x.pos;
-        read.skip = state.skip;
-        read.how = state.how;
-        read.eof = state.eof;
-        read.past = state.past;
-        read.err = state.err;
-        read.avail_in = state.strm.avail_in;
-        step
-    }) as ::core::ffi::c_uint;
-    state.buffers = ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
-    state.x.have = read.have;
-    state.x.pos = read.pos;
-    state.skip = read.skip;
-    state.how = read.how;
-    state.eof = read.eof;
-    state.past = read.past;
-    state.err = read.err;
-    state.strm.avail_in = read.avail_in;
+        let len = gz_read(&mut read, output, |action, read, destination| {
+            dispatch.dispatch(action, read, destination)
+        });
+        dispatch.project_from_read(&mut read);
+        len as ::core::ffi::c_uint
+    };
     match state
         .buffers
         .output_cursor()
