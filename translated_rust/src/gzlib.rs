@@ -61,6 +61,8 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+use std::os::fd::{AsRawFd, FromRawFd};
+
 fn gz_reset(
     have: &mut crate::stdlib::uInt,
     mode: ::core::ffi::c_int,
@@ -107,7 +109,7 @@ fn gz_open_state(
             pos: 0,
         },
         mode: crate::gzguts_h::GZ_NONE,
-        fd: -1,
+        fd: None,
         path: std::ffi::CString::default(),
         size: 0,
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
@@ -185,8 +187,7 @@ fn gz_open_file(
     mode: ::core::ffi::c_int,
     exclusive: ::core::ffi::c_int,
     oflag: ::core::ffi::c_int,
-) -> Option<::core::ffi::c_int> {
-    use std::os::fd::IntoRawFd;
+) -> Option<std::os::fd::OwnedFd> {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -209,7 +210,7 @@ fn gz_open_file(
     options
         .open(std::ffi::OsStr::from_bytes(path.to_bytes()))
         .ok()
-        .map(|file| file.into_raw_fd())
+        .map(Into::into)
 }
 
 unsafe extern "C" fn gz_open(
@@ -252,10 +253,7 @@ unsafe extern "C" fn gz_open(
                 })
         });
     if fd == -1 as ::core::ffi::c_int {
-        state.fd = match gz_open_file(path, state.mode, exclusive, oflag) {
-            Some(fd) => fd,
-            None => -1 as ::core::ffi::c_int,
-        };
+        state.fd = gz_open_file(path, state.mode, exclusive, oflag);
     } else {
         if oflag & crate::stdlib::O_NONBLOCK != 0 {
             crate::stdlib::fcntl(
@@ -271,14 +269,15 @@ unsafe extern "C" fn gz_open(
                 crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
             );
         }
-        state.fd = fd;
+        state.fd = Some(std::os::fd::OwnedFd::from_raw_fd(fd));
     }
-    if state.fd == -1 as ::core::ffi::c_int {
+    let Some(fd) = state.fd.as_ref() else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
+    };
+    let fd = std::os::fd::AsRawFd::as_raw_fd(fd);
     if state.mode == crate::gzguts_h::GZ_APPEND {
         crate::stdlib::lseek64(
-            state.fd,
+            fd,
             0 as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_END,
         );
@@ -286,7 +285,7 @@ unsafe extern "C" fn gz_open(
     }
     if state.mode == crate::gzguts_h::GZ_READ {
         state.start = crate::stdlib::lseek64(
-            state.fd,
+            fd,
             0 as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_CUR,
         ) as crate::stdlib::off64_t;
@@ -397,7 +396,7 @@ pub unsafe fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_
         return -1 as ::core::ffi::c_int;
     }
     if crate::stdlib::lseek64(
-        state.fd,
+        state.fd.as_ref().expect("open gzip state owns its descriptor").as_raw_fd(),
         state.start as crate::stdlib::__off64_t,
         crate::stdlib::SEEK_SET,
     ) == -1 as crate::stdlib::__off64_t
@@ -461,7 +460,7 @@ pub unsafe fn gzseek64(
         && state.x.pos + offset >= 0 as crate::stdlib::off64_t
     {
         ret = crate::stdlib::lseek64(
-            state.fd,
+            state.fd.as_ref().expect("open gzip state owns its descriptor").as_raw_fd(),
             offset as crate::stdlib::__off64_t - state.x.have as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_CUR,
         ) as crate::stdlib::off64_t;
@@ -578,7 +577,7 @@ pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::s
 fn gzoffset_impl(
     mode: ::core::ffi::c_int,
     avail_in: crate::stdlib::uInt,
-    fd: std::os::fd::BorrowedFd<'_>,
+    fd: &std::os::fd::OwnedFd,
 ) -> crate::stdlib::off64_t {
     if mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE {
         return -1 as crate::stdlib::off64_t;
@@ -602,10 +601,9 @@ pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crat
         return -1 as crate::stdlib::off64_t;
     }
     let state = &*(file as *const crate::gzguts_h::gz_state);
-    if state.fd < 0 {
+    let Some(fd) = state.fd.as_ref() else {
         return -1 as crate::stdlib::off64_t;
-    }
-    let fd = std::os::fd::BorrowedFd::borrow_raw(state.fd);
+    };
     gzoffset_impl(state.mode, state.strm.avail_in, fd)
 }
 #[export_name = "gzoffset"]
@@ -615,10 +613,9 @@ pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate:
         return -1 as crate::stdlib::off_t;
     }
     let state = &*(file as *const crate::gzguts_h::gz_state);
-    if state.fd < 0 {
+    let Some(fd) = state.fd.as_ref() else {
         return -1 as crate::stdlib::off_t;
-    }
-    let fd = std::os::fd::BorrowedFd::borrow_raw(state.fd);
+    };
     gzoffset_impl(state.mode, state.strm.avail_in, fd) as crate::stdlib::off_t
 }
 fn gzeof_impl(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {

@@ -42,7 +42,12 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-use std::os::fd::BorrowedFd;
+fn gz_write_fd(
+    fd: &std::os::fd::OwnedFd,
+    buffer: &[u8],
+) -> Result<usize, rustix::io::Errno> {
+    rustix::io::write(fd, buffer)
+}
 
 unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
@@ -129,10 +134,6 @@ unsafe fn gz_comp(
         if state.strm.avail_in == 0 {
             return 0 as ::core::ffi::c_int;
         }
-        // `state.fd` is retained by this gzip session for its entire
-        // lifetime.  Borrow it just for these writes, without transferring
-        // ownership or changing the close responsibility.
-        let fd = BorrowedFd::borrow_raw(state.fd);
         let mut input = ::core::slice::from_raw_parts(
             state.strm.next_in as *const u8,
             state.strm.avail_in as usize,
@@ -144,7 +145,10 @@ unsafe fn gz_comp(
             } else {
                 input.len() as ::core::ffi::c_uint
             };
-            let written = match rustix::io::write(fd, &input[..put as usize]) {
+            let Some(fd) = state.fd.as_ref() else {
+                return -1;
+            };
+            let written = match gz_write_fd(fd, &input[..put as usize]) {
                 Ok(written) => written,
                 Err(error) => {
                     if error == rustix::io::Errno::AGAIN
@@ -179,9 +183,6 @@ unsafe fn gz_comp(
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
-    // See the direct-write path above.  This fd borrow is deliberately kept
-    // local to compression so `gzclose_w` remains its sole owner/closer.
-    let fd = BorrowedFd::borrow_raw(state.fd);
     loop {
         if state.strm.avail_out == 0 as crate::stdlib::uInt
             || flush != crate::zlib_h::Z_NO_FLUSH
@@ -208,8 +209,10 @@ unsafe fn gz_comp(
                 };
                 let pending = end - start;
                 put = pending.min(max as usize) as ::core::ffi::c_uint;
-                let written = match rustix::io::write(fd, &state.out[start..start + put as usize])
-                {
+                let Some(fd) = state.fd.as_ref() else {
+                    return -1;
+                };
+                let written = match gz_write_fd(fd, &state.out[start..start + put as usize]) {
                     Ok(written) => written,
                     Err(error) => {
                         if error == rustix::io::Errno::AGAIN
@@ -671,7 +674,11 @@ pub unsafe fn gzclose_w(
             state.in_0.clear();
         }
         crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-        if crate::stdlib::close(state.fd) == -1 as ::core::ffi::c_int {
+        let close = match state.fd.take() {
+            Some(fd) => crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)),
+            None => -1,
+        };
+        if close == -1 as ::core::ffi::c_int {
             ret = crate::zlib_h::Z_ERRNO;
         }
         ret

@@ -52,11 +52,10 @@ enum GzLoadBuffer<'a> {
 
 /// Read from a descriptor that is owned by the gzip state for the duration of
 /// the call. The borrowed descriptor and slice cover exactly one `read`.
-unsafe fn gz_read_fd(
-    fd: ::core::ffi::c_int,
+fn gz_read_fd(
+    fd: &std::os::fd::OwnedFd,
     buffer: &mut [u8],
 ) -> Result<usize, std::io::Error> {
-    let fd = std::os::fd::BorrowedFd::borrow_raw(fd);
     rustix::io::read(fd, buffer).map_err(std::io::Error::from)
 }
 
@@ -82,7 +81,10 @@ unsafe fn gz_load(
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     loop {
         let get = (buf.len() - have).min(max);
-        match gz_read_fd(state.fd, &mut buf[have..have + get]) {
+        let Some(fd) = state.fd.as_ref() else {
+            return Err(());
+        };
+        match gz_read_fd(fd, &mut buf[have..have + get]) {
             Ok(0) => {
                 state.eof = 1 as ::core::ffi::c_int;
                 break;
@@ -929,7 +931,10 @@ pub unsafe fn gzclose_r(
             crate::zlib_h::Z_OK
         };
         crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-        let ret = crate::stdlib::close(state.fd);
+        let ret = match state.fd.take() {
+            Some(fd) => crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)),
+            None => -1,
+        };
         if ret != 0 {
             crate::zlib_h::Z_ERRNO
         } else {
