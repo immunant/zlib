@@ -100,8 +100,8 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     state.size = state.want;
     if state.direct == 0 {
         state.strm.avail_out = state.size as crate::stdlib::uInt;
-        state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
-        state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
+        state.strm.next_out = state.out;
+        state.x.next = state.strm.next_out;
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -226,7 +226,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             first = 0 as ::core::ffi::c_int;
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
-        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+        state.strm.next_in = state.in_0;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         crate::src::gzlib::gz_zero_progress(state, n);
         if ret == -1 as ::core::ffi::c_int {

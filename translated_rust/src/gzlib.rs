@@ -169,7 +169,7 @@ pub(crate) fn gz_avail_after_load(
     received: ::core::ffi::c_uint,
 ) {
     state.strm.avail_in = state.strm.avail_in.wrapping_add(received);
-    state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+    state.strm.next_in = state.in_0;
 }
 
 // The input-buffer adapter supplies whether its cursor is already at the
@@ -429,7 +429,7 @@ pub(crate) fn gz_comp_output_plan(
 
 pub(crate) fn gz_comp_reset_output(state: &mut crate::gzguts_h::gz_state) {
     gz_reset_output_buffer(state);
-    state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
+    state.strm.next_out = state.out;
     state.x.next = state.out;
 }
 
@@ -542,7 +542,7 @@ pub(crate) struct GzBufferedCopyPlan {
 // raw source and destination pointers.
 pub(crate) fn gz_buffered_input_len(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_uint {
     if state.strm.avail_in == 0 {
-        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+        state.strm.next_in = state.in_0;
     }
     state
         .strm
