@@ -82,18 +82,9 @@ pub unsafe extern "C" fn adler32_z_ffi(
     }
     adler32_z(adler, core::slice::from_raw_parts(buf, len))
 }
-pub unsafe extern "C" fn adler32(
-    mut adler: crate::stdlib::uLong,
-    mut buf: *const crate::stdlib::Bytef,
-    mut len: crate::stdlib::uInt,
-) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return 1;
-    }
-    adler32_z(
-        adler,
-        core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t),
-    )
+/// Calculate Adler-32 for a caller-validated input slice.
+pub fn adler32(adler: crate::stdlib::uLong, buf: &[crate::stdlib::Bytef]) -> crate::stdlib::uLong {
+    adler32_z(adler, buf)
 }
 #[export_name = "adler32"]
 
@@ -102,7 +93,11 @@ pub unsafe extern "C" fn adler32_ffi(
     mut buf: *const crate::stdlib::Bytef,
     mut len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    adler32(adler, buf, len)
+    if buf.is_null() {
+        return 1;
+    }
+    let input = core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t);
+    adler32(adler, input)
 }
 fn adler32_combine_(
     mut adler1: crate::stdlib::uLong,

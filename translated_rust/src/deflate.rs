@@ -1435,7 +1435,8 @@ pub unsafe extern "C" fn deflateSetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32((*strm).adler, dictionary, dictLength);
+        let dictionary_bytes = core::slice::from_raw_parts(dictionary, dictLength as usize);
+        (*strm).adler = crate::src::adler32::adler32((*strm).adler, dictionary_bytes);
     }
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
@@ -1604,11 +1605,7 @@ pub unsafe extern "C" fn deflateResetKeep(
     (*strm).adler = if (*s).wrap == 2 as ::core::ffi::c_int {
         crate::src::crc32::crc32(0 as crate::stdlib::uLong, &[])
     } else {
-        crate::src::adler32::adler32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        )
+        crate::src::adler32::adler32(0 as crate::stdlib::uLong, &[])
     };
     (*s).last_flush = -2 as ::core::ffi::c_int;
     crate::src::trees::tr_init(&mut *s);
