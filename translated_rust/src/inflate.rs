@@ -866,9 +866,15 @@ pub unsafe extern "C" fn inflateReset_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let state_ref = &mut *state;
-    inflate_reset_window_state(state_ref);
-    return inflate_reset_keep_state(&mut *strm, state_ref);
+    return inflate_reset_state(&mut *strm, &mut *state);
+}
+
+pub(crate) fn inflate_reset_state(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_int {
+    inflate_reset_window_state(state);
+    return inflate_reset_keep_state(strm, state);
 }
 
 fn inflate_reset_window_state(state: &mut crate::src::inflate::inflate_state) {

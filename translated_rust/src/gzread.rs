@@ -283,15 +283,11 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if gz_look_needs_more_header_input(state.strm.avail_in, state.again) {
         return 0 as ::core::ffi::c_int;
     }
-    if state.strm.avail_in > 3 as crate::stdlib::uInt {
-        let header = unsafe {
-            [
-                *state.strm.next_in,
-                *state.strm.next_in.wrapping_add(1),
-                *state.strm.next_in.wrapping_add(2),
-                *state.strm.next_in.wrapping_add(3),
-            ]
-        };
+    let input = unsafe {
+        &*::core::ptr::slice_from_raw_parts(state.strm.next_in, state.strm.avail_in as usize)
+    };
+    if input.len() > 3 {
+        let header = [input[0], input[1], input[2], input[3]];
         if gz_is_gzip_header(header) {
             unsafe {
                 crate::src::inflate::inflateReset_ffi(
@@ -303,13 +299,8 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
     }
     state.x.next = state.out;
-    unsafe {
-        crate::stdlib::memcpy(
-            state.x.next as *mut ::core::ffi::c_void,
-            state.strm.next_in as *const ::core::ffi::c_void,
-            state.strm.avail_in as crate::__stddef_size_t_h::size_t,
-        );
-    }
+    let output = unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(state.x.next, input.len()) };
+    output.copy_from_slice(input);
     state.x.have = state.strm.avail_in as ::core::ffi::c_uint;
     state.strm.avail_in = 0 as crate::stdlib::uInt;
     state.how = crate::gzguts_h::COPY;
