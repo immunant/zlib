@@ -412,6 +412,15 @@ impl<'a> PendingStorageView<'a> {
         &mut self.bytes[..self.layout.total_len]
     }
 
+    /// Return a checked immutable pending-output range.  This keeps pending
+    /// draining on the same bounded callback-storage view that performed the
+    /// preceding bit flush, instead of handing a private helper an unbounded
+    /// bare slice.
+    fn pending_output_range(&self, offset: usize, len: usize) -> Option<&[crate::stdlib::Bytef]> {
+        let end = offset.checked_add(len)?;
+        self.bytes.get(offset..end)
+    }
+
     pub(crate) fn symbol_bytes(&mut self) -> &mut [crate::stdlib::Bytef] {
         &mut self.bytes[self.layout.symbol_offset..self.layout.total_len]
     }
@@ -3048,7 +3057,7 @@ fn flush_pending_core(
 /// arithmetic or `memcpy`.  Keeping the copy here also makes an invalid
 /// pending cursor a no-op instead of deriving an out-of-bounds raw pointer.
 fn drain_pending(
-    pending_storage: &[crate::stdlib::Bytef],
+    pending_storage: &PendingStorageView<'_>,
     drain: PendingDrainState,
     output: &mut [crate::stdlib::Bytef],
     avail_out: crate::stdlib::uInt,
@@ -3056,8 +3065,7 @@ fn drain_pending(
 ) -> Option<FlushPendingResult> {
     let result = flush_pending_core(drain, avail_out, total_out)?;
     let copied = result.copied as usize;
-    let end = drain.pending_out_offset.checked_add(copied)?;
-    let source = pending_storage.get(drain.pending_out_offset..end)?;
+    let source = pending_storage.pending_output_range(drain.pending_out_offset, copied)?;
     let destination = output.get_mut(..copied)?;
     destination.copy_from_slice(source);
     Some(result)
@@ -3073,15 +3081,15 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         return;
     };
     let pending_storage = core::slice::from_raw_parts_mut(pending_buf.as_ptr(), layout.total_len);
-    assert!(with_pending_storage(pending_storage, layout, |storage| {
-        crate::src::trees::tr_flush_bits_core(
-            storage,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-        )
-    })
-    .expect("pending storage layout matches its allocation"));
+    let Some(mut storage) = PendingStorageView::new(pending_storage, layout) else {
+        return;
+    };
+    assert!(crate::src::trees::tr_flush_bits_core(
+        &mut storage,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+    ));
     let drain = PendingDrainState {
         pending: state.pending,
         pending_out_offset: state.pending_out_offset,
@@ -3093,13 +3101,8 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     // initializer.  Once their bounded views exist, the drain itself uses
     // checked ranges and a safe slice copy in `drain_pending()`.
     let output = core::slice::from_raw_parts_mut(stream.next_out, preview.copied as usize);
-    let Some(result) = drain_pending(
-        pending_storage,
-        drain,
-        output,
-        stream.avail_out,
-        stream.total_out,
-    ) else {
+    let Some(result) = drain_pending(&storage, drain, output, stream.avail_out, stream.total_out)
+    else {
         return;
     };
     stream.next_out = stream.next_out.wrapping_add(result.copied as usize);
@@ -6821,12 +6824,14 @@ mod tests {
 
     #[test]
     fn drain_pending_copies_the_selected_pending_segment() {
-        let pending = *b"0123456789";
+        let mut pending = [0; 12];
+        pending[..10].copy_from_slice(b"0123456789");
+        let storage = PendingStorageView::new(&mut pending, pending_storage_layout(3)).unwrap();
         let mut output = [0xaa; 5];
 
         assert_eq!(
             drain_pending(
-                &pending,
+                &storage,
                 PendingDrainState {
                     pending: 4,
                     pending_out_offset: 3,
@@ -6851,11 +6856,13 @@ mod tests {
 
     #[test]
     fn drain_pending_rejects_invalid_storage_or_output_without_writing() {
-        let pending = *b"012345";
+        let mut pending = [0; 8];
+        pending[..6].copy_from_slice(b"012345");
+        let storage = PendingStorageView::new(&mut pending, pending_storage_layout(2)).unwrap();
         let mut short_output = [0xaa; 2];
         assert_eq!(
             drain_pending(
-                &pending,
+                &storage,
                 PendingDrainState {
                     pending: 3,
                     pending_out_offset: 2,
@@ -6871,10 +6878,10 @@ mod tests {
         let mut output = [0xaa; 3];
         assert_eq!(
             drain_pending(
-                &pending,
+                &storage,
                 PendingDrainState {
                     pending: 3,
-                    pending_out_offset: 5,
+                    pending_out_offset: 6,
                 },
                 &mut output,
                 3,
@@ -6887,11 +6894,13 @@ mod tests {
 
     #[test]
     fn drain_pending_leaves_output_untouched_when_no_bytes_can_be_drained() {
-        let pending = *b"012345";
+        let mut pending = [0; 8];
+        pending[..6].copy_from_slice(b"012345");
+        let storage = PendingStorageView::new(&mut pending, pending_storage_layout(2)).unwrap();
         let mut output = [0xaa; 2];
         assert_eq!(
             drain_pending(
-                &pending,
+                &storage,
                 PendingDrainState {
                     pending: 2,
                     pending_out_offset: 1,

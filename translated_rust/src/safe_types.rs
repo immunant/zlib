@@ -94,6 +94,83 @@ impl<'a> InputCursor<'a> {
     }
 }
 
+/// A bounded, least-significant-bit-first reader over an input cursor.
+///
+/// Deflate streams consume bits from the low end of each byte.  The reader
+/// keeps that ordering explicit and never shifts by a value that could exceed
+/// the width of its accumulator.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct BitReader<'a> {
+    input: InputCursor<'a>,
+    hold: u64,
+    bits: BitCount,
+}
+
+impl<'a> BitReader<'a> {
+    /// Deflate never needs more than 32 bits in one decode request.
+    pub(crate) const MAX_REQUEST_BITS: BitCount = 32;
+
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            input: InputCursor::new(bytes),
+            hold: 0,
+            bits: 0,
+        }
+    }
+
+    pub(crate) fn input_position(&self) -> ByteCount {
+        self.input.position()
+    }
+
+    pub(crate) fn remaining_input(&self) -> ByteCount {
+        self.input.remaining()
+    }
+
+    pub(crate) fn buffered_bits(&self) -> BitCount {
+        self.bits
+    }
+
+    fn ensure_bits(&mut self, count: BitCount) -> bool {
+        if count > Self::MAX_REQUEST_BITS {
+            return false;
+        }
+
+        while self.bits < count {
+            let Some(byte) = self.input.read_byte() else {
+                return false;
+            };
+            self.hold |= u64::from(byte) << self.bits;
+            self.bits += 8;
+        }
+        true
+    }
+
+    pub(crate) fn peek_bits(&mut self, count: BitCount) -> Option<u32> {
+        if !self.ensure_bits(count) {
+            return None;
+        }
+
+        let mask = if count == 0 { 0 } else { (1u64 << count) - 1 };
+        u32::try_from(self.hold & mask).ok()
+    }
+
+    pub(crate) fn drop_bits(&mut self, count: BitCount) -> bool {
+        if count > self.bits {
+            return false;
+        }
+
+        self.hold >>= count;
+        self.bits -= count;
+        true
+    }
+
+    pub(crate) fn read_bits(&mut self, count: BitCount) -> Option<u32> {
+        let bits = self.peek_bits(count)?;
+        debug_assert!(self.drop_bits(count));
+        Some(bits)
+    }
+}
+
 /// A checked, forward-only output cursor.
 ///
 /// `copy_from_history()` deliberately copies one byte at a time.  When the
@@ -162,6 +239,77 @@ impl<'a> OutputCursor<'a> {
     }
 }
 
+/// A bounded, least-significant-bit-first writer over an output cursor.
+///
+/// `write_bits()` checks all output capacity before it mutates either cursor
+/// or its bit buffer.  That lets state machines stop at an output boundary
+/// without manufacturing a partially written symbol.
+#[derive(Debug)]
+pub(crate) struct BitWriter<'a> {
+    output: OutputCursor<'a>,
+    hold: u64,
+    bits: BitCount,
+}
+
+impl<'a> BitWriter<'a> {
+    pub(crate) const MAX_REQUEST_BITS: BitCount = 32;
+
+    pub(crate) fn new(bytes: &'a mut [u8]) -> Self {
+        Self {
+            output: OutputCursor::new(bytes),
+            hold: 0,
+            bits: 0,
+        }
+    }
+
+    pub(crate) fn buffered_bits(&self) -> BitCount {
+        self.bits
+    }
+
+    pub(crate) fn written(&self) -> &[u8] {
+        self.output.written()
+    }
+
+    pub(crate) fn write_bits(&mut self, value: u32, count: BitCount) -> bool {
+        if count > Self::MAX_REQUEST_BITS {
+            return false;
+        }
+
+        let bytes_to_flush = (self.bits + count) / 8;
+        let Ok(bytes_to_flush) = usize::try_from(bytes_to_flush) else {
+            return false;
+        };
+        if bytes_to_flush > self.output.remaining() {
+            return false;
+        }
+
+        let mask = if count == 0 { 0 } else { (1u64 << count) - 1 };
+        self.hold |= (u64::from(value) & mask) << self.bits;
+        self.bits += count;
+        while self.bits >= 8 {
+            debug_assert!(self.output.write_byte(self.hold as u8));
+            self.hold >>= 8;
+            self.bits -= 8;
+        }
+        true
+    }
+
+    /// Flush a final partial byte, padding its unused high bits with zero.
+    pub(crate) fn flush_partial_byte(&mut self) -> bool {
+        if self.bits == 0 {
+            return true;
+        }
+        if self.output.is_full() {
+            return false;
+        }
+
+        debug_assert!(self.output.write_byte(self.hold as u8));
+        self.hold = 0;
+        self.bits = 0;
+        true
+    }
+}
+
 pub(crate) fn byte_count_from_uint(value: crate::stdlib::uInt) -> Option<ByteCount> {
     ByteCount::try_from(value).ok()
 }
@@ -190,8 +338,8 @@ pub(crate) fn off64_from_stream_offset(value: StreamOffset) -> Option<crate::std
 mod tests {
     use super::{
         byte_count_from_uint, checksum_from_ulong, off64_from_stream_offset,
-        stream_offset_from_off64, uint_from_byte_count, ulong_from_checksum, BitCount,
-        FfiInputKind, InputCursor, OutputCursor,
+        stream_offset_from_off64, uint_from_byte_count, ulong_from_checksum, BitCount, BitReader,
+        BitWriter, FfiInputKind, InputCursor, OutputCursor,
     };
 
     #[test]
@@ -259,6 +407,30 @@ mod tests {
     }
 
     #[test]
+    fn bit_reader_consumes_deflate_bits_from_the_low_end_first() {
+        let mut reader = BitReader::new(&[0b1010_0110, 0b0000_0011]);
+
+        assert_eq!(reader.read_bits(3), Some(0b110));
+        assert_eq!(reader.peek_bits(5), Some(0b10100));
+        assert_eq!(reader.buffered_bits(), 5);
+        assert!(reader.drop_bits(5));
+        assert_eq!(reader.read_bits(2), Some(0b11));
+        assert_eq!(reader.input_position(), 2);
+        assert_eq!(reader.remaining_input(), 0);
+    }
+
+    #[test]
+    fn bit_reader_keeps_available_bits_when_a_larger_request_runs_out_of_input() {
+        let mut reader = BitReader::new(&[0x5a]);
+
+        assert_eq!(reader.peek_bits(12), None);
+        assert_eq!(reader.buffered_bits(), 8);
+        assert_eq!(reader.input_position(), 1);
+        assert_eq!(reader.read_bits(8), Some(0x5a));
+        assert_eq!(reader.peek_bits(BitReader::MAX_REQUEST_BITS + 1), None);
+    }
+
+    #[test]
     fn output_cursor_tracks_writes_and_leaves_state_unchanged_on_overflow() {
         let mut storage = [0_u8; 4];
         let mut cursor = OutputCursor::new(&mut storage);
@@ -284,5 +456,33 @@ mod tests {
         assert!(!cursor.copy_from_history(9, 1));
         assert!(!cursor.copy_from_history(2, 3));
         assert_eq!(cursor.written(), b"abababab");
+    }
+
+    #[test]
+    fn bit_writer_emits_deflate_bits_from_the_low_end_first() {
+        let mut storage = [0_u8; 2];
+        let mut writer = BitWriter::new(&mut storage);
+
+        assert!(writer.write_bits(0b110, 3));
+        assert!(writer.write_bits(0b10100, 5));
+        assert!(writer.write_bits(0b11, 2));
+        assert_eq!(writer.written(), &[0b1010_0110]);
+        assert_eq!(writer.buffered_bits(), 2);
+        assert!(writer.flush_partial_byte());
+        assert_eq!(writer.written(), &[0b1010_0110, 0b0000_0011]);
+    }
+
+    #[test]
+    fn bit_writer_rejects_a_write_that_cannot_flush_without_changing_state() {
+        let mut storage = [0_u8; 1];
+        let mut writer = BitWriter::new(&mut storage);
+
+        assert!(writer.write_bits(0b111, 3));
+        assert!(writer.write_bits(0xff, 8));
+        assert_eq!(writer.written(), &[0xff]);
+        assert_eq!(writer.buffered_bits(), 3);
+        assert!(!writer.write_bits(0b1_1111, 5));
+        assert_eq!(writer.buffered_bits(), 3);
+        assert!(!writer.flush_partial_byte());
     }
 }
