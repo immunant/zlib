@@ -64,11 +64,15 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+fn gz_clear_read_flags(eof: &mut ::core::ffi::c_int, past: &mut ::core::ffi::c_int) {
+    *eof = 0;
+    *past = 0;
+}
+
 fn gz_reset_fields(state: &mut crate::gzguts_h::gz_state) {
     state.x.have = 0;
     if state.mode == crate::gzguts_h::GZ_READ {
-        state.eof = 0;
-        state.past = 0;
+        gz_clear_read_flags(&mut state.eof, &mut state.past);
         state.how = crate::gzguts_h::LOOK;
         state.junk = -1;
     } else {
@@ -452,8 +456,7 @@ pub unsafe extern "C" fn gzseek64(
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
         (*state).x.have = 0 as ::core::ffi::c_uint;
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
+        gz_clear_read_flags(&mut (*state).eof, &mut (*state).past);
         (*state).skip = 0 as crate::stdlib::off64_t;
         gz_error(
             state,
@@ -689,8 +692,7 @@ pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
         return;
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
+        gz_clear_read_flags(&mut (*state).eof, &mut (*state).past);
     }
     gz_error(
         state,
@@ -764,7 +766,15 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 
 #[cfg(test)]
 mod tests {
-    use super::{gzerror_core, gztell64_core, GzErrorMessage};
+    use super::{gz_clear_read_flags, gzerror_core, gztell64_core, GzErrorMessage};
+
+    #[test]
+    fn clearing_read_flags_resets_both_values() {
+        let mut eof = 1;
+        let mut past = 1;
+        gz_clear_read_flags(&mut eof, &mut past);
+        assert_eq!((eof, past), (0, 0));
+    }
 
     #[test]
     fn gzerror_core_rejects_invalid_modes() {

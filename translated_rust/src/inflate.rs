@@ -2259,6 +2259,9 @@ unsafe extern "C" fn syncsearch(
     buf: *const ::core::ffi::c_uchar,
     len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
+    if len == 0 {
+        return 0;
+    }
     syncsearch_safe(&mut *have, ::core::slice::from_raw_parts(buf, len as usize))
         as ::core::ffi::c_uint
 }
@@ -2565,6 +2568,21 @@ mod tests {
         assert_eq!(have, 2);
         assert_eq!(syncsearch_safe(&mut have, &[0xff, 0xff]), 2);
         assert_eq!(have, 4);
+    }
+
+    #[test]
+    fn syncsearch_accepts_every_marker_split_and_empty_chunks() {
+        let marker = [0, 0, 0xff, 0xff];
+        for split in 0..=marker.len() {
+            let mut have = 0;
+            assert_eq!(syncsearch_safe(&mut have, &marker[..split]), split);
+            assert_eq!(syncsearch_safe(&mut have, &[]), 0);
+            assert_eq!(
+                syncsearch_safe(&mut have, &marker[split..]),
+                marker.len() - split
+            );
+            assert_eq!(have, 4, "split={split}");
+        }
     }
 
     #[test]

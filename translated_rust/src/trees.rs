@@ -5119,7 +5119,7 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{bi_flush_core, bi_windup_core, bl_order};
+    use super::{bi_flush_core, bi_reverse, bi_windup_core, bl_order, MAX_BITS};
 
     #[test]
     fn bit_length_code_order_matches_deflate_spec() {
@@ -5127,6 +5127,17 @@ mod tests {
             bl_order,
             [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
         );
+    }
+
+    #[test]
+    fn bit_reversal_matches_deflate_widths() {
+        for len in 1..=MAX_BITS {
+            let mask = (1_u32 << len) - 1;
+            for code in 0..=mask {
+                let expected = code.reverse_bits() >> (u32::BITS - len as u32);
+                assert_eq!(bi_reverse(code, len), expected, "code={code}, len={len}");
+            }
+        }
     }
 
     #[test]
