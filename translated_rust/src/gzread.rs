@@ -461,15 +461,18 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
-    had = (*strm).avail_out as ::core::ffi::c_uint;
+    // The stream itself is embedded in the state we already exclusively own.
+    // Keep field access through that borrow; only `inflate()` needs the ABI
+    // pointer projection at its call boundary.
+    let strm = &mut state.strm;
+    had = strm.avail_out as ::core::ffi::c_uint;
     loop {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt {
-            let cursor_address = state.strm.next_in.addr();
+        if strm.avail_in == 0 as crate::stdlib::uInt {
+            let cursor_address = strm.next_in.addr();
             if gz_avail(GzAvailState {
                 err: &mut state.err,
                 eof: &mut state.eof,
-                avail_in: &mut state.strm.avail_in,
+                avail_in: &mut strm.avail_in,
                 size: state.size as usize,
                 input: &mut state.in_0,
                 fd: state.fd.as_ref().expect("gzip state has an open file"),
@@ -484,9 +487,9 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 ret = state.err;
                 break;
             }
-            state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
+            strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
         }
-        if (*strm).avail_in == 0 as crate::stdlib::uInt {
+        if strm.avail_in == 0 as crate::stdlib::uInt {
             if state.again == 0 {
                 crate::src::gzlib::GzErrorState {
                     message: &mut state.msg,
@@ -503,7 +506,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );
-            if (*strm).avail_out < had {
+            if strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
             }
             if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
@@ -531,32 +534,38 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 break;
             } else if ret == crate::zlib_h::Z_DATA_ERROR {
                 if state.junk == 1 as ::core::ffi::c_int {
-                    (*strm).avail_in = 0 as crate::stdlib::uInt;
+                    strm.avail_in = 0 as crate::stdlib::uInt;
                     state.eof = 1 as ::core::ffi::c_int;
                     state.how = crate::gzguts_h::LOOK;
                     ret = crate::zlib_h::Z_OK;
                     break;
                 } else {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_DATA_ERROR,
-                        if (*strm).msg.is_null() {
-                            b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                        } else {
-                            (*strm).msg as *const ::core::ffi::c_char
-                        },
-                    );
+                    let message = if strm.msg.is_null() {
+                        b"compressed data error".as_slice()
+                    } else {
+                        // `inflate()` supplies this diagnostic as a
+                        // NUL-terminated C string. Copy it while the stream
+                        // is borrowed instead of forwarding the ABI state to
+                        // the raw error entry point.
+                        unsafe { ::core::ffi::CStr::from_ptr(strm.msg).to_bytes() }
+                    };
+                    crate::src::gzlib::GzErrorState {
+                        message: &mut state.msg,
+                        error: &mut state.err,
+                        buffered: &mut state.x.have,
+                        again: state.again,
+                        path: state.path.as_deref(),
+                    }
+                    .set(crate::zlib_h::Z_DATA_ERROR, Some(message));
                     break;
                 }
-            } else if !((*strm).avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END) {
+            } else if !(strm.avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END) {
                 break;
             }
         }
     }
-    state.x.have =
-        (had as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as ::core::ffi::c_uint;
-    state.x.next =
-        (*strm).next_out.wrapping_sub(state.x.have as usize) as *mut ::core::ffi::c_uchar;
+    state.x.have = (had as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as ::core::ffi::c_uint;
+    state.x.next = strm.next_out.wrapping_sub(state.x.have as usize) as *mut ::core::ffi::c_uchar;
     if ret == crate::zlib_h::Z_STREAM_END {
         state.junk = 0 as ::core::ffi::c_int;
         state.how = crate::gzguts_h::LOOK;
