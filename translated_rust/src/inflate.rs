@@ -1943,10 +1943,14 @@ fn updatewindow(
     }
 }
 
-pub unsafe extern "C" fn inflate(
+#[export_name = "inflate"]
+pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    if inflate_state_check_at_ffi_boundary!(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let mut c2rust_current_block: u64;
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
@@ -3257,16 +3261,6 @@ pub unsafe extern "C" fn inflate(
         ret = crate::zlib_h::Z_BUF_ERROR;
     }
     return ret;
-}
-#[export_name = "inflate"]
-pub unsafe extern "C" fn inflate_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if inflate_state_check_at_ffi_boundary!(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflate(strm, flush)
 }
 #[export_name = "inflateEnd"]
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {

@@ -18,7 +18,7 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
+pub use crate::src::inflate::inflate_ffi as inflate;
 pub use crate::src::inflate::inflateEnd_ffi as inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::src::inflate::inflateReset;
@@ -1571,7 +1571,7 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             GzDecompInputAction::Inflate => {}
         }
         ret = unsafe {
-            crate::src::inflate::inflate(&raw mut state.strm, crate::zlib_h::Z_NO_FLUSH)
+            crate::src::inflate::inflate_ffi(&raw mut state.strm, crate::zlib_h::Z_NO_FLUSH)
         };
         let stream_state = gz_decomp_stream_state(&state.strm);
         let decision = gz_decomp_decision(

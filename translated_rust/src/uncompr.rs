@@ -2,7 +2,7 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
+pub use crate::src::inflate::inflate_ffi as inflate;
 pub use crate::src::inflate::inflateEnd_ffi as inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
@@ -213,7 +213,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     let err = loop {
         output_progress.replenish(&mut stream.avail_out);
         input_progress.replenish(&mut stream.avail_in);
-        let err = crate::src::inflate::inflate(
+        let err = crate::src::inflate::inflate_ffi(
             &raw mut stream as *mut crate::zlib_h::z_stream_s,
             crate::zlib_h::Z_NO_FLUSH,
         );
