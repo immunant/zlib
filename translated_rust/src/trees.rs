@@ -2400,10 +2400,10 @@ unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).bi_valid = 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gen_codes(
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
-    mut bl_count: *mut crate::zutil_h::ushf,
+fn gen_codes(
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    bl_count: &[crate::zutil_h::ush],
 ) {
     let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
     let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
@@ -2412,18 +2412,18 @@ unsafe extern "C" fn gen_codes(
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
         code = code.wrapping_add(
-            *bl_count.offset((bits - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_uint
+            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint,
         ) << 1 as ::core::ffi::c_int;
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
-        let mut len: ::core::ffi::c_int = (*tree.offset(n as isize)).dl.len as ::core::ffi::c_int;
+        let len: ::core::ffi::c_int = tree[n as usize].len() as ::core::ffi::c_int;
         if len != 0 as ::core::ffi::c_int {
             let c2rust_fresh57 = next_code[len as usize];
             next_code[len as usize] = next_code[len as usize].wrapping_add(1);
-            (*tree.offset(n as isize)).fc.code =
+            tree[n as usize].fc.code =
                 bi_reverse(c2rust_fresh57 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
         n += 1;
@@ -2629,36 +2629,28 @@ unsafe fn gen_bitlen(s: &mut crate::src::deflate::deflate_state, tree_kind: u8) 
 
 unsafe fn build_tree(mut s: &mut crate::src::deflate::deflate_state, tree_kind: u8) {
     // Tree selection is part of the deflate state, not a caller-owned raw
-    // descriptor.  Keep the raw tree work in the narrow implementation below
-    // until the surrounding tree representation is converted to slices.
+    // descriptor. Keep its tree arrays selected by kind in the implementation.
     unsafe { build_tree_impl(s, tree_kind) }
+}
+
+fn selected_tree(
+    s: &mut crate::src::deflate::deflate_state,
+    tree_kind: u8,
+) -> &mut [crate::src::deflate::ct_data] {
+    match tree_kind {
+        crate::src::deflate::STATIC_TREE_LITERAL => &mut s.dyn_ltree,
+        crate::src::deflate::STATIC_TREE_DISTANCE => &mut s.dyn_dtree,
+        _ => &mut s.bl_tree,
+    }
 }
 
 unsafe fn build_tree_impl(
     s: &mut crate::src::deflate::deflate_state,
     tree_kind: u8,
 ) {
-    let mut tree: *mut crate::src::deflate::ct_data = {
-        match tree_kind {
-            crate::src::deflate::STATIC_TREE_LITERAL => {
-                &raw mut s.dyn_ltree as *mut crate::src::deflate::ct_data_s
-                    as *mut crate::src::deflate::ct_data
-            }
-            crate::src::deflate::STATIC_TREE_DISTANCE => {
-                &raw mut s.dyn_dtree as *mut crate::src::deflate::ct_data_s
-                    as *mut crate::src::deflate::ct_data
-            }
-            _ => {
-                &raw mut s.bl_tree as *mut crate::src::deflate::ct_data_s
-                    as *mut crate::src::deflate::ct_data
-            }
-        }
-    };
     let stat_desc = static_desc(tree_kind);
-    let mut stree: *const trees_h::StaticCtData = stat_desc
-        .static_tree
-        .map_or(::core::ptr::null(), <[trees_h::StaticCtData]>::as_ptr);
-    let mut elems: ::core::ffi::c_int = stat_desc.elems;
+    let stree = stat_desc.static_tree;
+    let elems: ::core::ffi::c_int = stat_desc.elems;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
     let mut max_code: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
@@ -2667,13 +2659,15 @@ unsafe fn build_tree_impl(
     s.heap_max = crate::src::deflate::HEAP_SIZE;
     n = 0 as ::core::ffi::c_int;
     while n < elems {
-        if (*tree.offset(n as isize)).fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+        if selected_tree(s, tree_kind)[n as usize].freq() as ::core::ffi::c_int
+            != 0 as ::core::ffi::c_int
+        {
             max_code = n;
             s.heap_len += 1;
             s.heap[s.heap_len as usize] = max_code;
             s.depth[n as usize] = 0 as crate::zutil_h::uch;
         } else {
-            (*tree.offset(n as isize)).dl.len = 0 as crate::zutil_h::ush;
+            selected_tree(s, tree_kind)[n as usize].set_len(0 as crate::zutil_h::ush);
         }
         n += 1;
     }
@@ -2687,13 +2681,13 @@ unsafe fn build_tree_impl(
             0 as ::core::ffi::c_int
         };
         node = s.heap[heap_index];
-        (*tree.offset(node as isize)).fc.freq = 1 as crate::zutil_h::ush;
+        selected_tree(s, tree_kind)[node as usize].fc.freq = 1 as crate::zutil_h::ush;
         s.depth[node as usize] = 0 as crate::zutil_h::uch;
         s.opt_len = s.opt_len.wrapping_sub(1);
-        if !stree.is_null() {
+        if let Some(stree) = stree {
             s.static_len = s
                 .static_len
-                .wrapping_sub((*stree.offset(node as isize)).len as crate::zutil_h::ulg);
+                .wrapping_sub(stree[node as usize].len as crate::zutil_h::ulg);
         }
     }
     match tree_kind {
@@ -2718,10 +2712,10 @@ unsafe fn build_tree_impl(
         s.heap[s.heap_max as usize] = n;
         s.heap_max -= 1;
         s.heap[s.heap_max as usize] = m;
-        (*tree.offset(node as isize)).fc.freq = ((*tree.offset(n as isize)).fc.freq
-            as ::core::ffi::c_int
-            + (*tree.offset(m as isize)).fc.freq as ::core::ffi::c_int)
-            as crate::zutil_h::ush;
+        selected_tree(s, tree_kind)[node as usize].fc.freq =
+            (selected_tree(s, tree_kind)[n as usize].freq() as ::core::ffi::c_int
+                + selected_tree(s, tree_kind)[m as usize].freq() as ::core::ffi::c_int)
+                as crate::zutil_h::ush;
         s.depth[node as usize] = ((if s.depth[n as usize] as ::core::ffi::c_int
             >= s.depth[m as usize] as ::core::ffi::c_int
         {
@@ -2729,8 +2723,8 @@ unsafe fn build_tree_impl(
         } else {
             s.depth[m as usize] as ::core::ffi::c_int
         }) + 1 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        (*tree.offset(m as isize)).dl.dad = node as crate::zutil_h::ush;
-        (*tree.offset(n as isize)).dl.dad = (*tree.offset(m as isize)).dl.dad;
+        selected_tree(s, tree_kind)[m as usize].dl.dad = node as crate::zutil_h::ush;
+        selected_tree(s, tree_kind)[n as usize].dl.dad = node as crate::zutil_h::ush;
         let c2rust_fresh56 = node;
         node = node + 1;
         s.heap[SMALLEST as usize] = c2rust_fresh56;
@@ -2742,11 +2736,8 @@ unsafe fn build_tree_impl(
     s.heap_max -= 1;
     s.heap[s.heap_max as usize] = s.heap[SMALLEST as usize];
     gen_bitlen(s, tree_kind);
-    gen_codes(
-        tree,
-        max_code,
-        &raw mut s.bl_count as *mut crate::zutil_h::ushf,
-    );
+    let bl_count = s.bl_count;
+    gen_codes(selected_tree(s, tree_kind), max_code, &bl_count);
 }
 
 unsafe extern "C" fn scan_tree(
