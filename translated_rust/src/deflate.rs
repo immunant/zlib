@@ -1286,37 +1286,40 @@ impl DeflateStorageLayout {
 mod callback_owner {
     use super::*;
 
-    // Do not cache either callback field or opaque across requests.  An
-    // allocator is permitted to inspect or update its stream while handling
-    // an earlier request, so each request observes the live callback state.
-    unsafe fn allocate(
+    // Allocate, publish, and (on failure) release one complete deflate
+    // callback lifecycle.  The constructor supplies only a complete Rust
+    // value with empty callback slots; this owner alone publishes the state
+    // handle and each returned region before a later callback can observe
+    // the stream.  It also keeps the matching failure release here instead
+    // of making initialization and copy reconstruct part of this transaction.
+    pub(super) unsafe fn allocate_and_publish(
         stream: &mut crate::zlib_h::z_stream_s,
-        request: DeflateAllocation,
-    ) -> Option<::core::ptr::NonNull<::core::ffi::c_void>> {
-        let callback = stream.zalloc?;
-        let opaque = stream.opaque;
-        ::core::ptr::NonNull::new(callback(opaque, request.items, request.size))
-    }
-
-    pub(super) unsafe fn allocate_state(
-        stream: &mut crate::zlib_h::z_stream_s,
-        request: DeflateAllocation,
+        plan: DeflateAllocationPlan,
+        build: impl FnOnce(DeflateCallbackStorageOwner) -> crate::src::deflate::internal_state,
     ) -> Option<::core::ptr::NonNull<crate::src::deflate::deflate_state>> {
-        allocate(stream, request).map(|handle| handle.cast())
-    }
-
-    // The state allocation has already been converted to its opaque Rust
-    // type before this dispatch.  Publish each backing handle and its
-    // lifecycle bit before proceeding to the next callback, including after
-    // a failure, which preserves zlib's four-request callback schedule.
-    pub(super) unsafe fn allocate_storage(
-        stream: &mut crate::zlib_h::z_stream_s,
-        mut state: ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-    ) -> bool {
-        let storage = state.as_ref().callback_storage.storage();
+        // Do not cache either callback field or opaque across requests.  An
+        // allocator may update the stream while handling an earlier request.
+        let state_callback = stream.zalloc?;
+        let state_opaque = stream.opaque;
+        let mut state = ::core::ptr::NonNull::new(state_callback(
+            state_opaque,
+            plan.state.items,
+            plan.state.size,
+        ))?
+        .cast();
+        state.write(build(DeflateCallbackStorageOwner::new_state(plan.storage)));
+        stream.state = Some(state.cast());
         let mut complete = true;
-        for request in storage.callback_requests() {
-            let allocation = allocate(stream, request.allocation);
+        for request in plan.storage.callback_requests() {
+            let callback = stream.zalloc;
+            let opaque = stream.opaque;
+            let allocation = callback.and_then(|callback| {
+                ::core::ptr::NonNull::new(callback(
+                    opaque,
+                    request.allocation.items,
+                    request.allocation.size,
+                ))
+            });
             complete &= allocation.is_some();
             let state = state.as_mut();
             match request.slot {
@@ -1331,7 +1334,38 @@ mod callback_owner {
                 .callback_storage
                 .record_storage(request.slot, allocation.is_some());
         }
-        complete
+        if complete {
+            return Some(state);
+        }
+
+        // Each request has completed and published its result, so an
+        // incomplete lifecycle has the same pending/head/prev/window/state
+        // teardown as a normal end.  Do this before returning failure so no
+        // caller can accidentally leave a partially published state behind.
+        let (release_plan, allocations) = {
+            let state_ref = state.as_mut();
+            let release_plan = state_ref.callback_storage.take_release_plan(state_ref.status);
+            let allocations = release_plan.ordered_slots().map(|slot| {
+                slot.and_then(|slot| match slot {
+                    DeflateReleaseSlot::Pending => state_ref.pending_buf.map(|value| value.cast()),
+                    DeflateReleaseSlot::Head => state_ref.head.map(|value| value.cast()),
+                    DeflateReleaseSlot::Prev => state_ref.prev.map(|value| value.cast()),
+                    DeflateReleaseSlot::Window => state_ref.window.map(|value| value.cast()),
+                    DeflateReleaseSlot::State => Some(state.cast()),
+                })
+            });
+            (release_plan, allocations)
+        };
+        for allocation in allocations.into_iter().flatten() {
+            let callback = stream
+                .zfree
+                .expect("published callback transaction has zfree");
+            let opaque = stream.opaque;
+            callback(opaque, allocation.as_ptr());
+        }
+        stream.state = None;
+        debug_assert!(release_plan.state);
+        None
     }
 
     // This is the sole raw callback-storage projection.  The returned request
@@ -1346,10 +1380,10 @@ mod callback_owner {
         &'storage mut crate::src::deflate::deflate_state,
         DeflateCallbackStorageRequest<'storage>,
     ) {
-        // The caller owns the complete state borrow for this projection.  Keep
-        // the state handle separate from the four field views so the returned
-        // state remains usable for scalar commits while those disjoint backing
-        // buffers are lent to the safe core.
+        // The state borrow and the four callback-buffer borrows are disjoint
+        // but cannot be expressed to the borrow checker through the opaque
+        // callback pointers.  Retain the checked state handle only for the
+        // final reborrow; all buffer views are still built above in one owner.
         let mut state_handle = ::core::ptr::NonNull::from(&mut *state);
         let lifecycle = state.callback_storage;
         let request = match projection {
@@ -1801,30 +1835,22 @@ pub unsafe fn deflateInit2_(
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let storage = initialization.allocation.storage;
     let stream_data_type = stream.data_type;
-    let Some(state_handle) =
-        callback_owner::allocate_state(stream, initialization.allocation.state)
-    else {
-        return crate::zlib_h::Z_MEM_ERROR;
-    };
-    // Publish a valid Rust state before invoking the remaining callbacks.
-    // This keeps the original allocation order and makes callback re-entry
-    // observe the same installed stream state without first writing invalid
-    // all-zero bytes into Rust enum fields.
-    state_handle.write(crate::src::deflate::internal_state {
+    // The callback owner publishes a complete state before it issues the
+    // four region requests, then either returns the complete lifecycle or
+    // performs its matching failure release itself.  The initialization
+    // adapter supplies only the pointer-free scalar payload.
+    let Some(_state_handle) = callback_owner::allocate_and_publish(
+        stream,
+        initialization.allocation,
+        |callback_storage| crate::src::deflate::internal_state {
         data_type: stream_data_type,
         status: initialization.initial_state.status,
         pending_buf: None,
         pending_buf_size: initialization.initial_state.pending_buf_size,
         pending_out: initialization.initial_state.pending_out,
         pending: initialization.initial_state.pending,
-        // This persistent, pointer-free ledger is the single authority for
-        // callback completion and eventual release.  Each callback below
-        // updates it only after publishing its returned handle, so a
-        // re-entrant allocator always observes matching handle/liveness
-        // state without a second temporary ledger.
-        callback_storage: DeflateCallbackStorageOwner::new_state(storage),
+        callback_storage,
         wrap: initialization.initial_state.wrap,
         gzhead: None,
         gzindex: initialization.initial_state.gzindex,
@@ -1889,13 +1915,8 @@ pub unsafe fn deflateInit2_(
         bi_used: 0,
         high_water: 0,
         slid: 0,
-    });
-    stream.state = Some(state_handle.cast());
-    // Do not retain a Rust state borrow across an allocator callback.  The
-    // owner validates and publishes each result before issuing the next
-    // request, retaining the original four-request failure sequence.
-    let allocations_complete = callback_owner::allocate_storage(stream, state_handle);
-    if !allocations_complete {
+    },
+    ) else {
         stream.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
             || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -1905,9 +1926,8 @@ pub unsafe fn deflateInit2_(
             2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
         }) as usize]
             .load(::core::sync::atomic::Ordering::Relaxed);
-        let _ = deflateEnd(::core::ptr::NonNull::from(stream));
         return crate::zlib_h::Z_MEM_ERROR;
-    }
+    };
     let Some((stream, state, storage_request)) =
         deflate_stream_and_state(stream, DeflateStorageProjection::Complete)
     else {
@@ -6287,34 +6307,28 @@ unsafe fn deflate_copy_from_abi_boundary(
         adler: source.adler,
         reserved: source.reserved,
     };
-    let Some(destination_state_handle) = callback_owner::allocate_state(
+    // Copy uses the same complete owner transaction as initialization.  Its
+    // constructor starts with empty callback slots: borrowing source handles
+    // into the destination before its own callbacks finish would let a
+    // re-entrant allocator observe the wrong release identities.
+    let Some(_destination_state_handle) = callback_owner::allocate_and_publish(
         dest,
-        DeflateAllocation {
-            items: 1,
-            size: ::core::mem::size_of::<crate::src::deflate::deflate_state>()
-                as crate::stdlib::uInt,
+        DeflateAllocationPlan {
+            state: DeflateAllocation {
+                items: 1,
+                size: ::core::mem::size_of::<crate::src::deflate::deflate_state>()
+                    as crate::stdlib::uInt,
+            },
+            storage,
         },
-    ) else {
-        return crate::zlib_h::Z_MEM_ERROR;
-    };
-    // Publish an explicit initialized snapshot rather than byte-copying a
-    // Rust value out of callback-owned storage.  The allocation handles are
-    // retained until their replacements are installed below, preserving the
-    // C copy path's callback-visible allocation order.  Header registration
-    // is independently deep-copied before any callback can observe `ds`.
-    // Keep the transaction's pointer-free lifecycle owner locally as well as
-    // in the published state.  The local copy lets this boundary decide
-    // completion and copy admission after the callback sequence without
-    // extending a Rust borrow of callback-visible state across it.
-    let destination_owner = DeflateCallbackStorageOwner::new_state(storage);
-    destination_state_handle.write(crate::src::deflate::internal_state {
+        |callback_storage| crate::src::deflate::internal_state {
         data_type: payload.data_type,
         status: payload.status,
-        pending_buf: ss.pending_buf,
+        pending_buf: None,
         pending_buf_size: payload.pending_buf_size,
         pending_out: payload.pending_out,
         pending: payload.pending,
-        callback_storage: destination_owner,
+        callback_storage,
         wrap: payload.wrap,
         gzhead: payload.gzhead,
         gzindex: payload.gzindex,
@@ -6323,10 +6337,10 @@ unsafe fn deflate_copy_from_abi_boundary(
         w_size: payload.w_size,
         w_bits: payload.w_bits,
         w_mask: payload.w_mask,
-        window: ss.window,
+        window: None,
         window_size: payload.window_size,
-        prev: ss.prev,
-        head: ss.head,
+        prev: None,
+        head: None,
         ins_h: payload.ins_h,
         hash_size: payload.hash_size,
         hash_bits: payload.hash_bits,
@@ -6370,13 +6384,10 @@ unsafe fn deflate_copy_from_abi_boundary(
         bi_used: payload.bi_used,
         high_water: payload.high_water,
         slid: payload.slid,
-    });
-    dest.state = Some(destination_state_handle.cast());
-    let destination_complete = callback_owner::allocate_storage(dest, destination_state_handle);
-    if !destination_complete {
-        deflateEnd(::core::ptr::NonNull::from(dest));
+    },
+    ) else {
         return crate::zlib_h::Z_MEM_ERROR;
-    }
+    };
     // The two callback lifecycles now own all allocations. Validate their
     // immutable descriptors once before the shared projection lends complete
     // bounded storage views to the pointer-free copy core.
