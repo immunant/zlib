@@ -3099,6 +3099,11 @@ unsafe extern "C" fn deflate_stored(
     // stored-mode policy below can then operate on fields through the scoped
     // Rust view instead of repeatedly dereferencing the ABI cursor.
     let state = &mut *s;
+    // The state keeps a validated backlink to its caller stream for the
+    // lifetime of this deflate invocation.  Project it once, so stored-mode
+    // accounting below uses the scoped stream rather than repeatedly
+    // dereferencing that external cursor.
+    let stream = &mut *state.strm.as_ptr();
     // The backing window has the exact `window_size` established by
     // `deflateInit2_()` and retained by `deflateCopy()`. Retain this one
     // bounded view while stored blocks copy or slide its contents.
@@ -3121,21 +3126,21 @@ unsafe extern "C" fn deflate_stored(
     let mut len: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    let mut used: ::core::ffi::c_uint = (*state.strm.as_ptr()).avail_in as ::core::ffi::c_uint;
+    let mut used: ::core::ffi::c_uint = stream.avail_in as ::core::ffi::c_uint;
     loop {
         len = MAX_STORED as ::core::ffi::c_uint;
         have = (state.bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
             >> 3 as ::core::ffi::c_int;
-        if (*state.strm.as_ptr()).avail_out < have {
+        if stream.avail_out < have {
             break;
         }
-        have = ((*state.strm.as_ptr()).avail_out as ::core::ffi::c_uint).wrapping_sub(have);
+        have = (stream.avail_out as ::core::ffi::c_uint).wrapping_sub(have);
         left = (state.strstart as ::core::ffi::c_long - state.block_start) as ::core::ffi::c_uint;
         if len as crate::zutil_h::ulg
             > (left as crate::zutil_h::ulg)
-                .wrapping_add((*state.strm.as_ptr()).avail_in as crate::zutil_h::ulg)
+                .wrapping_add(stream.avail_in as crate::zutil_h::ulg)
         {
-            len = (left as crate::stdlib::uInt).wrapping_add((*state.strm.as_ptr()).avail_in)
+            len = (left as crate::stdlib::uInt).wrapping_add(stream.avail_in)
                 as ::core::ffi::c_uint;
         }
         if len > have {
@@ -3145,12 +3150,12 @@ unsafe extern "C" fn deflate_stored(
             && (len == 0 as ::core::ffi::c_uint && flush != crate::zlib_h::Z_FINISH
                 || flush == crate::zlib_h::Z_NO_FLUSH
                 || len
-                    != (left as crate::stdlib::uInt).wrapping_add((*state.strm.as_ptr()).avail_in))
+                    != (left as crate::stdlib::uInt).wrapping_add(stream.avail_in))
         {
             break;
         }
         last = if flush == crate::zlib_h::Z_FINISH
-            && len == (left as crate::stdlib::uInt).wrapping_add((*state.strm.as_ptr()).avail_in)
+            && len == (left as crate::stdlib::uInt).wrapping_add(stream.avail_in)
         {
             1 as ::core::ffi::c_int
         } else {
@@ -3175,22 +3180,17 @@ unsafe extern "C" fn deflate_stored(
             if left > len {
                 left = len;
             }
-            let output =
-                ::core::slice::from_raw_parts_mut((*state.strm.as_ptr()).next_out, left as usize);
+            let output = ::core::slice::from_raw_parts_mut(stream.next_out, left as usize);
             let start = state.block_start as usize;
             output.copy_from_slice(&window[start..start + left as usize]);
-            (*state.strm.as_ptr()).next_out =
-                (*state.strm.as_ptr()).next_out.wrapping_add(left as usize);
-            (*state.strm.as_ptr()).avail_out = (*state.strm.as_ptr()).avail_out.wrapping_sub(left);
-            (*state.strm.as_ptr()).total_out = (*state.strm.as_ptr())
-                .total_out
-                .wrapping_add(left as crate::stdlib::uLong);
+            stream.next_out = stream.next_out.wrapping_add(left as usize);
+            stream.avail_out = stream.avail_out.wrapping_sub(left);
+            stream.total_out = stream.total_out.wrapping_add(left as crate::stdlib::uLong);
             state.block_start += left as ::core::ffi::c_long;
             len = len.wrapping_sub(left);
         }
         if len != 0 {
             let wrap = state.wrap;
-            let stream = &mut *state.strm.as_ptr();
             stream.avail_in = stream.avail_in.wrapping_sub(len);
             let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
             let next_in = input.as_ptr_range().end.cast_mut();
@@ -3206,14 +3206,12 @@ unsafe extern "C" fn deflate_stored(
             break;
         }
     }
-    used = used.wrapping_sub((*state.strm.as_ptr()).avail_in as ::core::ffi::c_uint);
+    used = used.wrapping_sub(stream.avail_in as ::core::ffi::c_uint);
     if used != 0 {
         if used >= state.w_size {
             state.matches = 2 as crate::stdlib::uInt;
             let input = ::core::slice::from_raw_parts(
-                (*state.strm.as_ptr())
-                    .next_in
-                    .wrapping_sub(state.w_size as usize),
+                stream.next_in.wrapping_sub(state.w_size as usize),
                 state.w_size as usize,
             );
             window[..state.w_size as usize].copy_from_slice(input);
@@ -3238,7 +3236,7 @@ unsafe extern "C" fn deflate_stored(
                 }
             }
             let input = ::core::slice::from_raw_parts(
-                (*state.strm.as_ptr()).next_in.wrapping_sub(used as usize),
+                stream.next_in.wrapping_sub(used as usize),
                 used as usize,
             );
             let start = state.strstart as usize;
@@ -3265,7 +3263,7 @@ unsafe extern "C" fn deflate_stored(
     }
     if flush != crate::zlib_h::Z_NO_FLUSH
         && flush != crate::zlib_h::Z_FINISH
-        && (*state.strm.as_ptr()).avail_in == 0 as crate::stdlib::uInt
+        && stream.avail_in == 0 as crate::stdlib::uInt
         && state.strstart as ::core::ffi::c_long == state.block_start
     {
         return block_done;
@@ -3273,7 +3271,7 @@ unsafe extern "C" fn deflate_stored(
     have = state
         .window_size
         .wrapping_sub(state.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
-    if (*state.strm.as_ptr()).avail_in > have
+    if stream.avail_in > have
         && state.block_start >= state.w_size as ::core::ffi::c_long
     {
         state.block_start -= state.w_size as ::core::ffi::c_long;
@@ -3290,13 +3288,12 @@ unsafe extern "C" fn deflate_stored(
             state.insert = state.strstart;
         }
     }
-    if have > (*state.strm.as_ptr()).avail_in {
-        have = (*state.strm.as_ptr()).avail_in as ::core::ffi::c_uint;
+    if have > stream.avail_in {
+        have = stream.avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
         let wrap = state.wrap;
         let start = state.strstart as usize;
-        let stream = &mut *state.strm.as_ptr();
         stream.avail_in = stream.avail_in.wrapping_sub(have);
         let input = ::core::slice::from_raw_parts(stream.next_in, have as usize);
         let next_in = input.as_ptr_range().end.cast_mut();
@@ -3347,12 +3344,12 @@ unsafe extern "C" fn deflate_stored(
     if left >= min_block
         || (left != 0 || flush == crate::zlib_h::Z_FINISH)
             && flush != crate::zlib_h::Z_NO_FLUSH
-            && (*state.strm.as_ptr()).avail_in == 0 as crate::stdlib::uInt
+            && stream.avail_in == 0 as crate::stdlib::uInt
             && left <= have
     {
         len = if left > have { have } else { left };
         last = if flush == crate::zlib_h::Z_FINISH
-            && (*state.strm.as_ptr()).avail_in == 0 as crate::stdlib::uInt
+            && stream.avail_in == 0 as crate::stdlib::uInt
             && len == left
         {
             1 as ::core::ffi::c_int
