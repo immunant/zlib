@@ -142,6 +142,85 @@ pub struct internal_state {
     pub slid: ::core::ffi::c_int,
 }
 
+// State allocations come from zlib's configurable allocator and are therefore
+// initially uninitialized.  Construct the exact field-wise zero value before
+// exposing such an allocation as `deflate_state`, rather than relying on a C
+// bytewise write after it has been allocated.
+fn deflate_state_zero_value() -> internal_state {
+    let zero_ct = ct_data_s {
+        fc: C2Rust_Unnamed_1 { freq: 0 },
+        dl: C2Rust_Unnamed_0 { dad: 0 },
+    };
+    let zero_tree = tree_desc_s {
+        dyn_tree: ::core::ptr::null_mut(),
+        max_code: 0,
+        stat_desc: ::core::ptr::null(),
+    };
+    internal_state {
+        strm: ::core::ptr::null_mut(),
+        status: 0,
+        pending_buf: ::core::ptr::null_mut(),
+        pending_buf_size: 0,
+        pending_out: ::core::ptr::null_mut(),
+        pending: 0,
+        wrap: 0,
+        gzhead: ::core::ptr::null_mut(),
+        gzindex: 0,
+        method: 0,
+        last_flush: 0,
+        w_size: 0,
+        w_bits: 0,
+        w_mask: 0,
+        window: ::core::ptr::null_mut(),
+        window_size: 0,
+        prev: ::core::ptr::null_mut(),
+        head: ::core::ptr::null_mut(),
+        ins_h: 0,
+        hash_size: 0,
+        hash_bits: 0,
+        hash_mask: 0,
+        hash_shift: 0,
+        block_start: 0,
+        match_length: 0,
+        prev_match: 0,
+        match_available: 0,
+        strstart: 0,
+        match_start: 0,
+        lookahead: 0,
+        prev_length: 0,
+        max_chain_length: 0,
+        max_lazy_match: 0,
+        level: 0,
+        strategy: 0,
+        good_match: 0,
+        nice_match: 0,
+        dyn_ltree: [zero_ct; 573],
+        dyn_dtree: [zero_ct; 61],
+        bl_tree: [zero_ct; 39],
+        l_desc: zero_tree,
+        d_desc: zero_tree,
+        bl_desc: zero_tree,
+        bl_count: [0; 16],
+        heap: [0; 573],
+        heap_len: 0,
+        heap_max: 0,
+        depth: [0; 573],
+        sym_buf: ::core::ptr::null_mut(),
+        lit_bufsize: 0,
+        sym_next: 0,
+        sym_end: 0,
+        opt_len: 0,
+        static_len: 0,
+        matches: 0,
+        insert: 0,
+        bi_buf: 0,
+        bi_valid: 0,
+        bi_used: 0,
+        high_water: 0,
+        slid: 0,
+    }
+}
+
 pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
     crate::zutil_h::MAX_MATCH + crate::zutil_h::MIN_MATCH + 1 as ::core::ffi::c_int;
 
@@ -695,20 +774,16 @@ pub fn deflateInit2_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     // SAFETY: the allocator returned a non-null allocation large enough for
-    // one `deflate_state`; C zlib initializes that allocation bytewise.
-    unsafe {
-        crate::stdlib::memset(
-            s as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-        );
-    }
+    // one `deflate_state`. Bind it as uninitialized storage only long enough
+    // to write the complete safe zero value, then retain the initialized
+    // reference for the rest of this function.
+    let state = unsafe {
+        (&mut *s.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>())
+            .write(deflate_state_zero_value())
+    };
     stream.state = s as *mut crate::src::deflate::internal_state;
     // The allocator returned a non-null `deflate_state` above. It is owned by
     // this stream until `deflateEnd()` handles the failure path below.
-    // SAFETY: `s` is the non-null allocation initialized immediately above
-    // and remains owned by this stream until `deflateEnd()` releases it.
-    let state = unsafe { &mut *s };
     state.strm = stream;
     state.status = crate::src::deflate::INIT_STATE;
     state.wrap = options.wrap;
