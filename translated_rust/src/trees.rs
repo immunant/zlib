@@ -2456,37 +2456,62 @@ fn gen_codes(
 
 fn tr_static_init() {}
 
-unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_int = 0;
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::L_CODES {
-        (*s).dyn_ltree[n as usize].fc = 0 as crate::zutil_h::ush;
-        n += 1;
+fn init_block_fields(
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &mut [crate::src::deflate::ct_data_s; 39],
+    static_len: &mut crate::zutil_h::ulg,
+    opt_len: &mut crate::zutil_h::ulg,
+    matches: &mut crate::stdlib::uInt,
+    sym_next: &mut crate::stdlib::uInt,
+) {
+    for entry in dyn_ltree
+        .iter_mut()
+        .take(crate::src::deflate::L_CODES as usize)
+    {
+        entry.fc = 0 as crate::zutil_h::ush;
     }
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::D_CODES {
-        (*s).dyn_dtree[n as usize].fc = 0 as crate::zutil_h::ush;
-        n += 1;
+    for entry in dyn_dtree
+        .iter_mut()
+        .take(crate::src::deflate::D_CODES as usize)
+    {
+        entry.fc = 0 as crate::zutil_h::ush;
     }
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::BL_CODES {
-        (*s).bl_tree[n as usize].fc = 0 as crate::zutil_h::ush;
-        n += 1;
+    for entry in bl_tree
+        .iter_mut()
+        .take(crate::src::deflate::BL_CODES as usize)
+    {
+        entry.fc = 0 as crate::zutil_h::ush;
     }
-    (*s).dyn_ltree[END_BLOCK as usize].fc = 1 as crate::zutil_h::ush;
-    (*s).static_len = 0 as crate::zutil_h::ulg;
-    (*s).opt_len = (*s).static_len;
-    (*s).matches = 0 as crate::stdlib::uInt;
-    (*s).sym_next = (*s).matches;
+    dyn_ltree[END_BLOCK as usize].fc = 1 as crate::zutil_h::ush;
+    *static_len = 0 as crate::zutil_h::ulg;
+    *opt_len = *static_len;
+    *matches = 0 as crate::stdlib::uInt;
+    *sym_next = *matches;
 }
+
+unsafe fn init_block(s: *mut crate::src::deflate::deflate_state) {
+    let state = &mut *s;
+    init_block_fields(
+        &mut state.dyn_ltree,
+        &mut state.dyn_dtree,
+        &mut state.bl_tree,
+        &mut state.static_len,
+        &mut state.opt_len,
+        &mut state.matches,
+        &mut state.sym_next,
+    );
+}
+
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
     tr_static_init();
-    (*s).l_desc.kind = crate::src::deflate::TreeKind::LitLen;
-    (*s).d_desc.kind = crate::src::deflate::TreeKind::Dist;
-    (*s).bl_desc.kind = crate::src::deflate::TreeKind::BitLen;
-    (*s).bi_buf = 0 as crate::zutil_h::ush;
-    (*s).bi_valid = 0 as ::core::ffi::c_int;
-    (*s).bi_used = 0 as ::core::ffi::c_int;
+    let state = &mut *s;
+    state.l_desc.kind = crate::src::deflate::TreeKind::LitLen;
+    state.d_desc.kind = crate::src::deflate::TreeKind::Dist;
+    state.bl_desc.kind = crate::src::deflate::TreeKind::BitLen;
+    state.bi_buf = 0 as crate::zutil_h::ush;
+    state.bi_valid = 0 as ::core::ffi::c_int;
+    state.bi_used = 0 as ::core::ffi::c_int;
     init_block(s);
 }
 #[export_name = "_tr_init"]
