@@ -246,6 +246,24 @@ fn gz_avail_should_compact(compact_input: bool, input_is_buffer_start: bool) -> 
     compact_input && !input_is_buffer_start
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct GzAvailRefillStep {
+    compact_input: bool,
+    plan: GzAvailRefillPlan,
+}
+
+fn gz_avail_refill_step(
+    size: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    compact_input: bool,
+    input_is_buffer_start: bool,
+) -> GzAvailRefillStep {
+    GzAvailRefillStep {
+        compact_input: gz_avail_should_compact(compact_input, input_is_buffer_start),
+        plan: gz_avail_refill_plan(size, avail_in),
+    }
+}
+
 fn gzread_request(len: ::core::ffi::c_uint) -> Option<crate::stdlib::z_size_t> {
     ((len as ::core::ffi::c_int) >= 0).then_some(len as crate::stdlib::z_size_t)
 }
@@ -805,14 +823,15 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             let (buf, len, prior_avail_in) = {
                 let p = state.in_0;
                 let q = state.strm.next_in;
-                let plan = gz_avail_refill_plan(state.size, state.strm.avail_in);
-                if gz_avail_should_compact(compact_input, q == p) {
+                let step =
+                    gz_avail_refill_step(state.size, state.strm.avail_in, compact_input, q == p);
+                if step.compact_input {
                     core::ptr::copy(q, p, state.strm.avail_in as usize);
                 }
                 (
-                    state.in_0.wrapping_add(plan.input_offset),
-                    plan.read_len,
-                    plan.prior_avail_in,
+                    state.in_0.wrapping_add(step.plan.input_offset),
+                    step.plan.read_len,
+                    step.plan.prior_avail_in,
                 )
             };
             let load = gz_load(state, buf, len);
@@ -1948,6 +1967,32 @@ mod tests {
                 input_offset: 1,
                 read_len: ::core::ffi::c_uint::MAX,
                 prior_avail_in: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_avail_refill_step_keeps_compaction_and_refill_layout_together() {
+        assert_eq!(
+            gz_avail_refill_step(16, 4, true, false),
+            GzAvailRefillStep {
+                compact_input: true,
+                plan: GzAvailRefillPlan {
+                    input_offset: 4,
+                    read_len: 12,
+                    prior_avail_in: 4,
+                },
+            }
+        );
+        assert_eq!(
+            gz_avail_refill_step(16, 0, false, true),
+            GzAvailRefillStep {
+                compact_input: false,
+                plan: GzAvailRefillPlan {
+                    input_offset: 0,
+                    read_len: 16,
+                    prior_avail_in: 0,
+                },
             }
         );
     }
