@@ -1221,16 +1221,6 @@ where
     }
 }
 
-fn inflate_back_dispatch<InputVisitor, OutputVisitor>(
-    invocation: &mut InflateBackInvocation<'_, InputVisitor, OutputVisitor>,
-) -> (InflateBackDecodeResult, InflateBackDecoderScalars)
-where
-    InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
-    OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
-{
-    invocation.decode()
-}
-
 // This is the complete ABI projection boundary.  It deliberately contains no
 // decoder work: after assembling a pointer-free invocation owner, it calls
 // `inflateBack()` and only writes the completed scalar/cursor state back to
@@ -1312,7 +1302,7 @@ pub unsafe extern "C" fn inflateBack(
         input,
         output,
     };
-    let (result, final_state) = inflate_back_dispatch(&mut invocation);
+    let (result, final_state) = invocation.decode();
     // Release callback/window borrows before writing either the backing state
     // or the ABI stream.  The completion above carries only scalar state.
     drop(invocation);
