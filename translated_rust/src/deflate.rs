@@ -1614,6 +1614,24 @@ fn flush_pending_bytes(
     len as crate::stdlib::uInt
 }
 
+// `deflateCopy()` duplicates two logical regions of the pending allocation:
+// queued output and the deferred symbol buffer.  Allocation setup establishes
+// the extents before the implementation constructs these views; the copy
+// order here matches the two original memcpy operations.
+fn copy_pending_regions(
+    source: &[crate::stdlib::Bytef],
+    destination: &mut [crate::stdlib::Bytef],
+    pending_out: usize,
+    pending_len: usize,
+    sym_buf_start: usize,
+    sym_next: usize,
+) {
+    let pending_end = pending_out + pending_len;
+    destination[pending_out..pending_end].copy_from_slice(&source[pending_out..pending_end]);
+    let sym_end = sym_buf_start + sym_next;
+    destination[sym_buf_start..sym_end].copy_from_slice(&source[sym_buf_start..sym_end]);
+}
+
 // `_tr_stored_block()` has already reserved these four bytes after winding up
 // the bit buffer.  Patch that header through the declared pending allocation
 // instead of reconstructing four raw cursors in the stored-block algorithm.
@@ -1641,9 +1659,13 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate:
     // rather than repeatedly dereferencing the ABI pointers.
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
-    crate::src::trees::bi_flush_or_windup(
-        state as *mut crate::src::deflate::internal_state,
-        crate::src::trees::BitOutputAction::Flush,
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    crate::src::trees::flush_pending_bits(
+        pending_buf,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
     );
     len = if state.pending > strm.avail_out as crate::zutil_h::ulg {
         strm.avail_out as ::core::ffi::c_uint
@@ -1654,8 +1676,6 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate:
         return strm.avail_out;
     }
     let output = ::core::slice::from_raw_parts_mut(strm.next_out, len as usize);
-    let pending_buf =
-        ::core::slice::from_raw_parts(state.pending_buf, state.pending_buf_size as usize);
     let len = flush_pending_bytes(
         output,
         pending_buf,
@@ -2393,15 +2413,20 @@ pub unsafe extern "C" fn deflateCopy(
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
     );
     (*ds).pending_out = (*ss).pending_out;
-    crate::stdlib::memcpy(
-        (*ds).pending_buf.offset((*ds).pending_out as isize) as *mut ::core::ffi::c_void,
-        (*ss).pending_buf.offset((*ss).pending_out as isize) as *const ::core::ffi::c_void,
-        (*ss).pending as crate::__stddef_size_t_h::size_t,
-    );
-    crate::stdlib::memcpy(
-        (*ds).pending_buf.offset((*ds).sym_buf_start as isize) as *mut ::core::ffi::c_void,
-        (*ss).pending_buf.offset((*ss).sym_buf_start as isize) as *const ::core::ffi::c_void,
-        (*ss).sym_next as crate::__stddef_size_t_h::size_t,
+    // Both allocations have the copied `pending_buf_size` capacity.  Form
+    // each bounded view once and keep the two logical-region copies in the
+    // pointer-free kernel.
+    let source_pending =
+        ::core::slice::from_raw_parts((*ss).pending_buf, (*ss).pending_buf_size as usize);
+    let destination_pending =
+        ::core::slice::from_raw_parts_mut((*ds).pending_buf, (*ds).pending_buf_size as usize);
+    copy_pending_regions(
+        source_pending,
+        destination_pending,
+        (*ss).pending_out as usize,
+        (*ss).pending as usize,
+        (*ss).sym_buf_start as usize,
+        (*ss).sym_next as usize,
     );
     return crate::zlib_h::Z_OK;
 }
