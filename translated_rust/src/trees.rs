@@ -3596,7 +3596,7 @@ static mut static_bl_desc: crate::src::deflate::static_tree_desc = static_tree_d
     max_length: MAX_BL_BITS,
 };
 
-unsafe extern "C" fn bi_reverse(
+fn bi_reverse(
     mut code: ::core::ffi::c_uint,
     mut len: ::core::ffi::c_int,
 ) -> ::core::ffi::c_uint {
@@ -3686,8 +3686,6 @@ unsafe extern "C" fn gen_codes(
     }
 }
 
-unsafe extern "C" fn tr_static_init() {}
-
 unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
@@ -3712,7 +3710,6 @@ unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) 
     (*s).sym_next = (*s).matches;
 }
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
-    tr_static_init();
     (*s).l_desc.dyn_tree = &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
     (*s).l_desc.stat_desc = &raw const static_l_desc;
