@@ -164,6 +164,21 @@ struct WindowUpdate {
     whave: ::core::ffi::c_uint,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct WindowMetadata {
+    wsize: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+}
+
+fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> WindowMetadata {
+    WindowMetadata {
+        wsize: (1 as ::core::ffi::c_uint) << wbits,
+        wnext: 0,
+        whave: 0,
+    }
+}
+
 fn window_update_plan(
     wsize: ::core::ffi::c_uint,
     wnext: ::core::ffi::c_uint,
@@ -512,9 +527,10 @@ unsafe extern "C" fn updatewindow(
         }
     }
     if (*state).wsize == 0 as ::core::ffi::c_uint {
-        (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = 0 as ::core::ffi::c_uint;
+        let metadata = initial_window_metadata((*state).wbits);
+        (*state).wsize = metadata.wsize;
+        (*state).wnext = metadata.wnext;
+        (*state).whave = metadata.whave;
     }
     let window = core::slice::from_raw_parts_mut((*state).window, (*state).wsize as usize);
     let produced = if copy == 0 {
@@ -2539,8 +2555,8 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_window_update, inflate_mode_is_valid, syncsearch_safe, window_update_plan, BAD, HEAD,
-        SYNC,
+        apply_window_update, inflate_mode_is_valid, initial_window_metadata, syncsearch_safe,
+        window_update_plan, BAD, HEAD, SYNC,
     };
 
     #[test]
@@ -2598,6 +2614,26 @@ mod tests {
                 second: 2,
                 wnext: 2,
                 whave: 8,
+            }
+        );
+    }
+
+    #[test]
+    fn initial_window_metadata_resets_history_positions() {
+        assert_eq!(
+            initial_window_metadata(8),
+            super::WindowMetadata {
+                wsize: 256,
+                wnext: 0,
+                whave: 0,
+            }
+        );
+        assert_eq!(
+            initial_window_metadata(15),
+            super::WindowMetadata {
+                wsize: 32_768,
+                wnext: 0,
+                whave: 0,
             }
         );
     }

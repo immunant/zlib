@@ -253,136 +253,136 @@ pub const NIL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const TOO_FAR: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
 
 static configuration_table: [config; 10] = [
-        config_s {
-            good_length: 0 as crate::zutil_h::ush,
-            max_lazy: 0 as crate::zutil_h::ush,
-            nice_length: 0 as crate::zutil_h::ush,
-            max_chain: 0 as crate::zutil_h::ush,
-            func: Some(
-                deflate_stored
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 4 as crate::zutil_h::ush,
-            max_lazy: 4 as crate::zutil_h::ush,
-            nice_length: 8 as crate::zutil_h::ush,
-            max_chain: 4 as crate::zutil_h::ush,
-            func: Some(
-                deflate_fast
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 4 as crate::zutil_h::ush,
-            max_lazy: 5 as crate::zutil_h::ush,
-            nice_length: 16 as crate::zutil_h::ush,
-            max_chain: 8 as crate::zutil_h::ush,
-            func: Some(
-                deflate_fast
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 4 as crate::zutil_h::ush,
-            max_lazy: 6 as crate::zutil_h::ush,
-            nice_length: 32 as crate::zutil_h::ush,
-            max_chain: 32 as crate::zutil_h::ush,
-            func: Some(
-                deflate_fast
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 4 as crate::zutil_h::ush,
-            max_lazy: 4 as crate::zutil_h::ush,
-            nice_length: 16 as crate::zutil_h::ush,
-            max_chain: 16 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 8 as crate::zutil_h::ush,
-            max_lazy: 16 as crate::zutil_h::ush,
-            nice_length: 32 as crate::zutil_h::ush,
-            max_chain: 32 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 8 as crate::zutil_h::ush,
-            max_lazy: 16 as crate::zutil_h::ush,
-            nice_length: 128 as crate::zutil_h::ush,
-            max_chain: 128 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 8 as crate::zutil_h::ush,
-            max_lazy: 32 as crate::zutil_h::ush,
-            nice_length: 128 as crate::zutil_h::ush,
-            max_chain: 256 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 32 as crate::zutil_h::ush,
-            max_lazy: 128 as crate::zutil_h::ush,
-            nice_length: 258 as crate::zutil_h::ush,
-            max_chain: 1024 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 32 as crate::zutil_h::ush,
-            max_lazy: 258 as crate::zutil_h::ush,
-            nice_length: 258 as crate::zutil_h::ush,
-            max_chain: 4096 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
+    config_s {
+        good_length: 0 as crate::zutil_h::ush,
+        max_lazy: 0 as crate::zutil_h::ush,
+        nice_length: 0 as crate::zutil_h::ush,
+        max_chain: 0 as crate::zutil_h::ush,
+        func: Some(
+            deflate_stored
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 4 as crate::zutil_h::ush,
+        max_lazy: 4 as crate::zutil_h::ush,
+        nice_length: 8 as crate::zutil_h::ush,
+        max_chain: 4 as crate::zutil_h::ush,
+        func: Some(
+            deflate_fast
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 4 as crate::zutil_h::ush,
+        max_lazy: 5 as crate::zutil_h::ush,
+        nice_length: 16 as crate::zutil_h::ush,
+        max_chain: 8 as crate::zutil_h::ush,
+        func: Some(
+            deflate_fast
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 4 as crate::zutil_h::ush,
+        max_lazy: 6 as crate::zutil_h::ush,
+        nice_length: 32 as crate::zutil_h::ush,
+        max_chain: 32 as crate::zutil_h::ush,
+        func: Some(
+            deflate_fast
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 4 as crate::zutil_h::ush,
+        max_lazy: 4 as crate::zutil_h::ush,
+        nice_length: 16 as crate::zutil_h::ush,
+        max_chain: 16 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 8 as crate::zutil_h::ush,
+        max_lazy: 16 as crate::zutil_h::ush,
+        nice_length: 32 as crate::zutil_h::ush,
+        max_chain: 32 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 8 as crate::zutil_h::ush,
+        max_lazy: 16 as crate::zutil_h::ush,
+        nice_length: 128 as crate::zutil_h::ush,
+        max_chain: 128 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 8 as crate::zutil_h::ush,
+        max_lazy: 32 as crate::zutil_h::ush,
+        nice_length: 128 as crate::zutil_h::ush,
+        max_chain: 256 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 32 as crate::zutil_h::ush,
+        max_lazy: 128 as crate::zutil_h::ush,
+        nice_length: 258 as crate::zutil_h::ush,
+        max_chain: 1024 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 32 as crate::zutil_h::ush,
+        max_lazy: 258 as crate::zutil_h::ush,
+        nice_length: 258 as crate::zutil_h::ush,
+        max_chain: 4096 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
 ];
 
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
@@ -1450,6 +1450,57 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         (*s).pending_out = (*s).pending_buf;
     }
 }
+
+fn gzip_header_crc(
+    crc: crate::stdlib::uLong,
+    text: ::core::ffi::c_int,
+    hcrc: ::core::ffi::c_int,
+    has_extra: bool,
+    has_name: bool,
+    has_comment: bool,
+    time: crate::stdlib::uLong,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    os: ::core::ffi::c_int,
+    extra_len: crate::stdlib::uInt,
+) -> crate::stdlib::uLong {
+    let flags = (if text != 0 { 1 } else { 0 })
+        + (if hcrc != 0 { 2 } else { 0 })
+        + (if has_extra { 4 } else { 0 })
+        + (if has_name { 8 } else { 0 })
+        + (if has_comment { 16 } else { 0 });
+    let xfl = if level == 9 {
+        2
+    } else if strategy >= 2 || level < 2 {
+        4
+    } else {
+        0
+    };
+    let mut header = [
+        31,
+        139,
+        8,
+        flags,
+        (time & 0xff) as u8,
+        ((time >> 8) & 0xff) as u8,
+        ((time >> 16) & 0xff) as u8,
+        ((time >> 24) & 0xff) as u8,
+        xfl,
+        (os & 0xff) as u8,
+        0,
+        0,
+    ];
+    let header_len = if has_extra {
+        header[10] = (extra_len & 0xff) as u8;
+        header[11] = ((extra_len >> 8) & 0xff) as u8;
+        12
+    } else {
+        10
+    };
+
+    crate::src::crc32::crc32_z(crc, &header[..header_len])
+}
+
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -1638,48 +1689,49 @@ pub unsafe extern "C" fn deflate(
                 return crate::zlib_h::Z_OK;
             }
         } else {
+            let gzhead = &*(*s).gzhead;
             let c2rust_fresh10 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh10 as isize) =
-                ((if (*(*s).gzhead).text != 0 {
-                    1 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).hcrc != 0 {
-                    2 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).extra.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    4 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).name.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    8 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).comment.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    16 as ::core::ffi::c_int
-                })) as crate::stdlib::Bytef;
+            *(*s).pending_buf.offset(c2rust_fresh10 as isize) = ((if gzhead.text != 0 {
+                1 as ::core::ffi::c_int
+            } else {
+                0 as ::core::ffi::c_int
+            }) + (if gzhead.hcrc != 0 {
+                2 as ::core::ffi::c_int
+            } else {
+                0 as ::core::ffi::c_int
+            }) + (if gzhead.extra.is_null() {
+                0 as ::core::ffi::c_int
+            } else {
+                4 as ::core::ffi::c_int
+            }) + (if gzhead.name.is_null() {
+                0 as ::core::ffi::c_int
+            } else {
+                8 as ::core::ffi::c_int
+            }) + (if gzhead.comment.is_null() {
+                0 as ::core::ffi::c_int
+            } else {
+                16 as ::core::ffi::c_int
+            }))
+                as crate::stdlib::Bytef;
             let c2rust_fresh11 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh11 as isize) =
-                ((*(*s).gzhead).time & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
+                (gzhead.time & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
             let c2rust_fresh12 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh12 as isize) =
-                ((*(*s).gzhead).time >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                (gzhead.time >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                     as crate::stdlib::Byte;
             let c2rust_fresh13 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh13 as isize) =
-                ((*(*s).gzhead).time >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                (gzhead.time >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                     as crate::stdlib::Byte;
             let c2rust_fresh14 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh14 as isize) =
-                ((*(*s).gzhead).time >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                (gzhead.time >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                     as crate::stdlib::Byte;
             let c2rust_fresh15 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
@@ -1696,24 +1748,31 @@ pub unsafe extern "C" fn deflate(
             let c2rust_fresh16 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh16 as isize) =
-                ((*(*s).gzhead).os & 0xff as ::core::ffi::c_int) as crate::stdlib::Bytef;
-            if !(*(*s).gzhead).extra.is_null() {
+                (gzhead.os & 0xff as ::core::ffi::c_int) as crate::stdlib::Bytef;
+            if !gzhead.extra.is_null() {
                 let c2rust_fresh17 = (*s).pending;
                 (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh17 as isize) = ((*(*s).gzhead).extra_len
-                    & 0xff as crate::stdlib::uInt)
-                    as crate::stdlib::Bytef;
+                *(*s).pending_buf.offset(c2rust_fresh17 as isize) =
+                    (gzhead.extra_len & 0xff as crate::stdlib::uInt) as crate::stdlib::Bytef;
                 let c2rust_fresh18 = (*s).pending;
                 (*s).pending = (*s).pending.wrapping_add(1);
                 *(*s).pending_buf.offset(c2rust_fresh18 as isize) =
-                    ((*(*s).gzhead).extra_len >> 8 as ::core::ffi::c_int
-                        & 0xff as crate::stdlib::uInt) as crate::stdlib::Bytef;
+                    (gzhead.extra_len >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uInt)
+                        as crate::stdlib::Bytef;
             }
-            if (*(*s).gzhead).hcrc != 0 {
-                (*strm).adler = crate::src::crc32::crc32_z_ffi(
+            if gzhead.hcrc != 0 {
+                (*strm).adler = gzip_header_crc(
                     (*strm).adler,
-                    (*s).pending_buf,
-                    (*s).pending as crate::stdlib::z_size_t,
+                    gzhead.text,
+                    gzhead.hcrc,
+                    !gzhead.extra.is_null(),
+                    !gzhead.name.is_null(),
+                    !gzhead.comment.is_null(),
+                    gzhead.time,
+                    (*s).level,
+                    (*s).strategy,
+                    gzhead.os,
+                    gzhead.extra_len,
                 );
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
@@ -3459,4 +3518,25 @@ unsafe extern "C" fn deflate_huff(
         }
     }
     return block_done;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gzip_header_crc;
+
+    #[test]
+    fn gzip_header_crc_matches_fixed_header() {
+        assert_eq!(
+            gzip_header_crc(0, 0, 1, false, false, false, 0, 6, 0, 3, 0),
+            0x0c5c_77a7,
+        );
+    }
+
+    #[test]
+    fn gzip_header_crc_includes_xlen_and_flags() {
+        assert_eq!(
+            gzip_header_crc(0, 1, 1, true, true, true, 0x1234_5678, 9, 0, 255, 0x1234),
+            0xd74e_6245,
+        );
+    }
 }
