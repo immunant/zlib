@@ -273,6 +273,36 @@ enum GzFetchAction {
     Corrupt,
 }
 
+// `gzdirect()` has one observable state-machine transition: an unread LOOK
+// stream must classify its input before reporting whether it is direct. Keep
+// that selection scalar-only so the eventual gzip owner can make it without
+// exposing the ABI-shaped state or its cursor.
+struct GzDirectState {
+    mode: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+}
+
+enum GzDirectAction {
+    Look,
+    Report,
+}
+
+fn gz_direct_action(state: GzDirectState) -> GzDirectAction {
+    if state.mode == crate::gzguts_h::GZ_READ
+        && state.how == crate::gzguts_h::LOOK
+        && state.have == 0
+    {
+        GzDirectAction::Look
+    } else {
+        GzDirectAction::Report
+    }
+}
+
+fn gz_direct_result(direct: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    (direct == 1) as ::core::ffi::c_int
+}
+
 impl GzFetchState {
     fn new(
         how: ::core::ffi::c_int,
@@ -1462,13 +1492,17 @@ pub unsafe extern "C" fn gzgets_ffi(
     )
 }
 unsafe fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state.mode == crate::gzguts_h::GZ_READ
-        && state.how == crate::gzguts_h::LOOK
-        && state.x.have == 0 as ::core::ffi::c_uint
-    {
-        gz_look(state);
+    if matches!(
+        gz_direct_action(GzDirectState {
+            mode: state.mode,
+            how: state.how,
+            have: state.x.have,
+        }),
+        GzDirectAction::Look
+    ) {
+        let _ = gz_look(state);
     }
-    return (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
+    gz_direct_result(state.direct)
 }
 #[export_name = "gzdirect"]
 
