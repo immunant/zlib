@@ -154,22 +154,64 @@ macro_rules! gz_deflate_reset_if_needed {
     }};
 }
 
+#[derive(Copy, Clone)]
+struct GzDeflateAction {
+    flush: ::core::ffi::c_int,
+    before_avail_out: crate::stdlib::uInt,
+}
+
+#[derive(Copy, Clone)]
+enum GzCompStatus {
+    Done(::core::ffi::c_int),
+    NeedDeflate(GzDeflateAction),
+}
+
+enum GzStepStatus<T> {
+    Done(T),
+    NeedDeflate(GzDeflateAction),
+}
+
+enum GzPendingCompPoll {
+    Idle,
+    Finished(::core::ffi::c_int),
+    NeedDeflate(GzDeflateAction),
+}
+
+fn gz_pending_comp_poll(pending: &mut Option<GzCompStatus>) -> GzPendingCompPoll {
+    let Some(status) = pending.take() else {
+        return GzPendingCompPoll::Idle;
+    };
+    match status {
+        GzCompStatus::Done(ret) => GzPendingCompPoll::Finished(ret),
+        GzCompStatus::NeedDeflate(action) => {
+            *pending = Some(GzCompStatus::NeedDeflate(action));
+            GzPendingCompPoll::NeedDeflate(action)
+        }
+    }
+}
+
+fn gz_pending_comp_after_deflate(
+    state: &mut crate::gzguts_h::gz_state,
+    pending: &mut Option<GzCompStatus>,
+    action: GzDeflateAction,
+    ret: ::core::ffi::c_int,
+) {
+    *pending = Some(gz_comp_after_deflate(state, action, ret));
+}
+
 fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
-    mut flush: ::core::ffi::c_int,
+    flush: ::core::ffi::c_int,
     direct_input: Option<&[crate::stdlib::Bytef]>,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut have: ::core::ffi::c_uint = 0;
+) -> GzCompStatus {
     let mut put: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = gz_io_chunk_limit();
     if state.size == 0 as ::core::ffi::c_uint {
         crate::src::gzlib::gz_error_static(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"internal error: write buffers not initialized\0",
         );
-        return -1 as ::core::ffi::c_int;
+        return GzCompStatus::Done(-1 as ::core::ffi::c_int);
     }
     if state.direct != 0 {
         let mut input_offset = 0usize;
@@ -180,7 +222,7 @@ fn gz_comp(
                 crate::zlib_h::Z_STREAM_ERROR,
                 b"internal error: direct write buffer missing\0",
             );
-            return -1 as ::core::ffi::c_int;
+            return GzCompStatus::Done(-1 as ::core::ffi::c_int);
         }
         while state.strm.avail_in != 0 {
             state.again = 0 as ::core::ffi::c_int;
@@ -200,16 +242,16 @@ fn gz_comp(
                 GzWriteSyscallResult::Error { errno, again } => {
                     state.again = again;
                     gz_error_with_os_error(state, crate::zlib_h::Z_ERRNO, errno);
-                    return -1 as ::core::ffi::c_int;
+                    return GzCompStatus::Done(-1 as ::core::ffi::c_int);
                 }
             }
         }
-        return 0 as ::core::ffi::c_int;
+        return GzCompStatus::Done(0 as ::core::ffi::c_int);
     }
     match gz_comp_reset_action(state.reset, state.strm.avail_in, flush) {
         GzCompResetAction::None => {}
         GzCompResetAction::ReturnOk => {
-            return 0 as ::core::ffi::c_int;
+            return GzCompStatus::Done(0 as ::core::ffi::c_int);
         }
         GzCompResetAction::ResetStream => {
             crate::src::gzlib::gz_error_static(
@@ -217,19 +259,29 @@ fn gz_comp(
                 crate::zlib_h::Z_STREAM_ERROR,
                 b"internal error: deflate reset not performed at boundary\0",
             );
-            return -1 as ::core::ffi::c_int;
+            return GzCompStatus::Done(-1 as ::core::ffi::c_int);
         }
     }
-    ret = crate::zlib_h::Z_OK;
+    gz_comp_continue(state, flush, crate::zlib_h::Z_OK)
+}
+
+fn gz_comp_continue(
+    state: &mut crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+) -> GzCompStatus {
+    let max = gz_io_chunk_limit();
     loop {
         if gz_comp_should_write_pending(state.strm.avail_out, flush, ret) {
             while let Some(chunk) = gz_pending_output_chunk(state, max) {
                 state.again = 0 as ::core::ffi::c_int;
-                put = chunk;
                 let write_result = gz_with_output_buffer_mut(state, |state, output_buf| {
                     let next_offset =
                         (state.x.next as usize).wrapping_sub(output_buf.as_ptr() as usize);
-                    gz_write_file(state, &output_buf[next_offset..next_offset + put as usize])
+                    gz_write_file(
+                        state,
+                        &output_buf[next_offset..next_offset + chunk as usize],
+                    )
                 });
                 match write_result {
                     GzWriteSyscallResult::Wrote(written) => {
@@ -238,7 +290,7 @@ fn gz_comp(
                     GzWriteSyscallResult::Error { errno, again } => {
                         state.again = again;
                         gz_error_with_os_error(state, crate::zlib_h::Z_ERRNO, errno);
-                        return -1 as ::core::ffi::c_int;
+                        return GzCompStatus::Done(-1 as ::core::ffi::c_int);
                     }
                 }
             }
@@ -246,30 +298,34 @@ fn gz_comp(
                 gz_reset_write_output(state);
             }
         }
-        have = state.strm.avail_out as ::core::ffi::c_uint;
-        ret = unsafe {
-            crate::src::deflate::deflate_ffi(
-                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-                flush,
-            )
-        };
-        if ret == crate::zlib_h::Z_STREAM_ERROR {
-            crate::src::gzlib::gz_error_static(
-                state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"internal error: deflate stream corrupt\0",
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        have = have.wrapping_sub(state.strm.avail_out as ::core::ffi::c_uint);
-        if !(have != 0) {
-            break;
-        }
+        return GzCompStatus::NeedDeflate(GzDeflateAction {
+            flush,
+            before_avail_out: state.strm.avail_out,
+        });
     }
-    if flush == crate::zlib_h::Z_FINISH {
+}
+
+fn gz_comp_after_deflate(
+    state: &mut crate::gzguts_h::gz_state,
+    action: GzDeflateAction,
+    ret: ::core::ffi::c_int,
+) -> GzCompStatus {
+    if ret == crate::zlib_h::Z_STREAM_ERROR {
+        crate::src::gzlib::gz_error_static(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"internal error: deflate stream corrupt\0",
+        );
+        return GzCompStatus::Done(-1 as ::core::ffi::c_int);
+    }
+    let have = action.before_avail_out.wrapping_sub(state.strm.avail_out);
+    if have != 0 {
+        return gz_comp_continue(state, action.flush, ret);
+    }
+    if action.flush == crate::zlib_h::Z_FINISH {
         state.reset = 1 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
+    GzCompStatus::Done(0 as ::core::ffi::c_int)
 }
 
 fn gz_direct_input_slice<'a>(
@@ -283,7 +339,7 @@ fn gz_direct_input_slice<'a>(
 fn gz_comp_with_state_input(
     state: &mut crate::gzguts_h::gz_state,
     flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+) -> GzCompStatus {
     if state.direct != 0
         && state.size != 0 as ::core::ffi::c_uint
         && state.strm.avail_in != 0 as crate::stdlib::uInt
@@ -297,111 +353,272 @@ fn gz_comp_with_state_input(
     }
 }
 
-fn gz_zero(
+struct GzZeroCursor {
+    pending_comp: Option<GzCompStatus>,
+    pending_n: crate::stdlib::uInt,
+    draining_initial: bool,
+    filled: bool,
+}
+
+impl GzZeroCursor {
+    fn new() -> Self {
+        Self {
+            pending_comp: None,
+            pending_n: 0 as crate::stdlib::uInt,
+            draining_initial: true,
+            filled: false,
+        }
+    }
+
+    fn after_deflate(
+        &mut self,
+        state: &mut crate::gzguts_h::gz_state,
+        action: GzDeflateAction,
+        ret: ::core::ffi::c_int,
+    ) {
+        gz_pending_comp_after_deflate(state, &mut self.pending_comp, action, ret);
+    }
+}
+
+fn gz_zero_step(
     state: &mut crate::gzguts_h::gz_state,
     input_buf: &mut [crate::stdlib::Bytef],
-) -> ::core::ffi::c_int {
-    let mut first: ::core::ffi::c_int = 0;
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut n: ::core::ffi::c_uint = 0;
-    if state.strm.avail_in != 0
-        && gz_comp(
-            state,
-            crate::zlib_h::Z_NO_FLUSH,
-            Some(gz_direct_input_slice(state, input_buf)),
-        ) == -1 as ::core::ffi::c_int
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    first = 1 as ::core::ffi::c_int;
+    cursor: &mut GzZeroCursor,
+) -> GzStepStatus<::core::ffi::c_int> {
     loop {
-        n = gz_clamped_uint(state.size, state.skip);
-        if first != 0 {
+        match gz_pending_comp_poll(&mut cursor.pending_comp) {
+            GzPendingCompPoll::Idle => {}
+            GzPendingCompPoll::NeedDeflate(action) => {
+                return GzStepStatus::NeedDeflate(action);
+            }
+            GzPendingCompPoll::Finished(ret) => {
+                if cursor.pending_n != 0 {
+                    let consumed = gz_note_input_consumed(state, cursor.pending_n);
+                    state.skip -= consumed as crate::stdlib::off64_t;
+                    cursor.pending_n = 0 as crate::stdlib::uInt;
+                } else {
+                    cursor.draining_initial = false;
+                }
+                if ret == -1 as ::core::ffi::c_int {
+                    return GzStepStatus::Done(-1 as ::core::ffi::c_int);
+                }
+                if state.skip == 0 {
+                    return GzStepStatus::Done(0 as ::core::ffi::c_int);
+                }
+            }
+        }
+
+        if cursor.draining_initial {
+            if state.strm.avail_in != 0 {
+                cursor.pending_comp = Some(gz_comp(
+                    state,
+                    crate::zlib_h::Z_NO_FLUSH,
+                    Some(gz_direct_input_slice(state, input_buf)),
+                ));
+                continue;
+            }
+            cursor.draining_initial = false;
+        }
+
+        let n = gz_clamped_uint(state.size, state.skip);
+        if !cursor.filled {
             gz_fill_zero(&mut input_buf[..n as usize]);
-            first = 0 as ::core::ffi::c_int;
+            cursor.filled = true;
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
         state.strm.next_in = input_buf.as_mut_ptr();
-        ret = gz_comp(
+        cursor.pending_n = n;
+        cursor.pending_comp = Some(gz_comp(
             state,
             crate::zlib_h::Z_NO_FLUSH,
             Some(gz_direct_input_slice(state, input_buf)),
-        );
-        n = gz_note_input_consumed(state, n);
-        state.skip -= n as crate::stdlib::off64_t;
-        if ret == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if !(state.skip != 0) {
-            break;
-        }
+        ));
     }
-    return 0 as ::core::ffi::c_int;
 }
 
-fn gz_write(
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum GzWritePhase {
+    Start,
+    Zero,
+    Choose,
+    Small,
+    LargeDrain,
+    LargeChunks,
+}
+
+#[derive(Copy, Clone)]
+enum GzWritePendingKind {
+    None,
+    Small,
+    LargeDrain,
+    LargeChunk { requested: crate::stdlib::uInt },
+}
+
+struct GzWriteCursor {
+    requested: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+    input_offset: usize,
+    phase: GzWritePhase,
+    zero: GzZeroCursor,
+    pending_comp: Option<GzCompStatus>,
+    pending_kind: GzWritePendingKind,
+}
+
+impl GzWriteCursor {
+    fn new(len: crate::stdlib::z_size_t) -> Self {
+        Self {
+            requested: len,
+            remaining: len,
+            input_offset: 0,
+            phase: GzWritePhase::Start,
+            zero: GzZeroCursor::new(),
+            pending_comp: None,
+            pending_kind: GzWritePendingKind::None,
+        }
+    }
+
+    fn after_deflate(
+        &mut self,
+        state: &mut crate::gzguts_h::gz_state,
+        action: GzDeflateAction,
+        ret: ::core::ffi::c_int,
+    ) {
+        if self.phase == GzWritePhase::Zero {
+            self.zero.after_deflate(state, action, ret);
+        } else {
+            gz_pending_comp_after_deflate(state, &mut self.pending_comp, action, ret);
+        }
+    }
+}
+
+fn gz_write_step(
     state: &mut crate::gzguts_h::gz_state,
     input_buf: &mut [crate::stdlib::Bytef],
     input: &[crate::stdlib::Bytef],
-) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = input.len() as crate::stdlib::z_size_t;
-    let put: crate::stdlib::z_size_t = len;
-    let mut input_offset: usize = 0;
-    let mut ret: ::core::ffi::c_int = 0;
-    if len == 0 as crate::stdlib::z_size_t {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if state.skip != 0 && gz_zero(state, input_buf) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if len < state.size as crate::stdlib::z_size_t || state.direct != 0 {
-        loop {
-            let mut have: ::core::ffi::c_uint = 0;
-            let mut copy: ::core::ffi::c_uint = 0;
-            if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = input_buf.as_mut_ptr();
+    cursor: &mut GzWriteCursor,
+) -> GzStepStatus<crate::stdlib::z_size_t> {
+    loop {
+        match gz_pending_comp_poll(&mut cursor.pending_comp) {
+            GzPendingCompPoll::Idle => {}
+            GzPendingCompPoll::NeedDeflate(action) => {
+                return GzStepStatus::NeedDeflate(action);
             }
-            have = gz_buffered_input_used(state);
-            copy = gz_buffered_write_copy_len(state.size, have, len);
-            input_buf[have as usize..have.wrapping_add(copy) as usize]
-                .copy_from_slice(&input[input_offset..input_offset + copy as usize]);
-            gz_note_buffered_input(state, copy);
-            input_offset = input_offset.wrapping_add(copy as usize);
-            len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
-            if len == 0 as crate::stdlib::z_size_t {
-                break;
+            GzPendingCompPoll::Finished(ret) => match cursor.pending_kind {
+                GzWritePendingKind::None => {}
+                GzWritePendingKind::Small => {
+                    cursor.pending_kind = GzWritePendingKind::None;
+                    if ret == -1 as ::core::ffi::c_int {
+                        return GzStepStatus::Done(gz_write_error_return(
+                            state.again,
+                            cursor.requested,
+                            cursor.remaining,
+                        ));
+                    }
+                }
+                GzWritePendingKind::LargeDrain => {
+                    cursor.pending_kind = GzWritePendingKind::None;
+                    cursor.phase = GzWritePhase::LargeChunks;
+                    if ret == -1 as ::core::ffi::c_int {
+                        return GzStepStatus::Done(0 as crate::stdlib::z_size_t);
+                    }
+                }
+                GzWritePendingKind::LargeChunk { requested } => {
+                    cursor.pending_kind = GzWritePendingKind::None;
+                    let consumed = gz_note_input_consumed(state, requested);
+                    cursor.remaining = cursor
+                        .remaining
+                        .wrapping_sub(consumed as crate::stdlib::z_size_t);
+                    cursor.input_offset = cursor.input_offset.wrapping_add(consumed as usize);
+                    if ret == -1 as ::core::ffi::c_int {
+                        return GzStepStatus::Done(gz_write_error_return(
+                            state.again,
+                            cursor.requested,
+                            cursor.remaining,
+                        ));
+                    }
+                    if cursor.remaining == 0 as crate::stdlib::z_size_t {
+                        return GzStepStatus::Done(cursor.requested);
+                    }
+                }
+            },
+        }
+
+        match cursor.phase {
+            GzWritePhase::Start => {
+                if cursor.requested == 0 as crate::stdlib::z_size_t {
+                    return GzStepStatus::Done(0 as crate::stdlib::z_size_t);
+                }
+                cursor.phase = if state.skip != 0 {
+                    GzWritePhase::Zero
+                } else {
+                    GzWritePhase::Choose
+                };
             }
-            if gz_comp(
-                state,
-                crate::zlib_h::Z_NO_FLUSH,
-                Some(gz_direct_input_slice(state, input_buf)),
-            ) == -1 as ::core::ffi::c_int
-            {
-                return gz_write_error_return(state.again, put, len);
+            GzWritePhase::Zero => match gz_zero_step(state, input_buf, &mut cursor.zero) {
+                GzStepStatus::NeedDeflate(action) => return GzStepStatus::NeedDeflate(action),
+                GzStepStatus::Done(ret) => {
+                    if ret == -1 as ::core::ffi::c_int {
+                        return GzStepStatus::Done(0 as crate::stdlib::z_size_t);
+                    }
+                    cursor.phase = GzWritePhase::Choose;
+                }
+            },
+            GzWritePhase::Choose => {
+                cursor.phase = if cursor.remaining < state.size as crate::stdlib::z_size_t
+                    || state.direct != 0
+                {
+                    GzWritePhase::Small
+                } else {
+                    GzWritePhase::LargeDrain
+                };
+            }
+            GzWritePhase::Small => {
+                let have = if state.strm.avail_in == 0 as crate::stdlib::uInt {
+                    state.strm.next_in = input_buf.as_mut_ptr();
+                    0 as crate::stdlib::uInt
+                } else {
+                    gz_buffered_input_used(state)
+                };
+                let copy = gz_buffered_write_copy_len(state.size, have, cursor.remaining);
+                input_buf[have as usize..have.wrapping_add(copy) as usize].copy_from_slice(
+                    &input[cursor.input_offset..cursor.input_offset + copy as usize],
+                );
+                gz_note_buffered_input(state, copy);
+                cursor.input_offset = cursor.input_offset.wrapping_add(copy as usize);
+                cursor.remaining = cursor
+                    .remaining
+                    .wrapping_sub(copy as crate::stdlib::z_size_t);
+                if cursor.remaining == 0 as crate::stdlib::z_size_t {
+                    return GzStepStatus::Done(cursor.requested);
+                }
+                cursor.pending_kind = GzWritePendingKind::Small;
+                cursor.pending_comp = Some(gz_comp(
+                    state,
+                    crate::zlib_h::Z_NO_FLUSH,
+                    Some(gz_direct_input_slice(state, input_buf)),
+                ));
+            }
+            GzWritePhase::LargeDrain => {
+                if state.strm.avail_in != 0 {
+                    cursor.pending_kind = GzWritePendingKind::LargeDrain;
+                    cursor.pending_comp = Some(gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None));
+                } else {
+                    cursor.phase = GzWritePhase::LargeChunks;
+                }
+            }
+            GzWritePhase::LargeChunks => {
+                if cursor.remaining == 0 as crate::stdlib::z_size_t {
+                    return GzStepStatus::Done(cursor.requested);
+                }
+                let n = gz_z_size_to_uInt_chunk(cursor.remaining);
+                state.strm.next_in =
+                    input[cursor.input_offset..].as_ptr() as *mut crate::stdlib::Bytef;
+                state.strm.avail_in = n as crate::stdlib::uInt;
+                cursor.pending_kind = GzWritePendingKind::LargeChunk { requested: n };
+                cursor.pending_comp = Some(gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None));
             }
         }
-    } else {
-        if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int
-        {
-            return 0 as crate::stdlib::z_size_t;
-        }
-        state.strm.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
-        loop {
-            let mut n: ::core::ffi::c_uint = gz_z_size_to_uInt_chunk(len);
-            state.strm.avail_in = n as crate::stdlib::uInt;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None);
-            n = gz_note_input_consumed(state, n);
-            len = len.wrapping_sub(n as crate::stdlib::z_size_t);
-            if ret == -1 as ::core::ffi::c_int {
-                return gz_write_error_return(state.again, put, len);
-            }
-            if !(len != 0) {
-                break;
-            }
-        }
     }
-    return put;
 }
 fn gz_write_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
     state.mode == crate::gzguts_h::GZ_WRITE
@@ -598,22 +815,8 @@ fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     gz_uInt_fits_int(len)
 }
 
-fn gzputc_impl(
-    state: &mut crate::gzguts_h::gz_state,
-    input_buf: &mut [crate::stdlib::Bytef],
-    c: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if state.skip != 0 && gz_zero(state, input_buf) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.size != 0 {
-        if let Some(ret) = gzputc_buffered(state, input_buf, c) {
-            return ret;
-        }
-    }
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
-    if gz_write(state, input_buf, &buf) != 1 as crate::stdlib::z_size_t {
+fn gzputc_impl(c: ::core::ffi::c_int, put: crate::stdlib::z_size_t) -> ::core::ffi::c_int {
+    if put != 1 as crate::stdlib::z_size_t {
         return -1 as ::core::ffi::c_int;
     }
     c & 0xff as ::core::ffi::c_int
@@ -647,18 +850,37 @@ pub unsafe extern "C" fn gzwrite_ffi(
     } else {
         ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, len as usize)
     };
-    if input.is_empty() {
-        let mut empty_input_buf = [];
-        return gz_write(state, &mut empty_input_buf[..], input) as ::core::ffi::c_int;
-    }
-    if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
+    if !input.is_empty()
+        && state.size == 0 as ::core::ffi::c_uint
+        && gz_init!(state) == -1 as ::core::ffi::c_int
+    {
         return 0 as ::core::ffi::c_int;
     }
-    gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
-    return gz_with_input_buffer_mut(state, |state, input_buf| {
-        let input_buf = &mut input_buf[..state.size as usize];
-        gz_write(state, input_buf, input) as ::core::ffi::c_int
-    });
+    if !input.is_empty() {
+        gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
+    }
+    let mut cursor = GzWriteCursor::new(input.len() as crate::stdlib::z_size_t);
+    loop {
+        let step = if state.size == 0 {
+            let mut empty_input_buf = [];
+            gz_write_step(state, &mut empty_input_buf[..], input, &mut cursor)
+        } else {
+            gz_with_input_buffer_mut(state, |state, input_buf| {
+                let input_buf = &mut input_buf[..state.size as usize];
+                gz_write_step(state, input_buf, input, &mut cursor)
+            })
+        };
+        match step {
+            GzStepStatus::Done(put) => return put as ::core::ffi::c_int,
+            GzStepStatus::NeedDeflate(action) => {
+                let ret = crate::src::deflate::deflate_ffi(
+                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                    action.flush,
+                );
+                cursor.after_deflate(state, action, ret);
+            }
+        }
+    }
 }
 #[export_name = "gzfwrite"]
 
@@ -690,10 +912,23 @@ pub unsafe extern "C" fn gzfwrite_ffi(
             return 0 as crate::stdlib::z_size_t;
         }
         gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
-        gz_with_input_buffer_mut(state, |state, input_buf| {
-            let input_buf = &mut input_buf[..state.size as usize];
-            gz_write(state, input_buf, input)
-        })
+        let mut cursor = GzWriteCursor::new(input.len() as crate::stdlib::z_size_t);
+        loop {
+            let step = gz_with_input_buffer_mut(state, |state, input_buf| {
+                let input_buf = &mut input_buf[..state.size as usize];
+                gz_write_step(state, input_buf, input, &mut cursor)
+            });
+            match step {
+                GzStepStatus::Done(put) => break put,
+                GzStepStatus::NeedDeflate(action) => {
+                    let ret = crate::src::deflate::deflate_ffi(
+                        &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                        action.flush,
+                    );
+                    cursor.after_deflate(state, action, ret);
+                }
+            }
+        }
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -717,10 +952,55 @@ pub unsafe extern "C" fn gzputc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
-    return gz_with_input_buffer_mut(state, |state, input_buf| {
+    if state.skip != 0 {
+        let mut zero = GzZeroCursor::new();
+        loop {
+            let step = gz_with_input_buffer_mut(state, |state, input_buf| {
+                let input_buf = &mut input_buf[..state.size as usize];
+                gz_zero_step(state, input_buf, &mut zero)
+            });
+            match step {
+                GzStepStatus::Done(ret) => {
+                    if ret == -1 as ::core::ffi::c_int {
+                        return -1 as ::core::ffi::c_int;
+                    }
+                    break;
+                }
+                GzStepStatus::NeedDeflate(action) => {
+                    let ret = crate::src::deflate::deflate_ffi(
+                        &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                        action.flush,
+                    );
+                    zero.after_deflate(state, action, ret);
+                }
+            }
+        }
+    }
+    let buffered = gz_with_input_buffer_mut(state, |state, input_buf| {
         let input_buf = &mut input_buf[..state.size as usize];
-        gzputc_impl(state, input_buf, c)
+        gzputc_buffered(state, input_buf, c)
     });
+    if let Some(ret) = buffered {
+        return ret;
+    }
+    let buf: [::core::ffi::c_uchar; 1] = [c as ::core::ffi::c_uchar; 1];
+    let mut cursor = GzWriteCursor::new(1 as crate::stdlib::z_size_t);
+    loop {
+        let step = gz_with_input_buffer_mut(state, |state, input_buf| {
+            let input_buf = &mut input_buf[..state.size as usize];
+            gz_write_step(state, input_buf, &buf, &mut cursor)
+        });
+        match step {
+            GzStepStatus::Done(put) => return gzputc_impl(c, put),
+            GzStepStatus::NeedDeflate(action) => {
+                let ret = crate::src::deflate::deflate_ffi(
+                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                    action.flush,
+                );
+                cursor.after_deflate(state, action, ret);
+            }
+        }
+    }
 }
 fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
     (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
@@ -755,13 +1035,7 @@ fn gzputs_len_or_error(
     }
 }
 
-fn gzputs_impl(
-    state: &mut crate::gzguts_h::gz_state,
-    input_buf: &mut [crate::stdlib::Bytef],
-    input: &[crate::stdlib::Bytef],
-    len: crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
-    let put = gz_write(state, input_buf, input);
+fn gzputs_impl(len: crate::stdlib::z_size_t, put: crate::stdlib::z_size_t) -> ::core::ffi::c_int {
     gzputs_return_value(len, put)
 }
 
@@ -783,18 +1057,37 @@ pub unsafe extern "C" fn gzputs_ffi(
     let Some(len) = gzputs_len_or_error(state, input) else {
         return -1 as ::core::ffi::c_int;
     };
-    if input.is_empty() {
-        let mut empty_input_buf = [];
-        return gzputs_impl(state, &mut empty_input_buf[..], input, len);
-    }
-    if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
+    if !input.is_empty()
+        && state.size == 0 as ::core::ffi::c_uint
+        && gz_init!(state) == -1 as ::core::ffi::c_int
+    {
         return -1 as ::core::ffi::c_int;
     }
-    gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
-    return gz_with_input_buffer_mut(state, |state, input_buf| {
-        let input_buf = &mut input_buf[..state.size as usize];
-        gzputs_impl(state, input_buf, input, len)
-    });
+    if !input.is_empty() {
+        gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
+    }
+    let mut cursor = GzWriteCursor::new(input.len() as crate::stdlib::z_size_t);
+    loop {
+        let step = if state.size == 0 {
+            let mut empty_input_buf = [];
+            gz_write_step(state, &mut empty_input_buf[..], input, &mut cursor)
+        } else {
+            gz_with_input_buffer_mut(state, |state, input_buf| {
+                let input_buf = &mut input_buf[..state.size as usize];
+                gz_write_step(state, input_buf, input, &mut cursor)
+            })
+        };
+        match step {
+            GzStepStatus::Done(put) => return gzputs_impl(len, put),
+            GzStepStatus::NeedDeflate(action) => {
+                let ret = crate::src::deflate::deflate_ffi(
+                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                    action.flush,
+                );
+                cursor.after_deflate(state, action, ret);
+            }
+        }
+    }
 }
 fn gzflush_valid_flush(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 as ::core::ffi::c_int && flush <= crate::zlib_h::Z_FINISH
@@ -822,12 +1115,27 @@ pub unsafe extern "C" fn gzflush_ffi(
             return state.err;
         }
         gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
-        if gz_with_input_buffer_mut(state, |state, input_buf| {
-            let input_buf = &mut input_buf[..state.size as usize];
-            gz_zero(state, input_buf)
-        }) == -1 as ::core::ffi::c_int
-        {
-            return state.err;
+        let mut zero = GzZeroCursor::new();
+        loop {
+            let step = gz_with_input_buffer_mut(state, |state, input_buf| {
+                let input_buf = &mut input_buf[..state.size as usize];
+                gz_zero_step(state, input_buf, &mut zero)
+            });
+            match step {
+                GzStepStatus::Done(ret) => {
+                    if ret == -1 as ::core::ffi::c_int {
+                        return state.err;
+                    }
+                    break;
+                }
+                GzStepStatus::NeedDeflate(action) => {
+                    let ret = crate::src::deflate::deflate_ffi(
+                        &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                        action.flush,
+                    );
+                    zero.after_deflate(state, action, ret);
+                }
+            }
         }
     }
     if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
@@ -838,7 +1146,20 @@ pub unsafe extern "C" fn gzflush_ffi(
         flush,
         state.strm.avail_in != 0 as crate::stdlib::uInt
     );
-    gz_comp_with_state_input(state, flush);
+    let mut pending = Some(gz_comp_with_state_input(state, flush));
+    loop {
+        match gz_pending_comp_poll(&mut pending) {
+            GzPendingCompPoll::Idle => break,
+            GzPendingCompPoll::Finished(_) => break,
+            GzPendingCompPoll::NeedDeflate(action) => {
+                let ret = crate::src::deflate::deflate_ffi(
+                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                    action.flush,
+                );
+                gz_pending_comp_after_deflate(state, &mut pending, action, ret);
+            }
+        }
+    }
     return state.err;
 }
 fn gzsetparams_unchanged(
@@ -892,18 +1213,47 @@ pub unsafe extern "C" fn gzsetparams_ffi(
             return state.err;
         }
         gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
-        if gz_with_input_buffer_mut(state, |state, input_buf| {
-            let input_buf = &mut input_buf[..state.size as usize];
-            gz_zero(state, input_buf)
-        }) == -1 as ::core::ffi::c_int
-        {
-            return state.err;
+        let mut zero = GzZeroCursor::new();
+        loop {
+            let step = gz_with_input_buffer_mut(state, |state, input_buf| {
+                let input_buf = &mut input_buf[..state.size as usize];
+                gz_zero_step(state, input_buf, &mut zero)
+            });
+            match step {
+                GzStepStatus::Done(ret) => {
+                    if ret == -1 as ::core::ffi::c_int {
+                        return state.err;
+                    }
+                    break;
+                }
+                GzStepStatus::NeedDeflate(action) => {
+                    let ret = crate::src::deflate::deflate_ffi(
+                        &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                        action.flush,
+                    );
+                    zero.after_deflate(state, action, ret);
+                }
+            }
         }
     }
     if state.size != 0 {
         if state.strm.avail_in != 0 {
             gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_BLOCK, true);
-            if gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int {
+            let mut pending = Some(gz_comp(state, crate::zlib_h::Z_BLOCK, None));
+            let comp_ret = loop {
+                match gz_pending_comp_poll(&mut pending) {
+                    GzPendingCompPoll::Idle => break 0 as ::core::ffi::c_int,
+                    GzPendingCompPoll::Finished(ret) => break ret,
+                    GzPendingCompPoll::NeedDeflate(action) => {
+                        let ret = crate::src::deflate::deflate_ffi(
+                            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                            action.flush,
+                        );
+                        gz_pending_comp_after_deflate(state, &mut pending, action, ret);
+                    }
+                }
+            };
+            if comp_ret == -1 as ::core::ffi::c_int {
                 return state.err;
             }
         }
@@ -932,10 +1282,23 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
             true
         } else {
             gz_deflate_reset_if_needed!(state, crate::zlib_h::Z_NO_FLUSH, true);
-            gz_with_input_buffer_mut(state, |state, input_buf| {
-                let input_buf = &mut input_buf[..state.size as usize];
-                gz_zero(state, input_buf)
-            }) == -1 as ::core::ffi::c_int
+            let mut zero = GzZeroCursor::new();
+            loop {
+                let step = gz_with_input_buffer_mut(state, |state, input_buf| {
+                    let input_buf = &mut input_buf[..state.size as usize];
+                    gz_zero_step(state, input_buf, &mut zero)
+                });
+                match step {
+                    GzStepStatus::Done(ret) => break ret == -1 as ::core::ffi::c_int,
+                    GzStepStatus::NeedDeflate(action) => {
+                        let ret = crate::src::deflate::deflate_ffi(
+                            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                            action.flush,
+                        );
+                        zero.after_deflate(state, action, ret);
+                    }
+                }
+            }
         }
     } else {
         false
@@ -953,8 +1316,24 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
             state.strm.avail_in != 0 as crate::stdlib::uInt
         );
     }
-    let comp_failed = init_failed
-        || gz_comp_with_state_input(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int;
+    let comp_failed = if init_failed {
+        true
+    } else {
+        let mut pending = Some(gz_comp_with_state_input(state, crate::zlib_h::Z_FINISH));
+        loop {
+            match gz_pending_comp_poll(&mut pending) {
+                GzPendingCompPoll::Idle => break false,
+                GzPendingCompPoll::Finished(ret) => break ret == -1 as ::core::ffi::c_int,
+                GzPendingCompPoll::NeedDeflate(action) => {
+                    let ret = crate::src::deflate::deflate_ffi(
+                        &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                        action.flush,
+                    );
+                    gz_pending_comp_after_deflate(state, &mut pending, action, ret);
+                }
+            }
+        }
+    };
     ret = gzclose_w_after_step(ret, comp_failed, state.err);
     if state.size != 0 {
         if state.direct == 0 {
