@@ -3883,6 +3883,78 @@ struct DeflateFastStream<'a> {
     data_type: &'a mut ::core::ffi::c_int,
 }
 
+// This is the pointer-free result of one bounded match-parser dispatch.  The
+// ABI adapter below is still responsible for publishing it today, but keeping
+// the progress independent of `z_stream_s` and `deflate_state` gives a future
+// owned stream facade one complete handoff instead of a second cursor scan.
+struct DeflateMatchProgress {
+    input_consumed: usize,
+    output_produced: usize,
+    avail_out: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    pending_out: usize,
+    pending: crate::zutil_h::ulg,
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+    bi_used: ::core::ffi::c_int,
+    heap_len: ::core::ffi::c_int,
+    heap_max: ::core::ffi::c_int,
+    opt_len: crate::zutil_h::ulg,
+    static_len: crate::zutil_h::ulg,
+    sym_next: crate::stdlib::uInt,
+    matches: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+    insert: crate::stdlib::uInt,
+    ins_h: crate::stdlib::uInt,
+    match_length: crate::stdlib::uInt,
+    match_start: crate::stdlib::uInt,
+    prev_length: crate::stdlib::uInt,
+    prev_match: crate::src::deflate::IPos,
+    match_available: ::core::ffi::c_int,
+    slid: ::core::ffi::c_int,
+    high_water: crate::zutil_h::ulg,
+}
+
+impl DeflateMatchProgress {
+    fn from_views(state: &DeflateFastState<'_>, stream: &DeflateFastStream<'_>) -> Self {
+        Self {
+            input_consumed: stream.input_pos,
+            output_produced: stream.output_pos,
+            avail_out: stream.avail_out,
+            total_in: stream.total_in,
+            total_out: stream.total_out,
+            adler: stream.adler,
+            pending_out: state.pending_out,
+            pending: state.pending,
+            bi_buf: state.bi_buf,
+            bi_valid: state.bi_valid,
+            bi_used: state.bi_used,
+            heap_len: state.heap_len,
+            heap_max: state.heap_max,
+            opt_len: state.opt_len,
+            static_len: state.static_len,
+            sym_next: state.sym_next,
+            matches: state.matches,
+            lookahead: state.lookahead,
+            strstart: state.strstart,
+            block_start: state.block_start,
+            insert: state.insert,
+            ins_h: state.ins_h,
+            match_length: state.match_length,
+            match_start: state.match_start,
+            prev_length: state.prev_length,
+            prev_match: state.prev_match,
+            match_available: state.match_available,
+            slid: state.slid,
+            high_water: state.high_water,
+        }
+    }
+}
+
 fn fill_fast_window(state: &mut DeflateFastState<'_>, stream: &mut DeflateFastStream<'_>) {
     let mut input = DeflateInputCursor {
         input: &stream.input[stream.input_pos..],
@@ -4941,35 +5013,36 @@ unsafe fn deflate_match_from_abi(
         data_type: &mut stream.data_type,
     };
     let result = run(&mut matched, &mut matched_stream, flush);
-    stream.next_in = stream.next_in.wrapping_add(matched_stream.input_pos);
-    stream.avail_in = stream.avail_in.wrapping_sub(matched_stream.input_pos as crate::stdlib::uInt);
-    stream.next_out = stream.next_out.wrapping_add(matched_stream.output_pos);
-    stream.avail_out = matched_stream.avail_out;
-    stream.total_in = matched_stream.total_in;
-    stream.total_out = matched_stream.total_out;
-    stream.adler = matched_stream.adler;
-    state.pending_out = matched.pending_out;
-    state.pending = matched.pending;
-    state.bi_buf = matched.bi_buf;
-    state.bi_valid = matched.bi_valid;
-    state.bi_used = matched.bi_used;
-    state.heap_len = matched.heap_len;
-    state.heap_max = matched.heap_max;
-    state.opt_len = matched.opt_len;
-    state.static_len = matched.static_len;
-    state.sym_next = matched.sym_next;
-    state.matches = matched.matches;
-    state.lookahead = matched.lookahead;
-    state.strstart = matched.strstart;
-    state.block_start = matched.block_start;
-    state.insert = matched.insert;
-    state.ins_h = matched.ins_h;
-    state.match_length = matched.match_length;
-    state.match_start = matched.match_start;
-    state.prev_length = matched.prev_length;
-    state.prev_match = matched.prev_match;
-    state.match_available = matched.match_available;
-    state.slid = matched.slid;
-    state.high_water = matched.high_water;
+    let progress = DeflateMatchProgress::from_views(&matched, &matched_stream);
+    stream.next_in = stream.next_in.wrapping_add(progress.input_consumed);
+    stream.avail_in = stream.avail_in.wrapping_sub(progress.input_consumed as crate::stdlib::uInt);
+    stream.next_out = stream.next_out.wrapping_add(progress.output_produced);
+    stream.avail_out = progress.avail_out;
+    stream.total_in = progress.total_in;
+    stream.total_out = progress.total_out;
+    stream.adler = progress.adler;
+    state.pending_out = progress.pending_out;
+    state.pending = progress.pending;
+    state.bi_buf = progress.bi_buf;
+    state.bi_valid = progress.bi_valid;
+    state.bi_used = progress.bi_used;
+    state.heap_len = progress.heap_len;
+    state.heap_max = progress.heap_max;
+    state.opt_len = progress.opt_len;
+    state.static_len = progress.static_len;
+    state.sym_next = progress.sym_next;
+    state.matches = progress.matches;
+    state.lookahead = progress.lookahead;
+    state.strstart = progress.strstart;
+    state.block_start = progress.block_start;
+    state.insert = progress.insert;
+    state.ins_h = progress.ins_h;
+    state.match_length = progress.match_length;
+    state.match_start = progress.match_start;
+    state.prev_length = progress.prev_length;
+    state.prev_match = progress.prev_match;
+    state.match_available = progress.match_available;
+    state.slid = progress.slid;
+    state.high_water = progress.high_water;
     result
 }
