@@ -2875,6 +2875,20 @@ fn table_usage_fits(type_0: CodeType, used: u32, table_start: usize, table_len: 
             .map_or(false, |end| end <= table_len)
 }
 
+fn next_huffman_code(mut huff: u32, length: u32) -> u32 {
+    let mut increment = 1u32 << (length - 1);
+    while huff & increment != 0 {
+        increment >>= 1;
+    }
+    if increment != 0 {
+        huff &= increment - 1;
+        huff += increment;
+    } else {
+        huff = 0;
+    }
+    huff
+}
+
 fn table_entry_for_symbol(
     type_0: CodeType,
     symbol: u16,
@@ -3043,16 +3057,7 @@ pub fn inflate_table_safe(
             }
         }
 
-        let mut increment = 1u32 << (length - 1);
-        while huff & increment != 0 {
-            increment >>= 1;
-        }
-        if increment != 0 {
-            huff &= increment - 1;
-            huff += increment;
-        } else {
-            huff = 0;
-        }
+        huff = next_huffman_code(huff, length);
 
         symbol += 1;
         count[length as usize] = count[length as usize].wrapping_sub(1);
@@ -3191,6 +3196,14 @@ mod tests {
         assert_eq!(entry.op, op);
         assert_eq!(entry.bits, bits);
         assert_eq!(entry.val, val);
+    }
+
+    #[test]
+    fn next_huffman_code_reverses_the_canonical_increment() {
+        assert_eq!(next_huffman_code(0b0000, 3), 0b0100);
+        assert_eq!(next_huffman_code(0b0100, 3), 0b0010);
+        assert_eq!(next_huffman_code(0b0110, 3), 0b0001);
+        assert_eq!(next_huffman_code(0b0111, 3), 0);
     }
 
     #[test]
