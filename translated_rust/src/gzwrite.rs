@@ -364,14 +364,12 @@ pub unsafe extern "C" fn gzwrite(
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return 0 as ::core::ffi::c_int;
     }
@@ -406,14 +404,12 @@ pub unsafe extern "C" fn gzfwrite(
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return 0 as crate::stdlib::z_size_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -453,16 +449,12 @@ pub unsafe extern "C" fn gzputc(
 ) -> ::core::ffi::c_int {
     let mut have: ::core::ffi::c_uint = 0;
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut strm: crate::zlib_h::z_streamp = ::core::ptr::null_mut::<crate::zlib_h::z_stream>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -471,24 +463,27 @@ pub unsafe extern "C" fn gzputc(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).size != 0 {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt {
-            (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+    if state.size != 0 {
+        let size = state.size;
+        let in_0 = state.in_0;
+        let strm = &mut state.strm;
+        if strm.avail_in == 0 as crate::stdlib::uInt {
+            strm.next_in = in_0 as *mut crate::stdlib::Bytef;
         }
-        have = (*strm)
+        have = strm
             .next_in
-            .offset((*strm).avail_in as isize)
-            .offset_from((*state).in_0) as ::core::ffi::c_uint;
-        if have < (*state).size {
-            let buffer = ::core::slice::from_raw_parts_mut((*state).in_0, (*state).size as usize);
+            .offset(strm.avail_in as isize)
+            .offset_from(in_0) as ::core::ffi::c_uint;
+        if have < size {
+            let buffer = ::core::slice::from_raw_parts_mut(in_0, size as usize);
             if !write_buffered_byte(buffer, have as usize, c as ::core::ffi::c_uchar) {
                 return -1 as ::core::ffi::c_int;
             }
-            (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
-            (*state).x.pos += 1;
+            strm.avail_in = strm.avail_in.wrapping_add(1);
+            state.x.pos += 1;
             return c & 0xff as ::core::ffi::c_int;
         }
     }
