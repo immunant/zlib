@@ -3863,206 +3863,56 @@ fn stored_block_window_slice(
     window.get(start..end)
 }
 
-unsafe fn deflate_stored(
+fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut len: ::core::ffi::c_uint = 0;
-    let mut left: ::core::ffi::c_uint = 0;
-    let mut have: ::core::ffi::c_uint = 0;
-    // Snapshot the initial input availability together with the first block
-    // admission.  The planner is scalar-only, so this avoids a separate raw
-    // stream adoption before the loop without changing when input is read.
-    let mut used: ::core::ffi::c_uint = 0;
-    let mut first_block = true;
-    loop {
-        let (initial_avail_in, plan) = {
-            let state = &mut *s;
-            let strm = &mut *state.strm;
-            (
-                strm.avail_in,
-                stored_initial_block_plan(
-                    state.pending_buf_size,
-                    state.w_size,
-                    state.bi_valid,
-                    strm.avail_out,
-                    state.strstart,
-                    state.block_start,
+    // This transitional codec boundary still owns the compatibility-state
+    // adoption and temporary raw buffer lends.  Keep it scoped here so callers
+    // do not inherit an unsafe-function requirement.
+    unsafe {
+        let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+        let mut len: ::core::ffi::c_uint = 0;
+        let mut left: ::core::ffi::c_uint = 0;
+        let mut have: ::core::ffi::c_uint = 0;
+        // Snapshot the initial input availability together with the first block
+        // admission.  The planner is scalar-only, so this avoids a separate raw
+        // stream adoption before the loop without changing when input is read.
+        let mut used: ::core::ffi::c_uint = 0;
+        let mut first_block = true;
+        loop {
+            let (initial_avail_in, plan) = {
+                let state = &mut *s;
+                let strm = &mut *state.strm;
+                (
                     strm.avail_in,
-                    flush,
-                ),
-            )
-        };
-        if first_block {
-            used = initial_avail_in;
-            first_block = false;
-        }
-        let Some(plan) = plan else {
-            break;
-        };
-        len = plan.len;
-        left = plan.left;
-        last = plan.last;
-        // The zero-length stored block needs only the already-owned pending
-        // buffer.  Lend that validated buffer directly to the safe core
-        // instead of round-tripping through the raw `_tr_stored_block`
-        // adapter.
-        let state = &mut *s;
-        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-            return need_more;
-        };
-        if pending_len != 0 && state.pending_buf.is_null() {
-            return need_more;
-        }
-        let pending_buf = if pending_len == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-        };
-        let _ = crate::src::trees::tr_stored_block_state(
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-            &mut state.bi_used,
-            &[],
-            last,
-        );
-        if !set_stored_block_length_state(pending_buf, state.pending, len) {
-            return need_more;
-        }
-        if last != 0 {
-            state.bi_used = 8 as ::core::ffi::c_int;
-        }
-        flush_pending(state.strm);
-        if left != 0 {
-            let state = &mut *s;
-            let strm = &mut *state.strm;
-            let (Ok(window_len), Ok(output_len)) = (
-                usize::try_from(state.window_size),
-                usize::try_from(strm.avail_out),
-            ) else {
-                return need_more;
+                    stored_initial_block_plan(
+                        state.pending_buf_size,
+                        state.w_size,
+                        state.bi_valid,
+                        strm.avail_out,
+                        state.strstart,
+                        state.block_start,
+                        strm.avail_in,
+                        flush,
+                    ),
+                )
             };
-            if (window_len != 0 && state.window.is_null())
-                || (output_len != 0 && strm.next_out.is_null())
-            {
-                return need_more;
+            if first_block {
+                used = initial_avail_in;
+                first_block = false;
             }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
+            let Some(plan) = plan else {
+                break;
             };
-            let output = if output_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(strm.next_out, output_len)
-            };
-            let Some(copy) =
-                copy_stored_window_to_output_state(window, output, state.block_start, left, len)
-            else {
-                return need_more;
-            };
-            // `copy.copied` is bounded by the output view above.  Preserve
-            // the ABI cursor advance without unsafe pointer arithmetic.
-            strm.next_out = strm.next_out.wrapping_add(copy.copied as usize);
-            strm.avail_out = strm.avail_out.wrapping_sub(copy.copied);
-            strm.total_out = strm
-                .total_out
-                .wrapping_add(copy.copied as crate::stdlib::uLong);
-            state.block_start = copy.block_start;
-            len = copy.remaining;
-        }
-        if len != 0 {
-            let state = &mut *s;
-            let stream = state.strm;
-            let strm = &mut *stream;
-            read_buf(stream, strm.next_out, len, state.wrap);
-            // `read_buf()` consumed at most the requested `len` bytes, so
-            // this is a cursor update only; no pointer dereference is needed.
-            strm.next_out = strm.next_out.wrapping_add(len as usize);
-            strm.avail_out = strm.avail_out.wrapping_sub(len);
-            strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
-        }
-        if last != 0 as ::core::ffi::c_int {
-            break;
-        }
-    }
-    used = used.wrapping_sub({
-        let state = &mut *s;
-        let strm = &mut *state.strm;
-        strm.avail_in
-    });
-    if used != 0 {
-        let state = &mut *s;
-        let strm = &mut *state.strm;
-        let Ok(window_len) = usize::try_from(state.window_size) else {
-            return need_more;
-        };
-        let Ok(used_len) = usize::try_from(used) else {
-            return need_more;
-        };
-        if state.window.is_null() || strm.next_in.is_null() {
-            return need_more;
-        }
-        let window = ::core::slice::from_raw_parts_mut(state.window, window_len);
-        let consumed =
-            ::core::slice::from_raw_parts(strm.next_in.wrapping_sub(used as usize), used_len);
-        if !update_stored_history_state(state, window, consumed) {
-            return need_more;
-        }
-    }
-    if last != 0 {
-        return finish_done;
-    }
-    {
-        let state = &mut *s;
-        let stream = state.strm;
-        let strm = &mut *stream;
-        if flush != crate::zlib_h::Z_NO_FLUSH
-            && flush != crate::zlib_h::Z_FINISH
-            && strm.avail_in == 0 as crate::stdlib::uInt
-            && state.strstart as ::core::ffi::c_long == state.block_start
-        {
-            return block_done;
-        }
-        let Ok(window_len) = usize::try_from(state.window_size) else {
-            return need_more;
-        };
-        if window_len != 0 && state.window.is_null() {
-            return need_more;
-        }
-        let window = if window_len == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(state.window, window_len)
-        };
-        let Some(next_have) = rebalance_stored_window_state(state, window, strm.avail_in) else {
-            return need_more;
-        };
-        have = next_have;
-        if have > strm.avail_in {
-            have = strm.avail_in as ::core::ffi::c_uint;
-        }
-        if have != 0 {
-            let output = state.window.wrapping_add(state.strstart as usize);
-            read_buf(stream, output, have, state.wrap);
-            record_stored_input_state(state, have);
-        }
-        let tail_plan = stored_tail_block_plan(
-            state.pending_buf_size,
-            state.bi_valid,
-            state.w_size,
-            state.strstart,
-            state.block_start,
-            strm.avail_in,
-            flush,
-        );
-        if let Some(plan) = tail_plan {
             len = plan.len;
+            left = plan.left;
             last = plan.last;
+            // The zero-length stored block needs only the already-owned pending
+            // buffer.  Lend that validated buffer directly to the safe core
+            // instead of round-tripping through the raw `_tr_stored_block`
+            // adapter.
+            let state = &mut *s;
             let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                 return need_more;
             };
@@ -4074,35 +3924,196 @@ unsafe fn deflate_stored(
             } else {
                 ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
             };
-            let stored = if len == 0 {
-                &[]
-            } else {
-                let Some(stored) = stored_block_window_slice(window, state.block_start, len) else {
-                    return need_more;
-                };
-                stored
-            };
             let _ = crate::src::trees::tr_stored_block_state(
                 pending_buf,
                 &mut state.pending,
                 &mut state.bi_buf,
                 &mut state.bi_valid,
                 &mut state.bi_used,
-                stored,
+                &[],
                 last,
             );
-            state.block_start += len as ::core::ffi::c_long;
+            if !set_stored_block_length_state(pending_buf, state.pending, len) {
+                return need_more;
+            }
             if last != 0 {
                 state.bi_used = 8 as ::core::ffi::c_int;
             }
             flush_pending(state.strm);
+            if left != 0 {
+                let state = &mut *s;
+                let strm = &mut *state.strm;
+                let (Ok(window_len), Ok(output_len)) = (
+                    usize::try_from(state.window_size),
+                    usize::try_from(strm.avail_out),
+                ) else {
+                    return need_more;
+                };
+                if (window_len != 0 && state.window.is_null())
+                    || (output_len != 0 && strm.next_out.is_null())
+                {
+                    return need_more;
+                }
+                let window = if window_len == 0 {
+                    &[]
+                } else {
+                    ::core::slice::from_raw_parts(state.window, window_len)
+                };
+                let output = if output_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(strm.next_out, output_len)
+                };
+                let Some(copy) = copy_stored_window_to_output_state(
+                    window,
+                    output,
+                    state.block_start,
+                    left,
+                    len,
+                ) else {
+                    return need_more;
+                };
+                // `copy.copied` is bounded by the output view above.  Preserve
+                // the ABI cursor advance without unsafe pointer arithmetic.
+                strm.next_out = strm.next_out.wrapping_add(copy.copied as usize);
+                strm.avail_out = strm.avail_out.wrapping_sub(copy.copied);
+                strm.total_out = strm
+                    .total_out
+                    .wrapping_add(copy.copied as crate::stdlib::uLong);
+                state.block_start = copy.block_start;
+                len = copy.remaining;
+            }
+            if len != 0 {
+                let state = &mut *s;
+                let stream = state.strm;
+                let strm = &mut *stream;
+                read_buf(stream, strm.next_out, len, state.wrap);
+                // `read_buf()` consumed at most the requested `len` bytes, so
+                // this is a cursor update only; no pointer dereference is needed.
+                strm.next_out = strm.next_out.wrapping_add(len as usize);
+                strm.avail_out = strm.avail_out.wrapping_sub(len);
+                strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+            }
+            if last != 0 as ::core::ffi::c_int {
+                break;
+            }
         }
+        used = used.wrapping_sub({
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            strm.avail_in
+        });
+        if used != 0 {
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            let Ok(window_len) = usize::try_from(state.window_size) else {
+                return need_more;
+            };
+            let Ok(used_len) = usize::try_from(used) else {
+                return need_more;
+            };
+            if state.window.is_null() || strm.next_in.is_null() {
+                return need_more;
+            }
+            let window = ::core::slice::from_raw_parts_mut(state.window, window_len);
+            let consumed =
+                ::core::slice::from_raw_parts(strm.next_in.wrapping_sub(used as usize), used_len);
+            if !update_stored_history_state(state, window, consumed) {
+                return need_more;
+            }
+        }
+        if last != 0 {
+            return finish_done;
+        }
+        {
+            let state = &mut *s;
+            let stream = state.strm;
+            let strm = &mut *stream;
+            if flush != crate::zlib_h::Z_NO_FLUSH
+                && flush != crate::zlib_h::Z_FINISH
+                && strm.avail_in == 0 as crate::stdlib::uInt
+                && state.strstart as ::core::ffi::c_long == state.block_start
+            {
+                return block_done;
+            }
+            let Ok(window_len) = usize::try_from(state.window_size) else {
+                return need_more;
+            };
+            if window_len != 0 && state.window.is_null() {
+                return need_more;
+            }
+            let window = if window_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.window, window_len)
+            };
+            let Some(next_have) = rebalance_stored_window_state(state, window, strm.avail_in)
+            else {
+                return need_more;
+            };
+            have = next_have;
+            if have > strm.avail_in {
+                have = strm.avail_in as ::core::ffi::c_uint;
+            }
+            if have != 0 {
+                let output = state.window.wrapping_add(state.strstart as usize);
+                read_buf(stream, output, have, state.wrap);
+                record_stored_input_state(state, have);
+            }
+            let tail_plan = stored_tail_block_plan(
+                state.pending_buf_size,
+                state.bi_valid,
+                state.w_size,
+                state.strstart,
+                state.block_start,
+                strm.avail_in,
+                flush,
+            );
+            if let Some(plan) = tail_plan {
+                len = plan.len;
+                last = plan.last;
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                    return need_more;
+                };
+                if pending_len != 0 && state.pending_buf.is_null() {
+                    return need_more;
+                }
+                let pending_buf = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                };
+                let stored = if len == 0 {
+                    &[]
+                } else {
+                    let Some(stored) = stored_block_window_slice(window, state.block_start, len)
+                    else {
+                        return need_more;
+                    };
+                    stored
+                };
+                let _ = crate::src::trees::tr_stored_block_state(
+                    pending_buf,
+                    &mut state.pending,
+                    &mut state.bi_buf,
+                    &mut state.bi_valid,
+                    &mut state.bi_used,
+                    stored,
+                    last,
+                );
+                state.block_start += len as ::core::ffi::c_long;
+                if last != 0 {
+                    state.bi_used = 8 as ::core::ffi::c_int;
+                }
+                flush_pending(state.strm);
+            }
+        }
+        return (if last != 0 {
+            finish_started as ::core::ffi::c_int
+        } else {
+            need_more as ::core::ffi::c_int
+        }) as block_state;
     }
-    return (if last != 0 {
-        finish_started as ::core::ffi::c_int
-    } else {
-        need_more as ::core::ffi::c_int
-    }) as block_state;
 }
 
 unsafe fn deflate_fast(
