@@ -3613,7 +3613,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
 ) {
     unsafe { tr_flush_block_from_raw(s, buf, stored_len, last) };
 }
-pub unsafe fn _tr_tally(
+pub fn _tr_tally(
     s: &mut crate::src::deflate::deflate_state,
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
