@@ -4389,7 +4389,7 @@ pub(crate) fn tr_stored_block_state(
     append_pending(pending_buf, pending, &header) && append_pending(pending_buf, pending, stored)
 }
 
-fn tr_align_state(
+pub(crate) fn tr_align_state(
     pending_buf: &mut [crate::stdlib::Byte],
     pending: &mut crate::zutil_h::ulg,
     bi_buf: &mut crate::zutil_h::ush,
@@ -5238,7 +5238,9 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     let pending_buf = ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len);
     flush_bits_state(&mut *s, pending_buf);
 }
-pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
+#[export_name = "_tr_align"]
+
+pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     if s.is_null() {
         return;
     }
@@ -5255,11 +5257,6 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
         ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
     };
     tr_align_state(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid);
-}
-#[export_name = "_tr_align"]
-
-pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_align(s)
 }
 fn compress_block_state(
     pending_buf: &mut [crate::stdlib::Byte],

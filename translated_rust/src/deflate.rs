@@ -151,7 +151,6 @@ pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
-pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
@@ -2321,10 +2320,15 @@ pub unsafe extern "C" fn deflate(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if (*strm).next_out.is_null()
-        || (*strm).avail_in != 0 as crate::stdlib::uInt && (*strm).next_in.is_null()
-        || (*s).status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
-    {
+    let invalid_stream_or_state = {
+        let strm_ref = &*strm;
+        let state = &*s;
+        strm_ref.next_out.is_null()
+            || strm_ref.avail_in != 0 as crate::stdlib::uInt && strm_ref.next_in.is_null()
+            || state.status == crate::src::deflate::FINISH_STATE
+                && flush != crate::zlib_h::Z_FINISH
+    };
+    if invalid_stream_or_state {
         (*strm).msg =
             crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int) < -6 as ::core::ffi::c_int
                 || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -2672,7 +2676,27 @@ pub unsafe extern "C" fn deflate(
         if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                crate::src::trees::_tr_align(s as *mut crate::src::deflate::internal_state);
+                // This exported stream boundary owns the callback-allocated
+                // pending buffer lend.  The bit alignment itself is a safe
+                // slice/state transition.
+                let state = &mut *s;
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if pending_len != 0 && state.pending_buf.is_null() {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let pending_buf = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                };
+                crate::src::trees::tr_align_state(
+                    pending_buf,
+                    &mut state.pending,
+                    &mut state.bi_buf,
+                    &mut state.bi_valid,
+                );
             } else if flush != crate::zlib_h::Z_BLOCK {
                 crate::src::trees::_tr_stored_block(
                     s as *mut crate::src::deflate::internal_state,
