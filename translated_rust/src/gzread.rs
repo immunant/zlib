@@ -958,6 +958,82 @@ fn gz_skip_step(
     }
 }
 
+// Resolving a pending forward seek can fetch more gzip data, so it remains at
+// an exported boundary.  Keep all three public read paths on the same checked
+// cursor-reconciliation and commit sequence rather than letting their copies
+// drift apart.
+macro_rules! gz_resolve_skip_at_boundary {
+    ($state:expr) => {{
+        let mut resolved = true;
+        while $state.skip != 0 {
+            match gz_skip_step($state.x.have, $state.skip, $state.eof, $state.strm.avail_in) {
+                Ok(GzSkipStep::Complete) => break,
+                Ok(GzSkipStep::NeedFetch) => {
+                    if gz_fetch_at_boundary!($state) == -1 {
+                        resolved = false;
+                        break;
+                    }
+                }
+                Ok(GzSkipStep::Advance { consumed, complete }) => {
+                    let commit = {
+                        let Some(output) = $state
+                            .buffers
+                            .as_ref()
+                            .and_then(|buffers| buffers.output.as_ref())
+                        else {
+                            resolved = false;
+                            break;
+                        };
+                        let Some(next_index) = gz_owned_buffer_index(
+                            output.as_ptr() as usize,
+                            output.len(),
+                            $state.x.next as usize,
+                        ) else {
+                            resolved = false;
+                            break;
+                        };
+                        let Some(commit) = gz_skip_buffer_commit_plan(
+                            output.len(),
+                            next_index,
+                            $state.x.have,
+                            $state.x.pos,
+                            $state.skip,
+                            consumed,
+                        ) else {
+                            resolved = false;
+                            break;
+                        };
+                        commit
+                    };
+                    if !resolved {
+                        break;
+                    }
+                    let Some(output) = $state
+                        .buffers
+                        .as_mut()
+                        .and_then(|buffers| buffers.output.as_mut())
+                    else {
+                        resolved = false;
+                        break;
+                    };
+                    $state.x.next = output.as_mut_ptr().wrapping_add(commit.next_index);
+                    $state.x.have = commit.have;
+                    $state.x.pos = commit.pos;
+                    $state.skip = commit.skip;
+                    if complete {
+                        break;
+                    }
+                }
+                Err(()) => {
+                    resolved = false;
+                    break;
+                }
+            }
+        }
+        resolved
+    }};
+}
+
 // The only remaining codec calls in this read loop are deliberately expanded
 // in exported read entry points.  Keeping the validated state and caller
 // slice at that ABI boundary avoids a private unsafe forwarding adapter.
@@ -973,64 +1049,8 @@ macro_rules! gz_read_at_boundary {
             if len == 0 as crate::stdlib::z_size_t {
                 break 'gz_read_result 0 as crate::stdlib::z_size_t;
             }
-            while state_ref.skip != 0 {
-                match gz_skip_step(
-                    state_ref.x.have,
-                    state_ref.skip,
-                    state_ref.eof,
-                    state_ref.strm.avail_in,
-                ) {
-                    Ok(GzSkipStep::Complete) => break,
-                    Ok(GzSkipStep::NeedFetch) => {
-                        if gz_fetch_at_boundary!(state_ref) == -1 as ::core::ffi::c_int {
-                            break 'gz_read_result 0 as crate::stdlib::z_size_t;
-                        }
-                    }
-                    Ok(GzSkipStep::Advance { consumed, complete }) => {
-                        let commit = {
-                            let Some(output) = state_ref
-                                .buffers
-                                .as_ref()
-                                .and_then(|buffers| buffers.output.as_ref())
-                            else {
-                                break 'gz_read_result 0;
-                            };
-                            let Some(next_index) = gz_owned_buffer_index(
-                                output.as_ptr() as usize,
-                                output.len(),
-                                state_ref.x.next as usize,
-                            ) else {
-                                break 'gz_read_result 0;
-                            };
-                            let Some(commit) = gz_skip_buffer_commit_plan(
-                                output.len(),
-                                next_index,
-                                state_ref.x.have,
-                                state_ref.x.pos,
-                                state_ref.skip,
-                                consumed,
-                            ) else {
-                                break 'gz_read_result 0;
-                            };
-                            commit
-                        };
-                        let Some(output) = state_ref
-                            .buffers
-                            .as_mut()
-                            .and_then(|buffers| buffers.output.as_mut())
-                        else {
-                            break 'gz_read_result 0;
-                        };
-                        state_ref.x.next = output.as_mut_ptr().wrapping_add(commit.next_index);
-                        state_ref.x.have = commit.have;
-                        state_ref.x.pos = commit.pos;
-                        state_ref.skip = commit.skip;
-                        if complete {
-                            break;
-                        }
-                    }
-                    Err(()) => break 'gz_read_result 0 as crate::stdlib::z_size_t,
-                }
+            if !gz_resolve_skip_at_boundary!(state_ref) {
+                break 'gz_read_result 0 as crate::stdlib::z_size_t;
             }
             got = 0 as crate::stdlib::z_size_t;
             err = 0 as ::core::ffi::c_int;
@@ -1428,59 +1448,8 @@ pub unsafe extern "C" fn gzungetc_ffi(
         return -1;
     }
     crate::src::gzlib::gz_error_clear(state);
-    while state.skip != 0 {
-        match gz_skip_step(state.x.have, state.skip, state.eof, state.strm.avail_in) {
-            Ok(GzSkipStep::Complete) => break,
-            Ok(GzSkipStep::NeedFetch) => {
-                if gz_fetch_at_boundary!(state) == -1 {
-                    return -1;
-                }
-            }
-            Ok(GzSkipStep::Advance { consumed, complete }) => {
-                let commit = {
-                    let Some(output) = state
-                        .buffers
-                        .as_ref()
-                        .and_then(|buffers| buffers.output.as_ref())
-                    else {
-                        return -1;
-                    };
-                    let Some(next_index) = gz_owned_buffer_index(
-                        output.as_ptr() as usize,
-                        output.len(),
-                        state.x.next as usize,
-                    ) else {
-                        return -1;
-                    };
-                    let Some(commit) = gz_skip_buffer_commit_plan(
-                        output.len(),
-                        next_index,
-                        state.x.have,
-                        state.x.pos,
-                        state.skip,
-                        consumed,
-                    ) else {
-                        return -1;
-                    };
-                    commit
-                };
-                let Some(output) = state
-                    .buffers
-                    .as_mut()
-                    .and_then(|buffers| buffers.output.as_mut())
-                else {
-                    return -1;
-                };
-                state.x.next = output.as_mut_ptr().wrapping_add(commit.next_index);
-                state.x.have = commit.have;
-                state.x.pos = commit.pos;
-                state.skip = commit.skip;
-                if complete {
-                    break;
-                }
-            }
-            Err(()) => return -1,
-        }
+    if !gz_resolve_skip_at_boundary!(state) {
+        return -1;
     }
 
     // `gzgetc` is allowed to advance the public prefix cursor directly, so
@@ -1555,59 +1524,8 @@ pub unsafe extern "C" fn gzgets_ffi(
     }
     let destination = ::core::slice::from_raw_parts_mut(buf as *mut u8, len as usize);
     crate::src::gzlib::gz_error_clear(state);
-    while state.skip != 0 {
-        match gz_skip_step(state.x.have, state.skip, state.eof, state.strm.avail_in) {
-            Ok(GzSkipStep::Complete) => break,
-            Ok(GzSkipStep::NeedFetch) => {
-                if gz_fetch_at_boundary!(state) == -1 {
-                    return ::core::ptr::null_mut();
-                }
-            }
-            Ok(GzSkipStep::Advance { consumed, complete }) => {
-                let commit = {
-                    let Some(output) = state
-                        .buffers
-                        .as_ref()
-                        .and_then(|buffers| buffers.output.as_ref())
-                    else {
-                        return ::core::ptr::null_mut();
-                    };
-                    let Some(next_index) = gz_owned_buffer_index(
-                        output.as_ptr() as usize,
-                        output.len(),
-                        state.x.next as usize,
-                    ) else {
-                        return ::core::ptr::null_mut();
-                    };
-                    let Some(commit) = gz_skip_buffer_commit_plan(
-                        output.len(),
-                        next_index,
-                        state.x.have,
-                        state.x.pos,
-                        state.skip,
-                        consumed,
-                    ) else {
-                        return ::core::ptr::null_mut();
-                    };
-                    commit
-                };
-                let Some(output) = state
-                    .buffers
-                    .as_mut()
-                    .and_then(|buffers| buffers.output.as_mut())
-                else {
-                    return ::core::ptr::null_mut();
-                };
-                state.x.next = output.as_mut_ptr().wrapping_add(commit.next_index);
-                state.x.have = commit.have;
-                state.x.pos = commit.pos;
-                state.skip = commit.skip;
-                if complete {
-                    break;
-                }
-            }
-            Err(()) => return ::core::ptr::null_mut(),
-        }
+    if !gz_resolve_skip_at_boundary!(state) {
+        return ::core::ptr::null_mut();
     }
     let mut left = (destination.len() as ::core::ffi::c_uint).wrapping_sub(1);
     let mut written = 0usize;
