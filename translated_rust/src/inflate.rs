@@ -106,8 +106,8 @@ pub struct inflate_state {
 }
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::adler32::adler32;
-pub use crate::src::crc32::crc32;
+pub use crate::src::adler32::adler32_ffi;
+pub use crate::src::crc32::crc32_ffi;
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inftrees::code;
 pub use crate::src::inftrees::codetype;
@@ -888,13 +888,13 @@ pub unsafe extern "C" fn inflate(
                     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
                         (*state).check = (if (*state).flags != 0 {
-                            crate::src::crc32::crc32(
+                            crate::src::crc32::crc32_ffi(
                                 (*state).check as crate::stdlib::uLong,
                                 put.offset(-(out as isize)),
                                 out as crate::stdlib::uInt,
                             )
                         } else {
-                            crate::src::adler32::adler32(
+                            crate::src::adler32::adler32_ffi(
                                 (*state).check as crate::stdlib::uLong,
                                 put.offset(-(out as isize)),
                                 out as crate::stdlib::uInt,
@@ -1592,7 +1592,7 @@ pub unsafe extern "C" fn inflate(
                         if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                             && (*state).wrap & 4 as ::core::ffi::c_int != 0
                         {
-                            (*state).check = crate::src::crc32::crc32(
+                            (*state).check = crate::src::crc32::crc32_ffi(
                                 (*state).check as crate::stdlib::uLong,
                                 next,
                                 copy as crate::stdlib::uInt,
@@ -1666,7 +1666,7 @@ pub unsafe extern "C" fn inflate(
                     if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                         && (*state).wrap & 4 as ::core::ffi::c_int != 0
                     {
-                        (*state).check = crate::src::crc32::crc32(
+                        (*state).check = crate::src::crc32::crc32_ffi(
                             (*state).check as crate::stdlib::uLong,
                             next,
                             copy as crate::stdlib::uInt,
@@ -1782,7 +1782,7 @@ pub unsafe extern "C" fn inflate(
                     if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                         && (*state).wrap & 4 as ::core::ffi::c_int != 0
                     {
-                        (*state).check = crate::src::crc32::crc32(
+                        (*state).check = crate::src::crc32::crc32_ffi(
                             (*state).check as crate::stdlib::uLong,
                             next,
                             copy as crate::stdlib::uInt,
@@ -1947,13 +1947,13 @@ pub unsafe extern "C" fn inflate(
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
         (*state).check = (if (*state).flags != 0 {
-            crate::src::crc32::crc32(
+            crate::src::crc32::crc32_ffi(
                 (*state).check as crate::stdlib::uLong,
                 (*strm).next_out.offset(-(out as isize)),
                 out as crate::stdlib::uInt,
             )
         } else {
-            crate::src::adler32::adler32(
+            crate::src::adler32::adler32_ffi(
                 (*state).check as crate::stdlib::uLong,
                 (*strm).next_out.offset(-(out as isize)),
                 out as crate::stdlib::uInt,
@@ -1999,7 +1999,9 @@ pub unsafe extern "C" fn inflate_ffi(
 ) -> ::core::ffi::c_int {
     inflate(strm, flush)
 }
-pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+#[export_name = "inflateEnd"]
+
+pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
@@ -2018,11 +2020,6 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     );
     (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateEnd"]
-
-pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    inflateEnd(strm)
 }
 pub fn inflateGetDictionary(
     state: &crate::src::inflate::inflate_state,
@@ -2082,7 +2079,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
     {
         dictid = crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
         dictid =
-            crate::src::adler32::adler32(dictid as crate::stdlib::uLong, dictionary, dictLength)
+            crate::src::adler32::adler32_ffi(dictid as crate::stdlib::uLong, dictionary, dictLength)
                 as ::core::ffi::c_ulong;
         if dictid != (*state).check {
             return crate::zlib_h::Z_DATA_ERROR;

@@ -4796,7 +4796,9 @@ pub fn crc32_update(
     crc32_slice(crc, buf)
 }
 
-pub unsafe extern "C" fn crc32_z(
+#[export_name = "crc32_z"]
+
+pub unsafe extern "C" fn crc32_z_ffi(
     mut crc: crate::stdlib::uLong,
     mut buf: *const ::core::ffi::c_uchar,
     mut len: crate::stdlib::z_size_t,
@@ -4806,22 +4808,6 @@ pub unsafe extern "C" fn crc32_z(
     }
     crc32_slice(crc, ::core::slice::from_raw_parts(buf, len as usize))
 }
-#[export_name = "crc32_z"]
-
-pub unsafe extern "C" fn crc32_z_ffi(
-    mut crc: crate::stdlib::uLong,
-    mut buf: *const ::core::ffi::c_uchar,
-    mut len: crate::stdlib::z_size_t,
-) -> crate::stdlib::uLong {
-    crc32_z(crc, buf, len)
-}
-pub unsafe extern "C" fn crc32(
-    mut crc: crate::stdlib::uLong,
-    mut buf: *const ::core::ffi::c_uchar,
-    mut len: crate::stdlib::uInt,
-) -> crate::stdlib::uLong {
-    return crc32_z(crc, buf, len as crate::stdlib::z_size_t);
-}
 #[export_name = "crc32"]
 
 pub unsafe extern "C" fn crc32_ffi(
@@ -4829,7 +4815,7 @@ pub unsafe extern "C" fn crc32_ffi(
     mut buf: *const ::core::ffi::c_uchar,
     mut len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    crc32(crc, buf, len)
+    crc32_z_ffi(crc, buf, len as crate::stdlib::z_size_t)
 }
 pub fn crc32_combine_gen64(len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
     if len2 < 0 as crate::stdlib::off64_t {

@@ -3,7 +3,7 @@ pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
-pub use crate::src::inflate::inflateEnd;
+pub use crate::src::inflate::inflateEnd_ffi;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::uLongf;
@@ -108,7 +108,9 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
     *sourceLen = (*sourceLen).wrapping_sub(len);
     *destLen = (*destLen).wrapping_sub(left);
-    crate::src::inflate::inflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+    crate::src::inflate::inflateEnd_ffi(
+        &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+    );
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
     } else if err == crate::zlib_h::Z_NEED_DICT {

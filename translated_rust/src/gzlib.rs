@@ -366,6 +366,20 @@ pub fn gz_clamped_uint(
         value
     }
 }
+
+pub fn gz_io_chunk_limit() -> ::core::ffi::c_uint {
+    (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2 as ::core::ffi::c_int)
+        .wrapping_add(1 as ::core::ffi::c_uint)
+}
+
+pub fn gz_z_size_to_uInt_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
+    let max = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
+    if max as crate::stdlib::z_size_t > len {
+        len as ::core::ffi::c_uint
+    } else {
+        max
+    }
+}
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {

@@ -2,7 +2,7 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::deflate;
-pub use crate::src::deflate::deflateEnd;
+pub use crate::src::deflate::deflateEnd_ffi;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -104,7 +104,9 @@ pub unsafe extern "C" fn compress2_z_ffi(
         }
     }
     *destLen = stream.next_out.offset_from(dest) as ::core::ffi::c_long as crate::stdlib::z_size_t;
-    crate::src::deflate::deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+    crate::src::deflate::deflateEnd_ffi(
+        &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+    );
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
     } else {

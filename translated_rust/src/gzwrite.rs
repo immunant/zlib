@@ -5,6 +5,8 @@ pub use crate::gzguts_h::gz_statep;
 pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_clamped_uint;
+pub use crate::src::gzlib::gz_io_chunk_limit;
+pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;
@@ -15,7 +17,7 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::deflate;
-pub use crate::src::deflate::deflateEnd;
+pub use crate::src::deflate::deflateEnd_ffi;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflateReset;
 pub use crate::src::deflate::internal_state;
@@ -115,9 +117,7 @@ unsafe extern "C" fn gz_comp(
     let mut writ: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
+    let mut max: ::core::ffi::c_uint = gz_io_chunk_limit();
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
@@ -324,10 +324,7 @@ unsafe extern "C" fn gz_write(
         }
         (*state).strm.next_in = buf as *mut crate::stdlib::Bytef;
         loop {
-            let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            if n as crate::stdlib::z_size_t > len {
-                n = len as ::core::ffi::c_uint;
-            }
+            let mut n: ::core::ffi::c_uint = gz_z_size_to_uInt_chunk(len);
             (*state).strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
             n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
@@ -636,7 +633,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     }
     if (*state).size != 0 {
         if (*state).direct == 0 {
-            crate::src::deflate::deflateEnd(
+            crate::src::deflate::deflateEnd_ffi(
                 &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
             crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);

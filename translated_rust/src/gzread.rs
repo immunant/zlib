@@ -8,6 +8,8 @@ pub use crate::gzguts_h::GZ_READ;
 pub use crate::gzguts_h::LOOK;
 pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_clamped_uint;
+pub use crate::src::gzlib::gz_io_chunk_limit;
+pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;
@@ -19,7 +21,7 @@ pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
-pub use crate::src::inflate::inflateEnd;
+pub use crate::src::inflate::inflateEnd_ffi;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::src::inflate::inflateReset;
 
@@ -57,9 +59,7 @@ unsafe fn gz_load(
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
+    let mut max: ::core::ffi::c_uint = gz_io_chunk_limit();
     (*state).again = 0 as ::core::ffi::c_int;
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
@@ -406,10 +406,7 @@ unsafe extern "C" fn gz_read(
     err = 0 as ::core::ffi::c_int;
     let mut c2rust_current_block_30: u64;
     loop {
-        n = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-        if n as crate::stdlib::z_size_t > len {
-            n = len as ::core::ffi::c_uint;
-        }
+        n = gz_z_size_to_uInt_chunk(len);
         if (*state).x.have != 0 {
             if (*state).x.have < n {
                 n = (*state).x.have;
@@ -787,7 +784,7 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if (*state).size != 0 {
-        crate::src::inflate::inflateEnd(
+        crate::src::inflate::inflateEnd_ffi(
             &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
         crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
