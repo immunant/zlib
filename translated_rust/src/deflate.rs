@@ -918,26 +918,24 @@ pub unsafe extern "C" fn deflateGetDictionary(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut len: crate::stdlib::uInt = 0;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    len = (*s).strstart.wrapping_add((*s).lookahead);
-    if len > (*s).w_size {
-        len = (*s).w_size;
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    len = state.strstart.wrapping_add(state.lookahead);
+    if len > state.w_size {
+        len = state.w_size;
     }
     if !dictionary.is_null() && len != 0 {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize)
-                .offset(-(len as isize)) as *const ::core::ffi::c_void,
-            len as crate::__stddef_size_t_h::size_t,
-        );
+        // The window allocation has exactly `window_size` bytes.  The C API
+        // supplies a destination large enough for the returned dictionary.
+        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+        let end = state.strstart.wrapping_add(state.lookahead) as usize;
+        let len = len as usize;
+        let source = &window[end - len..end];
+        let output = ::core::slice::from_raw_parts_mut(dictionary, len);
+        output.copy_from_slice(source);
     }
     if !dictLength.is_null() {
         *dictLength = len;
