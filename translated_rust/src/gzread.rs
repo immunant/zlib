@@ -314,6 +314,10 @@ fn gz_is_gzip_header(
     first == 31 && second == 139 && third == 8 && fourth < 32
 }
 
+fn gz_look_needs_more_input(avail_in: crate::stdlib::uInt, again: ::core::ffi::c_int) -> bool {
+    avail_in == 0 || again != 0 && avail_in < 4
+}
+
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
@@ -366,9 +370,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     if gz_avail(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*strm).avail_in == 0 as crate::stdlib::uInt
-        || (*state).again != 0 && (*strm).avail_in < 4 as crate::stdlib::uInt
-    {
+    if gz_look_needs_more_input((*strm).avail_in, (*state).again) {
         return 0 as ::core::ffi::c_int;
     }
     if (*strm).avail_in > 3 as crate::stdlib::uInt
@@ -550,6 +552,34 @@ fn gz_skip_core(
     *pos += n as crate::stdlib::off64_t;
     *skip -= n as crate::stdlib::off64_t;
     n
+}
+
+fn gzgets_copy_len(
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    newline_offset: Option<usize>,
+) -> ::core::ffi::c_uint {
+    let limit = if have > left { left } else { have };
+    match newline_offset {
+        Some(offset) if offset < limit as usize => (offset as ::core::ffi::c_uint).wrapping_add(1),
+        _ => limit,
+    }
+}
+
+fn gzclose_r_result(
+    stream_err: ::core::ffi::c_int,
+    close_ret: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let err = if stream_err == crate::zlib_h::Z_BUF_ERROR {
+        crate::zlib_h::Z_BUF_ERROR
+    } else {
+        crate::zlib_h::Z_OK
+    };
+    if close_ret != 0 {
+        crate::zlib_h::Z_ERRNO
+    } else {
+        err
+    }
 }
 
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
@@ -805,6 +835,18 @@ mod tests {
     }
 
     #[test]
+    fn gz_look_needs_more_input_requires_data_for_initial_probe() {
+        assert!(gz_look_needs_more_input(0, 0));
+        assert!(!gz_look_needs_more_input(4, 0));
+    }
+
+    #[test]
+    fn gz_look_needs_more_input_retries_until_header_is_wide_enough() {
+        assert!(gz_look_needs_more_input(3, 1));
+        assert!(!gz_look_needs_more_input(4, 1));
+    }
+
+    #[test]
     fn gz_skip_core_consumes_only_remaining_skip() {
         let mut have = 10;
         let mut pos = 42;
@@ -840,6 +882,44 @@ mod tests {
         assert_eq!(have, 0);
         assert_eq!(pos, 52);
         assert_eq!(skip, 5);
+    }
+
+    #[test]
+    fn gzgets_copy_len_prefers_smaller_buffer_limit() {
+        assert_eq!(gzgets_copy_len(10, 4, None), 4);
+        assert_eq!(gzgets_copy_len(4, 10, None), 4);
+    }
+
+    #[test]
+    fn gzgets_copy_len_stops_after_newline_within_limit() {
+        assert_eq!(gzgets_copy_len(10, 8, Some(0)), 1);
+        assert_eq!(gzgets_copy_len(10, 8, Some(4)), 5);
+    }
+
+    #[test]
+    fn gzgets_copy_len_ignores_newline_past_copy_limit() {
+        assert_eq!(gzgets_copy_len(10, 4, Some(4)), 4);
+        assert_eq!(gzgets_copy_len(3, 8, Some(9)), 3);
+    }
+
+    #[test]
+    fn gzclose_r_result_preserves_buffer_error_on_clean_close() {
+        assert_eq!(
+            gzclose_r_result(crate::zlib_h::Z_BUF_ERROR, 0),
+            crate::zlib_h::Z_BUF_ERROR
+        );
+        assert_eq!(
+            gzclose_r_result(crate::zlib_h::Z_DATA_ERROR, 0),
+            crate::zlib_h::Z_OK
+        );
+    }
+
+    #[test]
+    fn gzclose_r_result_prioritizes_close_failures() {
+        assert_eq!(
+            gzclose_r_result(crate::zlib_h::Z_BUF_ERROR, -1),
+            crate::zlib_h::Z_ERRNO
+        );
     }
 }
 
@@ -1188,20 +1268,18 @@ pub unsafe extern "C" fn gzgets(
                 (*state).past = 1 as ::core::ffi::c_int;
                 break;
             } else {
-                n = if (*state).x.have > left {
-                    left
-                } else {
-                    (*state).x.have
-                };
+                n = gzgets_copy_len((*state).x.have, left, None);
                 eol = crate::stdlib::memchr(
                     (*state).x.next as *const ::core::ffi::c_void,
                     '\n' as i32,
                     n as crate::__stddef_size_t_h::size_t,
                 ) as *mut ::core::ffi::c_uchar;
                 if !eol.is_null() {
-                    n = (eol.offset_from((*state).x.next) as ::core::ffi::c_long
-                        as ::core::ffi::c_uint)
-                        .wrapping_add(1 as ::core::ffi::c_uint);
+                    n = gzgets_copy_len(
+                        (*state).x.have,
+                        left,
+                        Some(eol.offset_from((*state).x.next) as usize),
+                    );
                 }
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
@@ -1256,7 +1334,7 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
 }
 pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
+    let stream_err: ::core::ffi::c_int;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -1273,11 +1351,7 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
         crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
         crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
     }
-    err = if (*state).err == crate::zlib_h::Z_BUF_ERROR {
-        crate::zlib_h::Z_BUF_ERROR
-    } else {
-        crate::zlib_h::Z_OK
-    };
+    stream_err = (*state).err;
     crate::src::gzlib::gz_error(
         state as *mut crate::gzguts_h::gz_state,
         crate::zlib_h::Z_OK,
@@ -1286,11 +1360,7 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
     crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
     ret = crate::stdlib::close((*state).fd);
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
-    return if ret != 0 {
-        crate::zlib_h::Z_ERRNO
-    } else {
-        err
-    };
+    return gzclose_r_result(stream_err, ret);
 }
 #[export_name = "gzclose_r"]
 

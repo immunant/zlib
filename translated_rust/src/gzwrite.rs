@@ -144,6 +144,24 @@ fn gzputs_result(
     }
 }
 
+fn gz_comp_needs_output_write(
+    avail_out: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+) -> bool {
+    avail_out == 0
+        || flush != crate::zlib_h::Z_NO_FLUSH
+            && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
+}
+
+fn gz_comp_write_chunk_len(available: usize, max: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    if available > max as usize {
+        max
+    } else {
+        available as ::core::ffi::c_uint
+    }
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     state.in_0 = crate::stdlib::malloc(
@@ -217,11 +235,7 @@ unsafe extern "C" fn gz_comp(
         while (*strm).avail_in != 0 {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
             (*state).again = 0 as ::core::ffi::c_int;
-            put = if (*strm).avail_in > max {
-                max
-            } else {
-                (*strm).avail_in as ::core::ffi::c_uint
-            };
+            put = gz_comp_write_chunk_len((*strm).avail_in as usize, max);
             writ = crate::stdlib::write(
                 (*state).fd,
                 (*strm).next_in as *const ::core::ffi::c_void,
@@ -254,21 +268,14 @@ unsafe extern "C" fn gz_comp(
     }
     ret = crate::zlib_h::Z_OK;
     loop {
-        if (*strm).avail_out == 0 as crate::stdlib::uInt
-            || flush != crate::zlib_h::Z_NO_FLUSH
-                && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
-        {
+        if gz_comp_needs_output_write((*strm).avail_out, flush, ret) {
             while (*strm).next_out > (*state).x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 (*state).again = 0 as ::core::ffi::c_int;
-                put = if (*strm).next_out.offset_from((*state).x.next) as ::core::ffi::c_long
-                    > max as ::core::ffi::c_int as ::core::ffi::c_long
-                {
-                    max
-                } else {
-                    (*strm).next_out.offset_from((*state).x.next) as ::core::ffi::c_long
-                        as ::core::ffi::c_uint
-                };
+                put = gz_comp_write_chunk_len(
+                    (*strm).next_out.offset_from((*state).x.next) as usize,
+                    max,
+                );
                 writ = crate::stdlib::write(
                     (*state).fd,
                     (*state).x.next as *const ::core::ffi::c_void,
@@ -755,10 +762,10 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_write_buffered_copy_len, gz_write_chunk_consumed_len, gz_write_chunk_len,
-        gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
-        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
-        gzwrite_len_fits_int,
+        gz_comp_needs_output_write, gz_comp_write_chunk_len, gz_write_buffered_copy_len,
+        gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_error_result,
+        gz_write_uses_buffered_path, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
+        gzputs_len_fits_int, gzputs_result, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -812,6 +819,60 @@ mod tests {
     fn gzputs_result_returns_written_count() {
         assert_eq!(gzputs_result(5, 5), 5);
         assert_eq!(gzputs_result(5, 3), 3);
+    }
+
+    #[test]
+    fn gz_comp_needs_output_write_when_output_buffer_is_full() {
+        assert!(gz_comp_needs_output_write(
+            0,
+            crate::zlib_h::Z_NO_FLUSH,
+            crate::zlib_h::Z_OK
+        ));
+    }
+
+    #[test]
+    fn gz_comp_needs_output_write_for_non_finish_flushes() {
+        assert!(gz_comp_needs_output_write(
+            1,
+            crate::zlib_h::Z_BLOCK,
+            crate::zlib_h::Z_OK
+        ));
+    }
+
+    #[test]
+    fn gz_comp_needs_output_write_only_finishes_at_stream_end() {
+        assert!(!gz_comp_needs_output_write(
+            1,
+            crate::zlib_h::Z_FINISH,
+            crate::zlib_h::Z_OK
+        ));
+        assert!(gz_comp_needs_output_write(
+            1,
+            crate::zlib_h::Z_FINISH,
+            crate::zlib_h::Z_STREAM_END
+        ));
+    }
+
+    #[test]
+    fn gz_comp_needs_output_write_skips_idle_no_flush_calls() {
+        assert!(!gz_comp_needs_output_write(
+            1,
+            crate::zlib_h::Z_NO_FLUSH,
+            crate::zlib_h::Z_OK
+        ));
+    }
+
+    #[test]
+    fn gz_comp_write_chunk_len_keeps_lengths_within_cap() {
+        assert_eq!(gz_comp_write_chunk_len(0, 4096), 0);
+        assert_eq!(gz_comp_write_chunk_len(1024, 4096), 1024);
+        assert_eq!(gz_comp_write_chunk_len(4096, 4096), 4096);
+    }
+
+    #[test]
+    fn gz_comp_write_chunk_len_caps_lengths_above_limit() {
+        assert_eq!(gz_comp_write_chunk_len(4097, 4096), 4096);
+        assert_eq!(gz_comp_write_chunk_len(usize::MAX, 4096), 4096);
     }
 
     #[test]
