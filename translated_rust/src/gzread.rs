@@ -935,17 +935,22 @@ fn gz_ungetc_compact_plan(
     }
 }
 
-unsafe fn gz_load(
+fn gz_load(
     state: &mut crate::gzguts_h::gz_state,
     buf: *mut ::core::ffi::c_uchar,
     len: ::core::ffi::c_uint,
 ) -> GzLoadResult {
     match gz_load_read_loop_body!(len, &mut state.eof, &mut state.again, |have, get| {
-        let ret = crate::stdlib::read(
-            state.fd,
-            buf.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
-            get as crate::__stddef_size_t_h::size_t,
-        ) as ::core::ffi::c_int;
+        // `buf` is supplied by the caller together with `len`; the state
+        // machine only advances within that checked C-sized range.  The
+        // actual fd operation remains the libc boundary here.
+        let ret = unsafe {
+            crate::stdlib::read(
+                state.fd,
+                buf.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
+                get as crate::__stddef_size_t_h::size_t,
+            )
+        } as ::core::ffi::c_int;
         let errno = gz_load_errno(ret, std::io::Error::last_os_error().raw_os_error());
         gz_load_read_result(ret, errno)
     }) {
@@ -954,11 +959,13 @@ unsafe fn gz_load(
             failed: false,
         },
         Err(error) => {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(error.errno),
-            );
+            unsafe {
+                crate::src::gzlib::gz_error(
+                    state as *mut crate::gzguts_h::gz_state,
+                    crate::zlib_h::Z_ERRNO,
+                    crate::stdlib::strerror(error.errno),
+                );
+            }
             GzLoadResult {
                 have: error.have,
                 failed: true,
