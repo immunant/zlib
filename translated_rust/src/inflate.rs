@@ -2778,10 +2778,16 @@ pub unsafe fn inflate(
                             state_ref.mode = crate::src::inflate::COMMENT;
                             break 'c_2325;
                         }
+                        // Keep distance-table state and its error publication on
+                        // the decoder entry's validated records. The table cursor
+                        // itself remains a boundary-owned compatibility pointer
+                        // until the ordinary inflate core owns its tables.
+                        let strm_ref = &mut *strm;
+                        let state_ref = &mut *state;
                         loop {
-                            here = *(*state).distcode.wrapping_add(
+                            here = *state_ref.distcode.wrapping_add(
                                 (hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint) << (*state).distbits)
+                                    & ((1 as ::core::ffi::c_uint) << state_ref.distbits)
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
                                     as usize,
                             );
@@ -2803,7 +2809,7 @@ pub unsafe fn inflate(
                         {
                             last = here;
                             loop {
-                                here = *(*state).distcode.wrapping_add(
+                                here = *state_ref.distcode.wrapping_add(
                                     (last.val as ::core::ffi::c_uint).wrapping_add(
                                         (hold as ::core::ffi::c_uint
                                             & ((1 as ::core::ffi::c_uint)
@@ -2833,22 +2839,22 @@ pub unsafe fn inflate(
                             }
                             hold >>= last.bits as ::core::ffi::c_int;
                             bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
-                            (*state).back += last.bits as ::core::ffi::c_int;
+                            state_ref.back += last.bits as ::core::ffi::c_int;
                         }
                         hold >>= here.bits as ::core::ffi::c_int;
                         bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                        (*state).back += here.bits as ::core::ffi::c_int;
+                        state_ref.back += here.bits as ::core::ffi::c_int;
                         if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                            (*strm).msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
+                            strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
+                            state_ref.mode = crate::src::inflate::BAD;
                             continue '_inf_leave;
                         } else {
-                            (*state).offset = here.val as ::core::ffi::c_uint;
-                            (*state).extra =
+                            state_ref.offset = here.val as ::core::ffi::c_uint;
+                            state_ref.extra =
                                 here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
-                            (*state).mode = crate::src::inflate::DISTEXT;
+                            state_ref.mode = crate::src::inflate::DISTEXT;
                             break 'c_2422;
                         }
                     }
