@@ -193,6 +193,13 @@ fn gz_input_range(state: &crate::gzguts_h::gz_state) -> Option<::core::ops::Rang
     (end <= state.in_0.len()).then_some(offset..end)
 }
 
+/// Return the suffix beginning at a validated cursor in gzip's owned output
+/// buffer.  Callers expose its pointer through the ABI state only after the
+/// cursor has been bounded by that buffer's configured capacity.
+fn gz_output_tail(output: &mut [u8], cursor: usize) -> Option<&mut [u8]> {
+    output.get_mut(cursor..)
+}
+
 fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
         let want = state.want as usize;
@@ -525,8 +532,16 @@ fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 );
                 return -1 as ::core::ffi::c_int;
             }
+            let Some(next) = gz_output_tail(&mut state.out, start + n as usize) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal read buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
+            };
             state.x.have = state.x.have.wrapping_sub(n);
-            state.x.next = state.out.as_mut_ptr().wrapping_add(start + n as usize);
+            state.x.next = next.as_mut_ptr();
             state.x.pos += n as crate::stdlib::off64_t;
             state.skip -= n as crate::stdlib::off64_t;
         } else {
@@ -604,7 +619,15 @@ fn gz_read(
                 }
                 let end = start + n as usize;
                 buf[..n as usize].copy_from_slice(&state.out[start..end]);
-                state.x.next = state.out.as_mut_ptr().wrapping_add(end);
+                let Some(next) = gz_output_tail(&mut state.out, end) else {
+                    crate::src::gzlib::gz_static_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal read buffer corrupt\0",
+                    );
+                    return got;
+                };
+                state.x.next = next.as_mut_ptr();
                 state.x.have = state.x.have.wrapping_sub(n);
                 if state.err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
