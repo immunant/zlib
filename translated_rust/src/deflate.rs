@@ -818,27 +818,38 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         stream_size,
     )
 }
-unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
+fn deflate_state_valid(
+    strm: &crate::zlib_h::z_stream,
+    state: &crate::src::deflate::deflate_state,
+) -> bool {
+    strm.zalloc.is_some()
+        && strm.zfree.is_some()
+        && state.strm == ::core::ptr::from_ref(strm).cast_mut()
+        && (state.status == crate::src::deflate::INIT_STATE
+            || state.status == crate::src::deflate::GZIP_STATE
+            || state.status == crate::src::deflate::EXTRA_STATE
+            || state.status == crate::src::deflate::NAME_STATE
+            || state.status == crate::src::deflate::COMMENT_STATE
+            || state.status == crate::src::deflate::HCRC_STATE
+            || state.status == crate::src::deflate::BUSY_STATE
+            || state.status == crate::src::deflate::FINISH_STATE)
+}
+
+unsafe fn deflateStateCheck(strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    if strm.is_null() {
+        return 1;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null()
-        || (*s).strm != strm
-        || (*s).status != crate::src::deflate::INIT_STATE
-            && (*s).status != crate::src::deflate::GZIP_STATE
-            && (*s).status != crate::src::deflate::EXTRA_STATE
-            && (*s).status != crate::src::deflate::NAME_STATE
-            && (*s).status != crate::src::deflate::COMMENT_STATE
-            && (*s).status != crate::src::deflate::HCRC_STATE
-            && (*s).status != crate::src::deflate::BUSY_STATE
-            && (*s).status != crate::src::deflate::FINISH_STATE
-    {
-        return 1 as ::core::ffi::c_int;
+    let strm = &*strm;
+    // Check callbacks before borrowing state. A stale non-null state must not
+    // be dereferenced when the stream itself has no valid allocator pair.
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return 1;
     }
-    return 0 as ::core::ffi::c_int;
+    if strm.state.is_null() {
+        return 1;
+    }
+    let state = &*(strm.state as *const crate::src::deflate::deflate_state);
+    (!deflate_state_valid(strm, state)) as ::core::ffi::c_int
 }
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
