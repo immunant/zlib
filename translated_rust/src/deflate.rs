@@ -217,7 +217,7 @@ pub const finish_started: block_state = 2;
 pub const need_more: block_state = 0;
 
 pub type compress_func = Option<
-    unsafe fn(
+    fn(
         *mut crate::src::deflate::deflate_state,
         ::core::ffi::c_int,
     ) -> block_state,
@@ -252,7 +252,7 @@ static configuration_table: [config; 10] = [
         max_chain: 0 as crate::zutil_h::ush,
         func: Some(
             deflate_stored
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -265,7 +265,7 @@ static configuration_table: [config; 10] = [
         max_chain: 4 as crate::zutil_h::ush,
         func: Some(
             deflate_fast
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -278,7 +278,7 @@ static configuration_table: [config; 10] = [
         max_chain: 8 as crate::zutil_h::ush,
         func: Some(
             deflate_fast
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -291,7 +291,7 @@ static configuration_table: [config; 10] = [
         max_chain: 32 as crate::zutil_h::ush,
         func: Some(
             deflate_fast
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -304,7 +304,7 @@ static configuration_table: [config; 10] = [
         max_chain: 16 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -317,7 +317,7 @@ static configuration_table: [config; 10] = [
         max_chain: 32 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -330,7 +330,7 @@ static configuration_table: [config; 10] = [
         max_chain: 128 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -343,7 +343,7 @@ static configuration_table: [config; 10] = [
         max_chain: 256 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -356,7 +356,7 @@ static configuration_table: [config; 10] = [
         max_chain: 1024 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -369,7 +369,7 @@ static configuration_table: [config; 10] = [
         max_chain: 4096 as crate::zutil_h::ush,
         func: Some(
             deflate_slow
-                as unsafe fn(
+                as fn(
                     *mut crate::src::deflate::deflate_state,
                     ::core::ffi::c_int,
                 ) -> block_state,
@@ -3109,34 +3109,40 @@ fn deflate_stored_impl(
     }) as block_state;
 }
 
-unsafe fn deflate_fast(
+// This private adapter binds a validated fast deflater's state, allocations,
+// and caller cursors once. The algorithm below only uses the bounded views.
+fn deflate_fast(
     s: *mut crate::src::deflate::deflate_state,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    let state = &mut *s;
-    let stream = &mut *state.strm;
-    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let symbols = ::core::slice::from_raw_parts_mut(
-        state.sym_buf,
-        state.lit_bufsize.wrapping_mul(3) as usize,
-    );
-    let input = if stream.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-    };
-    let output = if stream.avail_out == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-    };
-    deflate_fast_impl(
-        state, stream, window, head, prev, pending, symbols, input, output, flush,
-    )
+    // SAFETY: the validated compression dispatch supplies one live deflater
+    // and its bounded allocations and caller cursors for this call.
+    unsafe {
+        let state = &mut *s;
+        let stream = &mut *state.strm;
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+        let pending =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let symbols = ::core::slice::from_raw_parts_mut(
+            state.sym_buf,
+            state.lit_bufsize.wrapping_mul(3) as usize,
+        );
+        let input = if stream.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        };
+        let output = if stream.avail_out == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
+        };
+        deflate_fast_impl(
+            state, stream, window, head, prev, pending, symbols, input, output, flush,
+        )
+    }
 }
 
 // The fast deflater has a fixed view of all state allocations and caller
@@ -3249,34 +3255,40 @@ fn deflate_fast_impl(
     block_done
 }
 
-unsafe fn deflate_slow(
+// This private adapter binds a validated lazy deflater's state, allocations,
+// and caller cursors once. The algorithm below only uses the bounded views.
+fn deflate_slow(
     s: *mut crate::src::deflate::deflate_state,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    let state = &mut *s;
-    let stream = &mut *state.strm;
-    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let symbols = ::core::slice::from_raw_parts_mut(
-        state.sym_buf,
-        state.lit_bufsize.wrapping_mul(3) as usize,
-    );
-    let input = if stream.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-    };
-    let output = if stream.avail_out == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-    };
-    deflate_slow_impl(
-        state, stream, window, head, prev, pending, symbols, input, output, flush,
-    )
+    // SAFETY: the validated compression dispatch supplies one live deflater
+    // and its bounded allocations and caller cursors for this call.
+    unsafe {
+        let state = &mut *s;
+        let stream = &mut *state.strm;
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+        let pending =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let symbols = ::core::slice::from_raw_parts_mut(
+            state.sym_buf,
+            state.lit_bufsize.wrapping_mul(3) as usize,
+        );
+        let input = if stream.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        };
+        let output = if stream.avail_out == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
+        };
+        deflate_slow_impl(
+            state, stream, window, head, prev, pending, symbols, input, output, flush,
+        )
+    }
 }
 
 // The lazy deflater retains bounded views of every allocation and caller
@@ -3458,36 +3470,40 @@ fn rle_match_length(
     length as crate::stdlib::uInt
 }
 
-// This private adapter binds the RLE deflater's state, allocations, and
-// caller cursors once. The compression loop below only uses bounded views.
-unsafe fn deflate_rle(
+// This private adapter binds a validated RLE deflater's state, allocations,
+// and caller cursors once. The compression loop below only uses bounded views.
+fn deflate_rle(
     s: *mut crate::src::deflate::deflate_state,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    let state = &mut *s;
-    let stream = &mut *state.strm;
-    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let symbols = ::core::slice::from_raw_parts_mut(
-        state.sym_buf,
-        state.lit_bufsize.wrapping_mul(3) as usize,
-    );
-    let input = if stream.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-    };
-    let output = if stream.avail_out == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-    };
-    deflate_rle_impl(
-        state, stream, window, head, prev, pending, symbols, input, output, flush,
-    )
+    // SAFETY: the validated compression dispatch supplies one live deflater
+    // and its bounded allocations and caller cursors for this call.
+    unsafe {
+        let state = &mut *s;
+        let stream = &mut *state.strm;
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+        let pending =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let symbols = ::core::slice::from_raw_parts_mut(
+            state.sym_buf,
+            state.lit_bufsize.wrapping_mul(3) as usize,
+        );
+        let input = if stream.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        };
+        let output = if stream.avail_out == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
+        };
+        deflate_rle_impl(
+            state, stream, window, head, prev, pending, symbols, input, output, flush,
+        )
+    }
 }
 
 fn deflate_rle_impl(
@@ -3569,37 +3585,40 @@ fn deflate_rle_impl(
     block_done
 }
 
-// The raw compression dispatch binds the deflater, stream, allocations, and
-// caller cursors once.  This Huffman-only loop then works entirely with those
-// bounded references, including refill, tally, block emission, and draining.
-unsafe fn deflate_huff(
+// This private adapter binds a validated Huffman-only deflater, stream,
+// allocations, and caller cursors once. The loop then uses bounded views.
+fn deflate_huff(
     s: *mut crate::src::deflate::deflate_state,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    let state = &mut *s;
-    let stream = &mut *state.strm;
-    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let symbols = ::core::slice::from_raw_parts_mut(
-        state.sym_buf,
-        state.lit_bufsize.wrapping_mul(3) as usize,
-    );
-    let input = if stream.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-    };
-    let output = if stream.avail_out == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-    };
-    deflate_huff_impl(
-        state, stream, window, head, prev, pending, symbols, input, output, flush,
-    )
+    // SAFETY: the validated compression dispatch supplies one live deflater
+    // and its bounded allocations and caller cursors for this call.
+    unsafe {
+        let state = &mut *s;
+        let stream = &mut *state.strm;
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+        let pending =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let symbols = ::core::slice::from_raw_parts_mut(
+            state.sym_buf,
+            state.lit_bufsize.wrapping_mul(3) as usize,
+        );
+        let input = if stream.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        };
+        let output = if stream.avail_out == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
+        };
+        deflate_huff_impl(
+            state, stream, window, head, prev, pending, symbols, input, output, flush,
+        )
+    }
 }
 
 fn flush_pending_symbols(
