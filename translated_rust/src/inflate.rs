@@ -1832,9 +1832,13 @@ fn inflate_entry_mode(
 }
 
 pub fn inflate(
-    mut strm: crate::zlib_h::z_streamp,
+    strm_ref: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // Retain a raw alias only inside this transitional codec boundary. Rust
+    // callers pass the validated stream reference directly; ABI pointer
+    // adoption is confined to `inflate_ffi()`.
+    let mut strm = strm_ref as *mut crate::zlib_h::z_stream;
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -1885,9 +1889,6 @@ pub fn inflate(
     // Rust callers of the dispatcher do not inherit an unsafe-function
     // contract while the safe owned/slice core is still being extracted.
     unsafe {
-        if strm.is_null() {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
         // Keep the pointer checks here, then hand the scalar relationship to the
         // safe validator shared by the smaller inflate boundaries.
         let strm_ref = &mut *strm;
@@ -3882,7 +3883,10 @@ pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflate(strm, flush)
+    let Some(strm_ref) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate(strm_ref, flush)
 }
 // This expands only in export-attributed ABI functions (including the
 // boundary macros used by gzip and one-shot decompression).  Destruction

@@ -518,7 +518,7 @@ macro_rules! gz_decomp_at_boundary {
                     }
                 };
                 ret = crate::src::inflate::inflate(
-                    &mut state.strm as *mut crate::zlib_h::z_stream_s,
+                    &mut state.strm,
                     crate::zlib_h::Z_NO_FLUSH,
                 );
                 let Some(next_input_index) = gz_input_advance(

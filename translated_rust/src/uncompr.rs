@@ -154,7 +154,7 @@ macro_rules! uncompress2_z_at_boundary {
                     len = remaining;
                 }
                 err = crate::src::inflate::inflate(
-                    &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+                    &mut stream,
                     crate::zlib_h::Z_NO_FLUSH,
                 );
                 if err != crate::zlib_h::Z_OK {
