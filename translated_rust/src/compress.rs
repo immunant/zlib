@@ -117,17 +117,6 @@ struct CompressChunk {
 }
 
 impl CompressChunk {
-    fn slices<'a>(
-        self,
-        source: &'a [crate::stdlib::Bytef],
-        dest: &'a mut [crate::stdlib::Bytef],
-    ) -> (&'a [crate::stdlib::Bytef], &'a mut [crate::stdlib::Bytef]) {
-        (
-            &source[self.input_start..self.input_start + self.input_len],
-            &mut dest[self.output_start..self.output_start + self.output_len],
-        )
-    }
-
     fn record_progress(
         self,
         source_progress: &mut CompressProgress,
@@ -196,16 +185,6 @@ pub unsafe extern "C" fn compress2_z_ffi(
         Err(status) => return status,
     };
 
-    let source_slice = if plan.source_len == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(source, plan.source_len)
-    };
-    let dest_slice = if plan.dest_capacity == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(dest, plan.dest_capacity)
-    };
     *destLen = 0;
 
     let mut stream = crate::zlib_h::z_stream_s {
@@ -238,24 +217,23 @@ pub unsafe extern "C" fn compress2_z_ffi(
         return init_status;
     }
 
-    let mut source_progress = CompressProgress::new(source_slice.len());
-    let mut dest_progress = CompressProgress::new(dest_slice.len());
+    let mut source_progress = CompressProgress::new(plan.source_len);
+    let mut dest_progress = CompressProgress::new(plan.dest_capacity);
     let status = loop {
         let chunk = next_compress_chunk(source_progress, dest_progress);
-        let (input, output) = chunk.slices(source_slice, dest_slice);
 
-        stream.next_in = if input.is_empty() {
+        stream.next_in = if chunk.input_len == 0 {
             source as *mut crate::stdlib::Bytef
         } else {
-            input.as_ptr() as *mut crate::stdlib::Bytef
+            source.wrapping_add(chunk.input_start) as *mut crate::stdlib::Bytef
         };
-        stream.avail_in = input.len() as crate::stdlib::uInt;
-        stream.next_out = if output.is_empty() {
+        stream.avail_in = chunk.input_len as crate::stdlib::uInt;
+        stream.next_out = if chunk.output_len == 0 {
             dest
         } else {
-            output.as_mut_ptr()
+            dest.wrapping_add(chunk.output_start)
         };
-        stream.avail_out = output.len() as crate::stdlib::uInt;
+        stream.avail_out = chunk.output_len as crate::stdlib::uInt;
 
         let status = crate::src::deflate::deflate(&mut stream, chunk.flush);
         chunk.record_progress(
@@ -399,37 +377,27 @@ mod tests {
     }
 
     #[test]
-    fn compress_chunk_slices_follow_progress_and_handle_empty_windows() {
+    fn compress_chunk_ranges_follow_progress_and_handle_empty_windows() {
         let source = b"abcdef";
-        let mut dest = [0u8; 8];
         let source_progress = CompressProgress {
             total: source.len(),
             used: 2,
         };
-        let dest_progress = CompressProgress {
-            total: dest.len(),
-            used: 3,
-        };
+        let dest_progress = CompressProgress { total: 8, used: 3 };
         let chunk = next_compress_chunk(source_progress, dest_progress);
-        let (input, output) = chunk.slices(source, &mut dest);
-        assert_eq!(input, b"cdef");
-        assert_eq!(output.len(), 5);
-        output[0] = b'x';
-        assert_eq!(dest[3], b'x');
+        assert_eq!(chunk.input_start, 2);
+        assert_eq!(chunk.input_len, 4);
+        assert_eq!(chunk.output_start, 3);
+        assert_eq!(chunk.output_len, 5);
 
-        let dest_len = dest.len();
         let source_progress = CompressProgress {
             total: source.len(),
             used: source.len(),
         };
-        let dest_progress = CompressProgress {
-            total: dest_len,
-            used: dest_len,
-        };
+        let dest_progress = CompressProgress { total: 8, used: 8 };
         let chunk = next_compress_chunk(source_progress, dest_progress);
-        let (input, output) = chunk.slices(source, &mut dest);
-        assert!(input.is_empty());
-        assert!(output.is_empty());
+        assert_eq!(chunk.input_len, 0);
+        assert_eq!(chunk.output_len, 0);
     }
 
     #[test]
