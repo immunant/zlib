@@ -158,6 +158,10 @@ fn gzread_request_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0
 }
 
+fn gz_is_read_mode(mode: ::core::ffi::c_int) -> bool {
+    mode == crate::gzguts_h::GZ_READ
+}
+
 fn gz_read_error_is_recoverable(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {
     err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR || again != 0
 }
@@ -167,7 +171,7 @@ fn gz_read_state_is_usable(
     err: ::core::ffi::c_int,
     again: ::core::ffi::c_int,
 ) -> bool {
-    mode == crate::gzguts_h::GZ_READ && gz_read_error_is_recoverable(err, again)
+    gz_is_read_mode(mode) && gz_read_error_is_recoverable(err, again)
 }
 
 enum GzreadOutcome {
@@ -1578,6 +1582,14 @@ mod tests {
     }
 
     #[test]
+    fn gz_is_read_mode_accepts_only_read_mode() {
+        assert!(gz_is_read_mode(crate::gzguts_h::GZ_READ));
+        assert!(!gz_is_read_mode(crate::gzguts_h::GZ_WRITE));
+        assert!(!gz_is_read_mode(::core::ffi::c_int::MIN));
+        assert!(!gz_is_read_mode(::core::ffi::c_int::MAX));
+    }
+
+    #[test]
     fn gz_read_state_is_usable_requires_read_mode_and_recoverable_errors() {
         assert!(gz_read_state_is_usable(
             crate::gzguts_h::GZ_READ,
@@ -2484,7 +2496,7 @@ pub unsafe extern "C" fn gzungetc(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
+    if !gz_is_read_mode((*state).mode) {
         return -1 as ::core::ffi::c_int;
     }
     if gz_read_needs_look(crate::gzguts_h::GZ_READ, (*state).how, (*state).x.have) {
@@ -2662,7 +2674,7 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
+    if !gz_is_read_mode((*state).mode) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if (*state).size != 0 {

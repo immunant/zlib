@@ -203,6 +203,10 @@ fn inflate_output_checksum(
     }
 }
 
+fn inflate_is_gzip_header(wrap: ::core::ffi::c_int, hold: crate::stdlib::uLong) -> bool {
+    wrap & 2 != 0 && hold == 0x8b1f as crate::stdlib::uLong
+}
+
 fn inflate_zlib_header_error(
     wrap: ::core::ffi::c_int,
     hold: crate::stdlib::uLong,
@@ -952,9 +956,7 @@ pub unsafe extern "C" fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    if (*state).wrap & 2 as ::core::ffi::c_int != 0
-                        && hold == 0x8b1f as ::core::ffi::c_ulong
-                    {
+                    if inflate_is_gzip_header((*state).wrap, hold) {
                         if (*state).wbits == 0 as ::core::ffi::c_uint {
                             (*state).wbits = 15 as ::core::ffi::c_uint;
                         }
@@ -2896,7 +2898,8 @@ mod tests {
         inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_progress,
         inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
         inflate_get_dictionary_result, inflate_header_crc_enabled,
-        inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
+        inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
+        inflate_mark_value,
         inflate_match_copy_plan, inflate_mode_data_type_flags, inflate_mode_is_valid,
         inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
         inflate_reset2_params, inflate_should_update_window, inflate_state_is_usable,
@@ -2937,6 +2940,14 @@ mod tests {
         assert_eq!(inflate_dictionary_id_from_hold(0x7856_3412), 0x1234_5678);
         assert_eq!(inflate_dictionary_id_from_hold(0x0102_0408), 0x0804_0201);
         assert_eq!(inflate_dictionary_id_from_hold(0xffff_ffff), 0xffff_ffff);
+    }
+
+    #[test]
+    fn gzip_header_requires_wrapper_support_and_magic_bytes() {
+        assert!(inflate_is_gzip_header(2, 0x8b1f));
+        assert!(inflate_is_gzip_header(3, 0x8b1f));
+        assert!(!inflate_is_gzip_header(1, 0x8b1f));
+        assert!(!inflate_is_gzip_header(2, 0x1f8b));
     }
 
     #[test]

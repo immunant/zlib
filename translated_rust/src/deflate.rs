@@ -2488,6 +2488,19 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     deflateCopy(dest, source)
 }
+fn longest_match_limit(
+    strstart: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+) -> crate::src::deflate::IPos {
+    let window_start =
+        w_size.wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt);
+    if strstart > window_start {
+        (strstart as crate::src::deflate::IPos).wrapping_sub(window_start)
+    } else {
+        NIL as crate::src::deflate::IPos
+    }
+}
+
 unsafe fn longest_match(
     mut s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
@@ -2498,18 +2511,7 @@ unsafe fn longest_match(
     let mut len: ::core::ffi::c_int = 0;
     let mut best_len: ::core::ffi::c_int = (*s).prev_length as ::core::ffi::c_int;
     let mut nice_match: ::core::ffi::c_int = (*s).nice_match;
-    let mut limit: crate::src::deflate::IPos = if (*s).strstart
-        > (*s)
-            .w_size
-            .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-    {
-        ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(
-            (*s).w_size
-                .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
-        )
-    } else {
-        NIL as crate::src::deflate::IPos
-    };
+    let mut limit: crate::src::deflate::IPos = longest_match_limit((*s).strstart, (*s).w_size);
     let mut prev: *mut crate::src::deflate::Posf = (*s).prev;
     let mut wmask: crate::stdlib::uInt = (*s).w_mask;
     let mut strend: *mut crate::stdlib::Bytef = (*s)
@@ -3784,9 +3786,9 @@ mod tests {
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
         fill_window_insert_after_slide, fill_window_zero_range, flush_pending_accounting,
         gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
-        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        longest_match_limit, normalize_deflate_params, pending_buffer_needs_flush,
+        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
         stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
         symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
@@ -3994,6 +3996,22 @@ mod tests {
         assert_eq!(slide_hash_entry(31, window_size), 0);
         assert_eq!(slide_hash_entry(32, window_size), 0);
         assert_eq!(slide_hash_entry(47, window_size), 15);
+    }
+
+    #[test]
+    fn longest_match_limit_preserves_window_threshold_and_wrapping() {
+        let w_size = crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt + 10;
+
+        assert_eq!(longest_match_limit(10, w_size), 0);
+        assert_eq!(longest_match_limit(11, w_size), 1);
+        assert_eq!(
+            longest_match_limit(crate::stdlib::uInt::MAX, w_size),
+            crate::stdlib::uInt::MAX.wrapping_sub(10),
+        );
+        assert_eq!(
+            longest_match_limit(crate::stdlib::uInt::MAX, 0),
+            crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt - 1,
+        );
     }
 
     #[test]
