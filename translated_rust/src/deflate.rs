@@ -948,6 +948,35 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     }
     return crate::zlib_h::Z_OK;
 }
+
+struct DeflateResetKeepConfig {
+    wrap: ::core::ffi::c_int,
+    status: ::core::ffi::c_int,
+    adler: crate::stdlib::uLong,
+}
+
+fn deflate_reset_keep_config(mut wrap: ::core::ffi::c_int) -> DeflateResetKeepConfig {
+    if wrap < 0 as ::core::ffi::c_int {
+        wrap = -wrap;
+    }
+    let status = if wrap == 2 as ::core::ffi::c_int {
+        crate::src::deflate::GZIP_STATE
+    } else {
+        crate::src::deflate::INIT_STATE
+    };
+    let adler = if wrap == 2 as ::core::ffi::c_int {
+        crate::src::crc32::crc32_initial()
+    } else {
+        crate::src::adler32::adler32_initial()
+    };
+
+    DeflateResetKeepConfig {
+        wrap,
+        status,
+        adler,
+    }
+}
+
 #[export_name = "deflateResetKeep"]
 
 pub unsafe extern "C" fn deflateResetKeep_ffi(
@@ -965,19 +994,10 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     (*s).pending = 0 as crate::zutil_h::ulg;
     (*s).pending_out = (*s).pending_buf;
-    if (*s).wrap < 0 as ::core::ffi::c_int {
-        (*s).wrap = -(*s).wrap;
-    }
-    (*s).status = if (*s).wrap == 2 as ::core::ffi::c_int {
-        crate::src::deflate::GZIP_STATE
-    } else {
-        crate::src::deflate::INIT_STATE
-    };
-    (*strm).adler = if (*s).wrap == 2 as ::core::ffi::c_int {
-        crate::src::crc32::crc32_initial()
-    } else {
-        crate::src::adler32::adler32_initial()
-    };
+    let reset = deflate_reset_keep_config((*s).wrap);
+    (*s).wrap = reset.wrap;
+    (*s).status = reset.status;
+    (*strm).adler = reset.adler;
     (*s).last_flush = -2 as ::core::ffi::c_int;
     crate::src::trees::_tr_init_ffi(s as *mut crate::src::deflate::internal_state);
     return crate::zlib_h::Z_OK;

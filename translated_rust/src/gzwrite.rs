@@ -639,6 +639,26 @@ fn gzsetparams_unchanged(
     level == state.level && strategy == state.strategy
 }
 
+fn gzclose_w_after_step(
+    ret: ::core::ffi::c_int,
+    failed: bool,
+    state_err: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if failed {
+        state_err
+    } else {
+        ret
+    }
+}
+
+fn gzclose_w_final_status(ret: ::core::ffi::c_int, close_failed: bool) -> ::core::ffi::c_int {
+    if close_failed {
+        crate::zlib_h::Z_ERRNO
+    } else {
+        ret
+    }
+}
+
 #[export_name = "gzsetparams"]
 
 pub unsafe extern "C" fn gzsetparams_ffi(
@@ -696,12 +716,10 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     if (*state).mode != crate::gzguts_h::GZ_WRITE {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
-    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
+    let zero_failed = (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int;
+    ret = gzclose_w_after_step(ret, zero_failed, (*state).err);
+    let comp_failed = gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int;
+    ret = gzclose_w_after_step(ret, comp_failed, (*state).err);
     if (*state).size != 0 {
         if (*state).direct == 0 {
             crate::src::deflate::deflateEnd_ffi(
@@ -717,9 +735,10 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-    if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
-        ret = crate::zlib_h::Z_ERRNO;
-    }
+    ret = gzclose_w_final_status(
+        ret,
+        crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int,
+    );
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
     return ret;
 }

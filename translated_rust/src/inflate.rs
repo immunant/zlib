@@ -154,6 +154,39 @@ fn inflate_mode_is_valid(mode: crate::src::inflate::inflate_mode) -> bool {
     mode >= crate::src::inflate::HEAD && mode <= crate::src::inflate::SYNC
 }
 
+pub(crate) const INFLATE_CODE_LENGTH_ORDER: [::core::ffi::c_ushort; 19] = [
+    16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    17 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    18 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    8 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    7 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    9 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    6 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    10 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    5 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    11 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    4 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    12 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    3 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    13 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    2 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    14 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    1 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+    15 as ::core::ffi::c_int as ::core::ffi::c_ushort,
+];
+
+pub(crate) fn inflate_zero_code_length_order_tail(
+    lens: &mut [::core::ffi::c_ushort],
+    have: &mut ::core::ffi::c_uint,
+) {
+    while *have < INFLATE_CODE_LENGTH_ORDER.len() as ::core::ffi::c_uint {
+        let index = INFLATE_CODE_LENGTH_ORDER[*have as usize] as usize;
+        lens[index] = 0 as ::core::ffi::c_ushort;
+        *have = (*have).wrapping_add(1);
+    }
+}
+
 pub(crate) struct InflateDynamicCounts {
     pub(crate) nlen: ::core::ffi::c_uint,
     pub(crate) ndist: ::core::ffi::c_uint,
@@ -878,27 +911,6 @@ pub unsafe extern "C" fn inflate_ffi(
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
-    static order: [::core::ffi::c_ushort; 19] = [
-        16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        8 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        7 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        9 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        6 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        10 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        5 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        11 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        4 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        12 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        3 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        13 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        2 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        14 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        1 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-        15 as ::core::ffi::c_int as ::core::ffi::c_ushort,
-    ];
     if inflateStateCheck(strm) != 0
         || (*strm).next_out.is_null()
         || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
@@ -1303,20 +1315,18 @@ pub unsafe extern "C" fn inflate_ffi(
                     }
                     let c2rust_fresh15 = (*state).have;
                     (*state).have = (*state).have.wrapping_add(1);
-                    (*state).lens[order[c2rust_fresh15 as usize] as usize] = (hold
-                        as ::core::ffi::c_uint
+                    (*state).lens[crate::src::inflate::INFLATE_CODE_LENGTH_ORDER
+                        [c2rust_fresh15 as usize] as usize] = (hold as ::core::ffi::c_uint
                         & ((1 as ::core::ffi::c_uint) << 3 as ::core::ffi::c_int)
                             .wrapping_sub(1 as ::core::ffi::c_uint))
                         as ::core::ffi::c_ushort;
                     hold >>= 3 as ::core::ffi::c_int;
                     bits = bits.wrapping_sub(3 as ::core::ffi::c_int as ::core::ffi::c_uint);
                 }
-                while (*state).have < 19 as ::core::ffi::c_uint {
-                    let c2rust_fresh16 = (*state).have;
-                    (*state).have = (*state).have.wrapping_add(1);
-                    (*state).lens[order[c2rust_fresh16 as usize] as usize] =
-                        0 as ::core::ffi::c_ushort;
-                }
+                crate::src::inflate::inflate_zero_code_length_order_tail(
+                    &mut (*state).lens,
+                    &mut (*state).have,
+                );
                 (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                 (*state).distcode = (*state).next as *const crate::src::inftrees::code;
                 (*state).lencode = (*state).distcode;
