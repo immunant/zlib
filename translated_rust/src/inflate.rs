@@ -990,6 +990,7 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
         strm,
         InflateStreamRequest::Reset(InflateResetKind::Keep),
         None,
+        None,
     )
     .status()
 }
@@ -1004,6 +1005,7 @@ pub unsafe extern "C" fn inflateReset_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Reset(InflateResetKind::Full),
+        None,
         None,
     )
     .status()
@@ -1020,6 +1022,7 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Reset(InflateResetKind::WindowBits(windowBits)),
+        None,
         None,
     )
     .status()
@@ -1148,6 +1151,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::Prime { bits, value }),
+        None,
         None,
     )
     .scalar()
@@ -1568,6 +1572,13 @@ pub(crate) enum InflateStreamRequest<'request> {
     },
     SetDictionary(&'request [crate::stdlib::Bytef]),
     Header,
+    // Copy shares the validated source stream/state association with every
+    // other normal-inflate action.  The destination identity is scalar-only;
+    // the copied callback allocation handle is returned through the existing
+    // unsafe projection rather than retained in this request.
+    Copy {
+        destination_identity: usize,
+    },
     Back(&'request mut dyn InflateBackDispatch),
 }
 
@@ -1612,6 +1623,7 @@ fn inflate_stream_error(request: &InflateStreamRequest<'_>) -> InflateStreamResu
         | InflateStreamRequest::Dictionary { .. }
         | InflateStreamRequest::SetDictionary(_)
         | InflateStreamRequest::Header
+        | InflateStreamRequest::Copy { .. }
         | InflateStreamRequest::Back(_) => {
             InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR)
         }
@@ -3364,6 +3376,7 @@ pub(crate) unsafe fn inflate_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     request: InflateStreamRequest<'_>,
     mut header_registration: Option<&mut crate::zlib_h::gz_header_s>,
+    mut copied_state: Option<&mut Option<::core::ptr::NonNull<inflate_state>>>,
 ) -> InflateStreamResult {
     // This is the sole normal-inflate stream/state projection.  Keep the
     // opaque handle conversion beside the request-specific cursor, header,
@@ -3402,6 +3415,25 @@ pub(crate) unsafe fn inflate_from_stream(
             header.done = 0;
         }
         return InflateStreamResult::Status(crate::zlib_h::Z_OK);
+    }
+    if let InflateStreamRequest::Copy {
+        destination_identity,
+    } = request
+    {
+        // Copy allocation must stay at the same validated source projection
+        // as the normal decoder.  The caller receives only the allocation
+        // handle after this boundary has completed, then assembles the ABI
+        // stream without retaining a source-state borrow.
+        let Some(copied_state) = copied_state.as_deref_mut() else {
+            return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
+        };
+        return InflateStreamResult::Status(inflate_publish_callback_owner(
+            strm,
+            None,
+            Some(state),
+            destination_identity,
+            copied_state,
+        ));
     }
     if let InflateStreamRequest::Back(dispatch) = request {
         strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -3671,7 +3703,7 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Decode(flush), None).status()
+    inflate_from_stream(strm, InflateStreamRequest::Decode(flush), None, None).status()
 }
 // Ending a normal inflate stream has a pointer-free half: consume the Rust
 // history owner before the ABI adapter releases the callback-owned state
@@ -3697,7 +3729,7 @@ pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     let Some(stream) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(stream, InflateStreamRequest::End, None).status()
+    inflate_from_stream(stream, InflateStreamRequest::End, None, None).status()
 }
 #[export_name = "inflateGetDictionary"]
 
@@ -3726,6 +3758,7 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
             dictionary,
             dict_length: dictLength.as_mut(),
         },
+        None,
         None,
     )
     .status()
@@ -3791,7 +3824,13 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     } else {
         ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
-    inflate_from_stream(strm, InflateStreamRequest::SetDictionary(dictionary), None).status()
+    inflate_from_stream(
+        strm,
+        InflateStreamRequest::SetDictionary(dictionary),
+        None,
+        None,
+    )
+    .status()
 }
 #[export_name = "inflateGetHeader"]
 
@@ -3802,7 +3841,7 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Header, head.as_mut()).status()
+    inflate_from_stream(strm, InflateStreamRequest::Header, head.as_mut(), None).status()
 }
 fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> ::core::ffi::c_uint {
     let mut got: ::core::ffi::c_uint = 0;
@@ -3881,7 +3920,7 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Sync, None).status()
+    inflate_from_stream(strm, InflateStreamRequest::Sync, None, None).status()
 }
 
 fn inflate_sync_point(
@@ -3998,6 +4037,7 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::SyncPoint),
         None,
+        None,
     )
     .scalar()
     .status()
@@ -4013,54 +4053,35 @@ pub unsafe fn inflateCopy(
     // Build the replacement before borrowing the destination.  This retains
     // C's behavior even for a source/destination alias while all state
     // access remains scoped to the checked source stream.
-    let destination_stream = {
-        if source.zalloc.is_none() || source.zfree.is_none() {
-            return Err(crate::zlib_h::Z_STREAM_ERROR);
-        }
-        let source_identity = ::core::ptr::from_mut(source).addr();
-        let Some(state_handle) = source.state else {
-            return Err(crate::zlib_h::Z_STREAM_ERROR);
-        };
-        let state = state_handle
-            .cast::<crate::src::inflate::inflate_state>()
-            .as_mut();
-        if state.stream_identity != source_identity
-            || (state.decoder.normal.mode as ::core::ffi::c_uint)
-                < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-            || state.decoder.normal.mode as ::core::ffi::c_uint
-                > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            return Err(crate::zlib_h::Z_STREAM_ERROR);
-        }
-        let mut copied_state = None;
-        let status = inflate_publish_callback_owner(
-            source,
-            None,
-            Some(state),
+    let mut copied_state = None;
+    let status = inflate_from_stream(
+        source,
+        InflateStreamRequest::Copy {
             destination_identity,
-            &mut copied_state,
-        );
-        if status != crate::zlib_h::Z_OK {
-            return Err(status);
-        }
-        let copy = copied_state.expect("successful copy publication returns state");
-        let destination_stream = crate::zlib_h::z_stream_s {
-            next_in: source.next_in,
-            avail_in: source.avail_in,
-            total_in: source.total_in,
-            next_out: source.next_out,
-            avail_out: source.avail_out,
-            total_out: source.total_out,
-            msg: source.msg,
-            state: Some(::core::ptr::NonNull::from(copy).cast()),
-            zalloc: source.zalloc,
-            zfree: source.zfree,
-            opaque: source.opaque,
-            data_type: source.data_type,
-            adler: source.adler,
-            reserved: source.reserved,
-        };
-        destination_stream
+        },
+        None,
+        Some(&mut copied_state),
+    )
+    .status();
+    if status != crate::zlib_h::Z_OK {
+        return Err(status);
+    }
+    let copy = copied_state.expect("successful copy publication returns state");
+    let destination_stream = crate::zlib_h::z_stream_s {
+        next_in: source.next_in,
+        avail_in: source.avail_in,
+        total_in: source.total_in,
+        next_out: source.next_out,
+        avail_out: source.avail_out,
+        total_out: source.total_out,
+        msg: source.msg,
+        state: Some(::core::ptr::NonNull::from(copy).cast()),
+        zalloc: source.zalloc,
+        zfree: source.zfree,
+        opaque: source.opaque,
+        data_type: source.data_type,
+        adler: source.adler,
+        reserved: source.reserved,
     };
     // The ABI wrapper publishes this fully initialized stream only after the
     // source projection above has ended. This keeps source/destination
@@ -4106,6 +4127,7 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::Undermine),
         None,
+        None,
     )
     .scalar()
     .status()
@@ -4143,6 +4165,7 @@ pub unsafe extern "C" fn inflateValidate_ffi(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::Validate(check)),
         None,
+        None,
     )
     .scalar()
     .status()
@@ -4177,6 +4200,7 @@ pub unsafe extern "C" fn inflateMark_ffi(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::Mark),
         None,
+        None,
     )
     .scalar()
     .mark()
@@ -4197,6 +4221,7 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::CodesUsed),
+        None,
         None,
     )
     .scalar()

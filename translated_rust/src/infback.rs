@@ -1368,6 +1368,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
         strm,
         crate::src::inflate::InflateStreamRequest::Back(&mut dispatch),
         None,
+        None,
     );
     strm.next_in = next.cast::<crate::stdlib::Bytef>();
     strm.avail_in = have as crate::stdlib::uInt;
@@ -1384,6 +1385,7 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     crate::src::inflate::inflate_from_stream(
         strm,
         crate::src::inflate::InflateStreamRequest::End,
+        None,
         None,
     )
     .status()

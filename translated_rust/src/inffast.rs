@@ -396,5 +396,6 @@ pub unsafe extern "C" fn inflate_fast_ffi(
         stream,
         crate::src::inflate::InflateStreamRequest::Fast(start),
         None,
+        None,
     );
 }
