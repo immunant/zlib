@@ -4062,7 +4062,8 @@ pub unsafe extern "C" fn gzread_ffi(
         }
     }
 }
-pub unsafe extern "C" fn gzfread(
+#[export_name = "gzfread"]
+pub unsafe extern "C" fn gzfread_ffi(
     mut buf: crate::stdlib::voidp,
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
@@ -4097,17 +4098,8 @@ pub unsafe extern "C" fn gzfread(
         GzFreadAction::Read => gz_fread_items_read(size, gz_read(state, buf, len)),
     };
 }
-#[export_name = "gzfread"]
-
-pub unsafe extern "C" fn gzfread_ffi(
-    mut buf: crate::stdlib::voidp,
-    mut size: crate::stdlib::z_size_t,
-    mut nitems: crate::stdlib::z_size_t,
-    mut file: crate::zlib_h::gzFile,
-) -> crate::stdlib::z_size_t {
-    gzfread(buf, size, nitems, file)
-}
-pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzgetc"]
+pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
@@ -4145,17 +4137,13 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         buf[0 as ::core::ffi::c_int as usize],
     );
 }
-#[export_name = "gzgetc"]
-
-pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
-}
 #[export_name = "gzgetc_"]
 
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
+    gzgetc_ffi(file)
 }
-pub unsafe extern "C" fn gzungetc(
+#[export_name = "gzungetc"]
+pub unsafe extern "C" fn gzungetc_ffi(
     mut c: ::core::ffi::c_int,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
@@ -4229,15 +4217,8 @@ pub unsafe extern "C" fn gzungetc(
     state_ref.past = past;
     return c;
 }
-#[export_name = "gzungetc"]
-
-pub unsafe extern "C" fn gzungetc_ffi(
-    mut c: ::core::ffi::c_int,
-    mut file: crate::zlib_h::gzFile,
-) -> ::core::ffi::c_int {
-    gzungetc(c, file)
-}
-pub unsafe extern "C" fn gzgets(
+#[export_name = "gzgets"]
+pub unsafe extern "C" fn gzgets_ffi(
     mut file: crate::zlib_h::gzFile,
     mut buf: *mut ::core::ffi::c_char,
     mut len: ::core::ffi::c_int,
@@ -4316,15 +4297,6 @@ pub unsafe extern "C" fn gzgets(
     }
     *buf = 0 as ::core::ffi::c_char;
     return str;
-}
-#[export_name = "gzgets"]
-
-pub unsafe extern "C" fn gzgets_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: *mut ::core::ffi::c_char,
-    mut len: ::core::ffi::c_int,
-) -> *mut ::core::ffi::c_char {
-    gzgets(file, buf, len)
 }
 #[export_name = "gzdirect"]
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
