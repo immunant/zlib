@@ -1739,11 +1739,14 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     if len == 0 as ::core::ffi::c_uint {
         return;
     }
-    crate::stdlib::memcpy(
-        stream.next_out as *mut ::core::ffi::c_void,
-        state.pending_out as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
-    );
+    // `pending_out` always identifies a subrange of the bound pending
+    // allocation. Keep that source as a subslice, bind only the caller's
+    // already-validated output range, and make the transfer ordinary slice
+    // work instead of a C memory call.
+    let pending_start = (state.pending_out as usize).wrapping_sub(state.pending_buf as usize);
+    let pending = &pending_buf[pending_start..pending_start + len as usize];
+    let output = ::core::slice::from_raw_parts_mut(stream.next_out, len as usize);
+    output.copy_from_slice(pending);
     flush_pending_account(state, stream, len);
     // Both ranges were validated by the deflater before this flush. Advance
     // their addresses without requiring an in-bounds raw-pointer operation.
