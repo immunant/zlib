@@ -3810,7 +3810,7 @@ fn next_code_for_len(
     code
 }
 
-unsafe extern "C" fn gen_codes(
+unsafe fn gen_codes(
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
     bl_count: &[crate::zutil_h::ush; 16],

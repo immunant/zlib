@@ -403,7 +403,7 @@ pub(crate) fn symbol_triplet_cursors(
     ([start, second, third], third.wrapping_add(1))
 }
 
-unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
+unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut m: ::core::ffi::c_uint = 0;
     let mut p: *mut crate::src::deflate::Posf =
@@ -451,7 +451,7 @@ fn read_buf_total_in_after_copy(
     total_in.wrapping_add(copied as crate::stdlib::uLong)
 }
 
-unsafe extern "C" fn read_buf(
+unsafe fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
@@ -546,7 +546,7 @@ fn fill_window_zero_range(
     }
 }
 
-unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
     let mut wsize: crate::stdlib::uInt = (*s).w_size;
@@ -860,7 +860,7 @@ fn deflate_state_status_valid(status: ::core::ffi::c_int) -> bool {
     )
 }
 
-unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
@@ -1058,7 +1058,7 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 ) -> ::core::ffi::c_int {
     deflateResetKeep(strm)
 }
-unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
+unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
     *(*s)
@@ -1514,10 +1514,7 @@ fn pending_short_cursors(
     ([pending, second], second.wrapping_add(1))
 }
 
-unsafe extern "C" fn putShortMSB(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut b: crate::stdlib::uInt,
-) {
+unsafe fn putShortMSB(mut s: *mut crate::src::deflate::deflate_state, mut b: crate::stdlib::uInt) {
     let bytes = short_msb_bytes(b);
     let (cursors, next_pending) = pending_short_cursors((*s).pending);
     (*s).pending = next_pending;
@@ -1558,7 +1555,7 @@ fn flush_pending_accounting(
     ))
 }
 
-unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
+unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
     crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
@@ -2489,7 +2486,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     deflateCopy(dest, source)
 }
-unsafe extern "C" fn longest_match(
+unsafe fn longest_match(
     mut s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
@@ -3426,7 +3423,7 @@ unsafe extern "C" fn deflate_slow(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_rle(
+unsafe fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3663,7 +3660,7 @@ unsafe extern "C" fn deflate_rle(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_huff(
+unsafe fn deflate_huff(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {

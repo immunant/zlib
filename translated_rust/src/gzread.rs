@@ -585,7 +585,7 @@ unsafe fn gz_load(
     }
 }
 
-unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let action = {
         let state_ref = &*state;
         gz_avail_action(state_ref.err, state_ref.eof, state_ref.strm.avail_in)
@@ -680,7 +680,7 @@ fn gz_look_action(
     }
 }
 
-unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
         (*state).in_0 = crate::stdlib::malloc((*state).want as crate::__stddef_size_t_h::size_t)
@@ -851,7 +851,7 @@ fn gz_decomp_decision(
     GzDecompDecision { clear_junk, action }
 }
 
-unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
@@ -950,7 +950,7 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
     }
 }
 
-unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     loop {
         match gz_fetch_action((*state).how) {
@@ -1157,7 +1157,7 @@ fn gzclose_r_result(
     }
 }
 
-unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     loop {
         let action = {
             let state_ref = &mut *state;
@@ -2257,7 +2257,7 @@ mod tests {
     }
 }
 
-unsafe extern "C" fn gz_read(
+unsafe fn gz_read(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: crate::stdlib::voidp,
     mut len: crate::stdlib::z_size_t,
