@@ -863,30 +863,18 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );
-            // `inflate()` owns every diagnostic it publishes through
-            // `strm.msg`. Match that known static storage by address rather
-            // than dereferencing the ABI pointer. The safe loop receives only
-            // the selected byte slice.
-            let data_error_message = if result == crate::zlib_h::Z_DATA_ERROR {
-                Some(
-                    crate::src::inflate::INFLATE_ERROR_MESSAGES
-                        .iter()
-                        .find(|known| known.as_ptr().cast::<::core::ffi::c_char>() == strm.msg)
-                        .map(|known| &known[..known.len() - 1])
-                        .unwrap_or(b"compressed data error"),
-                )
-            } else {
-                None
-            };
-            GzCodecResult::from_codec_call(
-                &call,
+            // Snapshot the ABI projection immediately.  The gzip state
+            // machine handles the resulting checked cursors and diagnostics
+            // through the pointer-free embedded-codec result facade.
+            let snapshot = crate::src::gzlib::GzEmbeddedInflateResult::from_stream_fields(
                 result,
                 strm.avail_in,
                 strm.avail_out,
                 strm.total_in,
                 strm.total_out,
-                data_error_message,
-            )
+                (result == crate::zlib_h::Z_DATA_ERROR).then(|| strm.msg.addr()),
+            );
+            GzCodecResult::from_embedded_inflate(&call, snapshot)
         })
     };
     // The core transition returns the checked start of its owned output span,

@@ -922,6 +922,50 @@ pub(crate) struct GzCodecResult {
     pub(crate) data_error_message: Option<&'static [u8]>,
 }
 
+// This is the complete pointer-free result of one embedded inflate dispatch.
+// The gzip boundary may still need an ABI `z_stream` to invoke inflate today,
+// but it can immediately snapshot that projection here and leave all later
+// cursor/result handling in the owned gzip state machine.  Keeping the
+// diagnostic address as an integer is intentional: the stable known-message
+// lookup never dereferences the ABI pointer.
+pub(crate) struct GzEmbeddedInflateResult {
+    result: ::core::ffi::c_int,
+    remaining_input: crate::stdlib::uInt,
+    output_available: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+    data_error_message_address: Option<usize>,
+}
+
+impl GzEmbeddedInflateResult {
+    pub(crate) fn from_stream_fields(
+        result: ::core::ffi::c_int,
+        remaining_input: crate::stdlib::uInt,
+        output_available: crate::stdlib::uInt,
+        total_in: crate::stdlib::uLong,
+        total_out: crate::stdlib::uLong,
+        data_error_message_address: Option<usize>,
+    ) -> Self {
+        Self {
+            result,
+            remaining_input,
+            output_available,
+            total_in,
+            total_out,
+            data_error_message_address,
+        }
+    }
+
+    fn data_error_message(&self) -> Option<&'static [u8]> {
+        self.data_error_message_address.and_then(|address| {
+            crate::src::inflate::INFLATE_ERROR_MESSAGES
+                .iter()
+                .find(|known| known.as_ptr().addr() == address)
+                .map(|known| &known[..known.len() - 1])
+        })
+    }
+}
+
 impl GzCodecResult {
     // A codec owner reports only scalar cursor counters after its ABI call.
     // Rebuild the checked input cursor from the call that supplied it, so the
@@ -943,6 +987,28 @@ impl GzCodecResult {
             total_out,
             data_error_message,
         })
+    }
+
+    // Convert an embedded-codec snapshot into gzip's checked cursor result.
+    // This is the hand-off point that a future owned inflate facade will use;
+    // it deliberately accepts no ABI stream or raw pointer.
+    pub(crate) fn from_embedded_inflate(
+        call: &GzCodecCall<'_>,
+        snapshot: GzEmbeddedInflateResult,
+    ) -> Option<Self> {
+        Self::from_codec_call(
+            call,
+            snapshot.result,
+            snapshot.remaining_input,
+            snapshot.output_available,
+            snapshot.total_in,
+            snapshot.total_out,
+            if snapshot.result == crate::zlib_h::Z_DATA_ERROR {
+                snapshot.data_error_message()
+            } else {
+                None
+            },
+        )
     }
 }
 
