@@ -947,32 +947,6 @@ fn inflate_back_consume_output_copy(
     *left = left.wrapping_sub(count);
 }
 
-fn inflate_back_can_use_fast_path(have: ::core::ffi::c_uint, left: ::core::ffi::c_uint) -> bool {
-    have >= 6 && left >= 258
-}
-
-// The fast decoder temporarily owns the stream cursors, but its bit-buffer
-// handoff is ordinary inflater state.  Keep that scalar publication out of
-// the raw cursor boundary so both directions use the same reference-bound
-// transition.
-fn inflate_back_save_bit_buffer(
-    state: &mut crate::src::inflate::inflate_state,
-    hold: ::core::ffi::c_ulong,
-    bits: ::core::ffi::c_uint,
-) {
-    state.hold = hold;
-    state.bits = bits;
-}
-
-fn inflate_back_restore_bit_buffer(
-    state: &crate::src::inflate::inflate_state,
-    hold: &mut ::core::ffi::c_ulong,
-    bits: &mut ::core::ffi::c_uint,
-) {
-    *hold = state.hold;
-    *bits = state.bits;
-}
-
 fn inflate_back_pending_output(
     wsize: ::core::ffi::c_uint,
     left: ::core::ffi::c_uint,
@@ -1507,23 +1481,7 @@ pub(crate) fn inflateBack(
                 break;
             }
         }
-        if inflate_back_can_use_fast_path(have, left) {
-            strm.next_out = put as *mut crate::stdlib::Bytef;
-            strm.avail_out = left as crate::stdlib::uInt;
-            strm.next_in = next as *mut crate::stdlib::Bytef;
-            strm.avail_in = have as crate::stdlib::uInt;
-            inflate_back_save_bit_buffer(state_ref, hold, bits);
-            crate::src::inffast::inflate_fast(
-                strm as *mut crate::zlib_h::z_stream_s,
-                state_ref.wsize,
-            );
-            put = strm.next_out as *mut ::core::ffi::c_uchar;
-            left = strm.avail_out as ::core::ffi::c_uint;
-            next = strm.next_in as *mut ::core::ffi::c_uchar;
-            have = strm.avail_in as ::core::ffi::c_uint;
-            inflate_back_restore_bit_buffer(state_ref, &mut hold, &mut bits);
-        } else {
-            loop {
+        loop {
                 here = inflate_back_code_table_entry(
                     state_ref,
                     InflateBackCodeTable::Length,
@@ -1783,7 +1741,6 @@ pub(crate) fn inflateBack(
                         }
                     }
                 }
-            }
         }
     }
     if let Some(pending) = inflate_back_pending_output(state_ref.wsize, left) {
