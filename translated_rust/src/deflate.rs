@@ -213,12 +213,8 @@ pub const finish_started: block_state = 2;
 
 pub const need_more: block_state = 0;
 
-type compress_func = Option<
-    unsafe extern "C" fn(
-        *mut crate::src::deflate::deflate_state,
-        ::core::ffi::c_int,
-    ) -> block_state,
->;
+type compress_func =
+    Option<unsafe fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state>;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum CompressorKind {
@@ -351,7 +347,7 @@ pub(crate) fn clear_hash_state(
 /// Translate the legacy state-owned hash allocations into temporary slices for
 /// the pre-existing private window-fill adapter.  Export boundaries call the
 /// slice core directly instead.
-pub(crate) unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
+pub(crate) unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     if s.is_null() {
         return;
     }
@@ -661,7 +657,7 @@ fn slide_window_state(
     Some(more.wrapping_add(wsize))
 }
 
-unsafe extern "C" fn read_buf(
+unsafe fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
@@ -720,7 +716,7 @@ fn fill_window_space_state(
     (more, slide)
 }
 
-unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
     // This remains the transitional state/allocator boundary, but adopt the
@@ -871,7 +867,7 @@ pub unsafe extern "C" fn deflateInit__ffi(
         stream_size,
     )
 }
-pub unsafe extern "C" fn deflateInit2_(
+pub unsafe fn deflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
     mut method: ::core::ffi::c_int,
@@ -1100,9 +1096,7 @@ fn deflate_cursor_direction(cursor: usize, base: usize) -> (bool, usize) {
     }
 }
 
-pub(crate) unsafe extern "C" fn deflateStateCheck(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
+pub(crate) unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1;
     }
@@ -2174,7 +2168,7 @@ fn set_stored_block_length_state(
     true
 }
 
-unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
+unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     if strm.is_null() {
         return;
     }
@@ -2310,7 +2304,7 @@ fn repeated_flush_is_buffer_error(
         && flush != crate::zlib_h::Z_FINISH
 }
 
-pub unsafe extern "C" fn deflate(
+pub unsafe fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -2829,7 +2823,7 @@ fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
     }
 }
 
-pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+pub unsafe fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     // Validate and snapshot every callback argument before releasing any
     // allocation. A custom `zfree` is foreign code, so do not retain a Rust
     // borrow of the stream or state while it runs.
@@ -3388,7 +3382,7 @@ fn record_stored_input_state(
     }
 }
 
-unsafe extern "C" fn deflate_stored(
+unsafe fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3611,7 +3605,7 @@ unsafe extern "C" fn deflate_stored(
     }) as block_state;
 }
 
-unsafe extern "C" fn deflate_fast(
+unsafe fn deflate_fast(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3885,7 +3879,7 @@ unsafe extern "C" fn deflate_fast(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_slow(
+unsafe fn deflate_slow(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -4458,7 +4452,7 @@ fn filtered_match_length(
     }
 }
 
-unsafe extern "C" fn deflate_rle(
+unsafe fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -4586,7 +4580,7 @@ unsafe extern "C" fn deflate_rle(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_huff(
+unsafe fn deflate_huff(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
