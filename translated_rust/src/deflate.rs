@@ -522,6 +522,80 @@ impl DeflateCallbackStorageOwner {
         }
         Some(DeflateDictionaryStorage { window, prev, head })
     }
+
+    // A deflate copy crosses two independently callback-paired allocation
+    // lifecycles.  Keep the handoff at those lifecycles: callers lend the
+    // already-bounded views produced by their respective boundaries, and this
+    // owner verifies that both four-region sets still match the immutable
+    // callback request geometry before forming the one copy facade.  In
+    // particular, this method neither receives allocation handles nor builds
+    // raw views itself.
+    fn copy_storage<'source, 'destination>(
+        &self,
+        source: DeflateCallbackStorage<'source>,
+        destination_owner: &DeflateCallbackStorageOwner,
+        destination: DeflateCallbackStorage<'destination>,
+    ) -> Option<DeflateCopyStorage<'source, 'destination>> {
+        if !(self.window
+            && self.prev
+            && self.head
+            && self.pending
+            && destination_owner.window
+            && destination_owner.prev
+            && destination_owner.head
+            && destination_owner.pending
+            && self.storage.same_geometry(&destination_owner.storage))
+        {
+            return None;
+        }
+
+        let DeflateCallbackStorage {
+            window: Some(source_window),
+            prev: Some(source_prev),
+            head: Some(source_head),
+            pending: Some(source_pending),
+        } = source
+        else {
+            return None;
+        };
+        let DeflateCallbackStorage {
+            window: Some(destination_window),
+            prev: Some(destination_prev),
+            head: Some(destination_head),
+            pending: Some(destination_pending),
+        } = destination
+        else {
+            return None;
+        };
+
+        let storage = self.storage;
+        if source_window.len() != storage.window.byte_len()?
+            || source_prev.len() != storage.prev.element_len::<crate::src::deflate::Posf>()?
+            || source_head.len() != storage.head.element_len::<crate::src::deflate::Posf>()?
+            || source_pending.len() != storage.pending.byte_len()?
+            || destination_window.len() != storage.window.byte_len()?
+            || destination_prev.len() != storage.prev.element_len::<crate::src::deflate::Posf>()?
+            || destination_head.len() != storage.head.element_len::<crate::src::deflate::Posf>()?
+            || destination_pending.len() != storage.pending.byte_len()?
+        {
+            return None;
+        }
+
+        Some(DeflateCopyStorage::new(
+            DeflateCopySourceViews {
+                window: source_window,
+                prev: source_prev,
+                head: source_head,
+                pending: source_pending,
+            },
+            DeflateCopyDestinationViews {
+                window: destination_window,
+                prev: destination_prev,
+                head: destination_head,
+                pending: destination_pending,
+            },
+        ))
+    }
 }
 
 // This complete decision is pointer-free. The one callback boundary pairs
@@ -867,6 +941,17 @@ impl DeflateLayout {
 }
 
 impl DeflateStorageLayout {
+    fn same_geometry(&self, other: &Self) -> bool {
+        self.window.items == other.window.items
+            && self.window.size == other.window.size
+            && self.prev.items == other.prev.items
+            && self.prev.size == other.prev.size
+            && self.head.items == other.head.items
+            && self.head.size == other.head.size
+            && self.pending.items == other.pending.items
+            && self.pending.size == other.pending.size
+    }
+
     fn new(
         w_size: crate::stdlib::uInt,
         hash_size: crate::stdlib::uInt,
