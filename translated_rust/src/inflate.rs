@@ -370,7 +370,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit2_(strm, windowBits, version, stream_size)
 }
-pub unsafe fn inflateInit_(
+pub fn inflateInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
     version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
@@ -386,12 +386,16 @@ pub unsafe fn inflateInit_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    return inflateInit2_(
-        strm,
-        crate::zutil_h::DEF_WBITS,
-        ::core::ptr::from_ref(version),
-        stream_size,
-    );
+    // The safe inputs above establish the version and stream invariants that
+    // the translated initializer still expects as raw arguments.
+    unsafe {
+        inflateInit2_(
+            strm,
+            crate::zutil_h::DEF_WBITS,
+            ::core::ptr::from_ref(version),
+            stream_size,
+        )
+    }
 }
 #[export_name = "inflateInit_"]
 

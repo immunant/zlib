@@ -60,13 +60,11 @@ pub fn uncompress2_z(
     stream.zalloc = None;
     stream.zfree = None;
     stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    err = unsafe {
-        crate::src::inflate::inflateInit_(
-            Some(&mut stream),
-            Some(&crate::zlib_h::ZLIB_VERSION[0]),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        )
-    };
+    err = crate::src::inflate::inflateInit_(
+        Some(&mut stream),
+        Some(&crate::zlib_h::ZLIB_VERSION[0]),
+        ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+    );
     if err != crate::zlib_h::Z_OK {
         return (err, 0, 0);
     }
