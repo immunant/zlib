@@ -2825,9 +2825,8 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
     );
-    (*ds).pending_out = (*ds)
-        .pending_buf
-        .offset((*ss).pending_out.offset_from((*ss).pending_buf) as isize);
+    let pending_out_offset = (*ss).pending_out.offset_from((*ss).pending_buf);
+    (*ds).pending_out = (*ds).pending_buf.wrapping_offset(pending_out_offset);
     crate::stdlib::memcpy(
         (*ds).pending_out as *mut ::core::ffi::c_void,
         (*ss).pending_out as *const ::core::ffi::c_void,
