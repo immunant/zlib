@@ -196,6 +196,32 @@ fn inflate_back_block_header(
     (last, block_type)
 }
 
+// Applying a valid block header changes only decoder-owned state.  Keep that
+// transition reference-based after the FFI loop has decoded the header; the
+// invalid case is left to the caller so it can publish the diagnostic before
+// entering BAD, exactly as the original control flow does.
+fn inflate_back_start_block(
+    state: &mut crate::src::inflate::inflate_state,
+    block_type: InflateBackBlockType,
+) -> bool {
+    match block_type {
+        InflateBackBlockType::Stored => {
+            state.mode = crate::src::inflate::STORED;
+            false
+        }
+        InflateBackBlockType::Fixed => {
+            crate::src::inftrees::inflate_fixed(state);
+            state.mode = crate::src::inflate::LEN;
+            false
+        }
+        InflateBackBlockType::Dynamic => {
+            state.mode = crate::src::inflate::TABLE;
+            false
+        }
+        InflateBackBlockType::Invalid => true,
+    }
+}
+
 fn inflate_back_stored_length(hold: ::core::ffi::c_ulong) -> Option<::core::ffi::c_uint> {
     let length = hold as ::core::ffi::c_uint & 0xffff;
     if hold & 0xffff == hold >> 16 ^ 0xffff {
@@ -626,24 +652,11 @@ pub unsafe extern "C" fn inflateBack(
                     let (last, block_type) = inflate_back_block_header(hold);
                     (*state).last = last;
                     inflate_back_drop_bits(&mut hold, &mut bits, 3);
-                    match block_type {
-                        InflateBackBlockType::Stored => {
-                            (*state).mode = crate::src::inflate::STORED;
-                        }
-                        InflateBackBlockType::Fixed => {
-                            let state_ref = &mut *state;
-                            crate::src::inftrees::inflate_fixed(state_ref);
-                            state_ref.mode = crate::src::inflate::LEN;
-                        }
-                        InflateBackBlockType::Dynamic => {
-                            (*state).mode = crate::src::inflate::TABLE;
-                        }
-                        InflateBackBlockType::Invalid => {
-                            (*strm).msg = b"invalid block type\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
-                        }
+                    if inflate_back_start_block(&mut *state, block_type) {
+                        (*strm).msg = b"invalid block type\0".as_ptr()
+                            as *const ::core::ffi::c_char
+                            as *mut ::core::ffi::c_char;
+                        (*state).mode = crate::src::inflate::BAD;
                     }
                     continue;
                 }
