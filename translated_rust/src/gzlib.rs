@@ -431,6 +431,53 @@ fn gzseek_offset_state(
         _ => None,
     }
 }
+
+/// Plan the direct descriptor seek used by a transparent read stream.  This
+/// deliberately leaves the descriptor operation and state mutation at the
+/// boundary, where the opaque handle is already validated.
+fn gzseek_copy_plan(
+    mode: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    pos: crate::stdlib::off64_t,
+    have: crate::stdlib::uInt,
+    offset: crate::stdlib::off64_t,
+) -> Option<(crate::stdlib::off64_t, crate::stdlib::off64_t)> {
+    if mode != crate::gzguts_h::GZ_READ
+        || how != crate::gzguts_h::COPY
+        || pos.wrapping_add(offset) < 0
+    {
+        return None;
+    }
+    Some((
+        offset.wrapping_sub(have as crate::stdlib::off64_t),
+        pos.wrapping_add(offset),
+    ))
+}
+
+/// Determine how much already-buffered read data a seek can consume.  A
+/// negative offset has already been handled by rewind before this step.
+fn gzseek_read_buffer_plan(
+    have: crate::stdlib::uInt,
+    offset: crate::stdlib::off64_t,
+) -> Option<(crate::stdlib::uInt, crate::stdlib::off64_t)> {
+    if offset < 0 {
+        return None;
+    }
+    let consume = if (::core::mem::size_of::<::core::ffi::c_int>()
+        == ::core::mem::size_of::<crate::stdlib::off64_t>()
+        && have > gz_intmax())
+        || have as crate::stdlib::off64_t > offset
+    {
+        offset as crate::stdlib::uInt
+    } else {
+        have
+    };
+    Some((
+        consume,
+        offset.wrapping_sub(consume as crate::stdlib::off64_t),
+    ))
+}
+
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
     mut offset: crate::stdlib::off64_t,
@@ -460,13 +507,16 @@ pub unsafe extern "C" fn gzseek64(
     if clear_skip {
         (*state).skip = 0 as crate::stdlib::off64_t;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ
-        && (*state).how == crate::gzguts_h::COPY
-        && (*state).x.pos + offset >= 0 as crate::stdlib::off64_t
-    {
+    if let Some((descriptor_offset, next_pos)) = gzseek_copy_plan(
+        (*state).mode,
+        (*state).how,
+        (*state).x.pos,
+        (*state).x.have,
+        offset,
+    ) {
         ret = crate::stdlib::lseek64(
             (*state).fd,
-            offset as crate::stdlib::__off64_t - (*state).x.have as crate::stdlib::__off64_t,
+            descriptor_offset as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_CUR,
         ) as crate::stdlib::off64_t;
         if ret == -1 as crate::stdlib::off64_t {
@@ -482,8 +532,8 @@ pub unsafe extern "C" fn gzseek64(
             ::core::ptr::null::<::core::ffi::c_char>(),
         );
         (*state).strm.avail_in = 0 as crate::stdlib::uInt;
-        (*state).x.pos += offset;
-        return (*state).x.pos;
+        (*state).x.pos = next_pos;
+        return next_pos;
     }
     if offset < 0 as crate::stdlib::off64_t {
         if (*state).mode != crate::gzguts_h::GZ_READ {
@@ -498,19 +548,15 @@ pub unsafe extern "C" fn gzseek64(
         }
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>()
-            == ::core::mem::size_of::<crate::stdlib::off64_t>()
-            && (*state).x.have > gz_intmax()
-            || (*state).x.have as crate::stdlib::off64_t > offset
-        {
-            offset as ::core::ffi::c_uint
-        } else {
-            (*state).x.have
+        let Some((consume, remaining_offset)) = gzseek_read_buffer_plan((*state).x.have, offset)
+        else {
+            return -1 as crate::stdlib::off64_t;
         };
+        n = consume;
         (*state).x.have = (*state).x.have.wrapping_sub(n);
         (*state).x.next = (*state).x.next.offset(n as isize);
         (*state).x.pos += n as crate::stdlib::off64_t;
-        offset -= n as crate::stdlib::off64_t;
+        offset = remaining_offset;
     }
     (*state).skip = offset;
     return (*state).x.pos + offset;
