@@ -72,8 +72,12 @@ fn inflate_back_window_bits_are_valid(window_bits: ::core::ffi::c_int) -> bool {
     window_bits >= 8 as ::core::ffi::c_int && window_bits <= 15 as ::core::ffi::c_int
 }
 
-fn inflate_back_window_size(window_bits: ::core::ffi::c_int) -> ::core::ffi::c_uint {
-    (1 as ::core::ffi::c_uint) << window_bits
+fn inflate_back_window_size(window_bits: ::core::ffi::c_int) -> Option<::core::ffi::c_uint> {
+    if inflate_back_window_bits_are_valid(window_bits) {
+        Some((1 as ::core::ffi::c_uint) << window_bits)
+    } else {
+        None
+    }
 }
 
 fn inflate_back_init_metadata_is_valid(
@@ -97,9 +101,13 @@ pub unsafe fn inflateBackInit_(
     if !inflate_back_init_metadata_is_valid(version_first_byte, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() || window.is_null() || !inflate_back_window_bits_are_valid(windowBits) {
+    if strm.is_null() || window.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let window_size = match inflate_back_window_size(windowBits) {
+        Some(window_size) => window_size,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(crate::src::zutil::zcalloc_ffi);
@@ -120,7 +128,7 @@ pub unsafe fn inflateBackInit_(
     (*strm).state = state as *mut crate::src::deflate::internal_state;
     (*state).dmax = 32768 as ::core::ffi::c_uint;
     (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = inflate_back_window_size(windowBits);
+    (*state).wsize = window_size;
     (*state).window = window;
     (*state).wnext = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
@@ -1050,7 +1058,23 @@ mod tests {
     #[test]
     fn inflate_back_window_size_matches_each_supported_bit_width() {
         for window_bits in 8..=15 {
-            assert_eq!(inflate_back_window_size(window_bits), 1 << window_bits);
+            assert_eq!(
+                inflate_back_window_size(window_bits),
+                Some(1 << window_bits)
+            );
+        }
+    }
+
+    #[test]
+    fn inflate_back_window_size_rejects_unsupported_bit_widths() {
+        for window_bits in [
+            ::core::ffi::c_int::MIN,
+            -1,
+            7,
+            16,
+            ::core::ffi::c_int::MAX,
+        ] {
+            assert_eq!(inflate_back_window_size(window_bits), None);
         }
     }
 

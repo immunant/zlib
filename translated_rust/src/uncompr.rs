@@ -33,6 +33,20 @@ struct ChunkedProgress {
     unassigned: crate::stdlib::z_size_t,
 }
 
+fn replenish_scalar(
+    unassigned: &mut crate::stdlib::z_size_t,
+    available: &mut crate::stdlib::uInt,
+) {
+    if *available != 0 {
+        return;
+    }
+
+    *available = (*unassigned)
+        .min(crate::stdlib::uInt::MAX as crate::stdlib::z_size_t)
+        as crate::stdlib::uInt;
+    *unassigned = (*unassigned).wrapping_sub(*available as crate::stdlib::z_size_t);
+}
+
 impl ChunkedProgress {
     fn new(total: crate::stdlib::z_size_t) -> Self {
         Self {
@@ -42,17 +56,7 @@ impl ChunkedProgress {
     }
 
     fn replenish(&mut self, available: &mut crate::stdlib::uInt) {
-        if *available != 0 {
-            return;
-        }
-
-        *available = self
-            .unassigned
-            .min(crate::stdlib::uInt::MAX as crate::stdlib::z_size_t)
-            as crate::stdlib::uInt;
-        self.unassigned = self
-            .unassigned
-            .wrapping_sub(*available as crate::stdlib::z_size_t);
+        replenish_scalar(&mut self.unassigned, available);
     }
 
     fn remaining(self, available: crate::stdlib::uInt) -> crate::stdlib::z_size_t {
@@ -256,7 +260,7 @@ pub unsafe extern "C" fn uncompress_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        has_invalid_uncompress_buffers, uncompress_outcome, ChunkedProgress,
+        has_invalid_uncompress_buffers, replenish_scalar, uncompress_outcome, ChunkedProgress,
         LegacyUncompressLengths,
     };
 
@@ -292,6 +296,34 @@ mod tests {
                 crate::stdlib::z_size_t::MAX as crate::stdlib::uLong,
             )
         );
+    }
+
+    #[test]
+    fn replenish_scalar_caps_to_the_uint_bound() {
+        let mut unassigned = crate::stdlib::z_size_t::MAX;
+        let mut available = 0;
+
+        replenish_scalar(&mut unassigned, &mut available);
+
+        let expected = crate::stdlib::z_size_t::MAX
+            .min(crate::stdlib::uInt::MAX as crate::stdlib::z_size_t)
+            as crate::stdlib::uInt;
+        assert_eq!(available, expected);
+        assert_eq!(
+            unassigned,
+            crate::stdlib::z_size_t::MAX.wrapping_sub(expected as crate::stdlib::z_size_t)
+        );
+    }
+
+    #[test]
+    fn replenish_scalar_keeps_nonzero_availability() {
+        let mut unassigned = 10;
+        let mut available = 7;
+
+        replenish_scalar(&mut unassigned, &mut available);
+
+        assert_eq!(available, 7);
+        assert_eq!(unassigned, 10);
     }
 
     #[test]
