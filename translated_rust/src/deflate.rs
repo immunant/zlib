@@ -3650,8 +3650,8 @@ mod tests {
         fill_window_cursor, fill_window_insert_after_slide, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
         pending_output_len, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_min_size,
-        stored_insert_after_input, symbol_triplet_cursors, zlib_header,
+        slide_hash_entry, stored_block_min_size, stored_insert_after_input, symbol_triplet_cursors,
+        zlib_header,
     };
 
     #[test]

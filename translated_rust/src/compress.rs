@@ -182,12 +182,8 @@ pub unsafe extern "C" fn compress2_z_ffi(
     let mut source_progress = CompressProgress::new(source_slice.len());
     let mut dest_progress = CompressProgress::new(dest_slice.len());
     let status = loop {
-        let (input, output) = next_compress_chunk_slices(
-            source_slice,
-            dest_slice,
-            source_progress,
-            dest_progress,
-        );
+        let (input, output) =
+            next_compress_chunk_slices(source_slice, dest_slice, source_progress, dest_progress);
         let input_len = input.len();
         let output_len = output.len();
 
@@ -323,8 +319,14 @@ mod tests {
     fn compress_chunk_slices_follow_progress_and_handle_empty_windows() {
         let source = b"abcdef";
         let mut dest = [0u8; 8];
-        let source_progress = CompressProgress { total: source.len(), used: 2 };
-        let dest_progress = CompressProgress { total: dest.len(), used: 3 };
+        let source_progress = CompressProgress {
+            total: source.len(),
+            used: 2,
+        };
+        let dest_progress = CompressProgress {
+            total: dest.len(),
+            used: 3,
+        };
         let (input, output) =
             next_compress_chunk_slices(source, &mut dest, source_progress, dest_progress);
         assert_eq!(input, b"cdef");

@@ -423,6 +423,22 @@ fn copy_dictionary_from_window(
     dictionary[first..].copy_from_slice(&window[..wnext]);
 }
 
+fn inflate_get_dictionary_result(
+    whave: crate::stdlib::uInt,
+    wnext: crate::stdlib::uInt,
+    window: Option<&[crate::stdlib::Bytef]>,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
+) -> ::core::ffi::c_int {
+    if let (Some(window), Some(dictionary)) = (window, dictionary) {
+        copy_dictionary_from_window(window, wnext as usize, dictionary);
+    }
+    if let Some(dict_length) = dict_length {
+        *dict_length = whave;
+    }
+    crate::zlib_h::Z_OK
+}
+
 fn inflate_mark_value(
     back: ::core::ffi::c_int,
     mode: inflate_mode,
@@ -2211,10 +2227,11 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflateEnd(strm)
 }
-pub unsafe extern "C" fn inflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
+#[export_name = "inflateGetDictionary"]
+pub unsafe extern "C" fn inflateGetDictionary_ffi(
+    strm: crate::zlib_h::z_streamp,
+    dictionary: *mut crate::stdlib::Bytef,
+    dict_length: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
@@ -2222,24 +2239,17 @@ pub unsafe extern "C" fn inflateGetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).whave != 0 && !dictionary.is_null() {
+    let whave = (*state).whave;
+    let wnext = (*state).wnext;
+    let (window, dictionary) = if whave != 0 && !dictionary.is_null() {
         let window = core::slice::from_raw_parts((*state).window, (*state).wsize as usize);
-        let dictionary = core::slice::from_raw_parts_mut(dictionary, (*state).whave as usize);
-        copy_dictionary_from_window(window, (*state).wnext as usize, dictionary);
-    }
-    if !dictLength.is_null() {
-        *dictLength = (*state).whave as crate::stdlib::uInt;
-    }
-    return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateGetDictionary"]
+        let dictionary = core::slice::from_raw_parts_mut(dictionary, whave as usize);
+        (Some(window), Some(dictionary))
+    } else {
+        (None, None)
+    };
 
-pub unsafe extern "C" fn inflateGetDictionary_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    inflateGetDictionary(strm, dictionary, dictLength)
+    inflate_get_dictionary_result(whave, wnext, window, dictionary, dict_length.as_mut())
 }
 pub unsafe extern "C" fn inflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
@@ -2726,7 +2736,7 @@ mod tests {
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header,
         inflate_codes_used_offset_value, inflate_copy_progress, inflate_data_type_value,
-        inflate_dictionary_is_allowed, inflate_header_crc_enabled,
+        inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
         inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
         inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
@@ -2833,6 +2843,41 @@ mod tests {
         copy_dictionary_from_window(b"abc", 3, &mut dictionary);
 
         assert!(dictionary.is_empty());
+    }
+
+    #[test]
+    fn dictionary_result_copies_window_and_reports_length() {
+        let window = *b"YZcdefWX";
+        let mut dictionary = [0; 8];
+        let mut length = 0;
+
+        assert_eq!(
+            inflate_get_dictionary_result(
+                8,
+                2,
+                Some(&window),
+                Some(&mut dictionary),
+                Some(&mut length),
+            ),
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(dictionary, *b"cdefWXYZ");
+        assert_eq!(length, 8);
+    }
+
+    #[test]
+    fn dictionary_result_allows_null_output_equivalents() {
+        let mut length = 0;
+
+        assert_eq!(
+            inflate_get_dictionary_result(5, 0, None, None, Some(&mut length)),
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(length, 5);
+        assert_eq!(
+            inflate_get_dictionary_result(5, 0, None, None, None),
+            crate::zlib_h::Z_OK
+        );
     }
 
     #[test]
