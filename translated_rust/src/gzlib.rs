@@ -118,6 +118,15 @@ struct GzOpenOptions {
     exclusive: ::core::ffi::c_int,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GzOpenPlan {
+    mode: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    direct: ::core::ffi::c_int,
+    oflag: ::core::ffi::c_int,
+}
+
 fn gz_parse_open_mode(mode: &[u8]) -> Option<GzOpenOptions> {
     let mut options = GzOpenOptions {
         mode: crate::gzguts_h::GZ_NONE,
@@ -155,11 +164,59 @@ fn gz_parse_open_mode(mode: &[u8]) -> Option<GzOpenOptions> {
     Some(options)
 }
 
-fn gz_apply_open_options(state: &mut crate::gzguts_h::gz_state, options: GzOpenOptions) {
-    state.mode = options.mode;
-    state.level = options.level;
-    state.strategy = options.strategy;
-    state.direct = options.direct;
+fn gz_prepare_open(options: GzOpenOptions) -> Option<GzOpenPlan> {
+    if options.mode == crate::gzguts_h::GZ_NONE {
+        return None;
+    }
+
+    let direct = if options.mode == crate::gzguts_h::GZ_READ {
+        if options.direct == 1 {
+            return None;
+        }
+        if options.direct == 0 {
+            1
+        } else {
+            options.direct
+        }
+    } else {
+        if options.direct == -1 {
+            return None;
+        }
+        options.direct
+    };
+    let oflag = options.oflag
+        | crate::stdlib::O_LARGEFILE
+        | if options.mode == crate::gzguts_h::GZ_READ {
+            crate::stdlib::O_RDONLY
+        } else {
+            crate::stdlib::O_WRONLY
+                | crate::stdlib::O_CREAT
+                | if options.exclusive != 0 {
+                    crate::stdlib::O_EXCL
+                } else {
+                    0
+                }
+                | if options.mode == crate::gzguts_h::GZ_WRITE {
+                    crate::stdlib::O_TRUNC
+                } else {
+                    crate::stdlib::O_APPEND
+                }
+        };
+
+    Some(GzOpenPlan {
+        mode: options.mode,
+        level: options.level,
+        strategy: options.strategy,
+        direct,
+        oflag,
+    })
+}
+
+fn gz_apply_open_plan(state: &mut crate::gzguts_h::gz_state, plan: GzOpenPlan) {
+    state.mode = plan.mode;
+    state.level = plan.level;
+    state.strategy = plan.strategy;
+    state.direct = plan.direct;
 }
 
 unsafe extern "C" fn gz_open(
@@ -170,8 +227,6 @@ unsafe extern "C" fn gz_open(
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut oflag: ::core::ffi::c_int;
-    let mut exclusive: ::core::ffi::c_int;
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -182,32 +237,16 @@ unsafe extern "C" fn gz_open(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     gz_open_defaults(&mut *state);
-    let options = match gz_parse_open_mode(::core::ffi::CStr::from_ptr(mode).to_bytes()) {
-        Some(options) => options,
+    let plan = match gz_parse_open_mode(::core::ffi::CStr::from_ptr(mode).to_bytes())
+        .and_then(gz_prepare_open)
+    {
+        Some(plan) => plan,
         None => {
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     };
-    gz_apply_open_options(&mut *state, options);
-    oflag = options.oflag;
-    exclusive = options.exclusive;
-    if (*state).mode == crate::gzguts_h::GZ_NONE {
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        if (*state).direct == 1 as ::core::ffi::c_int {
-            crate::stdlib::free(state as *mut ::core::ffi::c_void);
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
-        if (*state).direct == 0 as ::core::ffi::c_int {
-            (*state).direct = 1 as ::core::ffi::c_int;
-        }
-    } else if (*state).direct == -1 as ::core::ffi::c_int {
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
+    gz_apply_open_plan(&mut *state, plan);
     len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
     (*state).path = crate::stdlib::malloc(
         (len as crate::__stddef_size_t_h::size_t)
@@ -224,38 +263,21 @@ unsafe extern "C" fn gz_open(
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
         path as *const ::core::ffi::c_char,
     );
-    oflag |= crate::stdlib::O_LARGEFILE
-        | (if (*state).mode == crate::gzguts_h::GZ_READ {
-            crate::stdlib::O_RDONLY
-        } else {
-            crate::stdlib::O_WRONLY
-                | crate::stdlib::O_CREAT
-                | (if exclusive != 0 {
-                    crate::stdlib::O_EXCL
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-                | (if (*state).mode == crate::gzguts_h::GZ_WRITE {
-                    crate::stdlib::O_TRUNC
-                } else {
-                    crate::stdlib::O_APPEND
-                })
-        });
     if fd == -1 as ::core::ffi::c_int {
         (*state).fd = crate::stdlib::open(
             path as *const ::core::ffi::c_char,
-            oflag,
+            plan.oflag,
             0o666 as ::core::ffi::c_int,
         );
     } else {
-        if oflag & crate::stdlib::O_NONBLOCK != 0 {
+        if plan.oflag & crate::stdlib::O_NONBLOCK != 0 {
             crate::stdlib::fcntl(
                 fd,
                 crate::stdlib::F_SETFL,
                 crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
             );
         }
-        if oflag & crate::stdlib::O_CLOEXEC != 0 {
+        if plan.oflag & crate::stdlib::O_CLOEXEC != 0 {
             crate::stdlib::fcntl(
                 fd,
                 crate::stdlib::F_SETFD,
@@ -781,7 +803,8 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_parse_open_mode, gzerror_core, gztell64_core, GzErrorMessage,
+        gz_clear_read_flags, gz_parse_open_mode, gz_prepare_open, gzerror_core, gztell64_core,
+        GzErrorMessage,
     };
 
     #[test]
@@ -855,5 +878,42 @@ mod tests {
         assert_eq!(options.level, 2);
         assert_eq!(options.strategy, crate::zlib_h::Z_FIXED);
         assert_eq!(options.direct, 1);
+    }
+
+    #[test]
+    fn preparing_read_open_normalizes_default_direct_mode_and_flags() {
+        let plan = gz_prepare_open(gz_parse_open_mode(b"r").unwrap()).unwrap();
+
+        assert_eq!(plan.mode, crate::gzguts_h::GZ_READ);
+        assert_eq!(plan.direct, 1);
+        assert_eq!(
+            plan.oflag,
+            crate::stdlib::O_LARGEFILE | crate::stdlib::O_RDONLY
+        );
+    }
+
+    #[test]
+    fn preparing_write_open_combines_descriptor_flags() {
+        let plan = gz_prepare_open(gz_parse_open_mode(b"axNe").unwrap()).unwrap();
+
+        assert_eq!(plan.mode, crate::gzguts_h::GZ_APPEND);
+        assert_eq!(plan.direct, 0);
+        assert_eq!(
+            plan.oflag,
+            crate::stdlib::O_LARGEFILE
+                | crate::stdlib::O_NONBLOCK
+                | crate::stdlib::O_CLOEXEC
+                | crate::stdlib::O_WRONLY
+                | crate::stdlib::O_CREAT
+                | crate::stdlib::O_EXCL
+                | crate::stdlib::O_APPEND
+        );
+    }
+
+    #[test]
+    fn preparing_open_rejects_missing_mode_and_invalid_direct_modes() {
+        assert_eq!(gz_prepare_open(gz_parse_open_mode(b"9").unwrap()), None);
+        assert_eq!(gz_prepare_open(gz_parse_open_mode(b"rT").unwrap()), None);
+        assert_eq!(gz_prepare_open(gz_parse_open_mode(b"wG").unwrap()), None);
     }
 }
