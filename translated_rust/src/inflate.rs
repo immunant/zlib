@@ -272,6 +272,34 @@ fn inflate_header_crc_update(check: ::core::ffi::c_ulong, bytes: &[u8]) -> ::cor
     crate::src::crc32::crc32_z(check as crate::stdlib::uLong, bytes) as ::core::ffi::c_ulong
 }
 
+/// Validate the low 16 bits carried by a gzip header CRC.  The wrapper bit,
+/// accumulated CRC, and bit-buffer value are all scalar state, so this policy
+/// does not need to remain in the transitional cursor loop.
+fn inflate_header_crc_matches(
+    wrap: ::core::ffi::c_int,
+    check: ::core::ffi::c_ulong,
+    hold: ::core::ffi::c_ulong,
+) -> bool {
+    wrap & 4 as ::core::ffi::c_int == 0 || hold == check & 0xffff as ::core::ffi::c_ulong
+}
+
+/// Preserve zlib's final no-progress/finish result mapping independently of
+/// the ABI cursor commit that precedes it.
+fn inflate_exit_status(
+    input_used: ::core::ffi::c_uint,
+    output_used: ::core::ffi::c_uint,
+    flush: ::core::ffi::c_int,
+    status: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if (input_used == 0 && output_used == 0 || flush == crate::zlib_h::Z_FINISH)
+        && status == crate::zlib_h::Z_OK
+    {
+        crate::zlib_h::Z_BUF_ERROR
+    } else {
+        status
+    }
+}
+
 // Keep all inflate diagnostics in one immutable table.  Besides making their
 // storage explicit, this lets gzip retain an inflate error without treating
 // `strm.msg` as an arbitrary foreign C string.
@@ -3012,9 +3040,7 @@ pub unsafe fn inflate(
                     hold = hold.wrapping_add((*c2rust_fresh9 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if state_ref.wrap & 4 as ::core::ffi::c_int != 0
-                    && hold != state_ref.check & 0xffff as ::core::ffi::c_ulong
-                {
+                if !inflate_header_crc_matches(state_ref.wrap, state_ref.check, hold) {
                     strm_ref.msg = INFLATE_ERROR_MESSAGES[16].as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     state_ref.mode = crate::src::inflate::BAD;
@@ -3228,13 +3254,7 @@ pub unsafe fn inflate(
         }
         strm_ref.data_type = exit.data_type;
     }
-    if (in_0 == 0 as ::core::ffi::c_uint && out == 0 as ::core::ffi::c_uint
-        || flush == crate::zlib_h::Z_FINISH)
-        && ret == crate::zlib_h::Z_OK
-    {
-        ret = crate::zlib_h::Z_BUF_ERROR;
-    }
-    return ret;
+    inflate_exit_status(in_0, out, flush, ret)
 }
 #[export_name = "inflate"]
 
