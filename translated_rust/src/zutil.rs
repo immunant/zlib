@@ -6,6 +6,15 @@ pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
 use core::sync::atomic::AtomicPtr;
+use std::mem::MaybeUninit;
+use std::sync::Mutex;
+
+// `zcalloc` is installed as the default C callback, so allocations escape to
+// the translated codec as raw storage.  Retain their owners here until the
+// matching `zcfree` callback removes them.  A u128 slot provides the
+// max-alignment needed by the supported zlib state records while keeping the
+// storage uninitialized, matching this target's malloc branch.
+static ZCALLOC_ALLOCATIONS: Mutex<Vec<(usize, Box<[MaybeUninit<u128>]>)>> = Mutex::new(Vec::new());
 static Z_ERROR_MESSAGES: [&[u8]; 10] = [
     b"need dictionary\0",
     b"stream end\0",
@@ -137,7 +146,27 @@ pub unsafe extern "C" fn zcalloc(
     // branch selected on every supported target.  Keep its wrapping product
     // and allocation semantics, without retaining the unreachable calloc
     // branch as an extra foreign call in the implementation.
-    crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
+    let bytes = items.wrapping_mul(size) as usize;
+    let words = (bytes / ::core::mem::size_of::<u128>())
+        + usize::from(bytes % ::core::mem::size_of::<u128>() != 0);
+    // Like malloc(0), return a freeable allocation for a zero-size request.
+    let words = words.max(1);
+    let mut allocation = Vec::<MaybeUninit<u128>>::new();
+    if allocation.try_reserve_exact(words).is_err() {
+        return ::core::ptr::null_mut();
+    }
+    allocation.resize_with(words, MaybeUninit::uninit);
+    let mut allocation = allocation.into_boxed_slice();
+    let pointer = ::core::ptr::from_mut(&mut allocation[0]).cast::<::core::ffi::c_void>();
+    let mut allocations = match ZCALLOC_ALLOCATIONS.lock() {
+        Ok(allocations) => allocations,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if allocations.try_reserve(1).is_err() {
+        return ::core::ptr::null_mut();
+    }
+    allocations.push((pointer as usize, allocation));
+    pointer
 }
 #[export_name = "zcalloc"]
 
@@ -149,7 +178,24 @@ pub unsafe extern "C" fn zcalloc_ffi(
     zcalloc(opaque, items, size)
 }
 pub unsafe extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
-    crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
+    if ptr.is_null() {
+        return;
+    }
+    let allocation = {
+        let mut allocations = match ZCALLOC_ALLOCATIONS.lock() {
+            Ok(allocations) => allocations,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        allocations
+            .iter()
+            .position(|(address, _)| *address == ptr as usize)
+            .map(|index| allocations.swap_remove(index).1)
+    };
+    if allocation.is_none() {
+        // Preserve zcfree's public free-compatible behavior for allocations
+        // supplied by an external caller rather than this default broker.
+        crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
+    }
 }
 #[export_name = "zcfree"]
 
