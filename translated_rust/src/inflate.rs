@@ -364,42 +364,33 @@ pub unsafe extern "C" fn inflateInit__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit_(strm, version, stream_size)
 }
-pub unsafe extern "C" fn inflatePrime(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
+/// Apply an `inflatePrime()` request to scalar bit-buffer state.  The export
+/// boundary validates and owns the stream state; this core preserves zlib's
+/// bit masking and wrapping arithmetic without accessing raw state.
+fn inflate_prime_update(
+    hold: ::core::ffi::c_ulong,
+    held_bits: ::core::ffi::c_uint,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> Result<(::core::ffi::c_ulong, ::core::ffi::c_uint), ()> {
+    if bits == 0 {
+        return Ok((hold, held_bits));
     }
-    if bits == 0 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_OK;
+    if bits < 0 {
+        return Ok((0, 0));
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if bits < 0 as ::core::ffi::c_int {
-        (*state).hold = 0 as ::core::ffi::c_ulong;
-        (*state).bits = 0 as ::core::ffi::c_uint;
-        return crate::zlib_h::Z_OK;
+    if bits > 16 || held_bits.wrapping_add(bits as ::core::ffi::c_uint) > 32 {
+        return Err(());
     }
-    if bits > 16 as ::core::ffi::c_int
-        || ((*state).bits as crate::stdlib::uInt).wrapping_add(bits as crate::stdlib::uInt)
-            > 32 as ::core::ffi::c_uint
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    value = (value as ::core::ffi::c_long
+    let value = (value as ::core::ffi::c_long
         & ((1 as ::core::ffi::c_long) << bits) - 1 as ::core::ffi::c_long)
         as ::core::ffi::c_int;
-    (*state).hold = (*state)
-        .hold
-        .wrapping_add((value as ::core::ffi::c_ulong) << (*state).bits);
-    (*state).bits = (*state)
-        .bits
-        .wrapping_add(bits as crate::stdlib::uInt as ::core::ffi::c_uint);
-    return crate::zlib_h::Z_OK;
+    Ok((
+        hold.wrapping_add((value as ::core::ffi::c_ulong) << held_bits),
+        held_bits.wrapping_add(bits as ::core::ffi::c_uint),
+    ))
 }
+
 #[export_name = "inflatePrime"]
 
 pub unsafe extern "C" fn inflatePrime_ffi(
@@ -407,7 +398,17 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflatePrime(strm, bits, value)
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let Ok((hold, held_bits)) = inflate_prime_update((*state).hold, (*state).bits, bits, value)
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    (*state).hold = hold;
+    (*state).bits = held_bits;
+    crate::zlib_h::Z_OK
 }
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
