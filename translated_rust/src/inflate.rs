@@ -983,6 +983,10 @@ fn inflate_mark_value(
         + progress as ::core::ffi::c_long
 }
 
+fn inflate_mark(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_long {
+    inflate_mark_value(state.back, state.mode, state.length, state.was)
+}
+
 fn inflate_mark_progress(
     mode: inflate_mode,
     length: crate::stdlib::uInt,
@@ -3582,11 +3586,15 @@ pub unsafe extern "C" fn inflateMark_ffi(
     if inflate_state_check_at_ffi_boundary!(strm) {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    inflate_mark_value((*state).back, (*state).mode, (*state).length, (*state).was)
+    let state = &*(((*strm).state) as *mut crate::src::inflate::inflate_state);
+    inflate_mark(state)
 }
 fn inflate_codes_used_offset_value(offset: ::core::ffi::c_long) -> ::core::ffi::c_ulong {
     offset as ::core::ffi::c_ulong
+}
+
+fn inflate_codes_used(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_ulong {
+    inflate_codes_used_offset_value(state.next as ::core::ffi::c_long)
 }
 #[export_name = "inflateCodesUsed"]
 
@@ -3596,8 +3604,8 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     if inflate_state_check_at_ffi_boundary!(strm) {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    inflate_codes_used_offset_value((*state).next as ::core::ffi::c_long)
+    let state = &*(((*strm).state) as *mut crate::src::inflate::inflate_state);
+    inflate_codes_used(state)
 }
 
 #[cfg(test)]
