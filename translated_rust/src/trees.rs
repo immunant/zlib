@@ -5596,10 +5596,10 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
         ))
     };
     tr_flush_block(state, pending_and_symbols, stored, stored_len, last);
-    let Some(mut strm) = state.strm else {
+    if state.strm == 0 {
         return;
-    };
-    let strm = strm.as_mut();
+    }
+    let strm = &mut *(state.strm as *mut crate::zlib_h::z_stream);
     strm.data_type = state.data_type;
 }
 pub fn _tr_tally(

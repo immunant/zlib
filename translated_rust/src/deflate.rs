@@ -80,10 +80,10 @@ pub type deflate_state = crate::src::deflate::internal_state;
 #[repr(C)]
 
 pub struct internal_state {
-    /// The ABI stream that owns this opaque state.  A non-null handle makes
-    /// that ownership invariant explicit without storing a nullable raw
-    /// pointer in implementation state.
-    pub strm: Option<::core::ptr::NonNull<crate::zlib_h::z_stream>>,
+    /// Address token for the ABI stream that owns this opaque state.  The
+    /// state is opaque across the ABI, so it needs only identity for its
+    /// consistency checks; ordinary codec code never dereferences this.
+    pub strm: usize,
     pub status: ::core::ffi::c_int,
     // `data_type` is observable through the ABI stream, but it is inferred by
     // the tree core.  Keep the working value with the opaque codec state so
@@ -174,7 +174,7 @@ fn deflate_initial_state() -> deflate_state {
         stat_desc: None,
     };
     internal_state {
-        strm: None,
+        strm: 0,
         status: 0,
         data_type: crate::zlib_h::Z_UNKNOWN,
         pending_buf: ::core::ptr::null_mut(),
@@ -1132,7 +1132,7 @@ pub fn deflateInit2_(
             let state = &mut *s;
             *state = deflate_initial_state();
             strm_ref.state = s as *mut crate::src::deflate::internal_state;
-            state.strm = Some(::core::ptr::NonNull::from(&mut *strm_ref));
+            state.strm = strm_ref as *mut crate::zlib_h::z_stream as usize;
             state.status = crate::src::deflate::INIT_STATE;
             state.wrap = wrap;
             state.gzhead = None;
@@ -1374,7 +1374,7 @@ macro_rules! deflate_state_check_at_boundary {
                 (!crate::src::deflate::deflate_state_values_are_valid(
                     strm_ref.zalloc.is_some(),
                     strm_ref.zfree.is_some(),
-                    state.strm == ::core::ptr::NonNull::new(strm),
+                    state.strm == strm as usize,
                     state.status,
                 )) as ::core::ffi::c_int
             }
@@ -3088,7 +3088,7 @@ pub fn deflate(
             if !deflate_state_values_are_valid(
                 stream.zalloc.is_some(),
                 stream.zfree.is_some(),
-                state.strm == Some(::core::ptr::NonNull::from(&mut *stream)),
+                state.strm == stream as *mut crate::zlib_h::z_stream as usize,
                 state.status,
             ) {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -3823,7 +3823,7 @@ pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
             if !deflate_state_values_are_valid(
                 strm.zalloc.is_some(),
                 strm.zfree.is_some(),
-                state.strm == Some(::core::ptr::NonNull::from(&mut *strm)),
+                state.strm == strm as *mut crate::zlib_h::z_stream as usize,
                 state.status,
             ) {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -3895,7 +3895,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     dest_stream.state = ds as *mut crate::src::deflate::internal_state;
     let dest_state = &mut *ds;
     *dest_state = *source_state;
-    dest_state.strm = ::core::ptr::NonNull::new(dest);
+    dest_state.strm = dest as usize;
     dest_state.window = zalloc(
         opaque,
         dest_state.w_size,
