@@ -112,7 +112,10 @@ pub struct internal_state {
     /// that nullable C handle as an optional non-null pointer internally.
     pub window: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
     pub window_size: crate::zutil_h::ulg,
-    pub prev: *mut crate::src::deflate::Posf,
+    /// The callback-owned previous-position table is absent until init
+    /// succeeds.  As with the history window, this opaque state can retain a
+    /// non-null handle instead of a nullable raw pointer.
+    pub prev: Option<::core::ptr::NonNull<crate::src::deflate::Posf>>,
     pub head: *mut crate::src::deflate::Posf,
     pub ins_h: crate::stdlib::uInt,
     pub hash_size: crate::stdlib::uInt,
@@ -194,7 +197,7 @@ fn deflate_initial_state() -> deflate_state {
         w_mask: 0,
         window: None,
         window_size: 0,
-        prev: ::core::ptr::null_mut(),
+        prev: None,
         head: ::core::ptr::null_mut(),
         ins_h: 0,
         hash_size: 0,
@@ -890,10 +893,16 @@ macro_rules! deflate_window_hash_buffers_at_boundary {
                 } else {
                     ::core::slice::from_raw_parts_mut(state.head, head_len)
                 };
-                let prev = if state.prev.is_null() {
+                let prev = if state.prev.is_none() {
                     &mut []
                 } else {
-                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                    ::core::slice::from_raw_parts_mut(
+                        state
+                            .prev
+                            .expect("validated deflate previous table")
+                            .as_ptr(),
+                        prev_len,
+                    )
                 };
                 Some(crate::src::deflate::DeflateWindowHashBuffers::new(
                     window, head, prev,
@@ -1182,7 +1191,7 @@ pub fn deflateInit2_(
             w_size,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
-        (&mut *s).prev = prev;
+        (&mut *s).prev = ::core::ptr::NonNull::new(prev);
         let Some(zalloc) = strm_ref.zalloc else {
             let _ = deflateEnd(strm_ref);
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -1471,7 +1480,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
             };
             if (window_len != 0 && state_ref.window.is_none())
                 || (head_len != 0 && state_ref.head.is_null())
-                || (prev_len != 0 && state_ref.prev.is_null())
+                || (prev_len != 0 && state_ref.prev.is_none())
             {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
@@ -1491,7 +1500,13 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
             let prev = if prev_len == 0 {
                 &mut []
             } else {
-                ::core::slice::from_raw_parts_mut(state_ref.prev, prev_len)
+                ::core::slice::from_raw_parts_mut(
+                    state_ref
+                        .prev
+                        .expect("validated deflate previous table")
+                        .as_ptr(),
+                    prev_len,
+                )
             };
             if !insert_dictionary_strings_state(state_ref, window, head, prev) {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -2079,7 +2094,7 @@ macro_rules! deflate_params_at_boundary {
                     0
                 };
                 if (head_len != 0 && state.head.is_null())
-                    || (prev_len != 0 && state.prev.is_null())
+                    || (prev_len != 0 && state.prev.is_none())
                 {
                     break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                 }
@@ -2091,7 +2106,13 @@ macro_rules! deflate_params_at_boundary {
                 let prev = if prev_len == 0 {
                     &mut []
                 } else {
-                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                    ::core::slice::from_raw_parts_mut(
+                        state
+                            .prev
+                            .expect("validated deflate previous table")
+                            .as_ptr(),
+                        prev_len,
+                    )
                 };
                 (head, prev)
             } else {
@@ -3841,8 +3862,8 @@ pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
         if !head.is_null() {
             zfree(opaque, head as crate::stdlib::voidpf);
         }
-        if !prev.is_null() {
-            zfree(opaque, prev as crate::stdlib::voidpf);
+        if let Some(prev) = prev {
+            zfree(opaque, prev.as_ptr() as crate::stdlib::voidpf);
         }
         if let Some(window) = window {
             zfree(opaque, window.as_ptr() as crate::stdlib::voidpf);
@@ -3894,11 +3915,11 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
             as crate::stdlib::uInt,
     ) as *mut crate::stdlib::Bytef);
-    dest_state.prev = zalloc(
+    dest_state.prev = ::core::ptr::NonNull::new(zalloc(
         opaque,
         dest_state.w_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
+    ) as *mut crate::src::deflate::Posf);
     dest_state.head = zalloc(
         opaque,
         dest_state.hash_size,
@@ -3907,7 +3928,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     dest_state.pending_buf = zalloc(opaque, dest_state.lit_bufsize, 4 as crate::stdlib::uInt)
         as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     if dest_state.window.is_none()
-        || dest_state.prev.is_null()
+        || dest_state.prev.is_none()
         || dest_state.head.is_null()
         || dest_state.pending_buf.is_null()
     {
@@ -3931,7 +3952,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if (window_len != 0 && source_state.window.is_none())
-        || (prev_capacity != 0 && source_state.prev.is_null())
+        || (prev_capacity != 0 && source_state.prev.is_none())
         || (head_len != 0 && source_state.head.is_null())
         || (pending_capacity != 0 && source_state.pending_buf.is_null())
     {
@@ -4019,12 +4040,24 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let src_prev = if prev_capacity == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(source_state.prev, prev_capacity)
+        ::core::slice::from_raw_parts(
+            source_state
+                .prev
+                .expect("validated source deflate previous table")
+                .as_ptr(),
+            prev_capacity,
+        )
     };
     let dst_prev = if prev_capacity == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(dest_state.prev, prev_capacity)
+        ::core::slice::from_raw_parts_mut(
+            dest_state
+                .prev
+                .expect("validated destination deflate previous table")
+                .as_ptr(),
+            prev_capacity,
+        )
     };
     let src_head = if head_len == 0 {
         &[]
@@ -4850,7 +4883,7 @@ fn deflate_fast(
                 return need_more;
             };
             if (head_len != 0 && state.head.is_null())
-                || (prev_len != 0 && state.prev.is_null())
+                || (prev_len != 0 && state.prev.is_none())
                 || window_hash.head.len() != head_len
                 || window_hash.prev.len() != prev_len
             {
@@ -5123,7 +5156,7 @@ fn deflate_slow(
                     return need_more;
                 };
                 if (head_len != 0 && state.head.is_null())
-                    || (prev_len != 0 && state.prev.is_null())
+                    || (prev_len != 0 && state.prev.is_none())
                     || window_hash.head.len() != head_len
                     || window_hash.prev.len() != prev_len
                 {
