@@ -1300,7 +1300,10 @@ pub unsafe fn deflateInit2_(
         strm.msg = crate::src::zutil::z_errmsg[6].load(::core::sync::atomic::Ordering::Relaxed);
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    unsafe { deflate_install_state(strm, DeflateStateInstallation::Initialize(state)) }
+    install_deflate_state(
+        DeflateStateStream::new(strm),
+        DeflateStateInstallation::Initialize(state),
+    )
 }
 
 /// Construct a fully owned deflate state before it is installed in the ABI
@@ -3635,26 +3638,55 @@ fn deflate_copy_impl(
 enum DeflateStateInstallation<'a> {
     Initialize(crate::src::deflate::deflate_state),
     Copy {
-        source: &'a crate::zlib_h::z_stream_s,
         state: &'a crate::src::deflate::deflate_state,
         allocators_present: bool,
     },
 }
 
+/// Carries an already-borrowed ABI stream through the state-installation
+/// boundary.  This keeps the implementation interface free of the stream's
+/// raw ABI fields while leaving allocation pairing local to installation.
+struct DeflateStateStream<'a> {
+    destination: &'a mut crate::zlib_h::z_stream_s,
+    source: Option<&'a crate::zlib_h::z_stream_s>,
+}
+
+impl<'a> DeflateStateStream<'a> {
+    fn new(destination: &'a mut crate::zlib_h::z_stream_s) -> Self {
+        Self {
+            destination,
+            source: None,
+        }
+    }
+
+    fn copy(
+        destination: &'a mut crate::zlib_h::z_stream_s,
+        source: &'a crate::zlib_h::z_stream_s,
+    ) -> Self {
+        Self {
+            destination,
+            source: Some(source),
+        }
+    }
+}
+
 /// Install a prepared deflater in either default Rust storage or storage
 /// supplied by the stream's ABI allocator.  This is the only deflate path
 /// that calls an allocator callback or turns its untyped result into a state.
-unsafe fn deflate_install_state(
-    dest: &mut crate::zlib_h::z_stream_s,
+fn install_deflate_state(
+    stream: DeflateStateStream<'_>,
     installation: DeflateStateInstallation<'_>,
 ) -> ::core::ffi::c_int {
+    let dest = stream.destination;
     let (source, mut copied_state) = match installation {
         DeflateStateInstallation::Initialize(state) => (None, state),
         DeflateStateInstallation::Copy {
-            source,
             state,
             allocators_present,
         } => {
+            let Some(source) = stream.source else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
             if !deflate_copy_state_is_valid(allocators_present, state) {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
@@ -3733,16 +3765,13 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let Some(source_state) = source.state.as_ref() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    unsafe {
-        deflate_install_state(
-            dest,
-            DeflateStateInstallation::Copy {
-                source,
-                state: source_state,
-                allocators_present: deflate_stream_has_state_allocation(source),
-            },
-        )
-    }
+    install_deflate_state(
+        DeflateStateStream::copy(dest, source),
+        DeflateStateInstallation::Copy {
+            state: source_state,
+            allocators_present: deflate_stream_has_state_allocation(source),
+        },
+    )
 }
 fn longest_match(
     s: &mut crate::src::deflate::deflate_state,
