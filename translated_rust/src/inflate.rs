@@ -1565,21 +1565,22 @@ pub unsafe extern "C" fn inflate_ffi(
                     &mut (*state).lens,
                     &mut (*state).have,
                 );
-                (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                (*state).distcode = (*state).next as *const crate::src::inftrees::code;
-                (*state).lencode = (*state).distcode;
-                let code_lengths = crate::src::inflate::inflate_build_code_length_table(
-                    &(*state).lens,
-                    &mut (*state).codes,
-                    &mut (*state).work,
-                );
-                (*state).lenbits = code_lengths.lenbits;
-                ret = code_lengths.ret;
-                if ret == 0 {
-                    (*state).next = (*state)
-                        .codes
-                        .as_mut_ptr()
-                        .wrapping_add(code_lengths.table_used);
+                {
+                    let state_ref = &mut *state;
+                    let codes_base = state_ref.codes.as_mut_ptr();
+                    state_ref.next = codes_base;
+                    state_ref.distcode = codes_base as *const crate::src::inftrees::code;
+                    state_ref.lencode = state_ref.distcode;
+                    let code_lengths = crate::src::inflate::inflate_build_code_length_table(
+                        &state_ref.lens,
+                        &mut state_ref.codes,
+                        &mut state_ref.work,
+                    );
+                    state_ref.lenbits = code_lengths.lenbits;
+                    ret = code_lengths.ret;
+                    if ret == 0 {
+                        state_ref.next = codes_base.wrapping_add(code_lengths.table_used);
+                    }
                 }
                 if ret != 0 {
                     (*strm).msg = b"invalid code lengths set\0".as_ptr()
