@@ -913,10 +913,9 @@ pub unsafe fn inflate(
                                                                                                                 } else {
                                                                                                                     (*state).dmax = (1 as ::core::ffi::c_uint) << len;
                                                                                                                     (*state).flags = 0 as ::core::ffi::c_int;
-                                                                                                                    (*state).check = crate::src::adler32::adler32(
-                                                                                                                        0 as crate::stdlib::uLong,
-                                                                                                                        ::core::ptr::null:: <crate::stdlib::Bytef>(),
-                                                                                                                        0 as crate::stdlib::uInt,
+                                                                                                                    (*state).check = crate::src::adler32::adler32_z(
+                                                                                                                        1 as crate::stdlib::uLong,
+                                                                                                                        &[],
                                                                                                                     ) as ::core::ffi::c_ulong;
                                                                                                                     (*strm).adler = (*state).check as crate::stdlib::uLong;
                                                                                                                     (*state).mode = (if hold & 0x200 as ::core::ffi::c_ulong
@@ -1367,10 +1366,9 @@ pub unsafe fn inflate(
                                                                                         (*state).bits = bits;
                                                                                         return crate::zlib_h::Z_NEED_DICT;
                                                                                     }
-                                                                                    (*state).check = crate::src::adler32::adler32(
-                                                                                        0 as crate::stdlib::uLong,
-                                                                                        ::core::ptr::null:: <crate::stdlib::Bytef>(),
-                                                                                        0 as crate::stdlib::uInt,
+                                                                                    (*state).check = crate::src::adler32::adler32_z(
+                                                                                        1 as crate::stdlib::uLong,
+                                                                                        &[],
                                                                                     ) as ::core::ffi::c_ulong;
                                                                                     (*strm).adler =
                                                                                         (*state)
