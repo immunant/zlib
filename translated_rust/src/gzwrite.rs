@@ -133,12 +133,16 @@ impl GzDeflater<'_> {
         crate::src::deflate::deflate_compress_gzip(self.stream, self.state, Some(input), Some(output), flush)
     }
 
-    fn set_params(&mut self, level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) {
-        crate::src::deflate::deflate_params_update(self.stream, self.state, level, strategy, true);
+    fn set_params(
+        &mut self,
+        output: &mut [crate::stdlib::Bytef],
+        level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    ) {
+        let mut stream = crate::src::deflate::DeflateParamsStream::gzip(self.stream, &[], output);
+        crate::src::deflate::deflate_params_update(&mut stream, self.state, level, strategy);
     }
-
 }
-
 fn gz_save_direct_input(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> bool {
     state.in_0.clear();
     if state.in_0.try_reserve_exact(input.len()).is_err() {
@@ -953,6 +957,20 @@ fn gzsetparams_impl(
         return state.err;
     }
     if state.size != 0 {
+        let Some(output_start) = state
+            .strm
+            .next_out
+            .addr()
+            .checked_sub(state.out.as_ptr().addr())
+        else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let Some(output_end) = output_start.checked_add(state.strm.avail_out as usize) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let Some(output) = state.out.get_mut(output_start..output_end) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         GzDeflater {
             stream: &mut state.strm,
             state: match state.deflater.as_deref_mut() {
@@ -960,7 +978,7 @@ fn gzsetparams_impl(
                 None => return crate::zlib_h::Z_STREAM_ERROR,
             },
         }
-        .set_params(level, strategy);
+        .set_params(output, level, strategy);
     }
     state.level = level;
     state.strategy = strategy;

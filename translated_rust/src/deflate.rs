@@ -1905,8 +1905,10 @@ struct DeflatePrimeStream<'a> {
 /// block boundary.  Keeping that dispatch behind this stream facade lets the
 /// parameter logic operate on its already-borrowed state without itself
 /// crossing back into the raw-stream implementation.
-struct DeflateParamsStream<'a> {
-    stream: &'a mut crate::zlib_h::z_stream_s,
+pub(crate) struct DeflateParamsStream<'stream, 'input, 'output> {
+    stream: &'stream mut crate::zlib_h::z_stream_s,
+    input: Option<&'input [crate::stdlib::Bytef]>,
+    output: Option<&'output mut [crate::stdlib::Bytef]>,
     gzip_owned: bool,
 }
 
@@ -1975,34 +1977,42 @@ impl Drop for DeflateCall<'_, '_, '_> {
     }
 }
 
-impl DeflateParamsStream<'_> {
+impl DeflateParamsStream<'_, '_, '_> {
+    /// Build the gzip-owned parameter-update facade from its already-bounded
+    /// staging buffers.
+    pub(crate) fn gzip<'stream, 'input, 'output>(
+        stream: &'stream mut crate::zlib_h::z_stream_s,
+        input: &'input [crate::stdlib::Bytef],
+        output: &'output mut [crate::stdlib::Bytef],
+    ) -> DeflateParamsStream<'stream, 'input, 'output> {
+        DeflateParamsStream {
+            stream,
+            input: Some(input),
+            output: Some(output),
+            gzip_owned: true,
+        }
+    }
+
     fn flush_block(
         &mut self,
         state: &mut crate::src::deflate::deflate_state,
     ) -> ::core::ffi::c_int {
-        let input = if self.stream.avail_in == 0 {
-            Some(&[][..])
-        } else if self.stream.next_in.is_null() {
-            None
-        } else {
-            Some(unsafe {
-                core::slice::from_raw_parts(self.stream.next_in, self.stream.avail_in as usize)
-            })
-        };
-        let output = if self.stream.next_out.is_null() {
-            None
-        } else {
-            Some(unsafe {
-                core::slice::from_raw_parts_mut(
-                    self.stream.next_out,
-                    self.stream.avail_out as usize,
-                )
-            })
-        };
         if self.gzip_owned {
-            deflate_compress_gzip(self.stream, state, input, output, crate::zlib_h::Z_BLOCK)
+            deflate_compress_gzip(
+                self.stream,
+                state,
+                self.input,
+                self.output.as_deref_mut(),
+                crate::zlib_h::Z_BLOCK,
+            )
         } else {
-            deflate_stream_impl(self.stream, Some(state), input, output, crate::zlib_h::Z_BLOCK)
+            deflate_stream_impl(
+                self.stream,
+                Some(state),
+                self.input,
+                self.output.as_deref_mut(),
+                crate::zlib_h::Z_BLOCK,
+            )
         }
     }
 }
@@ -2078,30 +2088,28 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     };
     deflate_prime_impl(stream, bits, value)
 }
-pub unsafe fn deflateParams(
-    strm: &mut crate::zlib_h::z_stream_s,
+fn deflate_params_impl(
+    stream: &mut DeflateParamsStream<'_, '_, '_>,
+    state: &mut crate::src::deflate::deflate_state,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // Validate the stream before crossing its raw state link.  The link is
-    // maintained by the allocation lifecycle and is the only remaining raw
-    // boundary this parameter update needs to cross.
-    if !deflate_params_stream_is_valid(strm) {
+    if !deflate_params_stream_is_valid(stream.stream)
+        || !deflate_params_state_is_valid(state)
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
-    deflate_params_update(strm, s, level, strategy, false)
+    deflate_params_update(stream, state, level, strategy)
 }
 
-/// Update a gzip-owned deflater after its state ownership has been made
-/// explicit.  The stream remains the ABI cursor carrier, while the caller
-/// supplies the state it owns instead of traversing `strm.state` here.
+/// Update compression parameters through an already-borrowed stream facade.
+/// Gzip supplies its owned staging buffers here, and the ABI path supplies
+/// bounded caller buffers at its exported boundary.
 pub(crate) fn deflate_params_update(
-    strm: &mut crate::zlib_h::z_stream_s,
+    stream: &mut DeflateParamsStream<'_, '_, '_>,
     s: &mut crate::src::deflate::deflate_state,
     mut level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
-    gzip_owned: bool,
 ) -> ::core::ffi::c_int {
     if !deflate_params_state_is_valid(s) {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -2120,15 +2128,11 @@ pub(crate) fn deflate_params_update(
     if (strategy != s.strategy || func != configuration_table[level as usize].func)
         && s.last_flush != -2 as ::core::ffi::c_int
     {
-        let err = DeflateParamsStream {
-            stream: strm,
-            gzip_owned,
-        }
-        .flush_block(s);
+        let err = stream.flush_block(s);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if strm.avail_in != 0
+        if stream.stream.avail_in != 0
             || s.strstart as ::core::ffi::c_long - s.block_start
                 + s.lookahead as ::core::ffi::c_long
                 != 0
@@ -2173,7 +2177,34 @@ pub unsafe extern "C" fn deflateParams_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateParams(strm, level, strategy)
+    let Some(state) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let input = if strm.avail_in == 0 {
+        Some(&[][..])
+    } else if strm.next_in.is_null() {
+        None
+    } else {
+        Some(core::slice::from_raw_parts(
+            strm.next_in,
+            strm.avail_in as usize,
+        ))
+    };
+    let output = if strm.next_out.is_null() {
+        None
+    } else {
+        Some(core::slice::from_raw_parts_mut(
+            strm.next_out,
+            strm.avail_out as usize,
+        ))
+    };
+    let mut stream = DeflateParamsStream {
+        stream: strm,
+        input,
+        output,
+        gzip_owned: false,
+    };
+    deflate_params_impl(&mut stream, state, level, strategy)
 }
 /// Tune an already-validated deflate state.  This state-only operation has no
 /// ABI pointers, so stream validation and the one state-link crossing stay in
