@@ -419,6 +419,20 @@ mod abi_layout_tests {
         zlib_h::{gzFile_s, gz_header_s, z_stream_s},
     };
 
+    // This repository's pinned nightly predates `core::mem::offset_of!`.
+    // Keep the compatibility implementation confined to the ABI test probe:
+    // it forms field addresses from uninitialized storage but never reads it.
+    macro_rules! offset_of {
+        ($type:ty, $field:ident) => {{
+            let value = core::mem::MaybeUninit::<$type>::uninit();
+            let base = value.as_ptr();
+            unsafe {
+                (core::ptr::addr_of!((*base).$field) as *const u8).offset_from(base as *const u8)
+                    as usize
+            }
+        }};
+    }
+
     #[test]
     fn z_stream_state_stays_an_opaque_pointer_slot() {
         assert_eq!(
@@ -430,9 +444,8 @@ mod abi_layout_tests {
             core::mem::align_of::<*mut internal_state>()
         );
         assert_eq!(
-            core::mem::offset_of!(z_stream_s, zalloc),
-            core::mem::offset_of!(z_stream_s, state)
-                + core::mem::size_of::<*mut core::ffi::c_void>()
+            offset_of!(z_stream_s, zalloc),
+            offset_of!(z_stream_s, state) + core::mem::size_of::<*mut core::ffi::c_void>()
         );
     }
 
@@ -445,49 +458,49 @@ mod abi_layout_tests {
             "ABI_LAYOUT z_stream {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
             core::mem::size_of::<z_stream_s>(),
             core::mem::align_of::<z_stream_s>(),
-            core::mem::offset_of!(z_stream_s, next_in),
-            core::mem::offset_of!(z_stream_s, avail_in),
-            core::mem::offset_of!(z_stream_s, total_in),
-            core::mem::offset_of!(z_stream_s, next_out),
-            core::mem::offset_of!(z_stream_s, avail_out),
-            core::mem::offset_of!(z_stream_s, total_out),
-            core::mem::offset_of!(z_stream_s, msg),
-            core::mem::offset_of!(z_stream_s, state),
-            core::mem::offset_of!(z_stream_s, zalloc),
-            core::mem::offset_of!(z_stream_s, zfree),
-            core::mem::offset_of!(z_stream_s, opaque),
-            core::mem::offset_of!(z_stream_s, data_type),
-            core::mem::offset_of!(z_stream_s, reserved),
+            offset_of!(z_stream_s, next_in),
+            offset_of!(z_stream_s, avail_in),
+            offset_of!(z_stream_s, total_in),
+            offset_of!(z_stream_s, next_out),
+            offset_of!(z_stream_s, avail_out),
+            offset_of!(z_stream_s, total_out),
+            offset_of!(z_stream_s, msg),
+            offset_of!(z_stream_s, state),
+            offset_of!(z_stream_s, zalloc),
+            offset_of!(z_stream_s, zfree),
+            offset_of!(z_stream_s, opaque),
+            offset_of!(z_stream_s, data_type),
+            offset_of!(z_stream_s, reserved),
         );
         println!(
             "ABI_LAYOUT gz_header {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
             core::mem::size_of::<gz_header_s>(),
             core::mem::align_of::<gz_header_s>(),
-            core::mem::offset_of!(gz_header_s, text),
-            core::mem::offset_of!(gz_header_s, time),
-            core::mem::offset_of!(gz_header_s, xflags),
-            core::mem::offset_of!(gz_header_s, os),
-            core::mem::offset_of!(gz_header_s, extra),
-            core::mem::offset_of!(gz_header_s, extra_len),
-            core::mem::offset_of!(gz_header_s, name),
-            core::mem::offset_of!(gz_header_s, name_max),
-            core::mem::offset_of!(gz_header_s, comment),
-            core::mem::offset_of!(gz_header_s, comm_max),
-            core::mem::offset_of!(gz_header_s, hcrc),
-            core::mem::offset_of!(gz_header_s, done),
+            offset_of!(gz_header_s, text),
+            offset_of!(gz_header_s, time),
+            offset_of!(gz_header_s, xflags),
+            offset_of!(gz_header_s, os),
+            offset_of!(gz_header_s, extra),
+            offset_of!(gz_header_s, extra_len),
+            offset_of!(gz_header_s, name),
+            offset_of!(gz_header_s, name_max),
+            offset_of!(gz_header_s, comment),
+            offset_of!(gz_header_s, comm_max),
+            offset_of!(gz_header_s, hcrc),
+            offset_of!(gz_header_s, done),
         );
         println!(
             "ABI_LAYOUT gz_file {} {} {} {} {}",
             core::mem::size_of::<gzFile_s>(),
             core::mem::align_of::<gzFile_s>(),
-            core::mem::offset_of!(gzFile_s, have),
-            core::mem::offset_of!(gzFile_s, next),
-            core::mem::offset_of!(gzFile_s, pos),
+            offset_of!(gzFile_s, have),
+            offset_of!(gzFile_s, next),
+            offset_of!(gzFile_s, pos),
         );
         println!(
             "ABI_LAYOUT gz_state_prefix {} {} {}",
-            core::mem::offset_of!(gz_state, x),
-            core::mem::offset_of!(gz_state, mode),
+            offset_of!(gz_state, x),
+            offset_of!(gz_state, mode),
             core::mem::size_of::<gzFile_s>(),
         );
     }
