@@ -1974,6 +1974,16 @@ pub fn inflate(
             // are again possible.
             // zlib permits a null `next_in` when no input is available.  Do
             // not turn that valid empty ABI cursor into a Rust slice.
+            // The optional gzip header is likewise stable throughout this
+            // no-callback loop. Adopt it once so individual header
+            // transitions do not repeatedly dereference the retained ABI
+            // pointer. This borrow ends with the other invocation-local views
+            // before the exit path can invoke an allocation callback.
+            let mut gzip_header = if state_ref.head.is_null() {
+                None
+            } else {
+                Some(&mut *state_ref.head)
+            };
             let input = if have == 0 {
                 &[]
             } else {
@@ -2062,14 +2072,13 @@ pub fn inflate(
                                                                                                             state_ref.mode = crate::src::inflate::FLAGS;
                                                                                                             continue '_inf_leave;
                                                                                                         } else {
-                                                                                                            if !state_ref.head.is_null() {
-                                                                                                                // The retained gzip header remains an ABI
-                                                                                                                // destination, but this no-callback transition
-                                                                                                                // only needs a short-lived borrow to publish its
-                                                                                                                // initial incomplete status.
-                                                                                                                let head = &mut *state_ref.head;
-                                                                                                                head.done = -1 as ::core::ffi::c_int;
-                                                                                                            }
+                                                                                                            if let Some(head) = gzip_header.as_deref_mut() {
+                                                                                                               // The retained gzip header remains an ABI
+                                                                                                               // destination, but this no-callback transition
+                                                                                                               // only needs a short-lived borrow to publish its
+                                                                                                               // initial incomplete status.
+                                                                                                               head.done = -1 as ::core::ffi::c_int;
+                                                                                                           }
                                                                                                             let header_plan = match inflate_zlib_header_plan(
                                                                                                                state_ref.wrap,
                                                                                                                state_ref.wbits,
@@ -2136,8 +2145,7 @@ pub fn inflate(
                                                                                                     };
                                                                                                     state_ref.flags = flags_plan.flags;
                                                                                                     {
-                                                                                                       if !state_ref.head.is_null() {
-                                                                                                            let head = &mut *state_ref.head;
+                                                                                                       if let Some(head) = gzip_header.as_deref_mut() {
                                                                                                             head.text = flags_plan.text;
                                                                                                        }
                                                                                                         if flags_plan.update_crc {
@@ -2891,9 +2899,7 @@ pub fn inflate(
                                                                             state_ref.wrap,
                                                                             hold,
                                                                         );
-                                                                    if !state_ref.head.is_null() {
-                                                                        let head =
-                                                                            &mut *state_ref.head;
+                                                                    if let Some(head) = gzip_header.as_deref_mut() {
                                                                         head.xflags =
                                                                             os_plan.xflags;
                                                                         head.os = os_plan.os;
@@ -3037,8 +3043,7 @@ pub fn inflate(
                                                             hold,
                                                         );
                                                         state_ref.length = extra_plan.length;
-                                                        if !state_ref.head.is_null() {
-                                                            let head = &mut *state_ref.head;
+                                                        if let Some(head) = gzip_header.as_deref_mut() {
                                                             head.extra_len = extra_plan.length
                                                                 as crate::stdlib::uInt;
                                                         }
@@ -3058,8 +3063,7 @@ pub fn inflate(
                                                         }
                                                         hold = 0 as ::core::ffi::c_ulong;
                                                         bits = 0 as ::core::ffi::c_uint;
-                                                    } else if !state_ref.head.is_null() {
-                                                        let head = &mut *state_ref.head;
+                                                    } else if let Some(head) = gzip_header.as_deref_mut() {
                                                         head.extra = ::core::ptr::null_mut::<
                                                             crate::stdlib::Bytef,
                                                         >(
@@ -3334,11 +3338,10 @@ pub fn inflate(
                                                 copy = have;
                                             }
                                             if copy != 0 {
-                                                if !state_ref.head.is_null() {
+                                                if let Some(head) = gzip_header.as_deref_mut() {
                                                     // The retained header is an ABI destination, but
                                                     // this transition only needs one temporary borrow
                                                     // to bound and copy its extra bytes.
-                                                    let head = &mut *state_ref.head;
                                                     if !head.extra.is_null() {
                                                         if let Some((header_offset, header_copy)) =
                                                             inflate_header_extra_copy_plan(
@@ -3453,13 +3456,12 @@ pub fn inflate(
                                                 &[len as crate::stdlib::Bytef],
                                             );
                                         }
-                                        if !state_ref.head.is_null() {
+                                        if let Some(head) = gzip_header.as_deref_mut() {
                                             // `head` remains an ABI-owned retained destination, but
                                             // this transition has already established that it is
                                             // non-null. Adopt it once rather than re-dereferencing
                                             // the compatibility pointer for its bounds and byte
                                             // commit.
-                                            let head = &mut *state_ref.head;
                                             if !head.name.is_null()
                                                 && state_ref.length < head.name_max
                                             {
@@ -3478,8 +3480,7 @@ pub fn inflate(
                                     if len != 0 {
                                         break '_inf_leave;
                                     }
-                                } else if !state_ref.head.is_null() {
-                                    let head = &mut *state_ref.head;
+                                } else if let Some(head) = gzip_header.as_deref_mut() {
                                     head.name = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                                 }
                                 state_ref.length = 0 as ::core::ffi::c_uint;
@@ -3614,10 +3615,9 @@ pub fn inflate(
                                         &[len as crate::stdlib::Bytef],
                                     );
                                 }
-                                if !state_ref.head.is_null() {
+                                if let Some(head) = gzip_header.as_deref_mut() {
                                     // As in NAME, use one transition-local borrow of the retained
                                     // ABI header destination for the bounds check and byte commit.
-                                    let head = &mut *state_ref.head;
                                     if !head.comment.is_null() && state_ref.length < head.comm_max {
                                         let c2rust_fresh8 = state_ref.length;
                                         state_ref.length = state_ref.length.wrapping_add(1);
@@ -3634,8 +3634,7 @@ pub fn inflate(
                             if len != 0 {
                                 break '_inf_leave;
                             }
-                        } else if !state_ref.head.is_null() {
-                            let head = &mut *state_ref.head;
+                        } else if let Some(head) = gzip_header.as_deref_mut() {
                             head.comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                         }
                         state_ref.mode = crate::src::inflate::HCRC;
@@ -3707,8 +3706,7 @@ pub fn inflate(
                 }
                 hold = plan.hold;
                 bits = plan.bits;
-                if !state_ref.head.is_null() {
-                    let head = &mut *state_ref.head;
+                if let Some(head) = gzip_header.as_deref_mut() {
                     head.hcrc = plan.hcrc;
                     head.done = 1 as ::core::ffi::c_int;
                 }
