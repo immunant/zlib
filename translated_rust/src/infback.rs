@@ -324,9 +324,9 @@ pub unsafe extern "C" fn inflateBack(
                             copy as crate::__stddef_size_t_h::size_t,
                         );
                         have = have.wrapping_sub(copy);
-                        next = next.offset(copy as isize);
+                        next = next.wrapping_add(copy as usize);
                         left = left.wrapping_sub(copy);
-                        put = put.offset(copy as isize);
+                        put = put.wrapping_add(copy as usize);
                         (*state).length = (*state).length.wrapping_sub(copy);
                     }
                     (*state).mode = crate::src::inflate::TYPE;

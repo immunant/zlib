@@ -2066,7 +2066,7 @@ pub fn inflate(
                                                         as ::core::ffi::c_ulong;
                                                 }
                                                 have = have.wrapping_sub(copy);
-                                                next = next.offset(copy as isize);
+                                                next = next.wrapping_add(copy as usize);
                                                 (*state).length =
                                                     (*state).length.wrapping_sub(copy);
                                             }
@@ -2142,7 +2142,7 @@ pub fn inflate(
                                             as ::core::ffi::c_ulong;
                                     }
                                     have = have.wrapping_sub(copy);
-                                    next = next.offset(copy as isize);
+                                    next = next.wrapping_add(copy as usize);
                                     if len != 0 {
                                         break '_inf_leave;
                                     }
@@ -2261,7 +2261,7 @@ pub fn inflate(
                                     as ::core::ffi::c_ulong;
                             }
                             have = have.wrapping_sub(copy);
-                            next = next.offset(copy as isize);
+                            next = next.wrapping_add(copy as usize);
                             if len != 0 {
                                 break '_inf_leave;
                             }
