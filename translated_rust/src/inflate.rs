@@ -3732,10 +3732,25 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     if crate::src::inflate::inflate_state_check_at_boundary!(source) != 0 || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*source).state as *mut crate::src::inflate::inflate_state;
-    copy = Some((*source).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*source).opaque,
+    // Snapshot callback inputs and allocation shape before invoking either
+    // callback. A custom allocator can inspect the public source stream, so
+    // no temporary Rust borrow of it may remain live across those calls.
+    let (zalloc, zfree, opaque, has_window, whave, wsize, wbits) = {
+        let source_ref = &mut *source;
+        state = source_ref.state as *mut crate::src::inflate::inflate_state;
+        let state_ref = &mut *state;
+        (
+            source_ref.zalloc.expect("non-null function pointer"),
+            source_ref.zfree.expect("non-null function pointer"),
+            source_ref.opaque,
+            !state_ref.window.is_null(),
+            state_ref.whave,
+            state_ref.wsize,
+            state_ref.wbits,
+        )
+    };
+    copy = zalloc(
+        opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
@@ -3743,57 +3758,52 @@ pub unsafe extern "C" fn inflateCopy_ffi(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !(*state).window.is_null() {
-        if (*state).whave > (*state).wsize {
-            Some((*source).zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                (*source).opaque,
-                copy as crate::stdlib::voidpf,
-            );
+    if has_window {
+        if whave > wsize {
+            zfree(opaque, copy as crate::stdlib::voidpf);
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        window = Some((*source).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*source).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
+        window = zalloc(
+            opaque,
+            (1 as crate::stdlib::uInt) << wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
         if window.is_null() {
-            Some((*source).zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                (*source).opaque,
-                copy as crate::stdlib::voidpf,
-            );
+            zfree(opaque, copy as crate::stdlib::voidpf);
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
     // Both ABI records are `Copy`; assigning them avoids treating their
     // typed layouts as unstructured C byte buffers at this boundary.
-    *dest = *source;
-    *copy = *state;
-    (*copy).strm = dest;
-    let source_codes = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-    let copy_codes = &raw mut (*copy).codes as *mut crate::src::inftrees::code;
+    let source_ref = &mut *source;
+    let state_ref = &mut *state;
+    let dest_ref = &mut *dest;
+    let copy_ref = &mut *copy;
+    *dest_ref = *source_ref;
+    *copy_ref = *state_ref;
+    copy_ref.strm = dest;
+    let source_codes = state_ref.codes.as_ptr();
+    let copy_codes = copy_ref.codes.as_mut_ptr();
     let cursors = inflate_copy_code_cursors(
         source_codes as usize,
         crate::src::inftrees::ENOUGH as usize,
-        (*state).lencode as usize,
-        (*state).distcode as usize,
-        (*state).next as usize,
+        state_ref.lencode as usize,
+        state_ref.distcode as usize,
+        state_ref.next as usize,
     );
     if let (Some(lencode), Some(distcode)) = (cursors.lencode, cursors.distcode) {
-        (*copy).lencode = copy_codes.wrapping_add(lencode);
-        (*copy).distcode = copy_codes.wrapping_add(distcode);
+        copy_ref.lencode = copy_codes.wrapping_add(lencode);
+        copy_ref.distcode = copy_codes.wrapping_add(distcode);
     }
-    (*copy).next = copy_codes.wrapping_add(cursors.next);
+    copy_ref.next = copy_codes.wrapping_add(cursors.next);
     if !window.is_null() {
-        let length = (*state).whave as usize;
-        let source_window = ::core::slice::from_raw_parts((*state).window, length);
+        let length = state_ref.whave as usize;
+        let source_window = ::core::slice::from_raw_parts(state_ref.window, length);
         let copied_window = ::core::slice::from_raw_parts_mut(window, length);
         copied_window.copy_from_slice(source_window);
     }
-    (*copy).window = window;
-    (*dest).state = copy as *mut crate::src::deflate::internal_state;
+    copy_ref.window = window;
+    dest_ref.state = copy as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateUndermine"]
