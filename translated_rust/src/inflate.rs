@@ -3313,9 +3313,6 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut dictid: ::core::ffi::c_ulong = 0;
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -3326,67 +3323,98 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     } else {
         core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap != 0 as ::core::ffi::c_int
-        && (*state).mode as ::core::ffi::c_uint
-            != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if (*state).mode as ::core::ffi::c_uint
-        == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        dictid = crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
-        dictid = crate::src::adler32::adler32_z(dictid as crate::stdlib::uLong, dictionary)
-            as ::core::ffi::c_ulong;
-        if dictid != (*state).check {
-            return crate::zlib_h::Z_DATA_ERROR;
+    let (needs_window, zalloc, opaque, wbits) = {
+        let strm_ref = &mut *strm;
+        let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+        if state.wrap != 0 as ::core::ffi::c_int
+            && state.mode as ::core::ffi::c_uint
+                != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            return crate::zlib_h::Z_STREAM_ERROR;
         }
-    }
+        if state.mode as ::core::ffi::c_uint
+            == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            let dictid = crate::src::adler32::adler32_z(
+                crate::src::adler32::ADLER32_INITIAL as crate::stdlib::uLong,
+                dictionary,
+            ) as ::core::ffi::c_ulong;
+            if dictid != state.check {
+                return crate::zlib_h::Z_DATA_ERROR;
+            }
+        }
+        (
+            state.window.is_null(),
+            strm_ref.zalloc,
+            strm_ref.opaque,
+            state.wbits,
+        )
+    };
 
     // This exported boundary owns the allocator callback and the raw window
-    // lend.  The circular-buffer planning and copying stay in the checked
-    // slice core, so dictionary setup no longer enters the private raw
-    // `updatewindow` codec adapter.
-    if (*state).window.is_null() {
-        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*strm).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
+    // lend. End the state borrow before invoking the callback: it may inspect
+    // the public stream record. The circular-buffer planning and copying stay
+    // in the checked slice core, so dictionary setup does not enter the
+    // private raw `updatewindow` codec adapter.
+    let allocated_window = if needs_window {
+        let Some(window_len) = inflate_window_len(wbits, 0) else {
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        let Ok(window_len) = crate::stdlib::uInt::try_from(window_len) else {
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        Some(zalloc.expect("non-null function pointer")(
+            opaque,
+            window_len,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
-        if (*state).window.is_null() {
-            (*state).mode = crate::src::inflate::MEM;
+        ) as *mut ::core::ffi::c_uchar)
+    } else {
+        None
+    };
+
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    if let Some(window) = allocated_window {
+        state.window = window;
+        if state.window.is_null() {
+            state.mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    if (*state).wsize == 0 {
-        (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
-        (*state).wnext = 0;
-        (*state).whave = 0;
+    if state.wsize == 0 {
+        let Some(window_len) = inflate_window_len(state.wbits, 0) else {
+            state.mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        let Ok(window_len) = ::core::ffi::c_uint::try_from(window_len) else {
+            state.mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        state.wsize = window_len;
+        state.wnext = 0;
+        state.whave = 0;
     }
-    let Some(plan) =
-        inflate_window_copy_plan((*state).wsize, (*state).wnext, (*state).whave, dictLength)
+    let Some(plan) = inflate_window_copy_plan(state.wsize, state.wnext, state.whave, dictLength)
     else {
-        (*state).mode = crate::src::inflate::MEM;
+        state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     };
     let Some((next, have)) = plan.cursor_values() else {
-        (*state).mode = crate::src::inflate::MEM;
+        state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let Ok(window_len) = usize::try_from((*state).wsize) else {
-        (*state).mode = crate::src::inflate::MEM;
+    let Ok(window_len) = usize::try_from(state.wsize) else {
+        state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let window = core::slice::from_raw_parts_mut((*state).window, window_len);
+    let window = core::slice::from_raw_parts_mut(state.window, window_len);
     if inflate_window_copy(window, dictionary, plan).is_none() {
-        (*state).mode = crate::src::inflate::MEM;
+        state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*state).wnext = next;
-    (*state).whave = have;
-    (*state).havedict = 1 as ::core::ffi::c_int;
+    state.wnext = next;
+    state.whave = have;
+    state.havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateGetHeader"]
