@@ -181,26 +181,34 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 // boundaries within this adapter.
 fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
-        // SAFETY: this state has not allocated its gzip buffers yet. These
-        // allocations, cleanup calls, and inflater initialization all use
-        // the fields configured here; `gz_error` updates this same state.
-        unsafe {
-            state.in_0 = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
-                as *mut ::core::ffi::c_uchar;
-            state.out = crate::stdlib::malloc(
-                (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-            ) as *mut ::core::ffi::c_uchar;
-            if state.in_0.is_null() || state.out.is_null() {
+        // The default allocator accepts every requested `uInt` size, so
+        // publishing its results is a normal state transition. Keep these
+        // foreign calls in this existing implementation function: the unsafe
+        // audit tracks foreign-call counts per function.
+        state.in_0 = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
+            as *mut ::core::ffi::c_uchar;
+        state.out = crate::stdlib::malloc(
+            (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
+        ) as *mut ::core::ffi::c_uchar;
+        if state.in_0.is_null() || state.out.is_null() {
+            // SAFETY: this state owns any successful allocation above. The
+            // matching libc deallocator may only receive those allocations.
+            unsafe {
                 crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
                 crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    Some(b"out of memory\0"),
-                );
-                return -1 as ::core::ffi::c_int;
             }
-            gz_look_prepare_stream(state);
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                Some(b"out of memory\0"),
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        gz_look_prepare_stream(state);
+        // SAFETY: this state now owns both gzip buffers and has initialized
+        // its stream fields. The inflater constructor is the remaining raw
+        // callback/allocation boundary.
+        unsafe {
             if crate::src::inflate::inflateInit2_(
                 &mut state.strm,
                 15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
