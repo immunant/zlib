@@ -91,6 +91,10 @@ pub struct internal_state {
     pub pending_buf_size: crate::zutil_h::ulg,
     pub pending_out_offset: usize,
     pub pending: crate::zutil_h::ulg,
+    /// A one-call override for the stored-block length written by the tree
+    /// boundary. `deflate_stored()` emits that header into pending storage
+    /// while sending its payload directly to caller output.
+    pub pending_header_len_override: Option<crate::zutil_h::ulg>,
     pub wrap: ::core::ffi::c_int,
     pub gzhead: crate::zlib_h::gz_headerp,
     pub gzindex: crate::zutil_h::ulg,
@@ -173,6 +177,7 @@ impl internal_state {
             pending_buf_size: 0,
             pending_out_offset: 0,
             pending: 0,
+            pending_header_len_override: None,
             wrap: 0,
             gzhead: ::core::ptr::null_mut(),
             gzindex: 0,
@@ -4358,6 +4363,15 @@ fn stored_block_length_bytes(len: ::core::ffi::c_uint) -> [crate::stdlib::Bytef;
     ]
 }
 
+/// Consume the direct-output stored-block header override, if one was set by
+/// `deflate_stored()`. All other tree callers use their payload length.
+pub(crate) fn take_pending_header_len_override(
+    state: &mut crate::src::deflate::deflate_state,
+    stored_len: crate::zutil_h::ulg,
+) -> crate::zutil_h::ulg {
+    state.pending_header_len_override.take().unwrap_or(stored_len)
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -4383,25 +4397,16 @@ unsafe extern "C" fn deflate_stored(
             break;
         }
         last = stored_block_is_last(flush, len, left, (*(*s).strm).avail_in) as ::core::ffi::c_int;
+        // The tree boundary owns the callback-backed pending-storage view.
+        // Tell it to encode this direct-output block's length there, rather
+        // than rewriting four pending bytes through raw interior pointers.
+        (*s).pending_header_len_override = Some(len as crate::zutil_h::ulg);
         crate::src::trees::_tr_stored_block(
             s as *mut crate::src::deflate::internal_state,
             ::core::ptr::null_mut::<crate::stdlib::charf>(),
             0 as crate::zutil_h::ulg,
             last,
         );
-        let length_bytes = stored_block_length_bytes(len);
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) = length_bytes[0];
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) = length_bytes[1];
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) = length_bytes[2];
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) = length_bytes[3];
         flush_pending((*s).strm);
         let (window_len, input_len) = stored_block_copy_lengths(left, len);
         if window_len != 0 {
@@ -5344,7 +5349,8 @@ mod tests {
         stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
         stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
         stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
-        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
+        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors,
+        take_pending_header_len_override, zlib_header,
         DeflateBoundGzipHeader, DeflateBoundState, DeflateFastMatchProgress,
         DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
         DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, PendingDrainState,
@@ -5364,6 +5370,7 @@ mod tests {
         assert_eq!(state.sym_buf_offset, 0);
         assert_eq!(state.status, 0);
         assert_eq!(state.pending_out_offset, 0);
+        assert_eq!(state.pending_header_len_override, None);
         assert_eq!(state.window_size, 0);
         assert_eq!(state.block_start, 0);
         assert_eq!(state.high_water, 0);
@@ -7416,6 +7423,17 @@ mod tests {
             stored_block_length_bytes(crate::src::deflate::MAX_STORED as ::core::ffi::c_uint),
             [0xff, 0xff, 0x00, 0x00]
         );
+    }
+
+    #[test]
+    fn stored_header_length_override_is_one_call_and_defaults_to_payload_length() {
+        let mut state = super::internal_state::newly_allocated();
+
+        assert_eq!(take_pending_header_len_override(&mut state, 7), 7);
+        state.pending_header_len_override = Some(0x1234);
+        assert_eq!(take_pending_header_len_override(&mut state, 7), 0x1234);
+        assert_eq!(state.pending_header_len_override, None);
+        assert_eq!(take_pending_header_len_override(&mut state, 7), 7);
     }
 
     #[test]

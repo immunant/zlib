@@ -5034,7 +5034,7 @@ fn tr_stored_block_core(
     bi_valid: &mut ::core::ffi::c_int,
     bi_used: &mut ::core::ffi::c_int,
     stored_data: &[crate::stdlib::Bytef],
-    stored_len: crate::zutil_h::ulg,
+    stored_header_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
     let len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
@@ -5064,13 +5064,17 @@ fn tr_stored_block_core(
     *bi_used = used;
     assert!(storage.append_pending(pending, &bytes[..count]));
     let stored_header = [
-        (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+        (stored_header_len as crate::zutil_h::ush as ::core::ffi::c_int
+            & 0xff as ::core::ffi::c_int)
             as crate::zutil_h::uch,
-        (stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
+        (stored_header_len as crate::zutil_h::ush as ::core::ffi::c_int
+            >> 8 as ::core::ffi::c_int)
             as crate::zutil_h::uch,
-        (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+        (!stored_header_len as crate::zutil_h::ush as ::core::ffi::c_int
+            & 0xff as ::core::ffi::c_int)
             as crate::zutil_h::uch,
-        (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
+        (!stored_header_len as crate::zutil_h::ush as ::core::ffi::c_int
+            >> 8 as ::core::ffi::c_int)
             as crate::zutil_h::uch,
     ];
     assert!(storage.append_pending(pending, &stored_header));
@@ -5094,6 +5098,8 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     } else {
         core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
     };
+    let stored_header_len =
+        crate::src::deflate::take_pending_header_len_override(state, stored_len);
     crate::src::deflate::with_pending_storage(pending_buffer, layout, |storage| {
         tr_stored_block_core(
             storage,
@@ -5102,7 +5108,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
             &mut state.bi_valid,
             &mut state.bi_used,
             stored_data,
-            stored_len,
+            stored_header_len,
             last,
         );
     })
@@ -6316,6 +6322,33 @@ mod tests {
             storage.pending_bytes()[..8],
             [1, 3, 0, 0xfc, 0xff, 0x11, 0x22, 0x33]
         );
+        assert_eq!((bi_buf, bi_valid, bi_used), (0, 0, 3));
+    }
+
+    #[test]
+    fn stored_block_core_can_encode_a_direct_output_length_without_payload_bytes() {
+        let layout = crate::src::deflate::pending_storage_layout(4);
+        let mut pending_buffer = [0; 16];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_buffer, layout).unwrap();
+        let mut pending = 0;
+        let mut bi_buf = 0;
+        let mut bi_valid = 0;
+        let mut bi_used = 0;
+
+        tr_stored_block_core(
+            &mut storage,
+            &mut pending,
+            &mut bi_buf,
+            &mut bi_valid,
+            &mut bi_used,
+            &[],
+            0x1234,
+            0,
+        );
+
+        assert_eq!(pending, 5);
+        assert_eq!(storage.pending_bytes()[..5], [0, 0x34, 0x12, 0xcb, 0xed]);
         assert_eq!((bi_buf, bi_valid, bi_used), (0, 0, 3));
     }
 
