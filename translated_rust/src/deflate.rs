@@ -1789,13 +1789,16 @@ macro_rules! deflate_params_at_boundary {
                 break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
             }
             let s = (*strm).state as *mut crate::src::deflate::deflate_state;
-            let Some(plan) = crate::src::deflate::deflate_params_plan(
-                level,
-                strategy,
-                (*s).level,
-                (*s).strategy,
-                (*s).last_flush,
-            ) else {
+            let Some(plan) = ({
+                let state = &*s;
+                crate::src::deflate::deflate_params_plan(
+                    level,
+                    strategy,
+                    state.level,
+                    state.strategy,
+                    state.last_flush,
+                )
+            }) else {
                 break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
             };
             if plan.needs_block_flush {
@@ -1803,64 +1806,70 @@ macro_rules! deflate_params_at_boundary {
                 if err == crate::zlib_h::Z_STREAM_ERROR {
                     break 'deflate_params_result err;
                 }
-                if (*strm).avail_in != 0
-                    || (*s).strstart as ::core::ffi::c_long - (*s).block_start
-                        + (*s).lookahead as ::core::ffi::c_long
-                        != 0
-                {
+                let has_unprocessed_data = {
+                    let stream = &*strm;
+                    let state = &*s;
+                    stream.avail_in != 0
+                        || state.strstart as ::core::ffi::c_long - state.block_start
+                            + state.lookahead as ::core::ffi::c_long
+                            != 0
+                };
+                if has_unprocessed_data {
                     break 'deflate_params_result crate::zlib_h::Z_BUF_ERROR;
                 }
             }
-            if (*s).level != plan.level {
-                if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt
+            if (&*s).level != plan.level {
+                let state = &mut *s;
+                if state.level == 0 as ::core::ffi::c_int
+                    && state.matches != 0 as crate::stdlib::uInt
                 {
-                    if (*s).matches == 1 as crate::stdlib::uInt {
-                        let Ok(head_len) = usize::try_from((*s).hash_size) else {
+                    if state.matches == 1 as crate::stdlib::uInt {
+                        let Ok(head_len) = usize::try_from(state.hash_size) else {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         };
-                        let Ok(prev_len) = usize::try_from((*s).w_size) else {
+                        let Ok(prev_len) = usize::try_from(state.w_size) else {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         };
-                        if (head_len != 0 && (*s).head.is_null())
-                            || (prev_len != 0 && (*s).prev.is_null())
+                        if (head_len != 0 && state.head.is_null())
+                            || (prev_len != 0 && state.prev.is_null())
                         {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         }
                         let head = if head_len == 0 {
                             &mut []
                         } else {
-                            ::core::slice::from_raw_parts_mut((*s).head, head_len)
+                            ::core::slice::from_raw_parts_mut(state.head, head_len)
                         };
                         let prev = if prev_len == 0 {
                             &mut []
                         } else {
-                            ::core::slice::from_raw_parts_mut((*s).prev, prev_len)
+                            ::core::slice::from_raw_parts_mut(state.prev, prev_len)
                         };
-                        crate::src::deflate::slide_hash_state(head, prev, (*s).w_size);
-                        (*s).slid = 1;
+                        crate::src::deflate::slide_hash_state(head, prev, state.w_size);
+                        state.slid = 1;
                     } else {
-                        let Ok(head_len) = usize::try_from((*s).hash_size) else {
+                        let Ok(head_len) = usize::try_from(state.hash_size) else {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         };
-                        if head_len != 0 && (*s).head.is_null() {
+                        if head_len != 0 && state.head.is_null() {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         }
                         let head = if head_len == 0 {
                             &mut []
                         } else {
-                            ::core::slice::from_raw_parts_mut((*s).head, head_len)
+                            ::core::slice::from_raw_parts_mut(state.head, head_len)
                         };
-                        crate::src::deflate::clear_hash_state(head, &mut (*s).slid);
+                        crate::src::deflate::clear_hash_state(head, &mut state.slid);
                     }
-                    (*s).matches = 0 as crate::stdlib::uInt;
+                    state.matches = 0 as crate::stdlib::uInt;
                 }
-                (*s).level = plan.level;
-                (*s).max_lazy_match = plan.config.max_lazy as crate::stdlib::uInt;
-                (*s).good_match = plan.config.good_length as crate::stdlib::uInt;
-                (*s).nice_match = plan.config.nice_length as ::core::ffi::c_int;
-                (*s).max_chain_length = plan.config.max_chain as crate::stdlib::uInt;
+                state.level = plan.level;
+                state.max_lazy_match = plan.config.max_lazy as crate::stdlib::uInt;
+                state.good_match = plan.config.good_length as crate::stdlib::uInt;
+                state.nice_match = plan.config.nice_length as ::core::ffi::c_int;
+                state.max_chain_length = plan.config.max_chain as crate::stdlib::uInt;
             }
-            (*s).strategy = plan.strategy;
+            (&mut *s).strategy = plan.strategy;
             crate::zlib_h::Z_OK
         }
     }};
