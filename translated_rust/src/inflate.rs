@@ -667,20 +667,42 @@ fn inflate_reset2_normal(
     Ok(inflate_reset_core(normal))
 }
 
-pub unsafe fn inflateResetKeep(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+// The reset exports differ only in which pointer-free normal-state policy is
+// selected.  Keep their common stream/state projection and scalar publication
+// in this one adapter so each ABI wrapper remains a handle conversion and
+// dispatch only.
+pub(crate) enum InflateResetKind {
+    Keep,
+    Full,
+    WindowBits(::core::ffi::c_int),
+}
+
+pub(crate) unsafe fn inflate_reset_from_stream(
+    strm: &mut crate::zlib_h::z_stream_s,
+    kind: InflateResetKind,
+) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let update = inflate_reset_keep_core(&mut state.normal);
+    let update = match kind {
+        InflateResetKind::Keep => inflate_reset_keep_core(&mut state.normal),
+        InflateResetKind::Full => inflate_reset_core(&mut state.normal),
+        InflateResetKind::WindowBits(window_bits) => {
+            match inflate_reset2_normal(&mut state.normal, window_bits) {
+                Ok(update) => update,
+                Err(status) => return status,
+            }
+        }
+    };
     strm.total_out = 0;
     strm.total_in = strm.total_out;
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    strm.msg = ::core::ptr::null_mut();
     strm.data_type = 0;
     if let Some(adler) = update.adler {
         strm.adler = adler;
     }
     state.head = None;
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateResetKeep"]
 
@@ -690,22 +712,7 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateResetKeep(strm)
-}
-pub unsafe fn inflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let update = inflate_reset_core(&mut state.normal);
-    strm.total_out = 0;
-    strm.total_in = strm.total_out;
-    strm.msg = ::core::ptr::null_mut();
-    strm.data_type = 0;
-    if let Some(adler) = update.adler {
-        strm.adler = adler;
-    }
-    state.head = None;
-    crate::zlib_h::Z_OK
+    inflate_reset_from_stream(strm, InflateResetKind::Keep)
 }
 #[export_name = "inflateReset"]
 
@@ -715,32 +722,7 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateReset(strm)
-}
-pub unsafe fn inflateReset2(
-    strm: &mut crate::zlib_h::z_stream_s,
-    windowBits: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // This variant already owns the validated stream/state projection.  Do
-    // not re-enter `inflateReset()` merely to repeat that projection: apply
-    // the same pointer-free reset core and publish its stream scalars while
-    // both borrows are still in scope.
-    let update = match inflate_reset2_normal(&mut state.normal, windowBits) {
-        Ok(update) => update,
-        Err(status) => return status,
-    };
-    strm.total_out = 0;
-    strm.total_in = strm.total_out;
-    strm.msg = ::core::ptr::null_mut();
-    strm.data_type = 0;
-    if let Some(adler) = update.adler {
-        strm.adler = adler;
-    }
-    state.head = None;
-    crate::zlib_h::Z_OK
+    inflate_reset_from_stream(strm, InflateResetKind::Full)
 }
 #[export_name = "inflateReset2"]
 
@@ -751,7 +733,7 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateReset2(strm, windowBits)
+    inflate_reset_from_stream(strm, InflateResetKind::WindowBits(windowBits))
 }
 pub unsafe extern "C" fn inflateInit2_(
     strm: Option<&mut crate::zlib_h::z_stream_s>,
