@@ -815,7 +815,7 @@ fn clone_prev_table(prev: &[crate::src::deflate::Posf]) -> Option<Vec<crate::src
     Some(copy)
 }
 
-unsafe fn slide_hash(s: &mut crate::src::deflate::deflate_state) {
+fn slide_hash(s: &mut crate::src::deflate::deflate_state) {
     let wsize = s.w_size;
     let Some(head) = s.head.as_mut() else {
         return;
@@ -1006,7 +1006,7 @@ unsafe fn fill_window(
             if s.insert > s.strstart {
                 s.insert = s.strstart;
             }
-            unsafe { slide_hash(s) };
+            slide_hash(s);
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
         if strm.avail_in == 0 as crate::stdlib::uInt {
