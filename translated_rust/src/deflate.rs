@@ -1109,15 +1109,22 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() || deflateStateCheck(strm).is_none() || dictionary.is_null() {
+    // The ABI boundary only binds the foreign stream and dictionary range.
+    // `deflateSetDictionary()` owns the one checked stream/state validation,
+    // avoiding the former duplicate raw-state binding here and in the core
+    // implementation.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if dictionary.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let dictionary = if dictLength == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
+        unsafe { ::core::slice::from_raw_parts(dictionary, dictLength as usize) }
     };
-    deflateSetDictionary(&mut *strm, dictionary)
+    deflateSetDictionary(strm, dictionary)
 }
 pub fn deflateGetDictionary(
     state: &mut crate::src::deflate::deflate_state,
