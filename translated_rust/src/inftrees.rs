@@ -2832,6 +2832,73 @@ fn inflate_table_used_exceeds(
             && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
 }
 
+fn inflate_table_root_bounds(
+    requested_root: ::core::ffi::c_uint,
+    min: ::core::ffi::c_uint,
+    max: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    core::cmp::max(core::cmp::min(requested_root, max), min)
+}
+
+fn inflate_table_is_oversubscribed(
+    left: &mut ::core::ffi::c_int,
+    count: &[::core::ffi::c_ushort; 16],
+) -> bool {
+    *left = 1 as ::core::ffi::c_int;
+    let mut len = 1 as ::core::ffi::c_uint;
+    while len <= MAXBITS as ::core::ffi::c_uint {
+        *left <<= 1 as ::core::ffi::c_int;
+        *left -= count[len as usize] as ::core::ffi::c_int;
+        if *left < 0 as ::core::ffi::c_int {
+            return true;
+        }
+        len = len.wrapping_add(1);
+    }
+    false
+}
+
+fn inflate_table_incomplete_is_invalid(
+    type_0: crate::src::inftrees::codetype,
+    max: ::core::ffi::c_uint,
+    left: ::core::ffi::c_int,
+) -> bool {
+    left > 0 as ::core::ffi::c_int
+        && (type_0 == crate::src::inftrees::CODES || max != 1 as ::core::ffi::c_uint)
+}
+
+fn inflate_table_entry(
+    len: ::core::ffi::c_uint,
+    drop_0: ::core::ffi::c_uint,
+    symbol: ::core::ffi::c_uint,
+    match_0: ::core::ffi::c_uint,
+    base_extra: Option<(
+        &'static [::core::ffi::c_ushort],
+        &'static [::core::ffi::c_ushort],
+    )>,
+) -> crate::src::inftrees::code {
+    if symbol.wrapping_add(1 as ::core::ffi::c_uint) < match_0 {
+        crate::src::inftrees::code {
+            op: 0 as ::core::ffi::c_int as ::core::ffi::c_uchar,
+            bits: len.wrapping_sub(drop_0) as ::core::ffi::c_uchar,
+            val: symbol as ::core::ffi::c_ushort,
+        }
+    } else if symbol >= match_0 {
+        let table_index = symbol.wrapping_sub(match_0) as usize;
+        let (base, extra) = base_extra.expect("base/extra tables are selected for this code type");
+        crate::src::inftrees::code {
+            op: extra[table_index] as ::core::ffi::c_uchar,
+            bits: len.wrapping_sub(drop_0) as ::core::ffi::c_uchar,
+            val: base[table_index],
+        }
+    } else {
+        crate::src::inftrees::code {
+            op: (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar,
+            bits: len.wrapping_sub(drop_0) as ::core::ffi::c_uchar,
+            val: 0 as ::core::ffi::c_ushort,
+        }
+    }
+}
+
 #[no_mangle]
 
 pub static inflate_copyright: [::core::ffi::c_char; 49] =
@@ -3027,9 +3094,6 @@ pub unsafe extern "C" fn inflate_table_ffi(
         }
         max = max.wrapping_sub(1);
     }
-    if root > max {
-        root = max;
-    }
     if max == 0 as ::core::ffi::c_uint {
         here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
@@ -3050,24 +3114,11 @@ pub unsafe extern "C" fn inflate_table_ffi(
         }
         min = min.wrapping_add(1);
     }
-    if root < min {
-        root = min;
+    root = inflate_table_root_bounds(root, min, max);
+    if inflate_table_is_oversubscribed(&mut left, &count) {
+        return -1 as ::core::ffi::c_int;
     }
-    left = 1 as ::core::ffi::c_int;
-    len = 1 as ::core::ffi::c_uint;
-    while len <= MAXBITS as ::core::ffi::c_uint {
-        left <<= 1 as ::core::ffi::c_int;
-        left -= count[len as usize] as ::core::ffi::c_int;
-        if left < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        len = len.wrapping_add(1);
-    }
-    if left > 0 as ::core::ffi::c_int
-        && (type_0 as ::core::ffi::c_uint
-            == crate::src::inftrees::CODES as ::core::ffi::c_int as ::core::ffi::c_uint
-            || max != 1 as ::core::ffi::c_uint)
-    {
+    if inflate_table_incomplete_is_invalid(type_0, max, left) {
         return -1 as ::core::ffi::c_int;
     }
     offs[1 as ::core::ffi::c_int as usize] = 0 as ::core::ffi::c_ushort;
@@ -3114,24 +3165,8 @@ pub unsafe extern "C" fn inflate_table_ffi(
         return 1 as ::core::ffi::c_int;
     }
     loop {
-        here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
-        if (*work.offset(sym as isize) as ::core::ffi::c_uint)
-            .wrapping_add(1 as ::core::ffi::c_uint)
-            < match_0
-        {
-            here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-            here.val = *work.offset(sym as isize);
-        } else if *work.offset(sym as isize) as ::core::ffi::c_uint >= match_0 {
-            let table_index =
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as usize;
-            let (base, extra) =
-                base_extra.expect("base/extra tables are selected for this code type");
-            here.op = extra[table_index] as ::core::ffi::c_uchar;
-            here.val = base[table_index];
-        } else {
-            here.op = (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-            here.val = 0 as ::core::ffi::c_ushort;
-        }
+        let work_symbol = *work.offset(sym as isize) as ::core::ffi::c_uint;
+        here = inflate_table_entry(len, drop_0, work_symbol, match_0, base_extra);
         incr = (1 as ::core::ffi::c_uint) << len.wrapping_sub(drop_0);
         fill = (1 as ::core::ffi::c_uint) << curr;
         min = fill;

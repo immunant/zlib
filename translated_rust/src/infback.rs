@@ -532,9 +532,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                         {
                             continue;
                         }
-                        if (*state).lens[256 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-                            == 0 as ::core::ffi::c_int
-                        {
+                        if !crate::src::inflate::inflate_has_end_of_block_code(&(*state).lens) {
                             (*strm).msg = b"invalid code -- missing end-of-block\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;

@@ -270,6 +270,13 @@ pub(crate) fn inflate_code_length_repeat_fits(
     have.wrapping_add(copy) <= nlen.wrapping_add(ndist)
 }
 
+pub(crate) fn inflate_has_end_of_block_code(lens: &[::core::ffi::c_ushort]) -> bool {
+    lens.get(256 as usize)
+        .copied()
+        .unwrap_or(0 as ::core::ffi::c_ushort)
+        != 0 as ::core::ffi::c_ushort
+}
+
 struct InflateGzipHeaderFieldScan {
     consumed: usize,
     terminated: bool,
@@ -1465,9 +1472,7 @@ pub unsafe extern "C" fn inflate_ffi(
                 {
                     continue;
                 }
-                if (*state).lens[256 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-                    == 0 as ::core::ffi::c_int
-                {
+                if !inflate_has_end_of_block_code(&(*state).lens) {
                     (*strm).msg = b"invalid code -- missing end-of-block\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
