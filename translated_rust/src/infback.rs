@@ -74,6 +74,27 @@ struct InflateBackStateConfig {
     wsize: ::core::ffi::c_uint,
 }
 
+// Keep the public initializer's validation order independent of its raw
+// stream and window bindings.  In particular, a bad version must win over
+// every other error, as it does in zlib.
+fn inflate_back_init_config(
+    version_first: Option<::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
+    has_stream: bool,
+    has_window: bool,
+    window_bits: ::core::ffi::c_int,
+) -> Result<InflateBackStateConfig, ::core::ffi::c_int> {
+    if version_first != Some(crate::zlib_h::ZLIB_VERSION[0])
+        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+    {
+        return Err(crate::zlib_h::Z_VERSION_ERROR);
+    }
+    if !has_stream || !has_window || !(8..=15).contains(&window_bits) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    Ok(inflate_back_state_config(window_bits))
+}
+
 #[derive(Copy, Clone)]
 enum InflateBackBlockType {
     Stored,
@@ -654,18 +675,16 @@ pub unsafe fn inflateBackInit_(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if version_first != Some(crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize])
-        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-    {
-        return crate::zlib_h::Z_VERSION_ERROR;
-    }
-    if strm.is_null()
-        || window.is_null()
-        || windowBits < 8 as ::core::ffi::c_int
-        || windowBits > 15 as ::core::ffi::c_int
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    let config = match inflate_back_init_config(
+        version_first,
+        stream_size,
+        !strm.is_null(),
+        !window.is_null(),
+        windowBits,
+    ) {
+        Ok(config) => config,
+        Err(error) => return error,
+    };
     let strm_ref = &mut *strm;
     inflate_back_prepare_stream(strm_ref);
     state = Some(strm_ref.zalloc.expect("non-null function pointer"))
@@ -678,7 +697,6 @@ pub unsafe fn inflateBackInit_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     strm_ref.state = state as *mut crate::src::deflate::internal_state;
-    let config = inflate_back_state_config(windowBits);
     (*state).dmax = config.dmax;
     (*state).wbits = config.wbits;
     (*state).wsize = config.wsize;
