@@ -1,4 +1,7 @@
 // =============== BEGIN deflate_h ================
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+
 pub use crate::src::trees::static_tree_desc_s;
 
 pub const LENGTH_CODES: ::core::ffi::c_int = 29 as ::core::ffi::c_int;
@@ -142,6 +145,46 @@ pub struct internal_state {
     // Rust-owned so implementations can borrow slices instead of rebuilding
     // them from allocator-owned raw pointers.
     buffers: Option<Box<deflate_buffers>>,
+}
+
+// `z_stream::state` remains a raw pointer for its C ABI and because inflate
+// shares that field.  Deflate allocations are nevertheless owned here, keyed
+// by their stable allocation address, so safe implementation code can release
+// them without rebuilding a `Box` from the ABI pointer.
+static DEFLATE_STATES: LazyLock<Mutex<HashMap<usize, (::core::ffi::c_int, Box<internal_state>)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn retain_deflate_state(state_key: usize, status: ::core::ffi::c_int, state: Box<internal_state>) {
+    DEFLATE_STATES
+        .lock()
+        .expect("deflate state registry lock poisoned")
+        .insert(state_key, (status, state));
+}
+
+fn update_tracked_deflate_status(state_key: usize, status: ::core::ffi::c_int) {
+    if let Some((tracked_status, _)) = DEFLATE_STATES
+        .lock()
+        .expect("deflate state registry lock poisoned")
+        .get_mut(&state_key)
+    {
+        *tracked_status = status;
+    }
+}
+
+fn take_deflate_state(state_key: usize) -> Option<Box<internal_state>> {
+    DEFLATE_STATES
+        .lock()
+        .expect("deflate state registry lock poisoned")
+        .remove(&state_key)
+        .map(|(_, state)| state)
+}
+
+fn tracked_deflate_state_status(state_key: usize) -> Option<::core::ffi::c_int> {
+    DEFLATE_STATES
+        .lock()
+        .expect("deflate state registry lock poisoned")
+        .get(&state_key)
+        .map(|(status, _)| *status)
 }
 
 #[derive(Clone)]
@@ -1142,7 +1185,9 @@ pub fn deflateInit2_(
     owned.strategy = strategy;
     owned.method = method as crate::stdlib::Byte;
     let result = deflateResetKeep(strm, &mut owned, true);
-    strm.state = Box::into_raw(owned);
+    let state_pointer = std::ptr::from_mut(owned.as_mut());
+    retain_deflate_state(state_pointer.addr(), crate::src::deflate::INIT_STATE, owned);
+    strm.state = state_pointer;
     result
 }
 #[export_name = "deflateInit2_"]
@@ -1348,6 +1393,7 @@ pub fn deflateResetKeep(
     } else {
         crate::src::deflate::INIT_STATE
     };
+    update_tracked_deflate_status(strm.state.addr(), s.status);
     strm.adler = if s.wrap == 2 as ::core::ffi::c_int {
         crc32_slice(0, &[])
     } else {
@@ -1952,6 +1998,7 @@ pub fn deflate(
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         s = strm.state as *mut crate::src::deflate::deflate_state;
+        let state_key = strm.state.addr();
         if strm.next_out.is_null()
             || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.is_null()
             || (*s).status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
@@ -2025,6 +2072,7 @@ pub fn deflate(
         }
         if (*s).status == crate::src::deflate::INIT_STATE && (*s).wrap == 0 as ::core::ffi::c_int {
             (*s).status = crate::src::deflate::BUSY_STATE;
+            update_tracked_deflate_status(state_key, crate::src::deflate::BUSY_STATE);
         }
         if (*s).status == crate::src::deflate::INIT_STATE {
             let state = &mut *s;
@@ -2065,6 +2113,7 @@ pub fn deflate(
             }
             (*strm).adler = crate::src::adler32::ADLER32_INITIAL;
             state.status = crate::src::deflate::BUSY_STATE;
+            update_tracked_deflate_status(state_key, crate::src::deflate::BUSY_STATE);
             flush_pending(strm);
             if state.pending != 0 as crate::zutil_h::ulg {
                 state.last_flush = -1 as ::core::ffi::c_int;
@@ -2103,6 +2152,7 @@ pub fn deflate(
                 );
                 (&mut *s).push_pending(3);
                 (*s).status = crate::src::deflate::BUSY_STATE;
+                update_tracked_deflate_status(state_key, crate::src::deflate::BUSY_STATE);
                 flush_pending(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
@@ -2185,6 +2235,7 @@ pub fn deflate(
                 }
                 (*s).gzindex = 0 as crate::zutil_h::ulg;
                 (*s).status = crate::src::deflate::EXTRA_STATE;
+                update_tracked_deflate_status(state_key, crate::src::deflate::EXTRA_STATE);
             }
         }
         if (*s).status == crate::src::deflate::EXTRA_STATE {
@@ -2262,6 +2313,7 @@ pub fn deflate(
                 (*s).gzindex = 0 as crate::zutil_h::ulg;
             }
             (*s).status = crate::src::deflate::NAME_STATE;
+            update_tracked_deflate_status(state_key, crate::src::deflate::NAME_STATE);
         }
         if (*s).status == crate::src::deflate::NAME_STATE {
             if let Some(name) = (*s)
@@ -2320,6 +2372,7 @@ pub fn deflate(
                 (*s).gzindex = 0 as crate::zutil_h::ulg;
             }
             (*s).status = crate::src::deflate::COMMENT_STATE;
+            update_tracked_deflate_status(state_key, crate::src::deflate::COMMENT_STATE);
         }
         if (*s).status == crate::src::deflate::COMMENT_STATE {
             if let Some(comment) = (*s)
@@ -2377,6 +2430,7 @@ pub fn deflate(
                 }
             }
             (*s).status = crate::src::deflate::HCRC_STATE;
+            update_tracked_deflate_status(state_key, crate::src::deflate::HCRC_STATE);
         }
         if (*s).status == crate::src::deflate::HCRC_STATE {
             if (*s)
@@ -2404,6 +2458,7 @@ pub fn deflate(
                 (*strm).adler = crc32_slice(0, &[]);
             }
             (*s).status = crate::src::deflate::BUSY_STATE;
+            update_tracked_deflate_status(state_key, crate::src::deflate::BUSY_STATE);
             flush_pending(strm);
             if (*s).pending != 0 as crate::zutil_h::ulg {
                 (*s).last_flush = -1 as ::core::ffi::c_int;
@@ -2457,6 +2512,7 @@ pub fn deflate(
                     == finish_done as ::core::ffi::c_int as ::core::ffi::c_uint
             {
                 (*s).status = crate::src::deflate::FINISH_STATE;
+                update_tracked_deflate_status(state_key, crate::src::deflate::FINISH_STATE);
             }
             if bstate as ::core::ffi::c_uint
                 == need_more as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -2543,25 +2599,46 @@ pub unsafe extern "C" fn deflate_ffi(
     }
     deflate(&mut *strm, flush)
 }
-pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut status: ::core::ffi::c_int = 0;
-    if deflateStateCheck(strm) != 0 {
+pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = Box::from_raw((*strm).state as *mut crate::src::deflate::deflate_state);
-    status = state.status;
+    if strm.state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state_key = strm.state.addr();
+    let Some(status) = tracked_deflate_state_status(state_key) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !matches!(
+        status,
+        crate::src::deflate::INIT_STATE
+            | crate::src::deflate::GZIP_STATE
+            | crate::src::deflate::EXTRA_STATE
+            | crate::src::deflate::NAME_STATE
+            | crate::src::deflate::COMMENT_STATE
+            | crate::src::deflate::HCRC_STATE
+            | crate::src::deflate::BUSY_STATE
+            | crate::src::deflate::FINISH_STATE
+    ) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = take_deflate_state(state_key).expect("tracked deflate state disappeared");
+    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     drop(state);
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return if status == crate::src::deflate::BUSY_STATE {
+    if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
     } else {
         crate::zlib_h::Z_OK
-    };
+    }
 }
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    deflateEnd(strm)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflateEnd(&mut *strm)
 }
 pub fn deflateCopy(
     source: &crate::src::deflate::deflate_state,
@@ -2591,10 +2668,12 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
-    let copied = deflateCopy(source_state);
+    let mut copied = deflateCopy(source_state);
     let dest = &mut *dest;
     *dest = *source;
-    dest.state = Box::into_raw(copied);
+    let state_pointer = std::ptr::from_mut(copied.as_mut());
+    retain_deflate_state(state_pointer.addr(), source_state.status, copied);
+    dest.state = state_pointer;
     crate::zlib_h::Z_OK
 }
 fn longest_match_in_buffers(
