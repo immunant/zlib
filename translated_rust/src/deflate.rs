@@ -463,26 +463,41 @@ unsafe extern "C" fn read_buf(
     return len;
 }
 
+fn fill_window_available_space(
+    window_size: crate::zutil_h::ulg,
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    wsize: crate::stdlib::uInt,
+    narrow_int: bool,
+) -> ::core::ffi::c_uint {
+    let mut available = window_size
+        .wrapping_sub(lookahead as crate::zutil_h::ulg)
+        .wrapping_sub(strstart as crate::zutil_h::ulg)
+        as ::core::ffi::c_uint;
+
+    if narrow_int {
+        if available == 0 && strstart == 0 && lookahead == 0 {
+            available = wsize as ::core::ffi::c_uint;
+        } else if available == -1 as ::core::ffi::c_int as ::core::ffi::c_uint {
+            available = available.wrapping_sub(1);
+        }
+    }
+
+    available
+}
+
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
     let mut wsize: crate::stdlib::uInt = (*s).w_size;
     loop {
-        more = (*s)
-            .window_size
-            .wrapping_sub((*s).lookahead as crate::zutil_h::ulg)
-            .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
-            as ::core::ffi::c_uint;
-        if ::core::mem::size_of::<::core::ffi::c_int>() as usize <= 2 as usize {
-            if more == 0 as ::core::ffi::c_uint
-                && (*s).strstart == 0 as crate::stdlib::uInt
-                && (*s).lookahead == 0 as crate::stdlib::uInt
-            {
-                more = wsize as ::core::ffi::c_uint;
-            } else if more == -1 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                more = more.wrapping_sub(1);
-            }
-        }
+        more = fill_window_available_space(
+            (*s).window_size,
+            (*s).lookahead,
+            (*s).strstart,
+            wsize,
+            ::core::mem::size_of::<::core::ffi::c_int>() <= 2,
+        );
         if (*s).strstart
             >= wsize.wrapping_add(
                 (*s).w_size
@@ -3634,9 +3649,10 @@ mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_pending_value, deflate_prime_bits_valid, deflate_state_status_valid,
-        deflate_version_matches, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len, read_buf_len,
-        short_msb_bytes, slide_hash_entry, stored_block_min_size, zlib_header,
+        deflate_version_matches, fill_window_available_space, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
+        pending_output_len, read_buf_len, short_msb_bytes, slide_hash_entry, stored_block_min_size,
+        zlib_header,
     };
 
     #[test]
@@ -3810,6 +3826,17 @@ mod tests {
                 ::core::ffi::c_uint::MAX as crate::zutil_h::ulg,
                 (::core::ffi::c_uint::MAX - 1) as crate::zutil_h::ulg,
             ),
+            ::core::ffi::c_uint::MAX - 1,
+        );
+    }
+
+    #[test]
+    fn fill_window_available_space_preserves_normal_and_narrow_int_cases() {
+        assert_eq!(fill_window_available_space(64, 10, 20, 32, false), 34);
+        assert_eq!(fill_window_available_space(0, 0, 0, 32, false), 0);
+        assert_eq!(fill_window_available_space(0, 0, 0, 32, true), 32);
+        assert_eq!(
+            fill_window_available_space(0, 1, 0, 32, true),
             ::core::ffi::c_uint::MAX - 1,
         );
     }

@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -99,6 +99,13 @@ fn gz_error_clears_buffer(err: ::core::ffi::c_int, again: ::core::ffi::c_int) ->
 
 fn gz_error_needs_message_allocation(err: ::core::ffi::c_int, has_message: bool) -> bool {
     has_message && err != crate::zlib_h::Z_MEM_ERROR
+}
+
+fn gz_error_message_allocation_len(
+    path_len: crate::__stddef_size_t_h::size_t,
+    message_len: crate::__stddef_size_t_h::size_t,
+) -> crate::__stddef_size_t_h::size_t {
+    path_len.wrapping_add(message_len).wrapping_add(3)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1017,20 +1024,18 @@ pub unsafe extern "C" fn gz_error(
     if !gz_error_needs_message_allocation(err, !msg.is_null()) {
         return;
     }
-    (*state).msg = crate::stdlib::malloc(
-        crate::stdlib::strlen((*state).path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_char;
+    let message_allocation_len = gz_error_message_allocation_len(
+        crate::stdlib::strlen((*state).path),
+        crate::stdlib::strlen(msg),
+    );
+    (*state).msg = crate::stdlib::malloc(message_allocation_len) as *mut ::core::ffi::c_char;
     if (*state).msg.is_null() {
         (*state).err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
     crate::stdlib::snprintf(
         (*state).msg,
-        crate::stdlib::strlen((*state).path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
+        message_allocation_len,
         b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
         (*state).path,
         b": \0".as_ptr() as *const ::core::ffi::c_char,
@@ -1058,19 +1063,19 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_error_clears_buffer, gz_error_needs_message_allocation,
-        gz_is_read_or_write_mode, gz_legacy_offset_result, gz_lseek_succeeded, gz_open_needs_open,
-        gz_open_offset_plan, gz_open_path_buffer_len, gz_open_recorded_offset,
-        gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking, gz_parse_open_mode,
-        gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
-        gzclearerr_core, gzdopen_has_valid_descriptor, gzeof_result, gzerror_core,
-        gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
-        gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
-        gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
-        gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
-        gzseek_plan_remaining_offset, gzseek_read_buffer_consumed, gzseek_request_is_valid,
-        gztell64_core, gztell64_result, GzErrorMessage, GzOpenOffsetPlan, GzResetFields,
-        GzSeekOffsetPlan, GzSeekReadBufferPlan,
+        gz_clear_read_flags, gz_error_clears_buffer, gz_error_message_allocation_len,
+        gz_error_needs_message_allocation, gz_is_read_or_write_mode, gz_legacy_offset_result,
+        gz_lseek_succeeded, gz_open_needs_open, gz_open_offset_plan, gz_open_path_buffer_len,
+        gz_open_recorded_offset, gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking,
+        gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
+        gzbuffer_normalized_want, gzclearerr_core, gzdopen_has_valid_descriptor, gzeof_result,
+        gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
+        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
+        gzseek_clears_pending_skip, gzseek_effective_skip, gzseek_error_allows_positioning,
+        gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
+        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
+        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, gztell64_result,
+        GzErrorMessage, GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1281,6 +1286,15 @@ mod tests {
             crate::zlib_h::Z_MEM_ERROR,
             true
         ));
+    }
+
+    #[test]
+    fn gz_error_message_allocation_length_preserves_wrapping_arithmetic() {
+        assert_eq!(gz_error_message_allocation_len(4, 6), 13);
+        assert_eq!(
+            gz_error_message_allocation_len(crate::__stddef_size_t_h::size_t::MAX, 1),
+            3
+        );
     }
 
     #[test]

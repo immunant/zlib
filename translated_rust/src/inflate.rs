@@ -163,6 +163,10 @@ fn inflate_state_metadata_is_valid(stream_matches: bool, mode: inflate_mode) -> 
     stream_matches && inflate_mode_is_valid(mode)
 }
 
+fn inflate_stream_has_allocator_callbacks(has_zalloc: bool, has_zfree: bool) -> bool {
+    has_zalloc && has_zfree
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct DynamicHeaderCounts {
     pub nlen: ::core::ffi::c_uint,
@@ -414,7 +418,10 @@ fn inflate_reset2_params(
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
+    if strm.is_null() {
+        return 1 as ::core::ffi::c_int;
+    }
+    if !inflate_stream_has_allocator_callbacks((*strm).zalloc.is_some(), (*strm).zfree.is_some()) {
         return 1 as ::core::ffi::c_int;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2646,11 +2653,11 @@ mod tests {
         inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
         inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
         inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
-        inflate_state_metadata_is_valid, inflate_sync_point_value, inflate_sync_search_core,
-        inflate_undermine_core, inflate_validate_wrap, initial_window_metadata,
-        stored_block_lengths_are_valid, syncsearch_safe, window_update_plan, InflatePrimeUpdate,
-        InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED,
-        SYNC, TYPE,
+        inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
+        inflate_sync_point_value, inflate_sync_search_core, inflate_undermine_core,
+        inflate_validate_wrap, initial_window_metadata, stored_block_lengths_are_valid,
+        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -3006,6 +3013,14 @@ mod tests {
         assert!(inflate_state_metadata_is_valid(true, HEAD));
         assert!(!inflate_state_metadata_is_valid(false, HEAD));
         assert!(!inflate_state_metadata_is_valid(true, SYNC + 1));
+    }
+
+    #[test]
+    fn inflate_stream_requires_both_allocator_callbacks() {
+        assert!(inflate_stream_has_allocator_callbacks(true, true));
+        assert!(!inflate_stream_has_allocator_callbacks(false, true));
+        assert!(!inflate_stream_has_allocator_callbacks(true, false));
+        assert!(!inflate_stream_has_allocator_callbacks(false, false));
     }
 
     #[test]

@@ -883,6 +883,10 @@ fn gz_skip_action(
     }
 }
 
+fn gz_skip_should_continue(skip: crate::stdlib::off64_t) -> bool {
+    skip != 0
+}
+
 fn gzgets_copy_len(
     have: ::core::ffi::c_uint,
     left: ::core::ffi::c_uint,
@@ -951,7 +955,7 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
                 }
             }
         }
-        if !((*state).skip != 0) {
+        if !gz_skip_should_continue((*state).skip) {
             break;
         }
     }
@@ -1669,6 +1673,13 @@ mod tests {
     fn gz_skip_action_stops_only_at_eof_without_input() {
         assert!(matches!(gz_skip_action(0, 1, 0), GzSkipAction::StopAtEof));
         assert!(matches!(gz_skip_action(0, 1, 1), GzSkipAction::Fetch));
+    }
+
+    #[test]
+    fn gz_skip_should_continue_requires_remaining_skip() {
+        assert!(!gz_skip_should_continue(0));
+        assert!(gz_skip_should_continue(1));
+        assert!(gz_skip_should_continue(-1));
     }
 
     #[test]
