@@ -16,7 +16,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateParams;
 pub use crate::src::deflate::deflateReset;
 pub use crate::src::deflate::internal_state;
 
@@ -1058,7 +1057,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         {
             return state.err;
         }
-        crate::src::deflate::deflateParams(&raw mut state.strm, level, strategy);
+        crate::src::deflate::deflate_params_at_boundary!(&raw mut state.strm, level, strategy);
     }
     state.level = level;
     state.strategy = strategy;

@@ -341,12 +341,15 @@ fn slide_hash_state(
     }
 }
 
-fn clear_hash_state(head: &mut [crate::src::deflate::Posf], slid: &mut ::core::ffi::c_int) {
+pub(crate) fn clear_hash_state(
+    head: &mut [crate::src::deflate::Posf],
+    slid: &mut ::core::ffi::c_int,
+) {
     head.fill(NIL as crate::src::deflate::Posf);
     *slid = 0;
 }
 
-unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
+pub(crate) unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     if s.is_null() {
         return;
     }
@@ -1051,7 +1054,9 @@ fn deflate_state_values_are_valid(
         )
 }
 
-unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+pub(crate) unsafe extern "C" fn deflateStateCheck(
+    mut strm: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1;
     }
@@ -1477,11 +1482,11 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     return crate::zlib_h::Z_OK;
 }
 #[derive(Copy, Clone)]
-struct DeflateParamsPlan {
-    level: ::core::ffi::c_int,
-    strategy: ::core::ffi::c_int,
-    config: config,
-    needs_block_flush: bool,
+pub(crate) struct DeflateParamsPlan {
+    pub(crate) level: ::core::ffi::c_int,
+    pub(crate) strategy: ::core::ffi::c_int,
+    pub(crate) config: config,
+    pub(crate) needs_block_flush: bool,
 }
 
 /// Validate and normalize a parameter change without touching stream state.
@@ -1489,7 +1494,7 @@ struct DeflateParamsPlan {
 /// Keeping the configuration-table lookup here makes malformed internal levels
 /// an ordinary stream error rather than an unchecked table index in the raw
 /// stream adapter.
-fn deflate_params_plan(
+pub(crate) fn deflate_params_plan(
     requested_level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
     current_level: ::core::ffi::c_int,
@@ -1515,64 +1520,75 @@ fn deflate_params_plan(
     })
 }
 
-pub unsafe extern "C" fn deflateParams(
-    mut strm: crate::zlib_h::z_streamp,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    let Some(plan) =
-        deflate_params_plan(level, strategy, (*s).level, (*s).strategy, (*s).last_flush)
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if plan.needs_block_flush {
-        let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
-        if err == crate::zlib_h::Z_STREAM_ERROR {
-            return err;
-        }
-        if (*strm).avail_in != 0
-            || (*s).strstart as ::core::ffi::c_long - (*s).block_start
-                + (*s).lookahead as ::core::ffi::c_long
-                != 0
-        {
-            return crate::zlib_h::Z_BUF_ERROR;
-        }
-    }
-    if (*s).level != plan.level {
-        if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
-            if (*s).matches == 1 as crate::stdlib::uInt {
-                slide_hash(s);
-            } else {
-                let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                    return crate::zlib_h::Z_STREAM_ERROR;
-                };
-                if head_len != 0 && (*s).head.is_null() {
-                    return crate::zlib_h::Z_STREAM_ERROR;
-                }
-                let head = if head_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut((*s).head, head_len)
-                };
-                clear_hash_state(head, &mut (*s).slid);
+// This still drives the legacy raw deflate state, so it is deliberately an
+// export-boundary macro.  `deflateParams` has no Rust implementation callers:
+// the gzip setter expands it directly at its own ABI boundary.
+macro_rules! deflate_params_at_boundary {
+    ($strm:expr, $level:expr, $strategy:expr) => {{
+        let strm = $strm;
+        let level = $level;
+        let strategy = $strategy;
+        'deflate_params_result: {
+            if crate::src::deflate::deflateStateCheck(strm) != 0 {
+                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
             }
-            (*s).matches = 0 as crate::stdlib::uInt;
+            let s = (*strm).state as *mut crate::src::deflate::deflate_state;
+            let Some(plan) = crate::src::deflate::deflate_params_plan(
+                level,
+                strategy,
+                (*s).level,
+                (*s).strategy,
+                (*s).last_flush,
+            ) else {
+                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+            };
+            if plan.needs_block_flush {
+                let err = crate::src::deflate::deflate(strm, crate::zlib_h::Z_BLOCK);
+                if err == crate::zlib_h::Z_STREAM_ERROR {
+                    break 'deflate_params_result err;
+                }
+                if (*strm).avail_in != 0
+                    || (*s).strstart as ::core::ffi::c_long - (*s).block_start
+                        + (*s).lookahead as ::core::ffi::c_long
+                        != 0
+                {
+                    break 'deflate_params_result crate::zlib_h::Z_BUF_ERROR;
+                }
+            }
+            if (*s).level != plan.level {
+                if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt
+                {
+                    if (*s).matches == 1 as crate::stdlib::uInt {
+                        crate::src::deflate::slide_hash(s);
+                    } else {
+                        let Ok(head_len) = usize::try_from((*s).hash_size) else {
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
+                        if head_len != 0 && (*s).head.is_null() {
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        }
+                        let head = if head_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut((*s).head, head_len)
+                        };
+                        crate::src::deflate::clear_hash_state(head, &mut (*s).slid);
+                    }
+                    (*s).matches = 0 as crate::stdlib::uInt;
+                }
+                (*s).level = plan.level;
+                (*s).max_lazy_match = plan.config.max_lazy as crate::stdlib::uInt;
+                (*s).good_match = plan.config.good_length as crate::stdlib::uInt;
+                (*s).nice_match = plan.config.nice_length as ::core::ffi::c_int;
+                (*s).max_chain_length = plan.config.max_chain as crate::stdlib::uInt;
+            }
+            (*s).strategy = plan.strategy;
+            crate::zlib_h::Z_OK
         }
-        (*s).level = plan.level;
-        (*s).max_lazy_match = plan.config.max_lazy as crate::stdlib::uInt;
-        (*s).good_match = plan.config.good_length as crate::stdlib::uInt;
-        (*s).nice_match = plan.config.nice_length as ::core::ffi::c_int;
-        (*s).max_chain_length = plan.config.max_chain as crate::stdlib::uInt;
-    }
-    (*s).strategy = plan.strategy;
-    return crate::zlib_h::Z_OK;
+    }};
 }
+pub(crate) use deflate_params_at_boundary;
+
 #[export_name = "deflateParams"]
 
 pub unsafe extern "C" fn deflateParams_ffi(
@@ -1580,7 +1596,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateParams(strm, level, strategy)
+    deflate_params_at_boundary!(strm, level, strategy)
 }
 fn deflate_tune_state(
     state: &mut crate::src::deflate::deflate_state,
