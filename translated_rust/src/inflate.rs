@@ -668,7 +668,6 @@ fn inflate_window_update(
     state: &mut inflate_state,
     window: &mut [u8],
     produced: &[u8],
-    copy: ::core::ffi::c_uint,
 ) -> Option<()> {
     if state.wsize == 0 {
         state.wsize = ::core::ffi::c_uint::try_from(inflate_window_len(state.wbits, 0)?).ok()?;
@@ -676,9 +675,10 @@ fn inflate_window_update(
         state.whave = 0;
     }
     let wsize = inflate_window_len(state.wbits, state.wsize)?;
-    if window.len() != wsize || produced.len() != usize::try_from(copy).ok()? {
+    if window.len() != wsize {
         return None;
     }
+    let copy = ::core::ffi::c_uint::try_from(produced.len()).ok()?;
     let plan = inflate_window_copy_plan(state.wsize, state.wnext, state.whave, copy)?;
     let (next, have) = plan.cursor_values()?;
     inflate_window_copy(window, produced, plan)?;
@@ -774,8 +774,8 @@ fn inflate_fast_commit(
 unsafe fn updatewindow(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
-    mut end: *const crate::stdlib::Bytef,
-    mut copy: ::core::ffi::c_uint,
+    end: *const crate::stdlib::Bytef,
+    copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     // The legacy decoder already validated and adopted these records at its
     // boundary.  This helper is still unsafe because it invokes the caller
@@ -821,11 +821,12 @@ unsafe fn updatewindow(
         // `copy_len` span only after validating the source pointer above.
         ::core::slice::from_raw_parts(end.wrapping_sub(copy_len), copy_len)
     };
-    if inflate_window_update(state, window, produced, copy).is_none() {
+    if inflate_window_update(state, window, produced).is_none() {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
 }
+
 pub unsafe fn inflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
