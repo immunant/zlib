@@ -1794,35 +1794,41 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     });
     deflateSetHeader(stream, header)
 }
-pub unsafe extern "C" fn deflatePending(
-    mut strm: crate::zlib_h::z_streamp,
-    mut pending: *mut ::core::ffi::c_uint,
-    mut bits: *mut ::core::ffi::c_int,
+/// The pointer-free state view needed by `deflatePending`.
+///
+/// The exported boundary converts the ABI stream's state link once.  Keeping
+/// allocator and state validation here gives every caller the same error
+/// precedence without retaining that raw link in the implementation.
+struct DeflatePendingStream<'a> {
+    allocators_present: bool,
+    state: Option<&'a crate::src::deflate::deflate_state>,
+}
+
+fn deflatePending(
+    stream: DeflatePendingStream<'_>,
+    pending: Option<&mut ::core::ffi::c_uint>,
+    bits: Option<&mut ::core::ffi::c_int>,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
+    if !stream.allocators_present {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let strm = &mut *strm;
-    if !deflate_params_stream_is_valid(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(state) = strm.state.as_mut() else {
+    let Some(state) = stream.state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if !deflate_params_state_is_valid(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if !bits.is_null() {
+    if let Some(bits) = bits {
         *bits = state.bi_valid;
     }
-    if !pending.is_null() {
-        *pending = state.pending as ::core::ffi::c_uint;
-        if *pending as crate::zutil_h::ulg != state.pending {
+    if let Some(pending) = pending {
+        let Ok(value) = ::core::ffi::c_uint::try_from(state.pending) else {
             *pending = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
             return crate::zlib_h::Z_BUF_ERROR;
-        }
+        };
+        *pending = value;
     }
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflatePending"]
 
@@ -1831,7 +1837,14 @@ pub unsafe extern "C" fn deflatePending_ffi(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflatePending(strm, pending, bits)
+    let Some(strm) = strm.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let stream = DeflatePendingStream {
+        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        state: strm.state.as_ref(),
+    };
+    deflatePending(stream, pending.as_mut(), bits.as_mut())
 }
 fn deflate_used_impl(state: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     state.bi_used
