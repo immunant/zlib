@@ -3304,6 +3304,11 @@ pub unsafe extern "C" fn inflate_table(
     {
         return 1;
     }
+    // These ABI cursors are only borrowed for this adapter call.  Keep the
+    // raw access at the edge and let the builder below operate entirely on
+    // owned/slice data.
+    let table = &mut *table;
+    let bits = &mut *bits;
     let mut lens_copy = [0; 320];
     for index in 0..codes as usize {
         lens_copy[index] = *lens.wrapping_add(index);
