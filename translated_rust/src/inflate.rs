@@ -1139,6 +1139,10 @@ fn update_window_buffer_len(wsize: ::core::ffi::c_uint) -> usize {
     wsize as usize
 }
 
+fn update_window_produced_len(copy: ::core::ffi::c_uint) -> Option<usize> {
+    (copy != 0).then(|| update_window_buffer_len(copy))
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct UpdateWindowSlicePlan {
     window_len: usize,
@@ -1155,7 +1159,7 @@ fn update_window_slice_plan(
         .unwrap_or(wsize);
     UpdateWindowSlicePlan {
         window_len: update_window_buffer_len(updated_wsize),
-        produced_len: (copy != 0).then_some(copy as usize),
+        produced_len: update_window_produced_len(copy),
     }
 }
 
@@ -4763,6 +4767,16 @@ mod tests {
         assert_eq!(
             update_window_buffer_len(::core::ffi::c_uint::MAX),
             ::core::ffi::c_uint::MAX as usize
+        );
+    }
+
+    #[test]
+    fn update_window_produced_len_skips_empty_and_preserves_nonempty_copy_lengths() {
+        assert_eq!(super::update_window_produced_len(0), None);
+        assert_eq!(super::update_window_produced_len(1), Some(1));
+        assert_eq!(
+            super::update_window_produced_len(::core::ffi::c_uint::MAX),
+            Some(::core::ffi::c_uint::MAX as usize)
         );
     }
 

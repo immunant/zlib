@@ -1341,7 +1341,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return 0 as ::core::ffi::c_int;
             }
             GzFetchAction::Gzip => {
-                state.strm.avail_out = gz_output_buffer_len(state.size) as crate::stdlib::uInt;
+                state.strm.avail_out = gz_fetch_output_capacity(state.size) as crate::stdlib::uInt;
                 state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
@@ -1392,6 +1392,10 @@ fn gz_fetch_action(how: ::core::ffi::c_int) -> GzFetchAction {
         crate::gzguts_h::GZIP => GzFetchAction::Gzip,
         _ => GzFetchAction::StateCorrupt,
     }
+}
+
+fn gz_fetch_output_capacity(size: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    gz_output_buffer_len(size)
 }
 
 fn gz_fetch_should_continue(
@@ -3027,6 +3031,16 @@ mod tests {
             GzFetchAfterLook::Continue
         );
         assert_eq!(gz_fetch_after_look(99), GzFetchAfterLook::Continue);
+    }
+
+    #[test]
+    fn gz_fetch_output_capacity_doubles_sizes_with_unsigned_wrapping() {
+        assert_eq!(gz_fetch_output_capacity(0), 0);
+        assert_eq!(gz_fetch_output_capacity(8), 16);
+        assert_eq!(
+            gz_fetch_output_capacity(::core::ffi::c_uint::MAX),
+            ::core::ffi::c_uint::MAX - 1
+        );
     }
 
     #[test]

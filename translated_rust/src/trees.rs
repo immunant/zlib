@@ -4649,6 +4649,13 @@ fn bl_tree_header_bit_length(max_blindex: ::core::ffi::c_int) -> crate::zutil_h:
         .wrapping_add(4)
 }
 
+fn bl_tree_header_cost_update(
+    opt_len: crate::zutil_h::ulg,
+    max_blindex: ::core::ffi::c_int,
+) -> crate::zutil_h::ulg {
+    opt_len.wrapping_add(bl_tree_header_bit_length(max_blindex))
+}
+
 fn bl_tree_header_update(
     code_lengths: &[crate::zutil_h::ush; BL_CODE_ORDER_LEN],
     opt_len: crate::zutil_h::ulg,
@@ -4658,7 +4665,7 @@ fn bl_tree_header_update(
     let max_blindex = last_nonzero_bl_code_rank(&nonzero_at_rank);
     (
         max_blindex,
-        opt_len.wrapping_add(bl_tree_header_bit_length(max_blindex)),
+        bl_tree_header_cost_update(opt_len, max_blindex),
     )
 }
 
@@ -5006,9 +5013,7 @@ unsafe fn build_bl_tree(mut s: *mut crate::src::deflate::deflate_state) -> ::cor
     {
         max_blindex -= 1;
     }
-    (*s).opt_len = (*s)
-        .opt_len
-        .wrapping_add(bl_tree_header_bit_length(max_blindex));
+    (*s).opt_len = bl_tree_header_cost_update((*s).opt_len, max_blindex);
     return max_blindex;
 }
 
@@ -5728,25 +5733,26 @@ mod tests {
     use super::{
         assign_canonical_codes, bi_flush_core, bi_reverse, bi_windup_core,
         bit_buffer_would_overflow, bit_length_correction, bl_code_index_at_rank, bl_order,
-        bl_tree_header_bit_length, bl_tree_header_update, block_bit_length_bytes,
-        block_header_bits, canonical_code_assignments, canonical_codes_for_lengths,
-        clamped_tree_bit_length, classify_tree_run, combined_tree_frequency, compress_block_symbol,
-        decode_symbol_triplet, detect_data_type_from_ltree, dist_code_index,
-        dynamic_tree_header_counts, gen_bitlen_node_plan, gen_bitlen_overflow_reassignment,
-        heap_node_precedes, last_nonzero_bl_code_rank, length_extra_bits,
-        mark_bl_code_nonzero_at_rank, match_tree_codes, next_code_for_len, next_codes,
-        pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
-        reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
-        static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
-        supplemental_tree_static_len, symbol_buffer_has_entries, symbol_buffer_is_full,
-        symbol_triplet_cursors, tally_match_tree_indices, tally_scan_tree_action,
-        tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
-        tree_bit_length_totals_after_node, tree_code_count, tree_heap_has_pair,
-        tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth, tree_run_continues,
-        tree_run_extra_bits, tree_run_limits, tree_run_step, tree_run_step_after_increment,
-        BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode, GenBitlenOverflowReassignment,
-        HeapChild, ScanTreeAction, TallyTreeUpdate, TreeInitialLeafPlan, TreeRunStep,
-        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
+        bl_tree_header_bit_length, bl_tree_header_cost_update, bl_tree_header_update,
+        block_bit_length_bytes, block_header_bits, canonical_code_assignments,
+        canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
+        combined_tree_frequency, compress_block_symbol, decode_symbol_triplet,
+        detect_data_type_from_ltree, dist_code_index, dynamic_tree_header_counts,
+        gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
+        last_nonzero_bl_code_rank, length_extra_bits, mark_bl_code_nonzero_at_rank,
+        match_tree_codes, next_code_for_len, next_codes, pending_cursor_after_bytes,
+        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_bit_length_counts,
+        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
+        symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
+        tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
+        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_code_count,
+        tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth,
+        tree_run_continues, tree_run_extra_bits, tree_run_limits, tree_run_step,
+        tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode,
+        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
+        TreeInitialLeafPlan, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138,
+        REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6650,6 +6656,16 @@ mod tests {
             bl_tree_header_bit_length(crate::src::deflate::BL_CODES - 1),
             71
         );
+    }
+
+    #[test]
+    fn bl_tree_header_cost_update_adds_header_bits() {
+        assert_eq!(bl_tree_header_cost_update(10, 3), 36);
+    }
+
+    #[test]
+    fn bl_tree_header_cost_update_preserves_wrapping() {
+        assert_eq!(bl_tree_header_cost_update(crate::zutil_h::ulg::MAX, 3), 25);
     }
 
     #[test]
