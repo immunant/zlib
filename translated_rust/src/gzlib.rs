@@ -258,6 +258,21 @@ pub(crate) struct GzEmbeddedDeflateResult {
     pub(crate) total_out: crate::stdlib::uLong,
 }
 
+// A completed deflate request retains both the codec's scalar counters and
+// the checked amount of each borrowed buffer it consumed.  This is the
+// write-side equivalent of `GzCodecResult`: the next owner can apply this
+// value without revisiting ABI cursors after the temporary stream projection
+// has ended.
+pub(crate) struct GzEmbeddedDeflateProgress {
+    pub(crate) result: ::core::ffi::c_int,
+    pub(crate) remaining_input: crate::stdlib::uInt,
+    pub(crate) output_available: crate::stdlib::uInt,
+    pub(crate) input_used: crate::stdlib::uInt,
+    pub(crate) output_used: crate::stdlib::uInt,
+    pub(crate) total_in: crate::stdlib::uLong,
+    pub(crate) total_out: crate::stdlib::uLong,
+}
+
 pub(crate) struct GzCodecOutputView<'a> {
     bytes: &'a mut [u8],
 }
@@ -671,16 +686,25 @@ impl<'input, 'output> GzEmbeddedDeflateCall<'input, 'output> {
     }
 
     // The ABI codec reports progress only as remaining input/output counts.
-    // The request's checked bounds make those counts sufficient to retain a
+    // The request's checked bounds turn those counters into a complete,
     // pointer-free result for the surrounding gzip state machine.
     pub(crate) fn finish(
         self,
         snapshot: GzEmbeddedDeflateResult,
-    ) -> Option<GzEmbeddedDeflateResult> {
+    ) -> Option<GzEmbeddedDeflateProgress> {
         let remaining_input = usize::try_from(snapshot.remaining_input).ok()?;
         let output_available = usize::try_from(snapshot.output_available).ok()?;
         (remaining_input <= self.input.len() && output_available <= self.output.bytes.len())
-            .then_some(snapshot)
+            .then_some(GzEmbeddedDeflateProgress {
+                result: snapshot.result,
+                remaining_input: snapshot.remaining_input,
+                output_available: snapshot.output_available,
+                input_used: self.input_available.wrapping_sub(snapshot.remaining_input),
+                output_used: (self.output.bytes.len() as crate::stdlib::uInt)
+                    .wrapping_sub(snapshot.output_available),
+                total_in: snapshot.total_in,
+                total_out: snapshot.total_out,
+            })
     }
 }
 

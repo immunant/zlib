@@ -435,7 +435,6 @@ unsafe fn gz_comp(
         else {
             return -1;
         };
-        have = call.output_available();
         let snapshot = {
             let strm = &mut state.strm;
             strm.next_in = call.input().as_ptr().cast_mut();
@@ -456,7 +455,7 @@ unsafe fn gz_comp(
             return -1;
         };
         ret = snapshot.result;
-        state.strm.avail_in = snapshot.remaining_input;
+        state.strm.avail_in = input_available.wrapping_sub(snapshot.input_used);
         state.strm.avail_out = snapshot.output_available;
         state.strm.total_in = snapshot.total_in;
         state.strm.total_out = snapshot.total_out;
@@ -474,7 +473,7 @@ unsafe fn gz_comp(
             );
             return -1 as ::core::ffi::c_int;
         }
-        have = have.wrapping_sub(snapshot.output_available);
+        have = snapshot.output_used;
         if have == 0 {
             break;
         }
