@@ -533,13 +533,20 @@ fn inflate_prime(
     crate::zlib_h::Z_OK
 }
 
+// All callers reach this only after zlib's window-bit validation. Keeping the
+// conversion in one value-only helper makes allocation and slice capacities
+// agree without adding another raw-pointer boundary.
+fn inflate_window_size(wbits: crate::stdlib::uInt) -> usize {
+    1usize << wbits
+}
+
 fn update_window(
     state: &mut crate::src::inflate::inflate_state,
     window: &mut [crate::stdlib::Bytef],
     end: &[crate::stdlib::Bytef],
 ) {
     if state.wsize == 0 {
-        state.wsize = (1 as ::core::ffi::c_uint) << state.wbits;
+        state.wsize = inflate_window_size(state.wbits) as ::core::ffi::c_uint;
         state.wnext = 0;
         state.whave = 0;
     }
@@ -589,7 +596,7 @@ fn updatewindow(
             Some(stream.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 stream.opaque,
-                (1 as crate::stdlib::uInt) << state.wbits,
+                inflate_window_size(state.wbits) as crate::stdlib::uInt,
                 ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
             ) as *mut ::core::ffi::c_uchar
         };
@@ -605,7 +612,7 @@ fn updatewindow(
     let window = unsafe {
         ::core::slice::from_raw_parts_mut(
             state.window,
-            ((1 as ::core::ffi::c_uint) << state.wbits) as usize,
+            inflate_window_size(state.wbits),
         )
     };
     update_window(state, window, output);
@@ -2497,7 +2504,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
         state.window = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
-            (1 as crate::stdlib::uInt) << state.wbits,
+            inflate_window_size(state.wbits) as crate::stdlib::uInt,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
     }
@@ -2507,7 +2514,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
     }
     let window = ::core::slice::from_raw_parts_mut(
         state.window,
-        ((1 as ::core::ffi::c_uint) << state.wbits) as usize,
+        inflate_window_size(state.wbits),
     );
     inflate_set_dictionary(state, window, dictionary)
 }
@@ -2784,7 +2791,7 @@ struct InflateCopyPlan {
 // allocator and raw storage bindings at its existing ABI boundary.
 fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> InflateCopyPlan {
     InflateCopyPlan {
-        window_len: (!state.window.is_null()).then_some((1usize) << state.wbits),
+        window_len: (!state.window.is_null()).then_some(inflate_window_size(state.wbits)),
     }
 }
 
