@@ -1782,7 +1782,10 @@ pub unsafe extern "C" fn inflate(
                                             });
                                             let mut fast_state =
                                                 crate::src::inffast::InflateFastState {
-                                                    window,
+                                                    history:
+                                                        crate::src::inffast::FastHistory::External(
+                                                            window,
+                                                        ),
                                                     wsize: state.wsize as usize,
                                                     whave: state.whave as usize,
                                                     wnext: state.wnext as usize,

@@ -16,11 +16,20 @@ pub(crate) struct FastResult {
     pub(crate) exit: FastExit,
 }
 
+// Normal inflate keeps its history allocation separate from the caller's
+// output.  inflateBack, however, deliberately uses its caller window for
+// both roles.  Represent that relationship explicitly instead of forming
+// overlapping `&[u8]` and `&mut [u8]` views of the same window.
+pub(crate) enum FastHistory<'a> {
+    External(Option<&'a [u8]>),
+    Output,
+}
+
 // The fast decoder's resumable state is deliberately pointer-free.  Both the
 // normal inflate loop and the exported `inflate_fast` boundary build this
 // view, so the decoder itself never needs an ABI stream or raw cursor.
 pub(crate) struct InflateFastState<'a> {
-    pub(crate) window: Option<&'a [u8]>,
+    pub(crate) history: FastHistory<'a>,
     pub(crate) wsize: usize,
     pub(crate) whave: usize,
     pub(crate) wnext: usize,
@@ -53,7 +62,7 @@ fn inflate_fast_core(
     input: &[u8],
     output: &mut [u8],
     mut output_pos: usize,
-    window: Option<&[u8]>,
+    history: FastHistory<'_>,
     wsize: usize,
     whave: usize,
     wnext: usize,
@@ -127,7 +136,6 @@ fn inflate_fast_core(
                                 exit = FastExit::InvalidDistance;
                                 break 'outer;
                             }
-                            let history = window.unwrap_or(&[]);
                             let (first_from, first_len) = if wnext == 0 {
                                 (wsize - missing, missing)
                             } else if wnext < missing {
@@ -138,14 +146,24 @@ fn inflate_fast_core(
                             let first = first_len.min(len);
                             for offset in 0..first {
                                 let from = first_from + offset;
-                                output[output_pos] = history[from];
+                                let byte = match &history {
+                                    FastHistory::External(history) => history.unwrap_or(&[])[from],
+                                    FastHistory::Output => output[from],
+                                };
+                                output[output_pos] = byte;
                                 output_pos += 1;
                             }
                             len -= first;
                             if len != 0 && wnext != 0 && wnext < missing {
                                 let second = wnext.min(len);
                                 for from in 0..second {
-                                    output[output_pos] = history[from];
+                                    let byte = match &history {
+                                        FastHistory::External(history) => {
+                                            history.unwrap_or(&[])[from]
+                                        }
+                                        FastHistory::Output => output[from],
+                                    };
+                                    output[output_pos] = byte;
                                     output_pos += 1;
                                 }
                                 len -= second;
@@ -214,7 +232,10 @@ pub(crate) fn inflate_fast_from_views(
         input,
         output,
         output_pos,
-        state.window,
+        match state.history {
+            FastHistory::External(window) => FastHistory::External(window),
+            FastHistory::Output => FastHistory::Output,
+        },
         state.wsize,
         state.whave,
         state.wnext,
@@ -245,7 +266,7 @@ pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::c
         .window
         .map(|window| core::slice::from_raw_parts(window.as_ptr(), state.wsize as usize));
     let mut fast_state = InflateFastState {
-        window,
+        history: FastHistory::External(window),
         wsize: state.wsize as usize,
         whave: state.whave as usize,
         wnext: state.wnext as usize,

@@ -757,22 +757,59 @@ pub unsafe extern "C" fn inflateBack(
             }
         }
         if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
-            (*strm).next_out = put as *mut crate::stdlib::Bytef;
-            (*strm).avail_out = left as crate::stdlib::uInt;
-            (*strm).next_in = next as *mut crate::stdlib::Bytef;
-            (*strm).avail_in = have as crate::stdlib::uInt;
-            (*state).hold = hold;
-            (*state).bits = bits;
-            crate::src::inffast::inflate_fast(
-                strm as *mut crate::zlib_h::z_stream_s,
-                (*state).wsize,
+            // Both callback cursors are bounded for this dispatch: `have`
+            // describes the input callback's current chunk, and `put` lies
+            // in the caller window with `left` bytes remaining.  Decode
+            // directly through those views instead of republishing them via
+            // the legacy raw-stream fast adapter.
+            let input = ::core::slice::from_raw_parts(next, have as usize);
+            let state = &mut *state;
+            let window = state.window.expect("inflateBack window");
+            let window_size = state.wsize as usize;
+            let output = ::core::slice::from_raw_parts_mut(window.as_ptr(), window_size);
+            let written = window_size.wrapping_sub(left as usize);
+            let mut fast_state = crate::src::inffast::InflateFastState {
+                history: crate::src::inffast::FastHistory::Output,
+                wsize: window_size,
+                whave: state.whave as usize,
+                wnext: state.wnext as usize,
+                hold,
+                bits,
+                lcode: state.lencode,
+                dcode: state.distcode,
+                lmask: (1u32 << state.lenbits) - 1,
+                dmask: (1u32 << state.distbits) - 1,
+                codes: &state.codes,
+                sane: state.sane != 0,
+            };
+            let result = crate::src::inffast::inflate_fast_from_views(
+                input,
+                output,
+                written,
+                &mut fast_state,
             );
-            put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-            left = (*strm).avail_out as ::core::ffi::c_uint;
-            next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-            have = (*strm).avail_in as ::core::ffi::c_uint;
-            hold = (*state).hold;
-            bits = (*state).bits;
+            next = input.as_ptr().wrapping_add(result.input_used) as *mut ::core::ffi::c_uchar;
+            have = input.len().wrapping_sub(result.input_used) as ::core::ffi::c_uint;
+            put = output.as_mut_ptr().wrapping_add(result.output_used);
+            left = output.len().wrapping_sub(result.output_used) as ::core::ffi::c_uint;
+            hold = fast_state.hold;
+            bits = fast_state.bits;
+            match result.exit {
+                crate::src::inffast::FastExit::Continue => {}
+                crate::src::inffast::FastExit::Type => state.mode = crate::src::inflate::TYPE,
+                crate::src::inffast::FastExit::InvalidDistance => {
+                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                        as *const ::core::ffi::c_char
+                        as *mut ::core::ffi::c_char;
+                    state.mode = crate::src::inflate::BAD;
+                }
+                crate::src::inffast::FastExit::InvalidCode => {
+                    (*strm).msg = b"invalid literal/length or distance code\0".as_ptr()
+                        as *const ::core::ffi::c_char
+                        as *mut ::core::ffi::c_char;
+                    state.mode = crate::src::inflate::BAD;
+                }
+            }
         } else {
             loop {
                 here = crate::src::inftrees::code::copied_from(
