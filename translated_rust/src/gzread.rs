@@ -63,6 +63,17 @@ struct GzLoadResult {
     failed: bool,
 }
 
+fn gz_load_checked_have(
+    have: ::core::ffi::c_uint,
+    failed: bool,
+) -> Result<::core::ffi::c_uint, ()> {
+    if failed {
+        Err(())
+    } else {
+        Ok(have)
+    }
+}
+
 enum GzLoadStep {
     Continue(::core::ffi::c_uint),
     Return(GzLoadResult),
@@ -82,12 +93,11 @@ fn gz_avail_load_action(
     prior_avail_in: crate::stdlib::uInt,
     load: &GzLoadResult,
 ) -> GzAvailLoadAction {
-    if load.failed {
-        GzAvailLoadAction::Error
-    } else {
-        GzAvailLoadAction::Commit {
-            avail_in: prior_avail_in.wrapping_add(load.have),
-        }
+    match gz_load_checked_have(load.have, load.failed) {
+        Err(()) => GzAvailLoadAction::Error,
+        Ok(have) => GzAvailLoadAction::Commit {
+            avail_in: prior_avail_in.wrapping_add(have),
+        },
     }
 }
 
@@ -1285,7 +1295,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 let size = state.size;
                 let load = gz_load(state, out, gz_output_buffer_len(size));
                 state.x.have = load.have;
-                if gz_fetch_copy_action(&load) == GzFetchCopyAction::Error {
+                if gz_load_checked_have(load.have, load.failed).is_err() {
                     return -1 as ::core::ffi::c_int;
                 }
                 state.x.next = state.out;
@@ -1326,20 +1336,6 @@ enum GzFetchAction {
 enum GzFetchAfterLook {
     Return,
     Continue,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum GzFetchCopyAction {
-    Error,
-    Commit,
-}
-
-fn gz_fetch_copy_action(load: &GzLoadResult) -> GzFetchCopyAction {
-    if load.failed {
-        GzFetchCopyAction::Error
-    } else {
-        GzFetchCopyAction::Commit
-    }
 }
 
 fn gz_fetch_after_look(how: ::core::ffi::c_int) -> GzFetchAfterLook {
@@ -1733,21 +1729,9 @@ mod tests {
     }
 
     #[test]
-    fn gz_fetch_copy_action_preserves_load_failure_status() {
-        assert_eq!(
-            gz_fetch_copy_action(&GzLoadResult {
-                have: 3,
-                failed: true,
-            }),
-            GzFetchCopyAction::Error
-        );
-        assert_eq!(
-            gz_fetch_copy_action(&GzLoadResult {
-                have: 0,
-                failed: false,
-            }),
-            GzFetchCopyAction::Commit
-        );
+    fn gz_load_checked_have_preserves_load_failure_status() {
+        assert_eq!(gz_load_checked_have(3, true), Err(()));
+        assert_eq!(gz_load_checked_have(0, false), Ok(0));
     }
 
     #[test]

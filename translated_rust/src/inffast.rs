@@ -403,6 +403,10 @@ fn trailing_match_copy_byte_count(trailing_bytes: ::core::ffi::c_uint) -> ::core
     trailing_bytes.min(2)
 }
 
+fn trailing_match_copy_needs_second_byte(trailing_copy_byte_count: ::core::ffi::c_uint) -> bool {
+    trailing_copy_byte_count > 1
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct FastMatchCopyLayout {
     final_copy_triplets: ::core::ffi::c_uint,
@@ -630,7 +634,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh33 = *c2rust_fresh32;
-                            if trailing_copy_byte_count > 1 as ::core::ffi::c_uint {
+                            if trailing_match_copy_needs_second_byte(trailing_copy_byte_count) {
                                 let c2rust_fresh34 = from;
                                 from = from.wrapping_add(1);
                                 let c2rust_fresh35 = out;
@@ -650,9 +654,8 @@ pub unsafe extern "C" fn inflate_fast(
                         ) {
                             FastWindowDistance::Valid { distance_back } => distance_back,
                             FastWindowDistance::Invalid => {
-                                pending_failure = Some(fast_decode_failure(
-                                    FastDecodeError::DistanceTooFarBack,
-                                ));
+                                pending_failure =
+                                    Some(fast_decode_failure(FastDecodeError::DistanceTooFarBack));
                                 break;
                             }
                         };
@@ -734,7 +737,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh23 = *c2rust_fresh22;
-                            if trailing_copy_byte_count > 1 as ::core::ffi::c_uint {
+                            if trailing_match_copy_needs_second_byte(trailing_copy_byte_count) {
                                 let c2rust_fresh24 = from;
                                 from = from.wrapping_add(1);
                                 let c2rust_fresh25 = out;
@@ -765,8 +768,7 @@ pub unsafe extern "C" fn inflate_fast(
     }
     if let Some(failure) = pending_failure {
         (*strm).msg = fast_decode_error_message(failure.error).as_ptr()
-            as *const ::core::ffi::c_char
-            as *mut ::core::ffi::c_char;
+            as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         state.mode = crate::src::inflate::BAD;
     }
     (hold, bits, len, input_remaining) = unread_input_state(hold, bits, input_remaining);
@@ -790,15 +792,16 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_code_entry, fast_decode_error_message, fast_decode_failure, fast_decode_needs_prefetch,
-        fast_decode_prefetch_byte_count, fast_dist_action, fast_length_extra_bits_need_input,
-        fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
-        fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
-        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
-        table_index, trailing_match_copy_byte_count, unread_input_state, FastDecodeFailure,
-        validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDistAction,
-        FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
-        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
+        fast_code_entry, fast_decode_error_message, fast_decode_failure,
+        fast_decode_needs_prefetch, fast_decode_prefetch_byte_count, fast_dist_action,
+        fast_length_extra_bits_need_input, fast_litlen_action, fast_match_copy_layout,
+        fast_match_uses_window, fast_window_copy_plan, fast_window_distance_is_invalid,
+        finish_fast_distance, input_bytes_needed, input_remaining_after_read, low_bits,
+        output_cursor_after_write, subtable_index, table_index, trailing_match_copy_byte_count,
+        trailing_match_copy_needs_second_byte, unread_input_state, validate_fast_window_distance,
+        FastCodeEntry, FastDecodeError, FastDecodeFailure, FastDistAction, FastDistance,
+        FastDistanceSource, FastLitLenAction, FastMatchCopyLayout, FastWindowContinuationSource,
+        FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -1140,6 +1143,16 @@ mod tests {
         assert_eq!(trailing_match_copy_byte_count(1), 1);
         assert_eq!(trailing_match_copy_byte_count(2), 2);
         assert_eq!(trailing_match_copy_byte_count(::core::ffi::c_uint::MAX), 2);
+    }
+
+    #[test]
+    fn trailing_match_copy_second_byte_guard_preserves_boundaries() {
+        assert!(!trailing_match_copy_needs_second_byte(0));
+        assert!(!trailing_match_copy_needs_second_byte(1));
+        assert!(trailing_match_copy_needs_second_byte(2));
+        assert!(trailing_match_copy_needs_second_byte(
+            ::core::ffi::c_uint::MAX
+        ));
     }
 
     #[test]
