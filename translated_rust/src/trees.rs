@@ -3107,26 +3107,22 @@ pub unsafe extern "C" fn _tr_stored_block(
         (*s).bi_valid += len;
     }
     bi_windup(s);
-    let c2rust_fresh51 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh51 as isize) =
+    (*s).put_pending_byte(
         (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-    let c2rust_fresh52 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh52 as isize) =
+            as crate::zutil_h::uch,
+    );
+    (*s).put_pending_byte(
         (stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-    let c2rust_fresh53 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh53 as isize) =
+            as crate::zutil_h::uch,
+    );
+    (*s).put_pending_byte(
         (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-    let c2rust_fresh54 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh54 as isize) =
+            as crate::zutil_h::uch,
+    );
+    (*s).put_pending_byte(
         (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+            as crate::zutil_h::uch,
+    );
     if stored_len != 0 {
         crate::stdlib::memcpy(
             (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
