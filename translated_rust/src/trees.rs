@@ -3214,7 +3214,9 @@ unsafe extern "C" fn send_all_trees(
         dcodes - 1 as ::core::ffi::c_int,
     );
 }
-pub unsafe extern "C" fn _tr_stored_block(
+#[export_name = "_tr_stored_block"]
+
+pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
@@ -3275,16 +3277,6 @@ pub unsafe extern "C" fn _tr_stored_block(
         );
     }
     (*s).pending = (*s).pending.wrapping_add(stored_len);
-}
-#[export_name = "_tr_stored_block"]
-
-pub unsafe extern "C" fn _tr_stored_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_stored_block(s, buf, stored_len, last)
 }
 #[export_name = "_tr_flush_bits"]
 
@@ -3611,7 +3603,9 @@ fn detect_data_type(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_in
     }
     return crate::zlib_h::Z_BINARY;
 }
-pub unsafe extern "C" fn _tr_flush_block(
+#[export_name = "_tr_flush_block"]
+
+pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
@@ -3662,7 +3656,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         opt_lenb = static_lenb;
     }
     if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
-        _tr_stored_block(s, buf, stored_len, last);
+        _tr_stored_block_ffi(s, buf, stored_len, last);
     } else if static_lenb == opt_lenb {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if (*s).bi_valid > crate::src::deflate::Buf_size - len {
@@ -3745,17 +3739,9 @@ pub unsafe extern "C" fn _tr_flush_block(
         bi_windup(s);
     }
 }
-#[export_name = "_tr_flush_block"]
+#[export_name = "_tr_tally"]
 
-pub unsafe extern "C" fn _tr_flush_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_flush_block(s, buf, stored_len, last)
-}
-pub unsafe extern "C" fn _tr_tally(
+pub unsafe extern "C" fn _tr_tally_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
@@ -3804,13 +3790,4 @@ pub unsafe extern "C" fn _tr_tally(
             .wrapping_add(1);
     }
     return ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-}
-#[export_name = "_tr_tally"]
-
-pub unsafe extern "C" fn _tr_tally_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut dist: ::core::ffi::c_uint,
-    mut lc: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    _tr_tally(s, dist, lc)
 }

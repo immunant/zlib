@@ -143,9 +143,9 @@ pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align_ffi;
 pub use crate::src::trees::_tr_flush_bits_ffi;
-pub use crate::src::trees::_tr_flush_block;
+pub use crate::src::trees::_tr_flush_block_ffi;
 pub use crate::src::trees::_tr_init_ffi;
-pub use crate::src::trees::_tr_stored_block;
+pub use crate::src::trees::_tr_stored_block_ffi;
 pub use crate::stdlib::charf;
 
 pub use crate::stdlib::uInt;
@@ -996,11 +996,8 @@ unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
                 as crate::__stddef_size_t_h::size_t),
     );
     (*s).slid = 0 as ::core::ffi::c_int;
-    (*s).max_lazy_match = configuration_table[(*s).level as usize].max_lazy as crate::stdlib::uInt;
-    (*s).good_match = configuration_table[(*s).level as usize].good_length as crate::stdlib::uInt;
-    (*s).nice_match = configuration_table[(*s).level as usize].nice_length as ::core::ffi::c_int;
-    (*s).max_chain_length =
-        configuration_table[(*s).level as usize].max_chain as crate::stdlib::uInt;
+    let level = (*s).level;
+    deflate_params_apply_config(&mut *s, level);
     (*s).strstart = 0 as crate::stdlib::uInt;
     (*s).block_start = 0 as ::core::ffi::c_long;
     (*s).lookahead = 0 as crate::stdlib::uInt;
@@ -1883,7 +1880,7 @@ pub unsafe extern "C" fn deflate(
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
                 crate::src::trees::_tr_align_ffi(s as *mut crate::src::deflate::internal_state);
             } else if flush != crate::zlib_h::Z_BLOCK {
-                crate::src::trees::_tr_stored_block(
+                crate::src::trees::_tr_stored_block_ffi(
                     s as *mut crate::src::deflate::internal_state,
                     ::core::ptr::null_mut::<crate::stdlib::charf>(),
                     0 as crate::zutil_h::ulg,
@@ -2337,7 +2334,7 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        crate::src::trees::_tr_stored_block(
+        crate::src::trees::_tr_stored_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             ::core::ptr::null_mut::<crate::stdlib::charf>(),
             0 as crate::zutil_h::ulg,
@@ -2520,7 +2517,7 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        crate::src::trees::_tr_stored_block(
+        crate::src::trees::_tr_stored_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             ((*s).window as *mut crate::stdlib::charf).offset((*s).block_start as isize),
             len as crate::zutil_h::ulg,
@@ -2686,7 +2683,7 @@ unsafe extern "C" fn deflate_fast(
             (*s).strstart = (*s).strstart.wrapping_add(1);
         }
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
+            crate::src::trees::_tr_flush_block_ffi(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
@@ -2718,7 +2715,7 @@ unsafe extern "C" fn deflate_fast(
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
+        crate::src::trees::_tr_flush_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -2742,7 +2739,7 @@ unsafe extern "C" fn deflate_fast(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
+        crate::src::trees::_tr_flush_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -2912,7 +2909,7 @@ unsafe extern "C" fn deflate_slow(
                 (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
             (*s).strstart = (*s).strstart.wrapping_add(1);
             if bflush != 0 {
-                crate::src::trees::_tr_flush_block(
+                crate::src::trees::_tr_flush_block_ffi(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
                         (*s).window
@@ -2953,7 +2950,7 @@ unsafe extern "C" fn deflate_slow(
             (*s).dyn_ltree[cc as usize].freq = (*s).dyn_ltree[cc as usize].freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
-                crate::src::trees::_tr_flush_block(
+                crate::src::trees::_tr_flush_block_ffi(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
                         (*s).window
@@ -3007,7 +3004,7 @@ unsafe extern "C" fn deflate_slow(
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
+        crate::src::trees::_tr_flush_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3031,7 +3028,7 @@ unsafe extern "C" fn deflate_slow(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
+        crate::src::trees::_tr_flush_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3219,7 +3216,7 @@ unsafe extern "C" fn deflate_rle(
             (*s).strstart = (*s).strstart.wrapping_add(1);
         }
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
+            crate::src::trees::_tr_flush_block_ffi(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
@@ -3245,7 +3242,7 @@ unsafe extern "C" fn deflate_rle(
     }
     (*s).insert = 0 as crate::stdlib::uInt;
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
+        crate::src::trees::_tr_flush_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3269,7 +3266,7 @@ unsafe extern "C" fn deflate_rle(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
+        crate::src::trees::_tr_flush_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3326,7 +3323,7 @@ unsafe extern "C" fn deflate_huff(
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);
         (*s).strstart = (*s).strstart.wrapping_add(1);
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
+            crate::src::trees::_tr_flush_block_ffi(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
@@ -3352,7 +3349,7 @@ unsafe extern "C" fn deflate_huff(
     }
     (*s).insert = 0 as crate::stdlib::uInt;
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
+        crate::src::trees::_tr_flush_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3376,7 +3373,7 @@ unsafe extern "C" fn deflate_huff(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
+        crate::src::trees::_tr_flush_block_ffi(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
