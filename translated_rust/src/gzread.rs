@@ -459,20 +459,6 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_read(
-    mut state: crate::gzguts_h::gz_statep,
-    mut buf: crate::stdlib::voidp,
-    mut len: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
-    if len == 0 as crate::stdlib::z_size_t {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    gz_read_impl(
-        &mut *state,
-        ::core::slice::from_raw_parts_mut(buf as *mut u8, len),
-    )
-}
-
 unsafe fn gz_read_impl(
     state: &mut crate::gzguts_h::gz_state,
     buf: &mut [u8],
@@ -596,7 +582,14 @@ pub unsafe extern "C" fn gzread(
         );
         return -1 as ::core::ffi::c_int;
     }
-    len = gz_read(state as *mut _, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_uint;
+    len = if len == 0 {
+        0
+    } else {
+        gz_read_impl(
+            state,
+            ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as crate::stdlib::z_size_t),
+        ) as ::core::ffi::c_uint
+    };
     if len == 0 as ::core::ffi::c_uint {
         if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
             return -1 as ::core::ffi::c_int;
