@@ -195,6 +195,32 @@ impl internal_state {
         self.pending = self.pending.wrapping_add(1);
     }
 
+    /// Replace the length and complement emitted at the end of an empty
+    /// stored block.  Keeping this as a checked slice update avoids
+    /// reconstructing four independent interior pointers at the call site.
+    #[inline]
+    pub fn set_stored_block_length(&mut self, len: crate::stdlib::uInt) -> bool {
+        let Ok(allocation_len) = usize::try_from(self.pending_buf_size) else {
+            return false;
+        };
+        let Ok(pending) = usize::try_from(self.pending) else {
+            return false;
+        };
+        let Some(start) = pending.checked_sub(4) else {
+            return false;
+        };
+        if self.pending_buf.is_null() || pending > allocation_len {
+            return false;
+        }
+
+        let length = len as crate::stdlib::Bytef;
+        let length_hi = (len >> 8) as crate::stdlib::Bytef;
+        let pending_bytes = unsafe { core::slice::from_raw_parts_mut(self.pending_buf, allocation_len) };
+        pending_bytes[start..pending]
+            .copy_from_slice(&[length, length_hi, !length, !length_hi]);
+        true
+    }
+
     /// View a checked range of the pending allocation.  Pending data is
     /// always addressed by offsets, so callers do not need to reconstruct
     /// interior raw pointers for checksum updates.
@@ -2544,22 +2570,9 @@ unsafe extern "C" fn deflate_stored(
             0 as crate::zutil_h::ulg,
             last,
         );
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            !len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+        // `_tr_stored_block()` just appended the four-byte length trailer.
+        // Replace its zero length with this block's actual length.
+        let _ = (*s).set_stored_block_length(len as crate::stdlib::uInt);
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {
