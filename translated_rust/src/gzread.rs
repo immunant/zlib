@@ -1053,7 +1053,6 @@ fn gz_close_read_finish(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
 // and descriptor closing remain at the narrow raw cleanup boundary below.
 pub fn gzclose_r(
     state: &mut crate::gzguts_h::gz_state,
-    mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut err: ::core::ffi::c_int = 0;
@@ -1076,13 +1075,14 @@ pub fn gzclose_r(
     err = gz_close_read_finish(state);
     let path = state.path;
     let fd = state.fd;
-    // SAFETY: `path`, `fd`, and `file` are owned by this closing state. The
+    // SAFETY: `path`, `fd`, and the allocation backing `state` are owned by
+    // this closing state. The
     // result of closing the descriptor intentionally overrides the earlier
     // buffered-error result, matching zlib's cleanup order.
     unsafe {
         crate::stdlib::free(path as *mut ::core::ffi::c_void);
         ret = crate::stdlib::close(fd);
-        crate::stdlib::free(file as *mut ::core::ffi::c_void);
+        crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
     }
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
@@ -1096,5 +1096,5 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    gzclose_r(&mut *(file as crate::gzguts_h::gz_statep), file)
+    gzclose_r(&mut *(file as crate::gzguts_h::gz_statep))
 }

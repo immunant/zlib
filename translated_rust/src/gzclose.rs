@@ -25,12 +25,11 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 // keep that selection safe and leave the raw handle conversion at the ABI edge.
 pub fn gzclose(
     state: &mut crate::gzguts_h::gz_state,
-    mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
     return if state.mode == crate::gzguts_h::GZ_READ {
-        crate::src::gzread::gzclose_r(state, file as *mut crate::zlib_h::gzFile_s)
+        crate::src::gzread::gzclose_r(state)
     } else {
-        crate::src::gzwrite::gzclose_w(state, file as *mut crate::zlib_h::gzFile_s)
+        crate::src::gzwrite::gzclose_w(state)
     };
 }
 #[export_name = "gzclose"]
@@ -39,5 +38,5 @@ pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    gzclose(&mut *(file as crate::gzguts_h::gz_statep), file)
+    gzclose(&mut *(file as crate::gzguts_h::gz_statep))
 }

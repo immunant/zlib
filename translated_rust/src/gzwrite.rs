@@ -825,7 +825,6 @@ fn gz_close_write_prepare(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi:
 // release and descriptor closing remain confined to the raw boundary below.
 pub fn gzclose_w(
     state: &mut crate::gzguts_h::gz_state,
-    mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_WRITE) {
@@ -857,7 +856,8 @@ pub fn gzclose_w(
     crate::src::gzlib::gzclearerr(state);
     let path = state.path;
     let fd = state.fd;
-    // SAFETY: `path`, `fd`, and `file` are owned by this closing state. The
+    // SAFETY: `path`, `fd`, and the allocation backing `state` are owned by
+    // this closing state. The
     // order matches zlib: close can override an earlier write result, and
     // the state allocation is released only after its fields are no longer
     // needed.
@@ -866,7 +866,7 @@ pub fn gzclose_w(
         if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
             ret = crate::zlib_h::Z_ERRNO;
         }
-        crate::stdlib::free(file as *mut ::core::ffi::c_void);
+        crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
     }
     return ret;
 }
@@ -876,5 +876,5 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    gzclose_w(&mut *(file as crate::gzguts_h::gz_statep), file)
+    gzclose_w(&mut *(file as crate::gzguts_h::gz_statep))
 }
