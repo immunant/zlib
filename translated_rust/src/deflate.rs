@@ -3121,14 +3121,50 @@ unsafe extern "C" fn deflate_slow(
     return block_done;
 }
 
+// Find a repeated-byte match using offsets into the fully allocated sliding
+// window.  `fill_window()` maintains the initialized window extent; the ABI
+// caller only projects that allocation to a slice for this bounded kernel.
+fn rle_match_length(
+    window: &[crate::stdlib::Bytef],
+    strstart: usize,
+    lookahead: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    if lookahead < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt || strstart == 0 {
+        return 0;
+    }
+
+    let Some(&previous) = window.get(strstart - 1) else {
+        return 0;
+    };
+    let mut scan = strstart - 1;
+    for _ in 0..3 {
+        scan += 1;
+        if window.get(scan) != Some(&previous) {
+            return 0;
+        }
+    }
+
+    let strend = strstart + crate::zutil_h::MAX_MATCH as usize;
+    loop {
+        for _ in 0..8 {
+            scan += 1;
+            if window.get(scan) != Some(&previous) {
+                let length = (crate::zutil_h::MAX_MATCH as usize)
+                    .saturating_sub(strend.saturating_sub(scan));
+                return (length as crate::stdlib::uInt).min(lookahead);
+            }
+        }
+        if scan >= strend {
+            return (crate::zutil_h::MAX_MATCH as crate::stdlib::uInt).min(lookahead);
+        }
+    }
+}
+
 unsafe extern "C" fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let mut prev: crate::stdlib::uInt = 0;
-    let mut scan: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    let mut strend: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     let sym_buf_start = (*s).sym_buf_start;
     let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
     let sym_buf = ::core::slice::from_raw_parts_mut(
@@ -3148,72 +3184,15 @@ unsafe extern "C" fn deflate_rle(
             }
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            && (*s).strstart > 0 as crate::stdlib::uInt
-        {
-            scan = (*s)
-                .window
-                .offset((*s).strstart as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize));
-            prev = *scan as crate::stdlib::uInt;
-            scan = scan.offset(1);
-            if prev == *scan as crate::stdlib::uInt
-                && {
-                    scan = scan.offset(1);
-                    prev == *scan as crate::stdlib::uInt
-                }
-                && {
-                    scan = scan.offset(1);
-                    prev == *scan as crate::stdlib::uInt
-                }
-            {
-                strend = (*s)
-                    .window
-                    .offset((*s).strstart as isize)
-                    .offset(crate::zutil_h::MAX_MATCH as isize);
-                loop {
-                    scan = scan.offset(1);
-                    if !(prev == *scan as crate::stdlib::uInt
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && scan < strend)
-                    {
-                        break;
-                    }
-                }
-                (*s).match_length = (crate::zutil_h::MAX_MATCH as crate::stdlib::uInt)
-                    .wrapping_sub(strend.offset_from(scan) as crate::stdlib::uInt);
-                if (*s).match_length > (*s).lookahead {
-                    (*s).match_length = (*s).lookahead;
-                }
-            }
-        }
+        // `window_size` is the full allocation capacity set by
+        // `deflateInit2_()`/`deflateCopy()`, not merely the current input.
+        // `rle_match_length()` uses checked slice accesses for the walk.
+        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
+        (*s).match_length = rle_match_length(
+            window,
+            (*s).strstart as usize,
+            (*s).lookahead,
+        );
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let mut len: crate::zutil_h::uch =
                 (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
@@ -3244,8 +3223,7 @@ unsafe extern "C" fn deflate_rle(
             (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
             (*s).match_length = 0 as crate::stdlib::uInt;
         } else {
-            let mut cc: crate::zutil_h::uch =
-                *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
+            let mut cc: crate::zutil_h::uch = window[(*s).strstart as usize] as crate::zutil_h::uch;
             let c2rust_fresh53 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             sym_buf[c2rust_fresh53 as usize] = 0 as crate::zutil_h::uchf;
