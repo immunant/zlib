@@ -973,6 +973,17 @@ fn inflate_dictionary_id_from_hold(hold: crate::stdlib::uLong) -> crate::stdlib:
         .wrapping_add((hold & 0xff as ::core::ffi::c_ulong) << 24 as ::core::ffi::c_int)
 }
 
+fn inflate_trailer_checksum_from_hold(
+    flags: ::core::ffi::c_int,
+    hold: crate::stdlib::uLong,
+) -> crate::stdlib::uLong {
+    if flags != 0 {
+        hold
+    } else {
+        inflate_dictionary_id_from_hold(hold)
+    }
+}
+
 fn update_window_metadata(
     wbits: ::core::ffi::c_uint,
     wsize: &mut ::core::ffi::c_uint,
@@ -1417,23 +1428,8 @@ pub unsafe extern "C" fn inflate(
                     checksum_start = put as *const crate::stdlib::Bytef;
                     out = left;
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0
-                        && (if (*state).flags != 0 {
-                            hold
-                        } else {
-                            (hold >> 24 as ::core::ffi::c_int & 0xff as ::core::ffi::c_ulong)
-                                .wrapping_add(
-                                    hold >> 8 as ::core::ffi::c_int
-                                        & 0xff00 as ::core::ffi::c_ulong,
-                                )
-                                .wrapping_add(
-                                    (hold & 0xff00 as ::core::ffi::c_ulong)
-                                        << 8 as ::core::ffi::c_int,
-                                )
-                                .wrapping_add(
-                                    (hold & 0xff as ::core::ffi::c_ulong)
-                                        << 24 as ::core::ffi::c_int,
-                                )
-                        }) != (*state).check
+                        && inflate_trailer_checksum_from_hold((*state).flags, hold)
+                            != (*state).check
                     {
                         (*strm).msg = b"incorrect data check\0".as_ptr()
                             as *const ::core::ffi::c_char
@@ -3087,17 +3083,17 @@ mod tests {
         inflate_state_is_usable, inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
-        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
-        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
-        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, update_window_core, update_window_has_produced_bytes,
-        window_allocation_failed, window_allocation_request, window_needs_allocation,
-        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
-        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
-        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
-        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
-        TYPEDO,
+        inflate_sync_search_core, inflate_trailer_checksum_from_hold, inflate_undermine_core,
+        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
+        inflate_zlib_header_transition, inflate_zlib_window_params, initial_window_metadata,
+        reset_window_history, stored_block_length, syncsearch_safe, update_window_core,
+        update_window_has_produced_bytes, window_allocation_failed, window_allocation_request,
+        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
+        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
+        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
+        InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4272,6 +4268,15 @@ mod tests {
         );
         assert_eq!(inflate_output_checksum(3, 1, 1), None);
         assert_eq!(inflate_output_checksum(4, 1, 0), None);
+    }
+
+    #[test]
+    fn trailer_checksum_uses_gzip_order_or_zlib_byte_order() {
+        let hold = 0x7856_3412;
+
+        assert_eq!(inflate_trailer_checksum_from_hold(1, hold), hold);
+        assert_eq!(inflate_trailer_checksum_from_hold(-1, hold), hold);
+        assert_eq!(inflate_trailer_checksum_from_hold(0, hold), 0x1234_5678);
     }
 
     #[test]

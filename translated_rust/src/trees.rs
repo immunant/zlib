@@ -3773,6 +3773,28 @@ fn tree_bit_length_cost(
     frequency.wrapping_mul(bit_length)
 }
 
+fn tree_bit_length_totals_after_node(
+    opt_len: crate::zutil_h::ulg,
+    static_len: crate::zutil_h::ulg,
+    frequency: crate::zutil_h::ush,
+    bit_length: ::core::ffi::c_int,
+    extra_bits: ::core::ffi::c_int,
+    static_bit_length: Option<::core::ffi::c_int>,
+) -> (crate::zutil_h::ulg, crate::zutil_h::ulg) {
+    let frequency = frequency as crate::zutil_h::ulg;
+    let opt_len = opt_len.wrapping_add(tree_bit_length_cost(
+        frequency,
+        (bit_length + extra_bits) as ::core::ffi::c_uint as crate::zutil_h::ulg,
+    ));
+    let static_len = static_bit_length.map_or(static_len, |static_bit_length| {
+        static_len.wrapping_add(tree_bit_length_cost(
+            frequency,
+            (static_bit_length + extra_bits) as ::core::ffi::c_uint as crate::zutil_h::ulg,
+        ))
+    });
+    (opt_len, static_len)
+}
+
 fn tally_symbol_bytes(
     dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
@@ -4088,17 +4110,19 @@ unsafe fn gen_bitlen(
                 xbits = *extra.offset((n - base) as isize) as ::core::ffi::c_int;
             }
             f = (*tree.offset(n as isize)).fc.value;
-            (*s).opt_len = (*s).opt_len.wrapping_add(tree_bit_length_cost(
-                f as crate::zutil_h::ulg,
-                (bits + xbits) as ::core::ffi::c_uint as crate::zutil_h::ulg,
-            ));
-            if !stree.is_null() {
-                (*s).static_len = (*s).static_len.wrapping_add(tree_bit_length_cost(
-                    f as crate::zutil_h::ulg,
-                    ((*stree.offset(n as isize)).dl.len as ::core::ffi::c_int + xbits)
-                        as ::core::ffi::c_uint as crate::zutil_h::ulg,
-                ));
-            }
+            let static_bit_length = if stree.is_null() {
+                None
+            } else {
+                Some((*stree.offset(n as isize)).dl.len as ::core::ffi::c_int)
+            };
+            ((*s).opt_len, (*s).static_len) = tree_bit_length_totals_after_node(
+                (*s).opt_len,
+                (*s).static_len,
+                f,
+                bits,
+                xbits,
+                static_bit_length,
+            );
         }
         h += 1;
     }
@@ -5363,8 +5387,9 @@ mod tests {
         reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
-        tree_next_cursor, tree_parent_depth, tree_run_continues, tree_run_limits, BlockEncoding,
-        HeapChild, ScanTreeAction, TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
+        tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction, TallyTreeUpdate,
+        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5680,6 +5705,36 @@ mod tests {
         assert_eq!(
             tree_bit_length_cost(crate::zutil_h::ulg::MAX, 2),
             crate::zutil_h::ulg::MAX.wrapping_sub(1),
+        );
+    }
+
+    #[test]
+    fn tree_bit_length_totals_preserve_optional_static_tree_costs() {
+        assert_eq!(
+            tree_bit_length_totals_after_node(10, 20, 3, 4, 2, Some(5)),
+            (28, 41)
+        );
+        assert_eq!(
+            tree_bit_length_totals_after_node(10, 20, 3, 4, 2, None),
+            (28, 20)
+        );
+    }
+
+    #[test]
+    fn tree_bit_length_totals_preserve_unsigned_cast_and_add_wrapping() {
+        assert_eq!(
+            tree_bit_length_totals_after_node(
+                crate::zutil_h::ulg::MAX,
+                crate::zutil_h::ulg::MAX,
+                1,
+                -1,
+                0,
+                Some(-1),
+            ),
+            (
+                ::core::ffi::c_uint::MAX as crate::zutil_h::ulg - 1,
+                ::core::ffi::c_uint::MAX as crate::zutil_h::ulg - 1,
+            ),
         );
     }
 

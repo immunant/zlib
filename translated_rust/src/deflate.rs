@@ -654,6 +654,15 @@ fn fill_window_cursor(
     (strstart as crate::zutil_h::ulg).wrapping_add(lookahead as crate::zutil_h::ulg)
 }
 
+fn fill_window_hash_update(
+    hash: crate::stdlib::uInt,
+    next_byte: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    (hash << hash_shift ^ next_byte) & hash_mask
+}
+
 fn fill_window_zero_range(
     high_water: crate::zutil_h::ulg,
     window_size: crate::zutil_h::ulg,
@@ -731,20 +740,26 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         {
             let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
             (*s).ins_h = *(*s).window.wrapping_add(str as usize) as crate::stdlib::uInt;
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s)
+            (*s).ins_h = fill_window_hash_update(
+                (*s).ins_h,
+                *(*s)
                     .window
                     .wrapping_add(str.wrapping_add(1 as crate::stdlib::uInt) as usize)
-                    as crate::stdlib::uInt)
-                & (*s).hash_mask;
+                    as crate::stdlib::uInt,
+                (*s).hash_shift,
+                (*s).hash_mask,
+            );
             while (*s).insert != 0 {
-                (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                    ^ *(*s).window.wrapping_add(
+                (*s).ins_h = fill_window_hash_update(
+                    (*s).ins_h,
+                    *(*s).window.wrapping_add(
                         str.wrapping_add(3 as crate::stdlib::uInt)
                             .wrapping_sub(1 as crate::stdlib::uInt)
                             as usize,
-                    ) as crate::stdlib::uInt)
-                    & (*s).hash_mask;
+                    ) as crate::stdlib::uInt,
+                    (*s).hash_shift,
+                    (*s).hash_mask,
+                );
                 *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
                     *(*s).head.wrapping_add((*s).ins_h as usize);
                 *(*s).head.wrapping_add((*s).ins_h as usize) =
@@ -4056,14 +4071,14 @@ mod tests {
         deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
         deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
         deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
-        fill_window_cursor, fill_window_insert_after_slide, fill_window_should_refill,
-        fill_window_should_slide, fill_window_zero_range, flush_pending_accounting,
-        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        lm_head_clear_len, lm_initial_state, lm_match_parameters, longest_match_candidate_update,
-        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
-        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_checksum, read_buf_len,
-        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
+        fill_window_cursor, fill_window_hash_update, fill_window_insert_after_slide,
+        fill_window_should_refill, fill_window_should_slide, fill_window_zero_range,
+        flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
+        gzip_header_crc_pending_range, lm_head_clear_len, lm_initial_state, lm_match_parameters,
+        longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
+        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
+        read_buf_len, read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
         stored_block_available_output, stored_block_can_emit, stored_block_is_last,
         stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
         stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction,
@@ -4705,6 +4720,14 @@ mod tests {
             fill_window_cursor(crate::stdlib::uInt::MAX, 1),
             (crate::stdlib::uInt::MAX as crate::zutil_h::ulg) + 1,
         );
+    }
+
+    #[test]
+    fn fill_window_hash_update_preserves_shift_xor_and_mask_order() {
+        assert_eq!(fill_window_hash_update(0, 0, 5, 0xff), 0);
+        assert_eq!(fill_window_hash_update(0x12, 0xab, 5, 0xff), 0xeb);
+        assert_eq!(fill_window_hash_update(0xff, 0x34, 8, 0x7fff), 0x7f34);
+        assert_eq!(fill_window_hash_update(0x1234, 0xffff, 4, 0), 0);
     }
 
     #[test]
