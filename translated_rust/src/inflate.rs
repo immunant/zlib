@@ -137,88 +137,129 @@ enum InflateHeaderUpdate<'a> {
     HcrcAndDone(::core::ffi::c_int),
 }
 
+/// Safe, retained views of the caller-provided gzip header outputs.
+///
+/// zlib requires the header and its output buffers to remain live until the
+/// stream is reset or ended.  `inflateGetHeader_ffi` establishes those
+/// borrow-checked views at that ABI boundary; the decoder only ever sees this
+/// sink.  Copies of an inflate state share the same sink, matching zlib's
+/// copied header pointer behavior.
+struct InflateHeaderSink {
+    header: &'static mut crate::zlib_h::gz_header_s,
+    extra: Option<&'static mut [crate::stdlib::Bytef]>,
+    name: Option<&'static mut [crate::stdlib::Bytef]>,
+    comment: Option<&'static mut [crate::stdlib::Bytef]>,
+}
+
+impl InflateHeaderSink {
+    fn new(
+        header: &'static mut crate::zlib_h::gz_header_s,
+        extra: Option<&'static mut [crate::stdlib::Bytef]>,
+        name: Option<&'static mut [crate::stdlib::Bytef]>,
+        comment: Option<&'static mut [crate::stdlib::Bytef]>,
+    ) -> Self {
+        Self {
+            header,
+            extra,
+            name,
+            comment,
+        }
+    }
+
+    fn apply(&mut self, update: InflateHeaderUpdate<'_>) -> bool {
+        match update {
+            InflateHeaderUpdate::Done(done) => {
+                self.header.done = done;
+                true
+            }
+            InflateHeaderUpdate::Text(text) => {
+                self.header.text = text;
+                true
+            }
+            InflateHeaderUpdate::Time(time) => {
+                self.header.time = time;
+                true
+            }
+            InflateHeaderUpdate::XflagsAndOs(xflags, os) => {
+                self.header.xflags = xflags;
+                self.header.os = os;
+                true
+            }
+            InflateHeaderUpdate::ExtraLen(extra_len) => {
+                self.header.extra_len = extra_len;
+                true
+            }
+            InflateHeaderUpdate::ClearExtra => {
+                self.header.extra = ::core::ptr::null_mut();
+                self.extra = None;
+                true
+            }
+            InflateHeaderUpdate::CopyExtra { remaining, bytes } => {
+                let offset = self.header.extra_len.wrapping_sub(remaining) as usize;
+                let Some(extra) = self.extra.as_deref_mut() else {
+                    return false;
+                };
+                let Some(target) = extra.get_mut(offset..) else {
+                    return false;
+                };
+                let copy_len = bytes.len().min(target.len());
+                target[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                copy_len != 0
+            }
+            InflateHeaderUpdate::CopyName { index, byte } => {
+                let Some(name) = self.name.as_deref_mut() else {
+                    return false;
+                };
+                let Some(target) = name.get_mut(index as usize) else {
+                    return false;
+                };
+                *target = byte;
+                true
+            }
+            InflateHeaderUpdate::ClearName => {
+                self.header.name = ::core::ptr::null_mut();
+                self.name = None;
+                true
+            }
+            InflateHeaderUpdate::CopyComment { index, byte } => {
+                let Some(comment) = self.comment.as_deref_mut() else {
+                    return false;
+                };
+                let Some(target) = comment.get_mut(index as usize) else {
+                    return false;
+                };
+                *target = byte;
+                true
+            }
+            InflateHeaderUpdate::ClearComment => {
+                self.header.comment = ::core::ptr::null_mut();
+                self.comment = None;
+                true
+            }
+            InflateHeaderUpdate::HcrcAndDone(hcrc) => {
+                self.header.hcrc = hcrc;
+                self.header.done = 1;
+                true
+            }
+        }
+    }
+}
+
 /// Apply one decoder-selected update to the caller's retained gzip header.
 ///
-/// `inflateGetHeader_ffi` validates the header pointer before installing the
-/// typed handle. The byte pointers and capacities remain ABI-owned data, so
-/// their checked writes stay at this narrow state-specific boundary.
+/// `inflateGetHeader_ffi` establishes the safe views, so the decoder does not
+/// retain or dereference ABI pointers while it processes a stream.
 fn apply_inflate_header_update(
     state: &mut inflate_state,
     update: InflateHeaderUpdate<'_>,
 ) -> bool {
-        let Some(mut header) = state.head else {
-            return false;
-        };
-        let header = unsafe { header.as_mut() };
-        match update {
-            InflateHeaderUpdate::Done(done) => {
-                header.done = done;
-                true
-            }
-            InflateHeaderUpdate::Text(text) => {
-                header.text = text;
-                true
-            }
-            InflateHeaderUpdate::Time(time) => {
-                header.time = time;
-                true
-            }
-            InflateHeaderUpdate::XflagsAndOs(xflags, os) => {
-                header.xflags = xflags;
-                header.os = os;
-                true
-            }
-            InflateHeaderUpdate::ExtraLen(extra_len) => {
-                header.extra_len = extra_len;
-                true
-            }
-            InflateHeaderUpdate::ClearExtra => {
-                header.extra = ::core::ptr::null_mut();
-                true
-            }
-            InflateHeaderUpdate::CopyExtra { remaining, bytes } => {
-                if header.extra.is_null() {
-                    return false;
-                }
-                let offset = header.extra_len.wrapping_sub(remaining) as usize;
-                if offset >= header.extra_max as usize {
-                    return false;
-                }
-                let copy_len = bytes.len().min(header.extra_max as usize - offset);
-                let target = unsafe {
-                    ::core::slice::from_raw_parts_mut(header.extra.wrapping_add(offset), copy_len)
-                };
-                target.copy_from_slice(&bytes[..copy_len]);
-                copy_len != 0
-            }
-            InflateHeaderUpdate::CopyName { index, byte } => {
-                if header.name.is_null() || index >= header.name_max {
-                    return false;
-                }
-                unsafe { *header.name.wrapping_add(index as usize) = byte };
-                true
-            }
-            InflateHeaderUpdate::ClearName => {
-                header.name = ::core::ptr::null_mut();
-                true
-            }
-            InflateHeaderUpdate::CopyComment { index, byte } => {
-                if header.comment.is_null() || index >= header.comm_max {
-                    return false;
-                }
-                unsafe { *header.comment.wrapping_add(index as usize) = byte };
-                true
-            }
-            InflateHeaderUpdate::ClearComment => {
-                header.comment = ::core::ptr::null_mut();
-                true
-            }
-            InflateHeaderUpdate::HcrcAndDone(hcrc) => {
-                header.hcrc = hcrc;
-                header.done = 1;
-                true
-            }
-        }
+    let Some(header) = &state.head else {
+        return false;
+    };
+    let Ok(mut header) = header.lock() else {
+        return false;
+    };
+    header.apply(update)
 }
 
 #[repr(C)]
@@ -235,7 +276,7 @@ pub struct inflate_state {
     pub dmax: ::core::ffi::c_uint,
     pub check: ::core::ffi::c_ulong,
     pub total: ::core::ffi::c_ulong,
-    head: Option<::core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
+    head: Option<::std::sync::Arc<::std::sync::Mutex<InflateHeaderSink>>>,
     pub wbits: ::core::ffi::c_uint,
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
@@ -539,7 +580,7 @@ fn copy_inflate_state(source: &inflate_state) -> inflate_state {
         dmax: source.dmax,
         check: source.check,
         total: source.total,
-        head: source.head,
+        head: source.head.clone(),
         wbits: source.wbits,
         wsize: source.wsize,
         whave: source.whave,
@@ -3506,10 +3547,10 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     };
     inflate_set_dictionary_for_stream(strm, dictionary)
 }
-pub fn inflateGetHeader(
+fn inflate_get_header(
     strm: &mut crate::zlib_h::z_stream_s,
     state: &mut crate::src::inflate::inflate_state,
-    head: &mut crate::zlib_h::gz_header_s,
+    head: InflateHeaderSink,
 ) -> ::core::ffi::c_int {
     if !inflate_state_valid(strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3517,19 +3558,20 @@ pub fn inflateGetHeader(
     if state.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state.head = Some(::core::ptr::NonNull::from(&mut *head));
-    head.done = 0 as ::core::ffi::c_int;
+    let head = ::std::sync::Arc::new(::std::sync::Mutex::new(head));
+    head.lock().expect("new header sink is not poisoned").header.done = 0;
+    state.head = Some(head);
     return crate::zlib_h::Z_OK;
 }
 
 fn inflate_get_header_for_stream(
     strm: &mut crate::zlib_h::z_stream_s,
-    head: &mut crate::zlib_h::gz_header_s,
+    head: InflateHeaderSink,
 ) -> ::core::ffi::c_int {
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    with_inflate_stream_state(strm, |strm, state| inflateGetHeader(strm, state, head))
+    with_inflate_stream_state(strm, |strm, state| inflate_get_header(strm, state, head))
         .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 #[export_name = "inflateGetHeader"]
@@ -3550,7 +3592,39 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     let Some(head) = head.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_get_header_for_stream(strm, head)
+    let extra = head.extra;
+    let extra_max = head.extra_max as usize;
+    let name = head.name;
+    let name_max = head.name_max as usize;
+    let comment = head.comment;
+    let comment_max = head.comm_max as usize;
+    // zlib's `inflateGetHeader` contract keeps the header and its buffers
+    // live until reset/end.  Establish those retained views only at this FFI
+    // boundary; the streaming implementation holds no ABI pointers.
+    let head: &'static mut crate::zlib_h::gz_header_s = ::core::mem::transmute(head);
+    let extra = if extra.is_null() {
+        None
+    } else {
+        Some(::core::mem::transmute(::core::slice::from_raw_parts_mut(
+            extra, extra_max,
+        )))
+    };
+    let name = if name.is_null() {
+        None
+    } else {
+        Some(::core::mem::transmute(::core::slice::from_raw_parts_mut(
+            name, name_max,
+        )))
+    };
+    let comment = if comment.is_null() {
+        None
+    } else {
+        Some(::core::mem::transmute(::core::slice::from_raw_parts_mut(
+            comment,
+            comment_max,
+        )))
+    };
+    inflate_get_header_for_stream(strm, InflateHeaderSink::new(head, extra, name, comment))
 }
 fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> ::core::ffi::c_uint {
     let mut got = *have;
