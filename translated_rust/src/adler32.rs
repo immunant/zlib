@@ -95,6 +95,9 @@ pub unsafe extern "C" fn adler32_z_ffi(adler: uLong, buf: *const Bytef, len: z_s
     if buf.is_null() {
         return 1;
     }
+    if len == 0 {
+        return adler32_z(adler, &[]);
+    }
 
     let input = unsafe { core::slice::from_raw_parts(buf, len) };
     adler32_z(adler, input)
@@ -104,6 +107,9 @@ pub unsafe extern "C" fn adler32_z_ffi(adler: uLong, buf: *const Bytef, len: z_s
 pub unsafe extern "C" fn adler32_ffi(adler: uLong, buf: *const Bytef, len: uInt) -> uLong {
     if buf.is_null() {
         return 1;
+    }
+    if len == 0 {
+        return adler32(adler, &[]);
     }
 
     let input = unsafe { core::slice::from_raw_parts(buf, len as usize) };
@@ -138,6 +144,17 @@ mod tests {
         }
 
         (sum1 | sum2 << 16) as uLong
+    }
+
+    #[test]
+    fn ffi_empty_non_null_input_avoids_a_raw_slice() {
+        let pointer = core::ptr::NonNull::<Bytef>::dangling().as_ptr();
+        let seed = 0x1234_5678;
+
+        assert_eq!(unsafe { adler32_z_ffi(seed, pointer, 0) }, adler32_z(seed, &[]));
+        assert_eq!(unsafe { adler32_ffi(seed, pointer, 0) }, adler32(seed, &[]));
+        assert_eq!(unsafe { adler32_z_ffi(seed, core::ptr::null(), 0) }, 1);
+        assert_eq!(unsafe { adler32_ffi(seed, core::ptr::null(), 0) }, 1);
     }
 
     #[test]

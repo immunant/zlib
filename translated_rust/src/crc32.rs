@@ -4798,6 +4798,9 @@ pub unsafe extern "C" fn crc32_z_ffi(
     if buf.is_null() {
         return 0;
     }
+    if len == 0 {
+        return crc32_z(crc, &[]);
+    }
 
     crc32_z(crc, unsafe { core::slice::from_raw_parts(buf, len) })
 }
@@ -4810,6 +4813,9 @@ pub unsafe extern "C" fn crc32_ffi(
 ) -> crate::stdlib::uLong {
     if buf.is_null() {
         return 0;
+    }
+    if len == 0 {
+        return crc32(crc, &[]);
     }
 
     crc32(crc, unsafe {
@@ -4901,6 +4907,17 @@ mod tests {
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
     const WORLD_CRC: crate::stdlib::uLong = 0x3a77_1143;
     const HELLO_WORLD_CRC: crate::stdlib::uLong = 0x0d4a_1185;
+
+    #[test]
+    fn ffi_empty_non_null_input_avoids_a_raw_slice() {
+        let pointer = core::ptr::NonNull::<u8>::dangling().as_ptr();
+        let seed = 0x1234_5678;
+
+        assert_eq!(unsafe { super::crc32_z_ffi(seed, pointer, 0) }, crc32_z(seed, &[]));
+        assert_eq!(unsafe { super::crc32_ffi(seed, pointer, 0) }, crc32(seed, &[]));
+        assert_eq!(unsafe { super::crc32_z_ffi(seed, core::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { super::crc32_ffi(seed, core::ptr::null(), 0) }, 0);
+    }
 
     #[test]
     fn crc32_safe_known_vectors() {

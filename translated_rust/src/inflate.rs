@@ -752,15 +752,31 @@ fn inflate_can_use_fast_path(
     available_input >= 6 && available_output >= 258
 }
 
+fn initialize_window_metadata(state: &mut crate::src::inflate::inflate_state) {
+    if state.wsize == 0 {
+        let metadata = initial_window_metadata(state.wbits);
+        state.wsize = metadata.wsize;
+        state.wnext = metadata.wnext;
+        state.whave = metadata.whave;
+    }
+}
+
+fn update_window_state(
+    state: &mut crate::src::inflate::inflate_state,
+    window: &mut [crate::stdlib::Bytef],
+    produced: &[crate::stdlib::Bytef],
+) {
+    let plan = apply_window_update(window, state.wnext, state.whave, produced);
+    state.wnext = plan.wnext;
+    state.whave = plan.whave;
+}
+
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut produced_start: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let plan: WindowUpdate;
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if window_needs_allocation(!(*state).window.is_null()) {
         (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
@@ -769,25 +785,19 @@ unsafe extern "C" fn updatewindow(
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
         if (*state).window.is_null() {
-            return 1 as ::core::ffi::c_int;
+            return 1;
         }
     }
-    if (*state).wsize == 0 as ::core::ffi::c_uint {
-        let metadata = initial_window_metadata((*state).wbits);
-        (*state).wsize = metadata.wsize;
-        (*state).wnext = metadata.wnext;
-        (*state).whave = metadata.whave;
-    }
-    let window = core::slice::from_raw_parts_mut((*state).window, (*state).wsize as usize);
+    let state = &mut *state;
+    initialize_window_metadata(state);
+    let window = core::slice::from_raw_parts_mut(state.window, state.wsize as usize);
     let produced = if copy == 0 {
         &[]
     } else {
         core::slice::from_raw_parts(produced_start, copy as usize)
     };
-    plan = apply_window_update(window, (*state).wnext, (*state).whave, produced);
-    (*state).wnext = plan.wnext;
-    (*state).whave = plan.whave;
-    return 0 as ::core::ffi::c_int;
+    update_window_state(state, window, produced);
+    0
 }
 pub unsafe extern "C" fn inflate(
     mut strm: crate::zlib_h::z_streamp,
