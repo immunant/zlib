@@ -405,6 +405,7 @@ unsafe extern "C" fn gz_read(
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
     's_140: loop {
+        let mut consumed_buffered = false;
         n = crate::src::gzlib::gz_stream_chunk(len);
         's_28: {
             if (*state).x.have != 0 {
@@ -414,8 +415,8 @@ unsafe extern "C" fn gz_read(
                     (*state).x.next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                (*state).x.next = (*state).x.next.offset(n as isize);
-                (*state).x.have = (*state).x.have.wrapping_sub(n);
+                n = gz_consume(&mut *state, n as crate::stdlib::off64_t);
+                consumed_buffered = true;
                 if (*state).err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
                 }
@@ -446,7 +447,9 @@ unsafe extern "C" fn gz_read(
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
             got = got.wrapping_add(n as crate::stdlib::z_size_t);
-            crate::src::gzlib::gz_advance_pos(&mut *state, n);
+            if !consumed_buffered {
+                crate::src::gzlib::gz_advance_pos(&mut *state, n);
+            }
         }
         if !(len != 0 && err == 0) {
             break;
