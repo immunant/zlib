@@ -189,6 +189,14 @@ fn inflate_state_check_result(
     }
 }
 
+fn inflate_stream_buffers_are_valid(
+    has_output: bool,
+    has_input: bool,
+    available_input: crate::stdlib::uInt,
+) -> bool {
+    has_output && (has_input || available_input == 0)
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateZlibHeaderError {
     IncorrectCheck,
@@ -927,8 +935,11 @@ pub unsafe extern "C" fn inflate(
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
     if inflateStateCheck(strm) != 0
-        || (*strm).next_out.is_null()
-        || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
+        || !inflate_stream_buffers_are_valid(
+            !(*strm).next_out.is_null(),
+            !(*strm).next_in.is_null(),
+            (*strm).avail_in,
+        )
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2917,15 +2928,16 @@ mod tests {
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
         inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
         inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
-        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
-        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
-        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
-        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
-        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
-        InflateSyncSearch, InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
+        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
+        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
+        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
+        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
+        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
+        InflateBlockKind, InflateCopyProgress, InflateMatchPlan, InflateMatchSource,
+        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
+        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2946,6 +2958,14 @@ mod tests {
             ::core::ffi::c_uint::MAX,
             ::core::ffi::c_uint::MAX
         ));
+    }
+
+    #[test]
+    fn inflate_stream_buffers_require_output_and_input_when_available() {
+        assert!(inflate_stream_buffers_are_valid(true, true, 4));
+        assert!(inflate_stream_buffers_are_valid(true, false, 0));
+        assert!(!inflate_stream_buffers_are_valid(true, false, 1));
+        assert!(!inflate_stream_buffers_are_valid(false, true, 0));
     }
 
     #[test]

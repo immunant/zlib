@@ -3166,6 +3166,18 @@ unsafe extern "C" fn deflate_fast(
     return block_done;
 }
 
+fn deflate_slow_should_discard_match(
+    match_length: crate::stdlib::uInt,
+    strategy: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    match_start: crate::stdlib::uInt,
+) -> bool {
+    match_length <= 5 as crate::stdlib::uInt
+        && (strategy == crate::zlib_h::Z_FILTERED
+            || match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                && strstart.wrapping_sub(match_start) > TOO_FAR as crate::stdlib::uInt)
+}
+
 unsafe extern "C" fn deflate_slow(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3209,12 +3221,12 @@ unsafe extern "C" fn deflate_slow(
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
         {
             (*s).match_length = longest_match(s, hash_head);
-            if (*s).match_length <= 5 as crate::stdlib::uInt
-                && ((*s).strategy == crate::zlib_h::Z_FILTERED
-                    || (*s).match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                        && (*s).strstart.wrapping_sub((*s).match_start)
-                            > TOO_FAR as crate::stdlib::uInt)
-            {
+            if deflate_slow_should_discard_match(
+                (*s).match_length,
+                (*s).strategy,
+                (*s).strstart,
+                (*s).match_start,
+            ) {
                 (*s).match_length =
                     (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
             }
@@ -3831,6 +3843,40 @@ mod tests {
                 1
             )
         );
+    }
+
+    #[test]
+    fn deflate_slow_should_discard_match_preserves_filtered_and_distance_rules() {
+        assert!(super::deflate_slow_should_discard_match(
+            5,
+            crate::zlib_h::Z_FILTERED,
+            0,
+            0,
+        ));
+        assert!(!super::deflate_slow_should_discard_match(
+            6,
+            crate::zlib_h::Z_FILTERED,
+            0,
+            0,
+        ));
+        assert!(!super::deflate_slow_should_discard_match(
+            crate::zutil_h::MIN_MATCH as crate::stdlib::uInt,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+            super::TOO_FAR as crate::stdlib::uInt,
+            0,
+        ));
+        assert!(super::deflate_slow_should_discard_match(
+            crate::zutil_h::MIN_MATCH as crate::stdlib::uInt,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+            (super::TOO_FAR as crate::stdlib::uInt).wrapping_add(1),
+            0,
+        ));
+        assert!(super::deflate_slow_should_discard_match(
+            crate::zutil_h::MIN_MATCH as crate::stdlib::uInt,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+            0,
+            crate::stdlib::uInt::MAX.wrapping_sub(super::TOO_FAR as crate::stdlib::uInt),
+        ));
     }
 
     #[test]

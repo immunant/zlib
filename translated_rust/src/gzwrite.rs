@@ -873,6 +873,25 @@ fn gzclose_mode_is_writable(mode: ::core::ffi::c_int) -> bool {
     mode == crate::gzguts_h::GZ_WRITE
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzCloseBufferAction {
+    Keep,
+    FreeBuffers { end_deflate: bool },
+}
+
+fn gzclose_buffer_action(
+    size: ::core::ffi::c_uint,
+    direct: ::core::ffi::c_int,
+) -> GzCloseBufferAction {
+    if !gz_buffer_is_initialized(size) {
+        GzCloseBufferAction::Keep
+    } else {
+        GzCloseBufferAction::FreeBuffers {
+            end_deflate: direct == 0,
+        }
+    }
+}
+
 pub unsafe extern "C" fn gzwrite(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidpc,
@@ -1134,14 +1153,17 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     } else {
         None
     };
-    if gz_buffer_is_initialized((*state).size) {
-        if (*state).direct == 0 {
-            crate::src::deflate::deflateEnd(
-                &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
+    match gzclose_buffer_action((*state).size, (*state).direct) {
+        GzCloseBufferAction::Keep => {}
+        GzCloseBufferAction::FreeBuffers { end_deflate } => {
+            if end_deflate {
+                crate::src::deflate::deflateEnd(
+                    &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                );
+                crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
+            }
+            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
         }
-        crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
     }
     crate::src::gzlib::gz_error(
         state as *mut crate::gzguts_h::gz_state,
@@ -1175,10 +1197,11 @@ mod tests {
         gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_needs_initialization, gz_zero_progress, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure,
+        gz_zero_needs_initialization, gz_zero_progress, gzclose_buffer_action,
+        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_result,
+        gzputc_result, gzputc_write_action, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_buffer_action, gzsetparams_settings_match, gzsetparams_state_is_usable,
+        gzwrite_len_fits_int, GzCloseBufferAction, GzCompResetAction, GzCompWriteFailure,
         GzCompWriteResult, GzPutcWriteAction, GzSetParamsBufferAction, GzWriteDirectAction,
         GzZeroAction,
     };
@@ -1215,6 +1238,28 @@ mod tests {
     fn gzclose_mode_is_writable_only_for_write_mode() {
         assert!(gzclose_mode_is_writable(crate::gzguts_h::GZ_WRITE));
         assert!(!gzclose_mode_is_writable(crate::gzguts_h::GZ_WRITE + 1));
+    }
+
+    #[test]
+    fn gzclose_buffer_action_keeps_uninitialized_buffers() {
+        assert_eq!(gzclose_buffer_action(0, 0), GzCloseBufferAction::Keep);
+        assert_eq!(gzclose_buffer_action(0, 1), GzCloseBufferAction::Keep);
+    }
+
+    #[test]
+    fn gzclose_buffer_action_frees_only_input_for_direct_writes() {
+        assert_eq!(
+            gzclose_buffer_action(1, 1),
+            GzCloseBufferAction::FreeBuffers { end_deflate: false }
+        );
+    }
+
+    #[test]
+    fn gzclose_buffer_action_ends_deflate_for_buffered_writes() {
+        assert_eq!(
+            gzclose_buffer_action(1, 0),
+            GzCloseBufferAction::FreeBuffers { end_deflate: true }
+        );
     }
 
     #[test]
