@@ -784,10 +784,7 @@ pub unsafe extern "C" fn gzgets_ffi(
 // Direct-mode querying only needs a validated, bound state. `gz_look` keeps
 // its allocation and descriptor boundaries scoped inside that coordinator.
 fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ)
-        && state.how == crate::gzguts_h::LOOK
-        && state.x.have == 0 as ::core::ffi::c_uint
-    {
+    if crate::src::gzlib::gz_direct_needs_look(state) {
         gz_look(state);
     }
     return (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;

@@ -83,6 +83,42 @@ pub(crate) fn gz_write_state_is_usable(state: &crate::gzguts_h::gz_state) -> boo
         && (state.err == crate::zlib_h::Z_OK || state.again != 0)
 }
 
+// Rewind's descriptor operation only applies to a readable state without a
+// serious error. Keep that eligibility check independent of the descriptor
+// boundary.
+pub(crate) fn gz_rewind_is_usable(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && (state.err == crate::zlib_h::Z_OK || state.err == crate::zlib_h::Z_BUF_ERROR)
+}
+
+// This is the state-only half of a successful rewind. `gz_reset` restores
+// read-side cursors before clearing the owned error record.
+pub(crate) fn gz_rewind_complete(state: &mut crate::gzguts_h::gz_state) {
+    gz_reset(state);
+    gzclearerr(state);
+}
+
+// A newly opened read handle has no transparent/gzip classification yet.
+// Leave the lookup itself at the allocation and descriptor boundary.
+pub(crate) fn gz_direct_needs_look(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && state.how == crate::gzguts_h::LOOK
+        && state.x.have == 0
+}
+
+// A descriptor offset includes unread compressed input only for a read
+// state. The descriptor query itself remains outside this scalar adjustment.
+pub(crate) fn gz_offset_after_descriptor(
+    state: &crate::gzguts_h::gz_state,
+    offset: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    if gz_has_mode(state, crate::gzguts_h::GZ_READ) {
+        offset - state.strm.avail_in as crate::stdlib::off64_t
+    } else {
+        offset
+    }
+}
+
 // Keep gzip I/O requests within the unsigned-int sizes used by zlib's stream
 // fields and the POSIX read/write adapters.
 pub fn gz_stream_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
@@ -1143,9 +1179,7 @@ pub unsafe extern "C" fn gzbuffer_ffi(
 // Rewind receives an already-bound state from its FFI entry point. Its
 // descriptor and error-record calls retain their established raw boundaries.
 fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
-        || state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR
-    {
+    if !gz_rewind_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
     // SAFETY: `fd` belongs to the bound gzip state and is not retained.
@@ -1158,10 +1192,7 @@ fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     } {
         return -1 as ::core::ffi::c_int;
     }
-    gz_reset(state);
-    // `gz_reset` has already restored the read-side flags. Clearing the
-    // owned error record can stay in the reference-bound helper.
-    gzclearerr(state);
+    gz_rewind_complete(state);
     0 as ::core::ffi::c_int
 }
 #[export_name = "gzrewind"]
@@ -1390,10 +1421,7 @@ fn gzoffset64(state: &mut crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
     if offset == -1 as crate::stdlib::off64_t {
         return -1 as crate::stdlib::off64_t;
     }
-    if state.mode == crate::gzguts_h::GZ_READ {
-        offset -= state.strm.avail_in as crate::stdlib::off64_t;
-    }
-    return offset;
+    gz_offset_after_descriptor(state, offset)
 }
 #[export_name = "gzoffset64"]
 
