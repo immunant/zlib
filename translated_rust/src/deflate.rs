@@ -512,6 +512,33 @@ fn clear_window_tail_state(
     true
 }
 
+fn slide_window_state(
+    window: &mut [crate::stdlib::Byte],
+    wsize: crate::stdlib::uInt,
+    more: ::core::ffi::c_uint,
+    match_start: &mut crate::stdlib::uInt,
+    strstart: &mut crate::stdlib::uInt,
+    block_start: &mut ::core::ffi::c_long,
+    insert: &mut crate::stdlib::uInt,
+) -> Option<::core::ffi::c_uint> {
+    let copy_len = wsize.wrapping_sub(more);
+    let source_start = usize::try_from(wsize).ok()?;
+    let copy_len = usize::try_from(copy_len).ok()?;
+    let source_end = source_start.checked_add(copy_len)?;
+    if source_end > window.len() {
+        return None;
+    }
+
+    window.copy_within(source_start..source_end, 0);
+    *match_start = match_start.wrapping_sub(wsize);
+    *strstart = strstart.wrapping_sub(wsize);
+    *block_start = block_start.wrapping_sub(wsize as ::core::ffi::c_long);
+    if *insert > *strstart {
+        *insert = *strstart;
+    }
+    Some(more.wrapping_add(wsize))
+}
+
 unsafe extern "C" fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
@@ -560,19 +587,30 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
             )
         {
-            crate::stdlib::memcpy(
-                (*s).window as *mut ::core::ffi::c_void,
-                (*s).window.offset(wsize as isize) as *const ::core::ffi::c_void,
-                wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).match_start = (*s).match_start.wrapping_sub(wsize);
-            (*s).strstart = (*s).strstart.wrapping_sub(wsize);
-            (*s).block_start -= wsize as ::core::ffi::c_long;
-            if (*s).insert > (*s).strstart {
-                (*s).insert = (*s).strstart;
+            let Ok(window_len) = usize::try_from((*s).window_size) else {
+                return;
+            };
+            if window_len != 0 && (*s).window.is_null() {
+                return;
             }
+            let window = if window_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut((*s).window, window_len)
+            };
+            let Some(next_more) = slide_window_state(
+                window,
+                wsize,
+                more,
+                &mut (*s).match_start,
+                &mut (*s).strstart,
+                &mut (*s).block_start,
+                &mut (*s).insert,
+            ) else {
+                return;
+            };
             slide_hash(s);
-            more = more.wrapping_add(wsize as ::core::ffi::c_uint);
+            more = next_more;
         }
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
             break;
