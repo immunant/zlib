@@ -4813,7 +4813,7 @@ pub unsafe extern "C" fn crc32_z(
     if buf.is_null() {
         return 0 as crate::stdlib::uLong;
     }
-    return crc32_slice(crc, unsafe { core::slice::from_raw_parts(buf, len) });
+    crc32_slice(crc, unsafe { core::slice::from_raw_parts(buf, len) })
 }
 
 #[export_name = "crc32_z"]

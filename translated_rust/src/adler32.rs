@@ -56,7 +56,7 @@ pub unsafe extern "C" fn adler32_z(
     len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
     if buf.is_null() {
-        return 1;
+        return ADLER32_INITIAL;
     }
     adler32_slice(adler, unsafe { core::slice::from_raw_parts(buf, len) })
 }
