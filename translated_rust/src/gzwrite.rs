@@ -82,18 +82,24 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ..
         } => Some((output_len, level, strategy)),
     };
-    state.in_0 = crate::stdlib::malloc(input_len) as *mut ::core::ffi::c_uchar;
-    if state.in_0.is_null() {
+    // Keep successful allocations local until deflater construction has
+    // completed.  `gz_init()` does not expose either buffer before then, so
+    // this avoids publishing a temporary allocation across that callback
+    // boundary while preserving zlib's allocation and cleanup order.
+    let Some(input) =
+        ::core::ptr::NonNull::new(crate::stdlib::malloc(input_len).cast::<::core::ffi::c_uchar>())
+    else {
         crate::src::gzlib::gz_error(state, crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory\0"));
         return -1 as ::core::ffi::c_int;
-    }
+    };
     if let Some((output_len, level, strategy)) = deflate {
-        state.out = crate::stdlib::malloc(output_len) as *mut ::core::ffi::c_uchar;
-        if state.out.is_null() {
+        let Some(output) = ::core::ptr::NonNull::new(
+            crate::stdlib::malloc(output_len).cast::<::core::ffi::c_uchar>(),
+        ) else {
             // SAFETY: this failure path releases only the input allocation
             // created above before reporting the initialization error.
             unsafe {
-                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+                crate::stdlib::free(input.as_ptr() as *mut ::core::ffi::c_void);
             }
             crate::src::gzlib::gz_error(
                 state,
@@ -101,7 +107,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 Some(b"out of memory\0"),
             );
             return -1 as ::core::ffi::c_int;
-        }
+        };
         gz_init_prepare_deflater(state);
         // SAFETY: the validated write state owns both initialized buffers;
         // this call creates the deflater that will use them.
@@ -121,8 +127,8 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             // SAFETY: failed initialization has not transferred either
             // allocation, so this path releases exactly those two buffers.
             unsafe {
-                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+                crate::stdlib::free(output.as_ptr() as *mut ::core::ffi::c_void);
+                crate::stdlib::free(input.as_ptr() as *mut ::core::ffi::c_void);
             }
             crate::src::gzlib::gz_error(
                 state,
@@ -131,7 +137,11 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
+        state.in_0 = input.as_ptr();
+        state.out = output.as_ptr();
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+    } else {
+        state.in_0 = input.as_ptr();
     }
     gz_init_finish(state);
     return 0 as ::core::ffi::c_int;
