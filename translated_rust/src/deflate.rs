@@ -2725,11 +2725,36 @@ impl DeflateCopyPreparation {
     // This is the pointer-free commit point for a deep copy.  The callback
     // boundary is still responsible for preserving zalloc/zfree pairing, but
     // once it has supplied owned storage it need not repeat the geometry or
-    // range validation performed while preparing the copy.
-    fn copy_into_owned(&self, source: &DeflateOwnedStorage) -> Option<DeflateOwnedStorage> {
+    // range validation performed while preparing the copy.  Consume the
+    // preparation with the copied storage so a future callback-pairing owner
+    // can keep the scalar snapshot and its allocations together.
+    fn into_owned_copy(self, source: &DeflateOwnedStorage) -> Option<DeflateOwnedCopy> {
         let mut destination = self.plan.storage.allocate_owned()?;
         self.copy_storage(source.source_views(), destination.destination_views())
-            .then_some(destination)
+            .then_some(DeflateOwnedCopy {
+                preparation: self,
+                storage: destination,
+            })
+    }
+}
+
+// This is the fully pointer-free form of a copied deflate state.  It keeps
+// the validated scalar/header/tree preparation with the independently owned
+// backing buffers, so an allocation broker can later replace only storage
+// acquisition without reintroducing raw state or callback handles into the
+// copy kernel.
+struct DeflateOwnedCopy {
+    preparation: DeflateCopyPreparation,
+    storage: DeflateOwnedStorage,
+}
+
+impl DeflateOwnedCopy {
+    fn payload(&self) -> &DeflateCopyPayload {
+        &self.preparation.payload
+    }
+
+    fn storage(&self) -> &DeflateOwnedStorage {
+        &self.storage
     }
 }
 
