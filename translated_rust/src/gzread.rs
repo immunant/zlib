@@ -662,7 +662,7 @@ pub unsafe extern "C" fn gzungetc(
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ) {
         return -1 as ::core::ffi::c_int;
     }
-    if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
+    if crate::src::gzlib::gz_ungetc_needs_look(state) {
         gz_look(state);
     }
     if !gz_prepare_read_operation(state) {

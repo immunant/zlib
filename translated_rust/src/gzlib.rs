@@ -106,6 +106,13 @@ pub(crate) fn gz_direct_needs_look(state: &crate::gzguts_h::gz_state) -> bool {
         && state.x.have == 0
 }
 
+// `gzungetc()` needs the same initial lookahead condition, but it has already
+// checked that this is a read handle. Keep that state-only decision out of
+// the adapter that owns lookahead's allocation and descriptor boundaries.
+pub(crate) fn gz_ungetc_needs_look(state: &crate::gzguts_h::gz_state) -> bool {
+    state.how == crate::gzguts_h::LOOK && state.x.have == 0
+}
+
 // A descriptor offset includes unread compressed input only for a read
 // state. The descriptor query itself remains outside this scalar adjustment.
 pub(crate) fn gz_offset_after_descriptor(
