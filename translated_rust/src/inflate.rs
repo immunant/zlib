@@ -608,17 +608,6 @@ fn window_allocation_failed(plan: WindowAllocationPlan, has_window: bool) -> boo
     matches!(plan, WindowAllocationPlan::Allocate { .. }) && !has_window
 }
 
-fn update_window_allocation_status(
-    plan: WindowAllocationPlan,
-    has_window: bool,
-) -> ::core::ffi::c_int {
-    if window_allocation_failed(plan, has_window) {
-        1
-    } else {
-        0
-    }
-}
-
 fn window_update_plan(
     wsize: ::core::ffi::c_uint,
     wnext: ::core::ffi::c_uint,
@@ -1198,6 +1187,17 @@ fn update_window_plan(
     }
 }
 
+fn update_window_slices_after_allocation(
+    plan: UpdateWindowPlan,
+    has_window: bool,
+) -> Result<UpdateWindowSlicePlan, ::core::ffi::c_int> {
+    if window_allocation_failed(plan.allocation, has_window) {
+        Err(1)
+    } else {
+        Ok(plan.slices)
+    }
+}
+
 fn update_window_produced_slice<'a>(
     produced: Option<&'a [crate::stdlib::Bytef]>,
 ) -> &'a [crate::stdlib::Bytef] {
@@ -1216,18 +1216,17 @@ unsafe fn updatewindow(
             .expect("non-null function pointer")((*strm).opaque, items, size)
             as *mut crate::stdlib::Byte;
     }
-    let allocation_status =
-        update_window_allocation_status(plan.allocation, !state.window.is_null());
-    if allocation_status != 0 {
-        return allocation_status;
-    }
+    let slices = match update_window_slices_after_allocation(plan, !state.window.is_null()) {
+        Ok(slices) => slices,
+        Err(status) => return status,
+    };
     update_window_core(
         state.wbits,
         &mut state.wsize,
         &mut state.wnext,
         &mut state.whave,
-        core::slice::from_raw_parts_mut(state.window, plan.slices.window_len),
-        update_window_produced_slice(match plan.slices.produced_len {
+        core::slice::from_raw_parts_mut(state.window, slices.window_len),
+        update_window_produced_slice(match slices.produced_len {
             Some(produced_len) => Some(core::slice::from_raw_parts(
                 end.wrapping_sub(produced_len),
                 produced_len,
@@ -3346,17 +3345,16 @@ mod tests {
         inflate_trailer_checksum_is_valid, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
         inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, update_window_allocation_status,
-        update_window_buffer_len, update_window_core, update_window_history,
-        update_window_slice_plan, window_allocation_failed, window_allocation_plan,
-        window_allocation_request, window_allocation_request_for_plan, window_metadata_update_plan,
-        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
-        InflateCallProgress, InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags,
-        InflateGzipFlagsError, InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource,
-        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
-        InflateZlibHeaderTransition, InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
-        TYPEDO,
+        stored_block_length, syncsearch_safe, update_window_buffer_len, update_window_core,
+        update_window_history, update_window_slice_plan, update_window_slices_after_allocation,
+        window_allocation_failed, window_allocation_plan, window_allocation_request,
+        window_allocation_request_for_plan, window_metadata_update_plan, window_needs_allocation,
+        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress,
+        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
+        InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
+        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
+        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4700,22 +4698,6 @@ mod tests {
     }
 
     #[test]
-    fn update_window_allocation_status_matches_allocation_outcome() {
-        assert_eq!(
-            update_window_allocation_status(window_allocation_plan(false, 15), false),
-            1
-        );
-        assert_eq!(
-            update_window_allocation_status(window_allocation_plan(false, 15), true),
-            0
-        );
-        assert_eq!(
-            update_window_allocation_status(window_allocation_plan(true, 15), false),
-            0
-        );
-    }
-
-    #[test]
     fn window_allocation_request_matches_supported_window_widths() {
         assert_eq!(window_allocation_request(8), (256, 1));
         assert_eq!(window_allocation_request(15), (32_768, 1));
@@ -4922,6 +4904,34 @@ mod tests {
                     produced_len: None,
                 },
             }
+        );
+    }
+
+    #[test]
+    fn update_window_slices_after_allocation_rejects_missing_new_window() {
+        let plan = super::update_window_plan(false, 0, 3, 5);
+
+        assert_eq!(update_window_slices_after_allocation(plan, false), Err(1));
+    }
+
+    #[test]
+    fn update_window_slices_after_allocation_preserves_ready_slice_lengths() {
+        let allocation_plan = super::update_window_plan(false, 0, 3, 5);
+        assert_eq!(
+            update_window_slices_after_allocation(allocation_plan, true),
+            Ok(super::UpdateWindowSlicePlan {
+                window_len: 8,
+                produced_len: Some(5),
+            })
+        );
+
+        let existing_plan = super::update_window_plan(true, 8, 3, 0);
+        assert_eq!(
+            update_window_slices_after_allocation(existing_plan, true),
+            Ok(super::UpdateWindowSlicePlan {
+                window_len: 8,
+                produced_len: None,
+            })
         );
     }
 

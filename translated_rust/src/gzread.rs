@@ -1321,14 +1321,11 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
 
 unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
-        match gz_fetch_action(state.how) {
+        let action = gz_fetch_action(state.how);
+        match action {
             GzFetchAction::Look => {
                 if gz_fetch_look_failed(gz_look(state as *mut crate::gzguts_h::gz_state)) {
                     return -1 as ::core::ffi::c_int;
-                }
-                let how = state.how;
-                if gz_fetch_after_look(how) == GzFetchAfterLook::Return {
-                    return 0 as ::core::ffi::c_int;
                 }
             }
             GzFetchAction::Copy => {
@@ -1339,7 +1336,6 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                     return -1 as ::core::ffi::c_int;
                 }
                 state.x.next = state.out;
-                return 0 as ::core::ffi::c_int;
             }
             GzFetchAction::Gzip => {
                 state.strm.avail_out = gz_fetch_output_capacity(state.size) as crate::stdlib::uInt;
@@ -1357,7 +1353,14 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if !gz_fetch_should_continue(state.x.have, state.eof, state.strm.avail_in) {
+        if gz_fetch_post_action(
+            action,
+            state.how,
+            state.x.have,
+            state.eof,
+            state.strm.avail_in,
+        ) == GzFetchPostAction::Return
+        {
             break;
         }
     }
@@ -1373,17 +1376,9 @@ enum GzFetchAction {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum GzFetchAfterLook {
+enum GzFetchPostAction {
     Return,
     Continue,
-}
-
-fn gz_fetch_after_look(how: ::core::ffi::c_int) -> GzFetchAfterLook {
-    if how == crate::gzguts_h::LOOK {
-        GzFetchAfterLook::Return
-    } else {
-        GzFetchAfterLook::Continue
-    }
 }
 
 fn gz_fetch_action(how: ::core::ffi::c_int) -> GzFetchAction {
@@ -1399,12 +1394,21 @@ fn gz_fetch_output_capacity(size: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     gz_output_buffer_len(size)
 }
 
-fn gz_fetch_should_continue(
+fn gz_fetch_post_action(
+    action: GzFetchAction,
+    how: ::core::ffi::c_int,
     have: ::core::ffi::c_uint,
     eof: ::core::ffi::c_int,
     avail_in: crate::stdlib::uInt,
-) -> bool {
-    have == 0 && (eof == 0 || avail_in != 0)
+) -> GzFetchPostAction {
+    match action {
+        GzFetchAction::Copy | GzFetchAction::StateCorrupt => GzFetchPostAction::Return,
+        GzFetchAction::Look if how == crate::gzguts_h::LOOK => GzFetchPostAction::Return,
+        GzFetchAction::Look | GzFetchAction::Gzip if have == 0 && (eof == 0 || avail_in != 0) => {
+            GzFetchPostAction::Continue
+        }
+        GzFetchAction::Look | GzFetchAction::Gzip => GzFetchPostAction::Return,
+    }
 }
 
 fn gz_fetch_look_failed(result: ::core::ffi::c_int) -> bool {
@@ -3032,24 +3036,31 @@ mod tests {
     }
 
     #[test]
-    fn gz_fetch_after_look_returns_when_look_remains_selected() {
+    fn gz_fetch_post_action_returns_when_look_remains_selected() {
         assert_eq!(
-            gz_fetch_after_look(crate::gzguts_h::LOOK),
-            GzFetchAfterLook::Return
+            gz_fetch_post_action(GzFetchAction::Look, crate::gzguts_h::LOOK, 0, 0, 0),
+            GzFetchPostAction::Return
         );
     }
 
     #[test]
-    fn gz_fetch_after_look_continues_for_copy_gzip_or_unknown_modes() {
+    fn gz_fetch_post_action_repeats_look_or_gzip_only_with_work_remaining() {
         assert_eq!(
-            gz_fetch_after_look(crate::gzguts_h::COPY),
-            GzFetchAfterLook::Continue
+            gz_fetch_post_action(GzFetchAction::Look, crate::gzguts_h::GZIP, 0, 0, 0),
+            GzFetchPostAction::Continue
         );
         assert_eq!(
-            gz_fetch_after_look(crate::gzguts_h::GZIP),
-            GzFetchAfterLook::Continue
+            gz_fetch_post_action(GzFetchAction::Gzip, crate::gzguts_h::GZIP, 0, 1, 1),
+            GzFetchPostAction::Continue
         );
-        assert_eq!(gz_fetch_after_look(99), GzFetchAfterLook::Continue);
+        assert_eq!(
+            gz_fetch_post_action(GzFetchAction::Gzip, crate::gzguts_h::GZIP, 1, 0, 1),
+            GzFetchPostAction::Return
+        );
+        assert_eq!(
+            gz_fetch_post_action(GzFetchAction::Gzip, crate::gzguts_h::GZIP, 0, 1, 0),
+            GzFetchPostAction::Return
+        );
     }
 
     #[test]
@@ -3063,11 +3074,15 @@ mod tests {
     }
 
     #[test]
-    fn gz_fetch_should_continue_only_without_output_and_with_work_remaining() {
-        assert!(gz_fetch_should_continue(0, 0, 0));
-        assert!(gz_fetch_should_continue(0, 1, 1));
-        assert!(!gz_fetch_should_continue(1, 0, 1));
-        assert!(!gz_fetch_should_continue(0, 1, 0));
+    fn gz_fetch_post_action_stops_copy_and_corrupt_state_actions() {
+        assert_eq!(
+            gz_fetch_post_action(GzFetchAction::Copy, crate::gzguts_h::COPY, 0, 0, 0),
+            GzFetchPostAction::Return
+        );
+        assert_eq!(
+            gz_fetch_post_action(GzFetchAction::StateCorrupt, 99, 0, 0, 0),
+            GzFetchPostAction::Return
+        );
     }
 
     #[test]
