@@ -64,14 +64,14 @@ fn zcalloc_allocations() -> &'static Mutex<Vec<ZcallocAllocation>> {
     ZCALLOC_ALLOCATIONS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn retain_zcalloc_allocation(address: usize, units: Vec<ZcallocUnit>) -> bool {
+fn retain_zcalloc_allocation(allocation: ZcallocAllocation) -> bool {
     let mut allocations = zcalloc_allocations()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if allocations.try_reserve(1).is_err() {
         return false;
     }
-    allocations.push(ZcallocAllocation { address, units });
+    allocations.push(allocation);
     true
 }
 
@@ -92,6 +92,23 @@ fn zcalloc_units(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> Optio
     bytes
         .checked_add(::core::mem::size_of::<ZcallocUnit>() - 1)
         .map(|rounded| (rounded / ::core::mem::size_of::<ZcallocUnit>()).max(1))
+}
+
+/// Construct a zeroed, Rust-owned allocation for the default zlib allocator.
+///
+/// This deliberately keeps both the checked byte calculation and the
+/// fallible reservation outside the ABI callback.  The callback only turns
+/// the resulting allocation into its opaque C handle and transfers ownership
+/// to the registry used by `zcfree`.
+fn prepare_zcalloc_allocation(
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> Option<ZcallocAllocation> {
+    let unit_count = zcalloc_units(items, size)?;
+    let mut units = Vec::<ZcallocUnit>::new();
+    units.try_reserve_exact(unit_count).ok()?;
+    units.resize_with(unit_count, || ZcallocUnit([0; 64]));
+    Some(ZcallocAllocation { address: 0, units })
 }
 
 fn zlib_version() -> &'static CStr {
@@ -195,21 +212,14 @@ pub unsafe extern "C" fn zcalloc(
     items: ::core::ffi::c_uint,
     size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    let Some(units) = zcalloc_units(items, size) else {
+    let Some(mut allocation) = prepare_zcalloc_allocation(items, size) else {
         return ::core::ptr::null_mut();
     };
-    let mut allocation = Vec::<ZcallocUnit>::new();
-    if allocation.try_reserve_exact(units).is_err() {
-        return ::core::ptr::null_mut();
-    }
-    allocation.resize_with(units, || ZcallocUnit([0; 64]));
-    let Some(first) = allocation.first_mut() else {
-        return ::core::ptr::null_mut();
-    };
-    let pointer = std::ptr::NonNull::from(first)
+    let pointer = std::ptr::NonNull::from(&mut allocation.units[0])
         .cast::<::core::ffi::c_void>()
         .as_ptr();
-    if retain_zcalloc_allocation(pointer.addr(), allocation) {
+    allocation.address = pointer.addr();
+    if retain_zcalloc_allocation(allocation) {
         pointer
     } else {
         ::core::ptr::null_mut()
