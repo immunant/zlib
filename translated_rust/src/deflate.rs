@@ -907,7 +907,8 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let strm_ref = &*strm;
+    let state = &*(strm_ref.state as *mut crate::src::deflate::deflate_state);
     let (offset, len) = deflateGetDictionary(state);
     if !dictionary.is_null() && len != 0 {
         let dictionary = ::core::slice::from_raw_parts_mut(dictionary, len as usize);
@@ -973,13 +974,12 @@ fn deflate_reset_keep_state(
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    deflate_reset_keep_state(&mut *strm, &mut *s);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::deflate::deflate_state);
+    deflate_reset_keep_state(strm_ref, state);
     return crate::zlib_h::Z_OK;
 }
 fn lm_init(state: &mut crate::src::deflate::deflate_state, head: &mut [crate::src::deflate::Posf]) {
@@ -1025,8 +1025,9 @@ pub unsafe extern "C" fn deflateReset_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
-    deflate_reset_keep_state(&mut *strm, state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::deflate::deflate_state);
+    deflate_reset_keep_state(strm_ref, state);
     let head_ptr = state.head;
     let hash_size = state.hash_size as usize;
     let head = ::core::slice::from_raw_parts_mut(head_ptr, hash_size);
@@ -1045,7 +1046,8 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::deflate::deflate_state);
     if !deflate_set_header_allowed(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1078,7 +1080,8 @@ pub unsafe extern "C" fn deflatePending_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &*(*strm).state;
+    let strm_ref = &*strm;
+    let state = &*(strm_ref.state as *mut crate::src::deflate::deflate_state);
     let (pending_value, bits_value) = deflatePending(state);
     if !bits.is_null() {
         *bits = bits_value;
@@ -1106,7 +1109,8 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &*(*strm).state;
+    let strm_ref = &*strm;
+    let state = &*(strm_ref.state as *mut crate::src::deflate::deflate_state);
     if !bits.is_null() {
         *bits = deflateUsed(state);
     }
@@ -1324,7 +1328,8 @@ pub unsafe extern "C" fn deflateTune_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::deflate::deflate_state);
     deflateTune(state, good_length, max_lazy, nice_length, max_chain)
 }
 

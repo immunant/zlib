@@ -1082,7 +1082,8 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
     inflatePrime(state, bits, value)
 }
 #[export_name = "inflate"]
@@ -2586,11 +2587,12 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if !inflate_get_header_allowed(&*state) {
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    if !inflate_get_header_allowed(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*state).head = head;
+    state.head = head;
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
@@ -2733,7 +2735,8 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &*((*strm).state as *mut crate::src::inflate::inflate_state);
+    let strm_ref = &*strm;
+    let state = &*(strm_ref.state as *mut crate::src::inflate::inflate_state);
     inflateSyncPoint(state)
 }
 #[export_name = "inflateCopy"]
@@ -2833,7 +2836,8 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
     inflateUndermine(state, subvert)
 }
 pub fn inflateValidate(
@@ -2856,7 +2860,8 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
     inflateValidate(state, check)
 }
 fn inflate_mark_progress(
@@ -2886,7 +2891,8 @@ pub unsafe extern "C" fn inflateMark_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     }
-    let state = &*((*strm).state as *mut crate::src::inflate::inflate_state);
+    let strm_ref = &*strm;
+    let state = &*(strm_ref.state as *mut crate::src::inflate::inflate_state);
     inflateMark(state)
 }
 #[export_name = "inflateCodesUsed"]
@@ -2896,9 +2902,8 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     if inflate_state_check_raw!(strm) != 0 {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return (*state)
-        .next
-        .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-        as ::core::ffi::c_long as ::core::ffi::c_ulong;
+    let strm_ref = &*strm;
+    let state = &*(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    return state.next.offset_from(state.codes.as_ptr()) as ::core::ffi::c_long
+        as ::core::ffi::c_ulong;
 }
