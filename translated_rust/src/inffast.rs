@@ -187,10 +187,14 @@ fn inflate_fast_core(
 }
 
 pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::core::ffi::c_uint) {
-    let state = &mut *((*strm).state as *mut inflate_state);
-    let input = core::slice::from_raw_parts((*strm).next_in, (*strm).avail_in as usize);
-    let written = start.wrapping_sub((*strm).avail_out) as usize;
-    let output_start = (*strm).next_out.sub(written);
+    // Project the ABI stream and state once.  All subsequent decoder work is
+    // on bounded slices and ordinary Rust references; this adapter only
+    // creates and republishes the caller-owned cursor views.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut inflate_state);
+    let input = core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+    let written = start.wrapping_sub(strm.avail_out) as usize;
+    let output_start = strm.next_out.wrapping_sub(written);
     let output = core::slice::from_raw_parts_mut(output_start, start as usize);
     let window = state
         .window
@@ -212,24 +216,24 @@ pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::c
         &state.codes,
         state.sane != 0,
     );
-    (*strm).next_in = (*strm).next_in.add(result.input_used);
-    (*strm).avail_in = input.len().wrapping_sub(result.input_used) as crate::stdlib::uInt;
-    (*strm).next_out = output_start.add(result.output_used);
-    (*strm).avail_out = output.len().wrapping_sub(result.output_used) as crate::stdlib::uInt;
+    strm.next_in = strm.next_in.wrapping_add(result.input_used);
+    strm.avail_in = input.len().wrapping_sub(result.input_used) as crate::stdlib::uInt;
+    strm.next_out = output_start.wrapping_add(result.output_used);
+    strm.avail_out = output.len().wrapping_sub(result.output_used) as crate::stdlib::uInt;
     state.hold = result.hold;
     state.bits = result.bits;
     match result.exit {
         FastExit::Continue => {}
         FastExit::Type => state.mode = TYPE,
         FastExit::InvalidDistance => {
-            (*strm).msg = b"invalid distance too far back\0"
+            strm.msg = b"invalid distance too far back\0"
                 .as_ptr()
                 .cast_mut()
                 .cast();
             state.mode = BAD;
         }
         FastExit::InvalidCode => {
-            (*strm).msg = b"invalid literal/length or distance code\0"
+            strm.msg = b"invalid literal/length or distance code\0"
                 .as_ptr()
                 .cast_mut()
                 .cast();
