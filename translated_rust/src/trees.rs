@@ -4358,22 +4358,17 @@ pub fn tr_align(
     bi_flush_state(state, pending);
 }
 
-pub extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
-    // SAFETY: this is the private raw adapter behind `_tr_align_ffi`; callers
-    // pass the initialized deflater state that owns `pending_buf`.
-    unsafe {
-        let state = &mut *s;
-        let pending =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        let end_code = static_ltree[256].fc.freq;
-        let end_len = static_ltree[256].dl.dad as ::core::ffi::c_int;
-        tr_align(state, pending, end_code, end_len);
-    }
-}
 #[export_name = "_tr_align"]
-
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_align(s)
+    // SAFETY: the C ABI requires an initialized deflater state with its
+    // owned pending buffer. Bind both once at this entry point; `tr_align`
+    // itself is reference-based.
+    let state = &mut *s;
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let end_code = static_ltree[256].fc.freq;
+    let end_len = static_ltree[256].dl.dad as ::core::ffi::c_int;
+    tr_align(state, pending, end_code, end_len);
 }
 fn send_compressed_tree_code(
     state: &mut crate::src::deflate::deflate_state,

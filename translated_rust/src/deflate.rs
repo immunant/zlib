@@ -151,7 +151,7 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::src::crc32::crc32_z_ffi as crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
-pub use crate::src::trees::_tr_align;
+pub use crate::src::trees::_tr_align_ffi as _tr_align;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
@@ -2317,30 +2317,35 @@ pub unsafe extern "C" fn deflate(
         }
         if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
-            if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                crate::src::trees::_tr_align(s as *mut crate::src::deflate::internal_state);
-            } else if flush != crate::zlib_h::Z_BLOCK {
+            if flush != crate::zlib_h::Z_BLOCK {
                 let state = &mut *s;
                 let pending = ::core::slice::from_raw_parts_mut(
                     state.pending_buf,
                     state.pending_buf_size as usize,
                 );
-                crate::src::trees::tr_stored_block(state, pending, &[], 0);
-                if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    // `fill_window()` binds the initialized table once, then
-                    // the reset itself is ordinary bounded slice work.
-                    fill_window(
-                        state,
-                        &mut *strm,
-                        false,
-                        |state, _stream, _window, head, _prev, _input| {
-                            deflate_clear_hash_table(state, head);
-                        },
-                    );
-                    if state.lookahead == 0 as crate::stdlib::uInt {
-                        state.strstart = 0 as crate::stdlib::uInt;
-                        state.block_start = 0 as ::core::ffi::c_long;
-                        state.insert = 0 as crate::stdlib::uInt;
+                if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
+                    let end_code = crate::src::trees::static_ltree[256].fc.freq;
+                    let end_len =
+                        crate::src::trees::static_ltree[256].dl.dad as ::core::ffi::c_int;
+                    crate::src::trees::tr_align(state, pending, end_code, end_len);
+                } else {
+                    crate::src::trees::tr_stored_block(state, pending, &[], 0);
+                    if flush == crate::zlib_h::Z_FULL_FLUSH {
+                        // `fill_window()` binds the initialized table once, then
+                        // the reset itself is ordinary bounded slice work.
+                        fill_window(
+                            state,
+                            &mut *strm,
+                            false,
+                            |state, _stream, _window, head, _prev, _input| {
+                                deflate_clear_hash_table(state, head);
+                            },
+                        );
+                        if state.lookahead == 0 as crate::stdlib::uInt {
+                            state.strstart = 0 as crate::stdlib::uInt;
+                            state.block_start = 0 as ::core::ffi::c_long;
+                            state.insert = 0 as crate::stdlib::uInt;
+                        }
                     }
                 }
             }
