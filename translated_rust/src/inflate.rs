@@ -1499,8 +1499,14 @@ pub unsafe extern "C" fn inflate(
                                                                                 (*state).distbits = 6 as ::core::ffi::c_uint;
                                                                                 ret = crate::src::inftrees::inflate_table(
                                                                                     crate::src::inftrees::DISTS,
-                                                                                    (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
-                                                                                        .offset((*state).nlen as isize),
+                                                                                    // `nlen` is checked against the
+                                                                                    // literal/length-code limit before
+                                                                                    // reaching this state. Bind the
+                                                                                    // remaining fixed state array instead
+                                                                                    // of deriving its cursor with raw
+                                                                                    // pointer arithmetic.
+                                                                                    (&mut (*state).lens)[(*state).nlen as usize..]
+                                                                                        .as_mut_ptr(),
                                                                                     (*state).ndist,
                                                                                     
                                                                                     &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
