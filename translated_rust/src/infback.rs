@@ -239,24 +239,21 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     };
     initialize_allocated_inflate_back_state(strm, windowBits, window, init.allocator_provenance)
 }
-pub fn inflateBack(
+pub fn inflateBack<F>(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
     window: &mut [u8],
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
-    mut out: crate::zlib_h::out_func,
-    mut out_desc: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
-    // The callback ABI and caller-owned buffers remain one internal unsafe
-    // boundary. Keeping it here lets callers dispatch through a safe core.
+    mut emit_window: F,
+) -> ::core::ffi::c_int
+where
+    F: FnMut(&mut [u8], ::core::ffi::c_uint) -> bool,
+{
+    // The input callback ABI and caller-owned buffers remain one internal
+    // unsafe boundary. The FFI wrapper adapts the output callback to the
+    // safe closure used by the decoder below.
     unsafe {
-    // Adapt the output callback once for this invocation.  The decoder below
-    // only decides when a complete window is ready; this closure owns the
-    // repeated ABI call and keeps each call site in terms of a checked slice.
-    let emit_window = |bytes: &mut [u8], length: ::core::ffi::c_uint| -> bool {
-        out.expect("non-null function pointer")(out_desc, bytes.as_mut_ptr(), length) == 0
-    };
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     // `window` is the one validated caller-owned history/output span.  Keep
     // its output cursor as an index so the decoder never advances a raw
@@ -1245,7 +1242,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
     // The buffer was checked and retained by inflateBackInit_; it is the
     // decoder's single history/output span for this call.
     let window = ::core::slice::from_raw_parts_mut(window.as_ptr(), window_len);
-    inflateBack(strm, state, window, in_0, in_desc, out, out_desc)
+    let emit_window = |bytes: &mut [u8], length: ::core::ffi::c_uint| {
+        out.expect("non-null function pointer")(out_desc, bytes.as_mut_ptr(), length) == 0
+    };
+    inflateBack(strm, state, window, in_0, in_desc, emit_window)
 }
 fn inflate_back_end<F>(
     strm: &mut crate::zlib_h::z_stream,
