@@ -1122,14 +1122,28 @@ fn gz_clear_error_state(state: &mut crate::gzguts_h::gz_state) -> bool {
     release_message
 }
 
-/// Calculate the storage required for the legacy `"path: message"` error
-/// text.  The allocator and C-string boundary remain in `gz_error`, but the
-/// C-size wrapping rule is now kept in one safe scalar helper.
-fn gz_error_storage_len(
-    path_len: crate::__stddef_size_t_h::size_t,
-    message_len: crate::__stddef_size_t_h::size_t,
-) -> crate::__stddef_size_t_h::size_t {
-    path_len.wrapping_add(message_len).wrapping_add(3)
+/// Construct the legacy `"path: message"` text before the raw error-storage
+/// boundary allocates or writes it.  Overflow and allocation failure are
+/// reported to that boundary as an out-of-memory condition rather than
+/// allowing a wrapped C allocation size.
+fn gz_error_message(
+    path: &::std::ffi::CStr,
+    message: &::std::ffi::CStr,
+) -> Option<::std::ffi::CString> {
+    let path = path.to_bytes();
+    let message = message.to_bytes();
+    let capacity = path
+        .len()
+        .checked_add(2)?
+        .checked_add(message.len())?
+        .checked_add(1)?;
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(capacity).ok()?;
+    bytes.extend_from_slice(path);
+    bytes.extend_from_slice(b": ");
+    bytes.extend_from_slice(message);
+    bytes.push(0);
+    ::std::ffi::CString::from_vec_with_nul(bytes).ok()
 }
 
 pub unsafe extern "C" fn gz_error(
@@ -1146,23 +1160,20 @@ pub unsafe extern "C" fn gz_error(
     if !gz_error_apply_transition(&mut *state, err, !msg.is_null()) {
         return;
     }
-    let storage_len = gz_error_storage_len(
-        crate::stdlib::strlen((*state).path),
-        crate::stdlib::strlen(msg),
-    );
+    let Some(message) = gz_error_message(
+        ::std::ffi::CStr::from_ptr((*state).path),
+        ::std::ffi::CStr::from_ptr(msg),
+    ) else {
+        (*state).err = crate::zlib_h::Z_MEM_ERROR;
+        return;
+    };
+    let storage_len = message.as_bytes_with_nul().len();
     (*state).msg = crate::stdlib::malloc(storage_len) as *mut ::core::ffi::c_char;
     if (*state).msg.is_null() {
         (*state).err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
-    crate::stdlib::snprintf(
-        (*state).msg,
-        storage_len,
-        b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
-        (*state).path,
-        b": \0".as_ptr() as *const ::core::ffi::c_char,
-        msg,
-    );
+    ::core::ptr::copy_nonoverlapping(message.as_ptr(), (*state).msg, storage_len);
 }
 #[export_name = "gz_error"]
 
