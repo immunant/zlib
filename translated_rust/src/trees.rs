@@ -3517,12 +3517,9 @@ pub unsafe extern "C" fn _tr_tally(
     let state = &mut *s;
     // The symbol region starts after the literal portion of `pending_buf`.
     // Its remaining capacity is three bytes per literal slot.
-    let sym_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf.wrapping_add(state.sym_buf_start),
-        state
-            .pending_buf_size
-            .wrapping_sub(state.sym_buf_start as crate::zutil_h::ulg) as usize,
-    );
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let sym_buf = &mut pending_buf[state.sym_buf_start..];
     tally_symbol(
         sym_buf,
         &mut state.sym_next,
