@@ -696,93 +696,108 @@ pub(crate) unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::f
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_write(
-    state: &mut crate::gzguts_h::gz_state,
-    mut source: &[u8],
-) -> crate::stdlib::z_size_t {
-    let mut len = source.len();
-    let mut put: crate::stdlib::z_size_t = len;
-    let mut ret: ::core::ffi::c_int = 0;
-    if len == 0 as crate::stdlib::z_size_t {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if state.direct != 0 {
-        return match gz_write_direct(state, source) {
-            Ok(written) => written,
-            Err(written) => gz_write_failure_result(state.again, put, put - written),
-        };
-    }
-    if len < state.size as crate::stdlib::z_size_t {
-        loop {
-            let Some(input) = state.buffers.as_ref().map(|buffers| &buffers.input) else {
-                return 0;
-            };
-            if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
-            }
-            let Some(next_index) = (state.strm.next_in as usize)
-                .checked_sub(input.as_ptr() as usize)
-                .filter(|index| *index <= input.len())
-            else {
-                return 0;
-            };
-            let copied = {
-                let Some(input) = state.buffers.as_mut().map(|buffers| buffers.input.as_mut())
-                else {
-                    return 0;
-                };
-                gz_write_buffered_copy(input, state.size, state.strm.avail_in, next_index, source)
-            };
-            let Some((copy, avail_in)) = copied else {
-                return 0;
-            };
-            state.strm.avail_in = avail_in;
-            gz_write_buffered_copy_commit_state(state, copy);
-            source = &source[copy as usize..];
-            len = source.len();
+// The compressor and ABI stream cursors are deliberately kept in exported
+// writer boundaries. This macro is not an implementation function: every
+// expansion is in an export wrapper that already owns the validated handle
+// and its call-scoped input view.
+macro_rules! gz_write_at_boundary {
+    ($state:expr, $source:expr) => {{
+        'gz_write_result: {
+            let state = $state;
+            let mut source: &[u8] = $source;
+            let mut len = source.len();
+            let put: crate::stdlib::z_size_t = len;
+            let mut ret: ::core::ffi::c_int = 0;
             if len == 0 as crate::stdlib::z_size_t {
-                break;
+                break 'gz_write_result 0 as crate::stdlib::z_size_t;
             }
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
-                return gz_write_failure_result(state.again, put, len);
+            if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
+            {
+                break 'gz_write_result 0 as crate::stdlib::z_size_t;
             }
+            if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+                break 'gz_write_result 0 as crate::stdlib::z_size_t;
+            }
+            if state.direct != 0 {
+                break 'gz_write_result match gz_write_direct(state, source) {
+                    Ok(written) => written,
+                    Err(written) => gz_write_failure_result(state.again, put, put - written),
+                };
+            }
+            if len < state.size as crate::stdlib::z_size_t {
+                loop {
+                    let Some(input) = state.buffers.as_ref().map(|buffers| &buffers.input) else {
+                        break 'gz_write_result 0;
+                    };
+                    if state.strm.avail_in == 0 as crate::stdlib::uInt {
+                        state.strm.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
+                    }
+                    let Some(next_index) = (state.strm.next_in as usize)
+                        .checked_sub(input.as_ptr() as usize)
+                        .filter(|index| *index <= input.len())
+                    else {
+                        break 'gz_write_result 0;
+                    };
+                    let copied = {
+                        let Some(input) =
+                            state.buffers.as_mut().map(|buffers| buffers.input.as_mut())
+                        else {
+                            break 'gz_write_result 0;
+                        };
+                        gz_write_buffered_copy(
+                            input,
+                            state.size,
+                            state.strm.avail_in,
+                            next_index,
+                            source,
+                        )
+                    };
+                    let Some((copy, avail_in)) = copied else {
+                        break 'gz_write_result 0;
+                    };
+                    state.strm.avail_in = avail_in;
+                    gz_write_buffered_copy_commit_state(state, copy);
+                    source = &source[copy as usize..];
+                    len = source.len();
+                    if len == 0 as crate::stdlib::z_size_t {
+                        break;
+                    }
+                    if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+                        break 'gz_write_result gz_write_failure_result(state.again, put, len);
+                    }
+                }
+            } else {
+                if state.strm.avail_in != 0
+                    && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+                {
+                    break 'gz_write_result 0 as crate::stdlib::z_size_t;
+                }
+                state.strm.next_in = source.as_ptr() as *mut crate::stdlib::Bytef;
+                loop {
+                    let n = gz_write_direct_chunk_plan(len);
+                    state.strm.avail_in = n as crate::stdlib::uInt;
+                    ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+                    let Some((next_source, next_len, consumed)) = gz_write_direct_progress(
+                        source,
+                        len,
+                        n as crate::stdlib::uInt,
+                        state.strm.avail_in,
+                    ) else {
+                        break 'gz_write_result 0;
+                    };
+                    len = gz_write_direct_commit_state(state, consumed, next_len);
+                    source = next_source;
+                    if ret == -1 as ::core::ffi::c_int {
+                        break 'gz_write_result gz_write_failure_result(state.again, put, len);
+                    }
+                    if len == 0 {
+                        break;
+                    }
+                }
+            }
+            break 'gz_write_result put;
         }
-    } else {
-        if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
-        {
-            return 0 as crate::stdlib::z_size_t;
-        }
-        state.strm.next_in = source.as_ptr() as *mut crate::stdlib::Bytef;
-        loop {
-            let n = gz_write_direct_chunk_plan(len);
-            state.strm.avail_in = n as crate::stdlib::uInt;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            let Some((next_source, next_len, consumed)) = gz_write_direct_progress(
-                source,
-                len,
-                n as crate::stdlib::uInt,
-                state.strm.avail_in,
-            ) else {
-                return 0;
-            };
-            len = gz_write_direct_commit_state(state, consumed, next_len);
-            source = next_source;
-            if ret == -1 as ::core::ffi::c_int {
-                return gz_write_failure_result(state.again, put, len);
-            }
-            if len == 0 {
-                break;
-            }
-        }
-    }
-    return put;
+    }};
 }
 #[export_name = "gzwrite"]
 
@@ -815,7 +830,7 @@ pub unsafe extern "C" fn gzwrite_ffi(
     } else {
         ::core::slice::from_raw_parts(buf as *const u8, len as usize)
     };
-    gz_write(state, source) as ::core::ffi::c_int
+    gz_write_at_boundary!(state, source) as ::core::ffi::c_int
 }
 #[export_name = "gzfwrite"]
 
@@ -855,7 +870,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     } else {
         ::core::slice::from_raw_parts(buf as *const u8, len)
     };
-    gzfwrite_completed_items(gz_write(state, source), size)
+    gzfwrite_completed_items(gz_write_at_boundary!(state, source), size)
 }
 #[export_name = "gzputc"]
 pub unsafe extern "C" fn gzputc_ffi(
@@ -917,7 +932,7 @@ pub unsafe extern "C" fn gzputc_ffi(
         // below, which flushes it before inserting this byte.
     }
     buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
-    if gz_write(state, &buf) != 1 as crate::stdlib::z_size_t {
+    if gz_write_at_boundary!(state, &buf) != 1 as crate::stdlib::z_size_t {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
@@ -946,7 +961,7 @@ pub unsafe extern "C" fn gzputs_ffi(
         );
         return -1;
     }
-    let put = gz_write(state, bytes);
+    let put = gz_write_at_boundary!(state, bytes);
     if len != 0 && put == 0 {
         -1
     } else {
