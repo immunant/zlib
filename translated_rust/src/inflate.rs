@@ -640,30 +640,6 @@ fn inflate_pull_byte(
     true
 }
 
-unsafe extern "C" fn updatewindow(
-    mut strm: crate::zlib_h::z_streamp,
-    mut end: *const crate::stdlib::Bytef,
-    mut copy: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    // The ABI state and stream have now passed their association and cursor
-    // checks.  Keep their raw projection at this boundary; the decoder below
-    // works through ordinary Rust references.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
-    let input = if copy == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(end.sub(copy as usize), copy as usize)
-    };
-    update_window_from_slice(
-        &mut state.owned_window,
-        state.wbits,
-        &mut state.wsize,
-        &mut state.wnext,
-        &mut state.whave,
-        input,
-    )
-}
 pub unsafe extern "C" fn inflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -2391,10 +2367,20 @@ pub unsafe extern "C" fn inflate(
                 < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
                 || flush != crate::zlib_h::Z_FINISH)
     {
-        if updatewindow(
-            strm,
-            strm.next_out,
-            out.wrapping_sub(strm.avail_out as ::core::ffi::c_uint),
+        // `output` is the bounded caller range retained for this call, and
+        // `output_chunk_start` marks the same post-checksum chunk that the
+        // former cursor adapter passed to `updatewindow()`.  Keep history
+        // updates in the slice core instead of rebuilding raw cursors from
+        // the ABI stream after all decoding has completed.
+        let produced = out.wrapping_sub(strm.avail_out as ::core::ffi::c_uint) as usize;
+        let produced_output = &output[output_chunk_start..output_chunk_start + produced];
+        if update_window_from_slice(
+            &mut state.owned_window,
+            state.wbits,
+            &mut state.wsize,
+            &mut state.wnext,
+            &mut state.whave,
+            produced_output,
         ) != 0
         {
             state.mode = crate::src::inflate::MEM;
