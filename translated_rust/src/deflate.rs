@@ -1075,26 +1075,15 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
 ) -> ::core::ffi::c_int {
     deflateSetHeader(strm, head)
 }
-pub unsafe extern "C" fn deflatePending(
-    mut strm: crate::zlib_h::z_streamp,
-    mut pending: *mut ::core::ffi::c_uint,
-    mut bits: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
+fn deflate_pending_value(pending: crate::zutil_h::ulg) -> Result<::core::ffi::c_uint, ()> {
+    let value = pending as ::core::ffi::c_uint;
+    if value as crate::zutil_h::ulg == pending {
+        Ok(value)
+    } else {
+        Err(())
     }
-    if !bits.is_null() {
-        *bits = (*(*strm).state).bi_valid;
-    }
-    if !pending.is_null() {
-        *pending = (*(*strm).state).pending as ::core::ffi::c_uint;
-        if *pending as crate::zutil_h::ulg != (*(*strm).state).pending {
-            *pending = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            return crate::zlib_h::Z_BUF_ERROR;
-        }
-    }
-    return crate::zlib_h::Z_OK;
 }
+
 #[export_name = "deflatePending"]
 
 pub unsafe extern "C" fn deflatePending_ffi(
@@ -1102,19 +1091,23 @@ pub unsafe extern "C" fn deflatePending_ffi(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflatePending(strm, pending, bits)
-}
-pub unsafe extern "C" fn deflateUsed(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let state = (*strm).state as *mut crate::src::deflate::deflate_state;
     if !bits.is_null() {
-        *bits = (*(*strm).state).bi_used;
+        *bits = (*state).bi_valid;
     }
-    return crate::zlib_h::Z_OK;
+    if !pending.is_null() {
+        match deflate_pending_value((*state).pending) {
+            Ok(value) => *pending = value,
+            Err(()) => {
+                *pending = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
+                return crate::zlib_h::Z_BUF_ERROR;
+            }
+        }
+    }
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateUsed"]
 
@@ -1122,7 +1115,14 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateUsed(strm, bits)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if !bits.is_null() {
+        let state = (*strm).state as *mut crate::src::deflate::deflate_state;
+        *bits = (*state).bi_used;
+    }
+    crate::zlib_h::Z_OK
 }
 fn deflate_prime_bits_valid(bits: ::core::ffi::c_int) -> bool {
     bits >= 0 as ::core::ffi::c_int && bits <= 16 as ::core::ffi::c_int
@@ -3633,7 +3633,8 @@ unsafe extern "C" fn deflate_huff(
 mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
-        deflate_prime_bits_valid, deflate_state_status_valid, deflate_version_matches,
+        deflate_pending_value, deflate_prime_bits_valid, deflate_state_status_valid,
+        deflate_version_matches,
         gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
         normalize_deflate_params, pending_output_len, read_buf_len, short_msb_bytes,
         slide_hash_entry, stored_block_min_size, zlib_header,
@@ -3657,6 +3658,19 @@ mod tests {
         assert_eq!(deflate_dictionary_len(27, 5, 32), 32);
         assert_eq!(deflate_dictionary_len(30, 5, 32), 32);
         assert_eq!(deflate_dictionary_len(crate::stdlib::uInt::MAX, 1, 32), 0);
+    }
+
+    #[test]
+    fn deflate_pending_value_accepts_uint_and_rejects_truncation() {
+        assert_eq!(deflate_pending_value(0), Ok(0));
+        assert_eq!(
+            deflate_pending_value(::core::ffi::c_uint::MAX as crate::zutil_h::ulg),
+            Ok(::core::ffi::c_uint::MAX),
+        );
+        assert_eq!(
+            deflate_pending_value((::core::ffi::c_uint::MAX as crate::zutil_h::ulg) + 1),
+            Err(()),
+        );
     }
 
     #[test]
