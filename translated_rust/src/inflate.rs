@@ -609,7 +609,10 @@ unsafe extern "C" fn updatewindow(
         if end.is_null() {
             return 1 as ::core::ffi::c_int;
         }
-        ::core::slice::from_raw_parts(end.offset(-copy_offset), copy_len)
+        // Preserve the translated cursor movement without making pointer
+        // arithmetic itself an unsafe operation. The boundary still lends a
+        // `copy_len` span only after validating the source pointer above.
+        ::core::slice::from_raw_parts(end.wrapping_offset(-copy_offset), copy_len)
     };
     if inflate_window_copy(window, produced, plan).is_none() {
         return 1 as ::core::ffi::c_int;
