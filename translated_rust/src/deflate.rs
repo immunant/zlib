@@ -419,9 +419,29 @@ struct DeflateStorageLayout {
     pending: DeflateAllocation,
 }
 
+// Keep the state record in the same pointer-free allocation plan as its four
+// backing regions.  The current ABI adapter still invokes zalloc directly,
+// but a future allocation broker can consume this complete plan and preserve
+// zlib's allocation/failure/release sequence without inspecting raw state.
+struct DeflateAllocationPlan {
+    state: DeflateAllocation,
+    storage: DeflateStorageLayout,
+}
+
 impl DeflateLayout {
     fn storage(&self) -> DeflateStorageLayout {
         DeflateStorageLayout::new(self.w_size, self.hash_size, self.lit_bufsize)
+    }
+
+    fn allocation_plan(&self) -> DeflateAllocationPlan {
+        DeflateAllocationPlan {
+            state: DeflateAllocation {
+                items: 1,
+                size: ::core::mem::size_of::<crate::src::deflate::deflate_state>()
+                    as crate::stdlib::uInt,
+            },
+            storage: self.storage(),
+        }
     }
 }
 
@@ -813,11 +833,12 @@ pub unsafe extern "C" fn deflateInit2_(
     let Some(layout) = deflate_layout(level, method, windowBits, memLevel, strategy) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let storage = layout.storage();
+    let allocation_plan = layout.allocation_plan();
+    let storage = allocation_plan.storage;
     s = Some((*strm).zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
         (*strm).opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+        allocation_plan.state.items,
+        allocation_plan.state.size,
     ) as *mut crate::src::deflate::deflate_state;
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
