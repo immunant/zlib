@@ -3718,6 +3718,9 @@ unsafe fn deflate_stored(
         if !set_stored_block_length_state(pending_buf, state.pending, len) {
             return need_more;
         }
+        if last != 0 {
+            state.bi_used = 8 as ::core::ffi::c_int;
+        }
         flush_pending(state.strm);
         if left != 0 {
             let state = &mut *s;
@@ -3798,7 +3801,6 @@ unsafe fn deflate_stored(
         }
     }
     if last != 0 {
-        (&mut *s).bi_used = 8 as ::core::ffi::c_int;
         return finish_done;
     }
     {
@@ -3868,10 +3870,10 @@ unsafe fn deflate_stored(
             last,
         );
         state.block_start += len as ::core::ffi::c_long;
+        if last != 0 {
+            state.bi_used = 8 as ::core::ffi::c_int;
+        }
         flush_pending(state.strm);
-    }
-    if last != 0 {
-        (&mut *s).bi_used = 8 as ::core::ffi::c_int;
     }
     return (if last != 0 {
         finish_started as ::core::ffi::c_int
