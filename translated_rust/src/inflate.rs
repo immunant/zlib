@@ -993,23 +993,21 @@ pub fn inflate(
     output_capacity = left as usize;
     next = strm.next_in as *mut ::core::ffi::c_uchar;
     have = strm.avail_in as ::core::ffi::c_uint;
-    let input = if have == 0 {
-        &[]
-    } else {
-        // The public C API requires `avail_in` readable bytes at a non-null
-        // `next_in` cursor; the guard above enforces the null half before
-        // this implementation binds the range.
-        unsafe { ::core::slice::from_raw_parts(next, have as usize) }
-    };
-    // The entry checks accepted this caller-owned range. Keep one binding for
-    // the complete output cursor so the decoder can use checked sub-slices
-    // instead of repeatedly recreating overlapping raw views as `put` moves.
-    let mut output_storage = if left == 0 {
-        &mut []
-    } else {
-        // The entry guard above requires a non-null output cursor. zlib's
-        // stream contract supplies `avail_out` writable bytes there.
-        unsafe { ::core::slice::from_raw_parts_mut(put, output_capacity) }
+    // SAFETY: the entry guard above established the C cursor contracts for
+    // both ranges. Bind them together once before decoding; all subsequent
+    // cursor movement is bounded slice/reference work.
+    let (input, mut output_storage) = unsafe {
+        let input = if have == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(next, have as usize)
+        };
+        let output = if left == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(put, output_capacity)
+        };
+        (input, output)
     };
     // `inflateGetHeader()` retains this optional caller-owned structure for
     // the duration of inflate. Bind it once for this decode call, so gzip
