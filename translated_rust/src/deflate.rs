@@ -1988,8 +1988,15 @@ pub unsafe extern "C" fn deflateTune_ffi(
 ) -> ::core::ffi::c_int {
     deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
 }
-pub unsafe fn deflateBound_z(
-    strm: Option<&crate::zlib_h::z_stream_s>,
+/// Compute a deflate bound after the ABI stream link has been converted at
+/// the caller boundary.  Keeping validation here lets both exported bounds
+/// share the exact state checks without retaining or dereferencing a raw
+/// pointer in the calculation itself.
+fn deflate_bound_z_impl(
+    stream: Option<(
+        &crate::zlib_h::z_stream_s,
+        &crate::src::deflate::deflate_state,
+    )>,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let mut fixedlen: crate::stdlib::z_size_t = 0;
@@ -2012,28 +2019,12 @@ pub unsafe fn deflateBound_z(
     if storelen < sourceLen {
         storelen = -1 as ::core::ffi::c_int as crate::stdlib::z_size_t;
     }
-    let state = match strm {
-        Some(strm) if strm.zalloc.is_some() && strm.zfree.is_some() && !strm.state.is_null() => {
-            let s = &*strm.state;
-            let stream_pointer =
-                strm as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp;
-            if s.strm == stream_pointer
-                && (s.status == crate::src::deflate::INIT_STATE
-                    || s.status == crate::src::deflate::GZIP_STATE
-                    || s.status == crate::src::deflate::EXTRA_STATE
-                    || s.status == crate::src::deflate::NAME_STATE
-                    || s.status == crate::src::deflate::COMMENT_STATE
-                    || s.status == crate::src::deflate::HCRC_STATE
-                    || s.status == crate::src::deflate::BUSY_STATE
-                    || s.status == crate::src::deflate::FINISH_STATE)
-            {
-                Some(s)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    };
+    let state = stream.and_then(|(strm, state)| {
+        (deflate_params_stream_is_valid(strm)
+            && core::ptr::eq(strm.state.cast_const(), core::ptr::from_ref(state))
+            && deflate_params_state_is_valid(strm, state))
+        .then_some(state)
+    });
     let Some(s) = state else {
         bound = if fixedlen > storelen {
             fixedlen
@@ -2116,14 +2107,17 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    deflateBound_z(strm.as_ref(), sourceLen)
+    let stream = strm.as_ref();
+    let state = stream.and_then(|strm| strm.state.as_ref());
+    deflate_bound_z_impl(stream.zip(state), sourceLen)
 }
 pub unsafe fn deflateBound(
     strm: Option<&crate::zlib_h::z_stream_s>,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
+    let state = strm.and_then(|strm| unsafe { strm.state.as_ref() });
     let mut bound: crate::stdlib::z_size_t =
-        deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t);
+        deflate_bound_z_impl(strm.zip(state), sourceLen as crate::stdlib::z_size_t);
     return if bound != bound {
         -1 as ::core::ffi::c_int as crate::stdlib::uLong
     } else {
