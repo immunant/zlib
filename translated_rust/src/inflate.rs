@@ -248,7 +248,7 @@ pub unsafe extern "C" fn inflateReset_ffi(
     };
     inflateReset(strm, state)
 }
-pub unsafe fn inflateReset2(
+pub fn inflateReset2(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
     mut windowBits: ::core::ffi::c_int,
@@ -275,10 +275,14 @@ pub unsafe fn inflateReset2(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if !state.window.is_null() && state.wbits != windowBits as ::core::ffi::c_uint {
-        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            strm.opaque,
-            state.window as crate::stdlib::voidpf,
-        );
+        // The validated stream owns this existing window allocation. The
+        // callback remains the ABI boundary for custom allocators.
+        unsafe {
+            Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+                strm.opaque,
+                state.window as crate::stdlib::voidpf,
+            );
+        }
         state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
     state.wrap = wrap;
