@@ -777,7 +777,7 @@ pub static mut _length_code: [crate::zutil_h::uch; 256] = [
 
 pub mod trees_h {
 
-    pub static mut static_ltree: [crate::src::deflate::ct_data; 288] = [
+    pub static static_ltree: [crate::src::deflate::ct_data; 288] = [
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
                 freq: 12 as crate::zutil_h::ush,
@@ -3084,7 +3084,7 @@ pub mod trees_h {
         },
     ];
 
-    pub static mut static_dtree: [crate::src::deflate::ct_data; 30] = [
+    pub static static_dtree: [crate::src::deflate::ct_data; 30] = [
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
                 freq: 0 as crate::zutil_h::ush,
@@ -3327,7 +3327,7 @@ pub mod trees_h {
         },
     ];
 
-    pub static mut base_length: [::core::ffi::c_int; 29] = [
+    pub static base_length: [::core::ffi::c_int; 29] = [
         0 as ::core::ffi::c_int,
         1 as ::core::ffi::c_int,
         2 as ::core::ffi::c_int,
@@ -3359,7 +3359,7 @@ pub mod trees_h {
         0 as ::core::ffi::c_int,
     ];
 
-    pub static mut base_dist: [::core::ffi::c_int; 30] = [
+    pub static base_dist: [::core::ffi::c_int; 30] = [
         0 as ::core::ffi::c_int,
         1 as ::core::ffi::c_int,
         2 as ::core::ffi::c_int,
@@ -3469,7 +3469,7 @@ pub const REPZ_3_10: ::core::ffi::c_int = 17 as ::core::ffi::c_int;
 
 pub const REPZ_11_138: ::core::ffi::c_int = 18 as ::core::ffi::c_int;
 
-static mut extra_lbits: [::core::ffi::c_int; 29] = [
+static extra_lbits: [::core::ffi::c_int; 29] = [
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
@@ -3501,7 +3501,7 @@ static mut extra_lbits: [::core::ffi::c_int; 29] = [
     0 as ::core::ffi::c_int,
 ];
 
-static mut extra_dbits: [::core::ffi::c_int; 30] = [
+static extra_dbits: [::core::ffi::c_int; 30] = [
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
@@ -3534,7 +3534,7 @@ static mut extra_dbits: [::core::ffi::c_int; 30] = [
     13 as ::core::ffi::c_int,
 ];
 
-static mut extra_blbits: [::core::ffi::c_int; 19] = [
+static extra_blbits: [::core::ffi::c_int; 19] = [
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
     0 as ::core::ffi::c_int,
@@ -3556,7 +3556,7 @@ static mut extra_blbits: [::core::ffi::c_int; 19] = [
     7 as ::core::ffi::c_int,
 ];
 
-static mut bl_order: [crate::zutil_h::uch; 19] = [
+static bl_order: [crate::zutil_h::uch; 19] = [
     16 as crate::zutil_h::uch,
     17 as crate::zutil_h::uch,
     18 as crate::zutil_h::uch,
