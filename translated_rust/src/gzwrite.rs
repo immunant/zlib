@@ -122,13 +122,6 @@ fn gzflush_mode_is_valid(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 && flush <= crate::zlib_h::Z_FINISH
 }
 
-fn gzfwrite_len(
-    size: crate::stdlib::z_size_t,
-    nitems: crate::stdlib::z_size_t,
-) -> Option<crate::stdlib::z_size_t> {
-    size.checked_mul(nitems)
-}
-
 fn gzfwrite_result(
     size: crate::stdlib::z_size_t,
     len: crate::stdlib::z_size_t,
@@ -776,7 +769,7 @@ pub unsafe extern "C" fn gzfwrite(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    let Some(len) = gzfwrite_len(size, nitems) else {
+    let Some(len) = crate::src::gzlib::gz_request_len(size, nitems) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -1018,9 +1011,9 @@ mod tests {
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result, gzputs_len_fits_int,
-        gzputs_result, gzsetparams_settings_match, gzsetparams_state_is_usable,
-        gzwrite_len_fits_int, GzCompWriteFailure,
+        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
+        GzCompWriteFailure,
     };
 
     #[test]
@@ -1446,17 +1439,6 @@ mod tests {
     fn gzflush_mode_is_valid_rejects_values_outside_supported_range() {
         assert!(!gzflush_mode_is_valid(-1));
         assert!(!gzflush_mode_is_valid(crate::zlib_h::Z_FINISH + 1));
-    }
-
-    #[test]
-    fn gzfwrite_len_returns_requested_byte_count() {
-        assert_eq!(gzfwrite_len(4, 3), Some(12));
-        assert_eq!(gzfwrite_len(0, crate::stdlib::z_size_t::MAX), Some(0));
-    }
-
-    #[test]
-    fn gzfwrite_len_rejects_overflow() {
-        assert_eq!(gzfwrite_len(crate::stdlib::z_size_t::MAX, 2), None);
     }
 
     #[test]

@@ -2114,7 +2114,7 @@ pub unsafe extern "C" fn inflate(
         if left == 0 as ::core::ffi::c_uint {
             break;
         }
-        copy = out.wrapping_sub(left);
+        copy = inflate_cursor_progress(out, left);
         if (*state).offset > copy {
             copy = (*state).offset.wrapping_sub(copy);
             if copy > (*state).whave {

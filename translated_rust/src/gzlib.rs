@@ -68,6 +68,13 @@ fn gz_is_read_or_write_mode(mode: ::core::ffi::c_int) -> bool {
     mode == crate::gzguts_h::GZ_READ || mode == crate::gzguts_h::GZ_WRITE
 }
 
+pub(crate) fn gz_request_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<crate::stdlib::z_size_t> {
+    size.checked_mul(nitems)
+}
+
 fn gz_clear_read_flags(eof: &mut ::core::ffi::c_int, past: &mut ::core::ffi::c_int) {
     *eof = 0;
     *past = 0;
@@ -1110,16 +1117,16 @@ mod tests {
         gz_legacy_offset_result, gz_lseek_succeeded, gz_open_needs_open, gz_open_offset_plan,
         gz_open_path_buffer_len, gz_open_recorded_offset, gz_open_should_set_close_on_exec,
         gz_open_should_set_nonblocking, gz_parse_open_mode, gz_position_after_skip,
-        gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
-        gzclearerr_core, gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result,
-        gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
-        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
-        gzseek_clears_pending_skip, gzseek_effective_skip, gzseek_error_allows_positioning,
-        gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
-        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
-        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, gztell64_result,
-        GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan,
-        GzSeekReadBufferPlan,
+        gz_post_open_metadata, gz_prepare_open, gz_request_len, gz_reset_core,
+        gzbuffer_normalized_want, gzclearerr_core, gzdopen_has_valid_descriptor,
+        gzdopen_path_buffer_len, gzeof_result, gzerror_core, gzoffset64_adjust_for_buffered_read,
+        gzoffset64_result, gzrewind_request_is_valid, gzseek_adjust_offset,
+        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
+        gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
+        gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
+        gzseek_plan_remaining_offset, gzseek_read_buffer_consumed, gzseek_request_is_valid,
+        gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan,
+        GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1128,6 +1135,22 @@ mod tests {
         let mut past = 1;
         gz_clear_read_flags(&mut eof, &mut past);
         assert_eq!((eof, past), (0, 0));
+    }
+
+    #[test]
+    fn gz_request_len_handles_zero_and_representable_products() {
+        assert_eq!(gz_request_len(0, 5), Some(0));
+        assert_eq!(gz_request_len(5, 0), Some(0));
+        assert_eq!(
+            gz_request_len(crate::stdlib::z_size_t::MAX, 1),
+            Some(crate::stdlib::z_size_t::MAX)
+        );
+        assert_eq!(gz_request_len(4, 7), Some(28));
+    }
+
+    #[test]
+    fn gz_request_len_rejects_overflow() {
+        assert_eq!(gz_request_len(crate::stdlib::z_size_t::MAX, 2), None);
     }
 
     #[test]

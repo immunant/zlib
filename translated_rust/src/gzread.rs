@@ -158,13 +158,6 @@ fn gz_avail_should_compact(compact_input: bool, input_is_buffer_start: bool) -> 
     compact_input && !input_is_buffer_start
 }
 
-fn gz_fread_request_len(
-    size: crate::stdlib::z_size_t,
-    nitems: crate::stdlib::z_size_t,
-) -> Option<crate::stdlib::z_size_t> {
-    size.checked_mul(nitems)
-}
-
 fn gzread_request_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0
 }
@@ -1408,12 +1401,6 @@ mod tests {
     }
 
     #[test]
-    fn gz_fread_request_len_handles_zero_operands() {
-        assert_eq!(gz_fread_request_len(0, 5), Some(0));
-        assert_eq!(gz_fread_request_len(5, 0), Some(0));
-    }
-
-    #[test]
     fn gzgetc_read_result_returns_error_when_no_byte_was_read() {
         assert_eq!(gzgetc_read_result(0, 42), -1);
     }
@@ -1431,20 +1418,6 @@ mod tests {
             gzgetc_buffered_result(1, crate::stdlib::off64_t::MAX, 0),
             (0, crate::stdlib::off64_t::MIN, 0)
         );
-    }
-
-    #[test]
-    fn gz_fread_request_len_accepts_representable_products() {
-        assert_eq!(
-            gz_fread_request_len(crate::stdlib::z_size_t::MAX, 1),
-            Some(crate::stdlib::z_size_t::MAX)
-        );
-        assert_eq!(gz_fread_request_len(4, 7), Some(28));
-    }
-
-    #[test]
-    fn gz_fread_request_len_rejects_overflow() {
-        assert_eq!(gz_fread_request_len(crate::stdlib::z_size_t::MAX, 2), None);
     }
 
     #[test]
@@ -2182,7 +2155,7 @@ pub unsafe extern "C" fn gzfread(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    let Some(request_len) = gz_fread_request_len(size, nitems) else {
+    let Some(request_len) = crate::src::gzlib::gz_request_len(size, nitems) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,

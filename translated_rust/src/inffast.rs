@@ -65,6 +65,21 @@ fn consume_bits(
     (hold >> bit_count, bits.wrapping_sub(bit_count))
 }
 
+fn add_and_consume_extra_bits(
+    value: ::core::ffi::c_uint,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+    extra_bits: ::core::ffi::c_uint,
+) -> (
+    ::core::ffi::c_uint,
+    crate::stdlib::uLong,
+    ::core::ffi::c_uint,
+) {
+    let value = value.wrapping_add(low_bits(hold, extra_bits));
+    let (hold, bits) = consume_bits(hold, bits, extra_bits);
+    (value, hold, bits)
+}
+
 fn append_input_byte(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -248,8 +263,7 @@ pub unsafe extern "C" fn inflate_fast(
                             input_remaining = input_remaining_after_read(input_remaining);
                             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh3);
                         }
-                        len = len.wrapping_add(low_bits(hold, extra_bits));
-                        (hold, bits) = consume_bits(hold, bits, extra_bits);
+                        (len, hold, bits) = add_and_consume_extra_bits(len, hold, bits, extra_bits);
                     }
                     if bits < 15 as ::core::ffi::c_uint {
                         let c2rust_fresh4 = in_0;
@@ -299,8 +313,8 @@ pub unsafe extern "C" fn inflate_fast(
                                     (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh7);
                                 }
                             }
-                            dist = dist.wrapping_add(low_bits(hold, extra_bits));
-                            (hold, bits) = consume_bits(hold, bits, extra_bits);
+                            (dist, hold, bits) =
+                                add_and_consume_extra_bits(dist, hold, bits, extra_bits);
                             op = output_produced;
                             if dist > op {
                                 c2rust_current_block_141 = 5235537862154438448;
@@ -552,10 +566,10 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_input_byte, bit_mask, code, consume_bits, fast_dist_action, fast_input_available,
-        fast_litlen_action, fast_output_available, input_remaining_after_read, low_bits,
-        output_cursor_after_write, subtable_offset, unread_input_state, FastDistAction,
-        FastLitLenAction,
+        add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
+        fast_dist_action, fast_input_available, fast_litlen_action, fast_output_available,
+        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_offset,
+        unread_input_state, FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -582,6 +596,22 @@ mod tests {
     fn consume_bits_preserves_zero_count_and_wrapping_subtraction() {
         assert_eq!(consume_bits(0xfeed, 9, 0), (0xfeed, 9));
         assert_eq!(consume_bits(1, 0, 1), (0, ::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn extra_bits_update_preserves_value_and_bit_count_wrapping() {
+        assert_eq!(
+            add_and_consume_extra_bits(7, 0b1011_0101, 8, 3),
+            (12, 0b1_0110, 5)
+        );
+        assert_eq!(
+            add_and_consume_extra_bits(::core::ffi::c_uint::MAX, 0, 0, 0),
+            (::core::ffi::c_uint::MAX, 0, 0)
+        );
+        assert_eq!(
+            add_and_consume_extra_bits(::core::ffi::c_uint::MAX, 1, 0, 1),
+            (0, 0, ::core::ffi::c_uint::MAX)
+        );
     }
 
     #[test]
