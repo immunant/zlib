@@ -673,6 +673,39 @@ struct InflateInitPreparation {
     window_bits: ::core::ffi::c_int,
 }
 
+/// A stream prepared for the public inflater-initialization implementation.
+///
+/// This keeps the ABI carrier at the boundary of initialization.  In
+/// particular, the implementation owns the allocator validation and the
+/// state-storage handoff instead of making either exported entry point manage
+/// callback-owned memory.
+struct InflateInitStream<'a> {
+    stream: &'a mut crate::zlib_h::z_stream_s,
+}
+
+impl<'a> InflateInitStream<'a> {
+    fn new(stream: &'a mut crate::zlib_h::z_stream_s) -> Self {
+        Self { stream }
+    }
+
+    fn clear_message(&mut self) {
+        self.stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    }
+
+    fn install(&mut self, preparation: InflateInitPreparation) -> ::core::ffi::c_int {
+        // `InflateInitStream` is constructed only after the ABI wrapper has
+        // checked the stream pointer.  The remaining unsafety is limited to
+        // the paired allocator callback and its typed-state handoff.
+        unsafe {
+            inflate_allocate_state(
+                self.stream,
+                preparation.state,
+                InflateStateInstallation::Initialize(preparation.window_bits),
+            )
+        }
+    }
+}
+
 fn prepare_inflate_init(
     window_bits: ::core::ffi::c_int,
     version: Option<::core::ffi::c_char>,
@@ -688,21 +721,31 @@ fn prepare_inflate_init(
     Ok(InflateInitPreparation { state, window_bits })
 }
 
+fn inflate_init2_impl(
+    mut stream: InflateInitStream<'_>,
+    window_bits: ::core::ffi::c_int,
+    version: Option<::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let preparation = match prepare_inflate_init(window_bits, version, stream_size) {
+        Ok(preparation) => preparation,
+        Err(error) => return error,
+    };
+    stream.clear_message();
+    stream.install(preparation)
+}
+
 pub unsafe fn inflateInit2_(
     strm: &mut crate::zlib_h::z_stream_s,
     windowBits: ::core::ffi::c_int,
     version: Option<::core::ffi::c_char>,
     stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let preparation = match prepare_inflate_init(windowBits, version, stream_size) {
-        Ok(preparation) => preparation,
-        Err(error) => return error,
-    };
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    inflate_allocate_state(
-        strm,
-        preparation.state,
-        InflateStateInstallation::Initialize(preparation.window_bits),
+    inflate_init2_impl(
+        InflateInitStream::new(strm),
+        windowBits,
+        version,
+        stream_size,
     )
 }
 #[export_name = "inflateInit2_"]
@@ -716,7 +759,12 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateInit2_(strm, windowBits, version.as_ref().copied(), stream_size)
+    inflate_init2_impl(
+        InflateInitStream::new(strm),
+        windowBits,
+        version.as_ref().copied(),
+        stream_size,
+    )
 }
 #[export_name = "inflateInit_"]
 
@@ -728,8 +776,8 @@ pub unsafe extern "C" fn inflateInit__ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateInit2_(
-        strm,
+    inflate_init2_impl(
+        InflateInitStream::new(strm),
         crate::zutil_h::DEF_WBITS,
         version.as_ref().copied(),
         stream_size,
