@@ -683,6 +683,26 @@ fn gzgetc_buffer_commit_state(state: &mut crate::gzguts_h::gz_state) -> bool {
     true
 }
 
+/// Read one byte from owned buffered output after the export boundary has
+/// reconciled its public cursor to an index.  This keeps `gzgetc` from
+/// dereferencing a public raw cursor directly (the public macro may have
+/// advanced it between calls).
+fn gzgetc_buffered_take(
+    output: &[u8],
+    next_index: usize,
+    have: crate::stdlib::uInt,
+) -> Option<(::core::ffi::c_int, usize)> {
+    if have == 0 {
+        return None;
+    }
+    let end = next_index.checked_add(have as usize)?;
+    output.get(next_index..end)?;
+    Some((
+        *output.get(next_index)? as ::core::ffi::c_int,
+        next_index + 1,
+    ))
+}
+
 /// Calculate a `gzfread` byte request with the same wrapping multiplication
 /// and overflow rejection as the C API.  This deliberately reports a zero
 /// request separately from an invalid overflowing request.
@@ -947,12 +967,37 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
     }
     crate::src::gzlib::gz_error_clear(state);
     if state.x.have != 0 {
-        let c2rust_fresh2 = state.x.next;
-        state.x.next = state.x.next.offset(1);
+        let taken = {
+            let Some(output) = state
+                .buffers
+                .as_ref()
+                .and_then(|buffers| buffers.output.as_ref())
+            else {
+                return -1;
+            };
+            let Some(next_index) = (state.x.next as usize)
+                .checked_sub(output.as_ptr() as usize)
+                .filter(|index| *index <= output.len())
+            else {
+                return -1;
+            };
+            gzgetc_buffered_take(output, next_index, state.x.have)
+        };
+        let Some((byte, next_index)) = taken else {
+            return -1;
+        };
         if !gzgetc_buffer_commit_state(state) {
             return -1 as ::core::ffi::c_int;
         }
-        return *c2rust_fresh2 as ::core::ffi::c_int;
+        let Some(output) = state
+            .buffers
+            .as_mut()
+            .and_then(|buffers| buffers.output.as_mut())
+        else {
+            return -1;
+        };
+        state.x.next = output.as_mut_ptr().wrapping_add(next_index);
+        return byte;
     }
     if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
@@ -973,12 +1018,37 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     }
     crate::src::gzlib::gz_error_clear(state);
     if state.x.have != 0 {
-        let c2rust_fresh2 = state.x.next;
-        state.x.next = state.x.next.offset(1);
+        let taken = {
+            let Some(output) = state
+                .buffers
+                .as_ref()
+                .and_then(|buffers| buffers.output.as_ref())
+            else {
+                return -1;
+            };
+            let Some(next_index) = (state.x.next as usize)
+                .checked_sub(output.as_ptr() as usize)
+                .filter(|index| *index <= output.len())
+            else {
+                return -1;
+            };
+            gzgetc_buffered_take(output, next_index, state.x.have)
+        };
+        let Some((byte, next_index)) = taken else {
+            return -1;
+        };
         if !gzgetc_buffer_commit_state(state) {
             return -1 as ::core::ffi::c_int;
         }
-        return *c2rust_fresh2 as ::core::ffi::c_int;
+        let Some(output) = state
+            .buffers
+            .as_mut()
+            .and_then(|buffers| buffers.output.as_mut())
+        else {
+            return -1;
+        };
+        state.x.next = output.as_mut_ptr().wrapping_add(next_index);
+        return byte;
     }
     if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
@@ -1220,13 +1290,45 @@ pub unsafe extern "C" fn gzgets_ffi(
             state.past = 1;
             break;
         }
-        let available = ::core::slice::from_raw_parts(state.x.next, state.x.have as usize);
-        let Some((copied, found_newline)) =
-            gzgets_buffered_copy(&mut destination[written..], available, state.x.have, left)
+        let copied = {
+            let Some(output) = state
+                .buffers
+                .as_ref()
+                .and_then(|buffers| buffers.output.as_ref())
+            else {
+                return ::core::ptr::null_mut();
+            };
+            let Some(next_index) = (state.x.next as usize)
+                .checked_sub(output.as_ptr() as usize)
+                .filter(|index| *index <= output.len())
+            else {
+                return ::core::ptr::null_mut();
+            };
+            let Some(available) = output.get(next_index..) else {
+                return ::core::ptr::null_mut();
+            };
+            let Some((copied, found_newline)) =
+                gzgets_buffered_copy(&mut destination[written..], available, state.x.have, left)
+            else {
+                return ::core::ptr::null_mut();
+            };
+            let Some(next_index) = next_index.checked_add(copied as usize) else {
+                return ::core::ptr::null_mut();
+            };
+            if next_index > output.len() {
+                return ::core::ptr::null_mut();
+            }
+            (copied, found_newline, next_index)
+        };
+        let (copied, found_newline, next_index) = copied;
+        let Some(output) = state
+            .buffers
+            .as_mut()
+            .and_then(|buffers| buffers.output.as_mut())
         else {
             return ::core::ptr::null_mut();
         };
-        state.x.next = state.x.next.offset(copied as isize);
+        state.x.next = output.as_mut_ptr().wrapping_add(next_index);
         let Some(remaining) = gzgets_buffer_copy_commit_state(state, left, copied) else {
             return ::core::ptr::null_mut();
         };
