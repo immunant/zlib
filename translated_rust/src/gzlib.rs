@@ -155,7 +155,7 @@ unsafe extern "C" fn gz_open(
             next_out: ::core::ptr::null_mut(),
             avail_out: 0,
             total_out: 0,
-            msg: ::core::ptr::null_mut(),
+            msg: None,
             state: ::core::ptr::null_mut(),
             zalloc: None,
             zfree: None,

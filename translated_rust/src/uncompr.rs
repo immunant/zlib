@@ -39,7 +39,7 @@ pub unsafe extern "C" fn uncompress2_z(
         next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
         avail_out: 0,
         total_out: 0,
-        msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+        msg: None,
         state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
         zalloc: None,
         zfree: None,

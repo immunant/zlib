@@ -974,7 +974,7 @@ pub fn deflateInit2_(
         .expect("deflate initialization registry lock poisoned")
         .remove(&std::thread::current().id());
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    strm.msg = None;
     if strm.zalloc.is_none() {
         strm.zalloc = Some(crate::src::zutil::zcalloc);
         strm.opaque = crate::zlib_h::Opaque::default();
@@ -1038,7 +1038,7 @@ pub fn deflateInit2_(
         Err(()) => {
             // This is the fixed `z_errmsg[6]` string.  Use immutable local
             // storage instead of reading the legacy mutable C export.
-            strm.msg = b"insufficient memory\0".as_ptr().cast_mut().cast();
+            strm.msg = crate::stream_message!(c"insufficient memory");
             return crate::zlib_h::Z_MEM_ERROR;
         }
     };
@@ -1229,7 +1229,7 @@ pub fn deflateResetKeep(
     }
     strm.total_out = 0 as crate::stdlib::uLong;
     strm.total_in = strm.total_out;
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    strm.msg = None;
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
     s.data_type = crate::zlib_h::Z_UNKNOWN;
     s.pending = 0 as crate::zutil_h::ulg;
@@ -1945,25 +1945,11 @@ pub fn deflate(
             || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.0.is_none()
             || s.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
         {
-            strm.msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
-            }) as usize];
+            strm.msg = crate::stream_message!(crate::src::zutil::z_error_message(-2));
             return -2 as ::core::ffi::c_int;
         }
         if strm.avail_out == 0 as crate::stdlib::uInt {
-            strm.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize];
+            strm.msg = crate::stream_message!(crate::src::zutil::z_error_message(-5));
             return -5 as ::core::ffi::c_int;
         }
         // The ABI output range is converted once at this boundary.  All
@@ -2004,27 +1990,13 @@ pub fn deflate(
                     })
             && flush != crate::zlib_h::Z_FINISH
         {
-            (*strm).msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize];
+            (*strm).msg = crate::stream_message!(crate::src::zutil::z_error_message(-5));
             return -5 as ::core::ffi::c_int;
         }
         if s.status == crate::src::deflate::FINISH_STATE
             && (*strm).avail_in != 0 as crate::stdlib::uInt
         {
-            (*strm).msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize];
+            (*strm).msg = crate::stream_message!(crate::src::zutil::z_error_message(-5));
             return -5 as ::core::ffi::c_int;
         }
         if s.status == crate::src::deflate::INIT_STATE && s.wrap == 0 as ::core::ffi::c_int {
@@ -2641,7 +2613,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 
     let copied: Arc<internal_state> = Arc::from(deflateCopy(source_state));
     let dest = &mut *dest;
-    *dest = *source;
+    *dest = source.clone();
     let mut copied = copied;
     let state_pointer = Arc::as_ptr(&copied).cast_mut();
     let state_key = state_pointer.addr();

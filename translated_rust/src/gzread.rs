@@ -278,14 +278,14 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
                     ret = crate::zlib_h::Z_OK;
                     break;
                 } else {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
+                    crate::src::gzlib::gz_error_safe(
+                        &mut *state,
                         crate::zlib_h::Z_DATA_ERROR,
-                        if (*strm).msg.is_null() {
-                            b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                        } else {
-                            (*strm).msg as *const ::core::ffi::c_char
-                        },
+                        (*strm)
+                            .msg
+                            .as_ref()
+                            .map(|message| message.as_c_str())
+                            .or(Some(c"compressed data error")),
                     );
                     break;
                 }

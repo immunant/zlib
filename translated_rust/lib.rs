@@ -129,6 +129,15 @@ macro_rules! input_pointer {
         )
     };
 }
+
+/// Own a copy of a fixed zlib diagnostic while keeping `z_stream_s::msg`
+/// pointer-sized for the C ABI.
+#[macro_export]
+macro_rules! stream_message {
+    ($message:expr) => {
+        Some(::std::rc::Rc::new(($message).to_owned()))
+    };
+}
 pub mod zlib_h {
     pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = unsafe {
         ::core::mem::transmute::<[u8; 15], [::core::ffi::c_char; 15]>(*b"1.3.2.1-motley\0")
@@ -167,7 +176,7 @@ pub mod zlib_h {
         }
     }
 
-    #[derive(Copy, Clone)]
+    #[derive(Clone)]
     #[repr(C)]
 
     pub struct z_stream_s {
@@ -177,7 +186,9 @@ pub mod zlib_h {
         pub next_out: *mut crate::stdlib::Bytef,
         pub avail_out: crate::stdlib::uInt,
         pub total_out: crate::stdlib::uLong,
-        pub msg: *mut ::core::ffi::c_char,
+        // `Rc<CString>` owns a fixed diagnostic without a raw pointer while the
+        // nullable smart pointer retains the original one-word C ABI layout.
+        pub msg: Option<::std::rc::Rc<::std::ffi::CString>>,
         pub state: *mut crate::src::deflate::internal_state,
         pub zalloc: crate::zlib_h::alloc_func,
         pub zfree: crate::zlib_h::free_func,
@@ -185,6 +196,17 @@ pub mod zlib_h {
         pub data_type: ::core::ffi::c_int,
         pub adler: crate::stdlib::uLong,
         pub reserved: crate::stdlib::uLong,
+    }
+
+    pub fn set_stream_message(
+        stream: &mut z_stream_s,
+        message: &'static ::core::ffi::CStr,
+    ) {
+        stream.msg = crate::stream_message!(message);
+    }
+
+    pub fn clear_stream_message(stream: &mut z_stream_s) {
+        stream.msg = None;
     }
 
     pub type z_streamp = *mut crate::zlib_h::z_stream;

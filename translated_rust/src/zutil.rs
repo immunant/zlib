@@ -19,6 +19,23 @@ pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
     b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
     b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
 ];
+
+/// Return zlib's fixed diagnostic for an error code without reading the
+/// legacy mutable C export above.  The export remains for C ABI compatibility.
+pub fn z_error_message(error: ::core::ffi::c_int) -> &'static ::core::ffi::CStr {
+    match error {
+        2 => c"need dictionary",
+        1 => c"stream end",
+        0 => c"",
+        -1 => c"file error",
+        -2 => c"stream error",
+        -3 => c"data error",
+        -4 => c"insufficient memory",
+        -5 => c"buffer error",
+        -6 => c"incompatible version",
+        _ => c"",
+    }
+}
 pub unsafe extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
     return crate::zlib_h::ZLIB_VERSION.as_ptr();
 }
