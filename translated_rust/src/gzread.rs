@@ -154,46 +154,48 @@ unsafe extern "C" fn gz_load(
 
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut got: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
+    let state = &mut *state;
+    if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).eof == 0 as ::core::ffi::c_int {
-        if (*strm).avail_in != 0 {
-            let p: *mut ::core::ffi::c_uchar = (*state).in_0;
-            let q: *const ::core::ffi::c_uchar = (*strm).next_in;
-            if q != p as *const ::core::ffi::c_uchar {
-                let n = (*strm).avail_in as usize;
-                let size = (*state).size as usize;
-                if p.is_null() || q.is_null() || n > size {
-                    return -1 as ::core::ffi::c_int;
-                }
-                let buffer = ::core::slice::from_raw_parts_mut(p, size);
-                // `strm.next_in` is always a cursor in `in_0`: gz_load()
-                // installs the buffer, and inflate only advances that cursor.
-                let Some(source_start) = q.addr().checked_sub(p.addr()) else {
-                    return -1 as ::core::ffi::c_int;
-                };
-                if source_start <= size && n <= size.wrapping_sub(source_start) {
-                    compact_buffered_input(buffer, source_start, n);
-                } else {
-                    return -1 as ::core::ffi::c_int;
+    if state.eof == 0 as ::core::ffi::c_int {
+        {
+            let strm = &mut state.strm;
+            if strm.avail_in != 0 {
+                let p: *mut ::core::ffi::c_uchar = state.in_0;
+                let q: *const ::core::ffi::c_uchar = strm.next_in;
+                if q != p as *const ::core::ffi::c_uchar {
+                    let n = strm.avail_in as usize;
+                    let size = state.size as usize;
+                    if p.is_null() || q.is_null() || n > size {
+                        return -1 as ::core::ffi::c_int;
+                    }
+                    let buffer = ::core::slice::from_raw_parts_mut(p, size);
+                    // `strm.next_in` is always a cursor in `in_0`: gz_load()
+                    // installs the buffer, and inflate only advances that cursor.
+                    let Some(source_start) = q.addr().checked_sub(p.addr()) else {
+                        return -1 as ::core::ffi::c_int;
+                    };
+                    if source_start <= size && n <= size.wrapping_sub(source_start) {
+                        compact_buffered_input(buffer, source_start, n);
+                    } else {
+                        return -1 as ::core::ffi::c_int;
+                    }
                 }
             }
         }
+        let avail_in = state.strm.avail_in;
         if gz_load(
-            state,
-            (*state).in_0.offset((*strm).avail_in as isize),
-            (*state)
-                .size
-                .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
+            state as *mut crate::gzguts_h::gz_state,
+            state.in_0.offset(avail_in as isize),
+            state.size.wrapping_sub(avail_in as ::core::ffi::c_uint),
             &raw mut got,
         ) == -1 as ::core::ffi::c_int
         {
             return -1 as ::core::ffi::c_int;
         }
-        (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
-        (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+        state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
+        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
     }
     return 0 as ::core::ffi::c_int;
 }
