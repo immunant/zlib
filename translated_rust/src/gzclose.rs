@@ -40,16 +40,8 @@ macro_rules! gzclose_read_at_boundary {
                     crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
                 }
                 let state_err = (*state).err;
-                let message = (*state).msg;
-                let release_message = crate::src::gzlib::gz_clear_error_should_release_message(
-                    !message.is_null(),
-                    (*state).err,
-                );
-                (*state).msg = ::core::ptr::null_mut();
+                (*state).msg = None;
                 (*state).err = crate::zlib_h::Z_OK;
-                if release_message {
-                    crate::stdlib::free(message as *mut ::core::ffi::c_void);
-                }
                 let close_result = crate::stdlib::close((*state).fd);
                 ::core::ptr::drop_in_place(state);
                 crate::stdlib::free(state as *mut ::core::ffi::c_void);
@@ -90,16 +82,8 @@ macro_rules! gzclose_write_at_boundary {
                     }
                     crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
                 }
-                let message = (*state).msg;
-                let release_message = crate::src::gzlib::gz_clear_error_should_release_message(
-                    !message.is_null(),
-                    (*state).err,
-                );
-                (*state).msg = ::core::ptr::null_mut();
+                (*state).msg = None;
                 (*state).err = crate::zlib_h::Z_OK;
-                if release_message {
-                    crate::stdlib::free(message as *mut ::core::ffi::c_void);
-                }
                 let close_result = crate::stdlib::close((*state).fd);
                 ::core::ptr::drop_in_place(state);
                 crate::stdlib::free(state as *mut ::core::ffi::c_void);

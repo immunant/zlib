@@ -61,7 +61,10 @@ pub mod gzguts_h {
         pub reset: ::core::ffi::c_int,
         pub skip: crate::stdlib::off64_t,
         pub err: ::core::ffi::c_int,
-        pub msg: *mut ::core::ffi::c_char,
+        // This is outside the public `gzFile_s` prefix.  Keep error text
+        // owned with the opaque state so its C view remains stable until the
+        // next mutation without a separate malloc/free lifecycle.
+        pub msg: Option<::std::ffi::CString>,
         pub strm: crate::zlib_h::z_stream,
     }
 

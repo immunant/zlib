@@ -390,7 +390,7 @@ macro_rules! gz_open_at_boundary {
                 reset: 0,
                 skip: 0,
                 err: crate::zlib_h::Z_OK,
-                msg: ::core::ptr::null_mut(),
+                msg: None,
                 strm: crate::zlib_h::z_stream_s {
                     next_in: ::core::ptr::null_mut(),
                     avail_in: 0,
@@ -568,13 +568,8 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     {
         return -1;
     }
-    let message = state.msg;
-    let release_message = gz_clear_error_should_release_message(!message.is_null(), state.err);
-    state.msg = ::core::ptr::null_mut();
+    state.msg = None;
     state.err = crate::zlib_h::Z_OK;
-    if release_message && !message.is_null() {
-        crate::stdlib::free(message as *mut ::core::ffi::c_void);
-    }
     0
 }
 /// Validate and normalize a gzip seek request without touching the opaque
@@ -871,14 +866,8 @@ macro_rules! gzseek_at_boundary {
                 state.x.next = state.x.next.offset(result.advance as isize);
             }
             if result.clear_error {
-                let message = state.msg;
-                let release_message =
-                    gz_clear_error_should_release_message(!message.is_null(), state.err);
-                state.msg = ::core::ptr::null_mut();
+                state.msg = None;
                 state.err = crate::zlib_h::Z_OK;
-                if release_message {
-                    crate::stdlib::free(message as *mut ::core::ffi::c_void);
-                }
             }
             result.position
         }
@@ -1040,11 +1029,7 @@ pub unsafe extern "C" fn gzerror_ffi(
         return ::core::ptr::null();
     }
     let state = &*(file as crate::gzguts_h::gz_statep);
-    let message = if state.msg.is_null() {
-        None
-    } else {
-        Some(::std::ffi::CStr::from_ptr(state.msg))
-    };
+    let message = state.msg.as_deref();
     let Some((err, message)) = gzerror_state(state.mode, state.err, message) else {
         return ::core::ptr::null();
     };
@@ -1074,13 +1059,8 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
     if gzclearerr(state) {
-        let message = state.msg;
-        let release_message = gz_clear_error_should_release_message(!message.is_null(), state.err);
-        state.msg = ::core::ptr::null_mut();
+        state.msg = None;
         state.err = crate::zlib_h::Z_OK;
-        if release_message {
-            crate::stdlib::free(message as *mut ::core::ffi::c_void);
-        }
     }
 }
 
@@ -1098,16 +1078,6 @@ struct GzErrorUpdate {
     available: ::core::ffi::c_uint,
     err: ::core::ffi::c_int,
     message: Option<::std::ffi::CString>,
-}
-
-/// The pointer-free portion of clearing a gzip error.  The boundary retains
-/// the old C allocation only long enough to free it when requested, then
-/// clears the ABI mirror's message and error fields.
-pub(crate) fn gz_clear_error_should_release_message(
-    has_message: bool,
-    err: ::core::ffi::c_int,
-) -> bool {
-    has_message && err != crate::zlib_h::Z_MEM_ERROR
 }
 
 /// Construct the legacy `"path: message"` text before the raw error-storage
@@ -1168,24 +1138,17 @@ fn gz_error_update(
     }
 }
 
-pub unsafe extern "C" fn gz_error(
-    mut state: crate::gzguts_h::gz_statep,
-    mut err: ::core::ffi::c_int,
-    mut msg: *const ::core::ffi::c_char,
+/// Apply a gzip error to owned opaque state.  Boundary adapters provide an
+/// already-validated message view, while this core preserves the historical
+/// `x.have` and retryable-error rules without touching C storage.
+pub(crate) fn gz_error_update_state(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    message: Option<&::std::ffi::CStr>,
 ) {
-    let state = &mut *state;
     let prior = GzErrorState {
         available: state.x.have,
         again: state.again,
-    };
-    let prior_message = state.msg;
-    if gz_clear_error_should_release_message(!prior_message.is_null(), state.err) {
-        crate::stdlib::free(prior_message as *mut ::core::ffi::c_void);
-    }
-    let message = if msg.is_null() {
-        None
-    } else {
-        Some(::std::ffi::CStr::from_ptr(msg))
     };
     let path = if message.is_some() {
         Some(state.path.as_c_str())
@@ -1194,19 +1157,27 @@ pub unsafe extern "C" fn gz_error(
     };
     let update = gz_error_update(prior, err, path, message);
 
-    state.msg = ::core::ptr::null_mut();
+    state.msg = None;
     state.x.have = update.available;
     state.err = update.err;
-    let Some(message) = update.message else {
-        return;
+    state.msg = update.message;
+}
+
+/// Convert the legacy raw arguments only for callers that have not yet moved
+/// to the safe gzip-state core.  Export wrappers and the remaining translated
+/// I/O adapters are responsible for supplying valid pointers.
+pub unsafe extern "C" fn gz_error(
+    state: crate::gzguts_h::gz_statep,
+    err: ::core::ffi::c_int,
+    msg: *const ::core::ffi::c_char,
+) {
+    let state = &mut *state;
+    let message = if msg.is_null() {
+        None
+    } else {
+        Some(::std::ffi::CStr::from_ptr(msg))
     };
-    let storage_len = message.as_bytes_with_nul().len();
-    state.msg = crate::stdlib::malloc(storage_len) as *mut ::core::ffi::c_char;
-    if state.msg.is_null() {
-        state.err = crate::zlib_h::Z_MEM_ERROR;
-        return;
-    }
-    ::core::ptr::copy_nonoverlapping(message.as_ptr(), state.msg, storage_len);
+    gz_error_update_state(state, err, message);
 }
 #[export_name = "gz_error"]
 
