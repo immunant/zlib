@@ -14,7 +14,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateReset;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -133,7 +132,8 @@ impl GzDeflater<'_> {
     }
 
     fn reset(&mut self) -> ::core::ffi::c_int {
-        unsafe { crate::src::deflate::deflateReset(self.stream) }
+        let state = unsafe { self.stream.state.as_mut() };
+        crate::src::deflate::deflate_reset_impl(self.stream, state)
     }
 
     fn compress(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {

@@ -1645,11 +1645,19 @@ fn deflate_reset_state(
     crate::zlib_h::Z_OK
 }
 
-pub unsafe fn deflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+/// Reset a stream after its ABI state link has been converted at the caller
+/// boundary.  Validation remains here so every caller shares the same reset
+/// contract without placing stream logic in an FFI wrapper.
+pub(crate) fn deflate_reset_impl(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: Option<&mut crate::src::deflate::deflate_state>,
+) -> ::core::ffi::c_int {
     if !deflate_params_stream_is_valid(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let s = unsafe { &mut *strm.state };
+    let Some(s) = state else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     if !deflate_params_state_is_valid(s) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1663,7 +1671,8 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    unsafe { deflateReset(strm) }
+    let state = unsafe { strm.state.as_mut() };
+    deflate_reset_impl(strm, state)
 }
 fn deflate_set_header_impl(
     state: &mut crate::src::deflate::deflate_state,
