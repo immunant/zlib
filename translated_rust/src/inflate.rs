@@ -2842,26 +2842,23 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     }
     inflate_copy_impl(&mut *dest, &source, state)
 }
-pub unsafe extern "C" fn inflateUndermine(
-    mut strm: crate::zlib_h::z_streamp,
-    _subvert: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+fn inflate_undermine_impl(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    let Some(state) = inflate_validate_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).sane = 1 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_DATA_ERROR;
+    };
+    state.sane = 1;
+    crate::zlib_h::Z_DATA_ERROR
 }
 #[export_name = "inflateUndermine"]
 
 pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
-    mut subvert: ::core::ffi::c_int,
+    _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateUndermine(strm, subvert)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_undermine_impl(strm)
 }
 fn inflate_validate_state(
     strm: &mut crate::zlib_h::z_stream_s,
