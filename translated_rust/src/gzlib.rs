@@ -669,6 +669,41 @@ pub(crate) fn gz_read_mark_past(state: &mut crate::gzguts_h::gz_state, remaining
     }
 }
 
+// Plan a pushed-back byte without touching the output buffer.  The read
+// adapter retains the pointer movement, overlapping copy, and byte store;
+// this keeps the corresponding gzip cursor/accounting transition local.
+pub(crate) enum GzUngetcPlan {
+    First { buffer_end: ::core::ffi::c_uint },
+    Full,
+    Prepend { move_to_end: bool },
+}
+
+pub(crate) fn gz_ungetc_plan(state: &crate::gzguts_h::gz_state) -> GzUngetcPlan {
+    let buffer_end = state.size << 1 as ::core::ffi::c_int;
+    if state.x.have == 0 {
+        GzUngetcPlan::First { buffer_end }
+    } else if state.x.have == buffer_end {
+        GzUngetcPlan::Full
+    } else {
+        GzUngetcPlan::Prepend {
+            move_to_end: state.x.next == state.out,
+        }
+    }
+}
+
+pub(crate) fn gz_ungetc_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    was_empty: bool,
+) {
+    if was_empty {
+        state.x.have = 1;
+    } else {
+        state.x.have = state.x.have.wrapping_add(1);
+    }
+    state.x.pos -= 1;
+    state.past = 0;
+}
+
 // Return how much input fits in the gzip input buffer.  Valid gzip state has
 // `buffered <= size`; wrapping preserves the translated C arithmetic if a
 // corrupt state reaches this internal path.

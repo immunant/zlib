@@ -645,43 +645,42 @@ pub unsafe extern "C" fn gzungetc(
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if state.x.have == 0 as ::core::ffi::c_uint {
-        state.x.have = 1 as ::core::ffi::c_uint;
-        state.x.next = state
-            .out
-            .offset((state.size << 1 as ::core::ffi::c_int) as isize)
-            .offset(-(1 as ::core::ffi::c_int as isize));
-        *state.x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
-        state.x.pos -= 1;
-        state.past = 0 as ::core::ffi::c_int;
-        return c;
-    }
-    if state.x.have == state.size << 1 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_DATA_ERROR,
-            b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.x.next == state.out {
-        let mut src: *mut ::core::ffi::c_uchar = state.out.offset(state.x.have as isize);
-        let mut dest: *mut ::core::ffi::c_uchar = state
-            .out
-            .offset((state.size << 1 as ::core::ffi::c_int) as isize);
-        while src > state.out {
-            src = src.offset(-1);
-            dest = dest.offset(-1);
-            *dest = *src;
+    match crate::src::gzlib::gz_ungetc_plan(state) {
+        crate::src::gzlib::GzUngetcPlan::First { buffer_end } => {
+            state.x.next = state
+                .out
+                .offset(buffer_end as isize)
+                .offset(-(1 as ::core::ffi::c_int as isize));
+            *state.x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+            crate::src::gzlib::gz_ungetc_progress(state, true);
         }
-        state.x.next = dest;
+        crate::src::gzlib::GzUngetcPlan::Full => {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_DATA_ERROR,
+                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        crate::src::gzlib::GzUngetcPlan::Prepend { move_to_end } => {
+            if move_to_end {
+                let mut src: *mut ::core::ffi::c_uchar = state.out.offset(state.x.have as isize);
+                let mut dest: *mut ::core::ffi::c_uchar = state
+                    .out
+                    .offset((state.size << 1 as ::core::ffi::c_int) as isize);
+                while src > state.out {
+                    src = src.offset(-1);
+                    dest = dest.offset(-1);
+                    *dest = *src;
+                }
+                state.x.next = dest;
+            }
+            state.x.next = state.x.next.offset(-1);
+            *state.x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+            crate::src::gzlib::gz_ungetc_progress(state, false);
+        }
     }
-    state.x.have = state.x.have.wrapping_add(1);
-    state.x.next = state.x.next.offset(-1);
-    *state.x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
-    state.x.pos -= 1;
-    state.past = 0 as ::core::ffi::c_int;
-    return c;
+    c
 }
 #[export_name = "gzungetc"]
 
