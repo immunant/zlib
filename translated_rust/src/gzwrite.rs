@@ -1332,6 +1332,25 @@ enum GzZeroInitialAction {
     Generate,
 }
 
+enum GzZeroCompressionRequest<'a> {
+    FlushPending,
+    Zeroes(&'a [crate::stdlib::Byte]),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum GzZeroDriveStatus {
+    Done,
+    FlushError,
+    CompressionError,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct GzZeroDriveOutcome {
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+    status: GzZeroDriveStatus,
+}
+
 impl GzZeroCore {
     fn new(
         size: ::core::ffi::c_uint,
@@ -1383,6 +1402,54 @@ impl GzZeroCore {
     }
 }
 
+fn gz_zero_drive<F>(
+    buffer: &mut [crate::stdlib::Byte],
+    size: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+    pending_input: crate::stdlib::uInt,
+    mut compress: F,
+) -> GzZeroDriveOutcome
+where
+    F: FnMut(GzZeroCompressionRequest<'_>) -> Result<crate::stdlib::uInt, crate::stdlib::uInt>,
+{
+    let mut input = GzWriteInputStorage::new(buffer);
+    let mut zero = GzZeroCore::new(size, pos, skip);
+
+    if matches!(
+        zero.initial_action(pending_input),
+        GzZeroInitialAction::FlushPending
+    ) && compress(GzZeroCompressionRequest::FlushPending).is_err()
+    {
+        return GzZeroDriveOutcome {
+            pos: zero.pos,
+            skip: zero.skip,
+            status: GzZeroDriveStatus::FlushError,
+        };
+    }
+
+    loop {
+        let chunk = zero.prepare_chunk(&mut input);
+        let result = match compress(GzZeroCompressionRequest::Zeroes(
+            &input.bytes[..chunk.len as usize],
+        )) {
+            Ok(remaining_avail_in) => (remaining_avail_in, 0),
+            Err(remaining_avail_in) => (remaining_avail_in, -1),
+        };
+        let action = zero.apply_compression(chunk.len, result.0, result.1);
+        let status = match action {
+            GzZeroAction::Error => GzZeroDriveStatus::CompressionError,
+            GzZeroAction::Done => GzZeroDriveStatus::Done,
+            GzZeroAction::Continue => continue,
+        };
+        return GzZeroDriveOutcome {
+            pos: zero.pos,
+            skip: zero.skip,
+            status,
+        };
+    }
+}
+
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let buffer = if state.size == 0 {
         &mut []
@@ -1391,17 +1458,16 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     };
     let mut input = GzWriteInputStorage::new(buffer);
     let mut zero = GzZeroCore::new(state.size, state.x.pos, state.skip);
-    match zero.initial_action(state.strm.avail_in) {
-        GzZeroInitialAction::FlushPending => {
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
-                return -1 as ::core::ffi::c_int;
-            }
-        }
-        GzZeroInitialAction::Generate => {}
+    if matches!(
+        zero.initial_action(state.strm.avail_in),
+        GzZeroInitialAction::FlushPending
+    ) && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+    {
+        return -1 as ::core::ffi::c_int;
     }
     loop {
         let chunk = zero.prepare_chunk(&mut input);
-        state.strm.avail_in = chunk.len as crate::stdlib::uInt;
+        state.strm.avail_in = chunk.len;
         state.strm.next_in = state.in_0;
         let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         let action = zero.apply_compression(chunk.len, state.strm.avail_in, ret);
@@ -1409,13 +1475,10 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.skip = zero.skip;
         match action {
             GzZeroAction::Error => return -1 as ::core::ffi::c_int,
-            GzZeroAction::Done => break,
+            GzZeroAction::Done => return 0 as ::core::ffi::c_int,
             GzZeroAction::Continue => {}
         }
     }
-    state.x.pos = zero.pos;
-    state.skip = zero.skip;
-    return 0 as ::core::ffi::c_int;
 }
 
 unsafe fn gz_write(
@@ -1899,12 +1962,12 @@ mod tests {
         gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
         gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
         gz_zero_apply_comp_progress, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_chunk_limits, gz_zero_chunk_plan, gz_zero_chunk_step, gz_zero_initial_step,
-        gz_zero_initialize_buffer, gz_zero_initialize_chunk_buffer, gz_zero_needs_initialization,
-        gz_zero_pending_step, gz_zero_prepare_and_initialize_chunk, gz_zero_progress,
-        gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error, gzclose_w_result,
-        gzflush_action, gzflush_mode_is_valid, gzfwrite_request, gzfwrite_result, gzputc_result,
-        gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_action,
+        gz_zero_chunk_limits, gz_zero_chunk_plan, gz_zero_chunk_step, gz_zero_drive,
+        gz_zero_initial_step, gz_zero_initialize_buffer, gz_zero_initialize_chunk_buffer,
+        gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_prepare_and_initialize_chunk,
+        gz_zero_progress, gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error,
+        gzclose_w_result, gzflush_action, gzflush_mode_is_valid, gzfwrite_request, gzfwrite_result,
+        gzputc_result, gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_action,
         gzsetparams_buffer_action, gzsetparams_requires_deflate, gzsetparams_settings_match,
         gzsetparams_state_is_usable, gzsetparams_zero_action, gzwrite_request, GzCloseBufferAction,
         GzCompDeflateAction, GzCompDirectLoopAction, GzCompDirectWriteProgress,
@@ -1914,7 +1977,8 @@ mod tests {
         GzInitMode, GzPutcWriteAction, GzSetParamsAction, GzSetParamsBufferAction,
         GzSetParamsZeroAction, GzWriteBufferedCopyPlan, GzWriteBufferedInputAction,
         GzWriteDirectAction, GzWriteInputStorage, GzWritePreparation, GzZeroAction,
-        GzZeroChunkLimits, GzZeroCore, GzZeroInitialAction, GzZeroPreparedChunk, GzZeroStep,
+        GzZeroChunkLimits, GzZeroCompressionRequest, GzZeroCore, GzZeroDriveOutcome,
+        GzZeroDriveStatus, GzZeroInitialAction, GzZeroPreparedChunk, GzZeroStep,
     };
 
     #[test]
@@ -3654,6 +3718,89 @@ mod tests {
         ));
         assert_eq!(zero.pos, 16);
         assert_eq!(zero.skip, 0);
+    }
+
+    #[test]
+    fn gz_zero_drive_flush_failure_keeps_progress_and_does_not_zero_buffer() {
+        let mut buffer = [0xff; 4];
+        let mut requests = 0;
+
+        let result = gz_zero_drive(&mut buffer, 4, 10, 6, 1, |request| match request {
+            GzZeroCompressionRequest::FlushPending => {
+                requests += 1;
+                Err(0)
+            }
+            GzZeroCompressionRequest::Zeroes(_) => panic!("unexpected zero-fill compression"),
+        });
+
+        assert_eq!(
+            result,
+            GzZeroDriveOutcome {
+                pos: 10,
+                skip: 6,
+                status: GzZeroDriveStatus::FlushError,
+            }
+        );
+        assert_eq!(requests, 1);
+        assert_eq!(buffer, [0xff; 4]);
+    }
+
+    #[test]
+    fn gz_zero_drive_retries_partial_compression_without_reinitializing_buffer() {
+        let mut buffer = [0xff; 4];
+        let mut chunk_lengths = Vec::new();
+        let mut calls = 0;
+
+        let result = gz_zero_drive(&mut buffer, 4, 10, 6, 0, |request| match request {
+            GzZeroCompressionRequest::FlushPending => panic!("unexpected pending-input flush"),
+            GzZeroCompressionRequest::Zeroes(input) => {
+                assert_eq!(input, &[0; 4]);
+                chunk_lengths.push(input.len());
+                calls += 1;
+                if calls == 1 {
+                    Ok(2)
+                } else {
+                    Ok(0)
+                }
+            }
+        });
+
+        assert_eq!(
+            result,
+            GzZeroDriveOutcome {
+                pos: 16,
+                skip: 0,
+                status: GzZeroDriveStatus::Done,
+            }
+        );
+        assert_eq!(chunk_lengths, [4, 4]);
+        assert_eq!(buffer, [0; 4]);
+    }
+
+    #[test]
+    fn gz_zero_drive_commits_partial_progress_before_compression_error() {
+        let mut buffer = [0xff; 4];
+        let mut requests = 0;
+
+        let result = gz_zero_drive(&mut buffer, 4, 10, 6, 0, |request| match request {
+            GzZeroCompressionRequest::FlushPending => panic!("unexpected pending-input flush"),
+            GzZeroCompressionRequest::Zeroes(input) => {
+                requests += 1;
+                assert_eq!(input, &[0; 4]);
+                Err(2)
+            }
+        });
+
+        assert_eq!(
+            result,
+            GzZeroDriveOutcome {
+                pos: 12,
+                skip: 4,
+                status: GzZeroDriveStatus::CompressionError,
+            }
+        );
+        assert_eq!(requests, 1);
+        assert_eq!(buffer, [0; 4]);
     }
 
     #[test]

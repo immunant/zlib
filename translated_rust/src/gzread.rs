@@ -1505,27 +1505,23 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
 unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         let action = gz_fetch_action(state.how);
-        match action {
-            GzFetchAction::Look => {
-                if gz_fetch_look_failed(gz_look(state)) {
-                    return -1 as ::core::ffi::c_int;
-                }
-            }
+        let failed = match action {
+            GzFetchAction::Look => gz_fetch_look_failed(gz_look(state)),
             GzFetchAction::Copy => {
                 let out = state.out;
                 let size = state.size;
                 let load = gz_load(state, out, gz_output_buffer_len(size));
                 if !gz_fetch_apply_copy_load(&mut state.x.have, &load) {
-                    return -1 as ::core::ffi::c_int;
+                    true
+                } else {
+                    state.x.next = state.out;
+                    false
                 }
-                state.x.next = state.out;
             }
             GzFetchAction::Gzip => {
                 state.strm.avail_out = gz_fetch_output_capacity(state.size) as crate::stdlib::uInt;
                 state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
-                if gz_decomp(state) == -1 as ::core::ffi::c_int {
-                    return -1 as ::core::ffi::c_int;
-                }
+                gz_decomp(state) == -1 as ::core::ffi::c_int
             }
             GzFetchAction::StateCorrupt => {
                 crate::src::gzlib::gz_error(
@@ -1535,19 +1531,22 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 );
                 return -1 as ::core::ffi::c_int;
             }
+        };
+        if failed {
+            return -1 as ::core::ffi::c_int;
         }
+        let control = gz_fetch_control_state(state);
         if gz_fetch_post_action(
             action,
-            state.how,
-            state.x.have,
-            state.eof,
-            state.strm.avail_in,
+            control.how,
+            control.have,
+            control.eof,
+            control.avail_in,
         ) == GzFetchPostAction::Return
         {
-            break;
+            return 0 as ::core::ffi::c_int;
         }
     }
-    return 0 as ::core::ffi::c_int;
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1562,6 +1561,64 @@ enum GzFetchAction {
 enum GzFetchPostAction {
     Return,
     Continue,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct GzFetchControlState {
+    how: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum GzFetchActionResult {
+    Success,
+    Failure,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct GzFetchPostActionSnapshot {
+    state: GzFetchControlState,
+    result: GzFetchActionResult,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum GzFetchControlResult {
+    Complete,
+    ActionFailed,
+    StateCorrupt,
+}
+
+fn gz_fetch_control_state(state: &crate::gzguts_h::gz_state) -> GzFetchControlState {
+    GzFetchControlState {
+        how: state.how,
+        have: state.x.have,
+        eof: state.eof,
+        avail_in: state.strm.avail_in,
+    }
+}
+
+fn gz_fetch_control<F>(mut state: GzFetchControlState, mut run_action: F) -> GzFetchControlResult
+where
+    F: FnMut(GzFetchAction) -> GzFetchPostActionSnapshot,
+{
+    loop {
+        let action = gz_fetch_action(state.how);
+        if action == GzFetchAction::StateCorrupt {
+            return GzFetchControlResult::StateCorrupt;
+        }
+        let snapshot = run_action(action);
+        if snapshot.result == GzFetchActionResult::Failure {
+            return GzFetchControlResult::ActionFailed;
+        }
+        state = snapshot.state;
+        if gz_fetch_post_action(action, state.how, state.have, state.eof, state.avail_in)
+            == GzFetchPostAction::Return
+        {
+            return GzFetchControlResult::Complete;
+        }
+    }
 }
 
 fn gz_fetch_action(how: ::core::ffi::c_int) -> GzFetchAction {
@@ -3467,6 +3524,97 @@ mod tests {
     fn gz_fetch_action_rejects_unknown_read_modes() {
         assert_eq!(gz_fetch_action(-1), GzFetchAction::StateCorrupt);
         assert_eq!(gz_fetch_action(99), GzFetchAction::StateCorrupt);
+    }
+
+    #[test]
+    fn gz_fetch_control_runs_look_then_gzip_actions() {
+        let mut actions = Vec::new();
+
+        let result = gz_fetch_control(
+            GzFetchControlState {
+                how: crate::gzguts_h::LOOK,
+                have: 0,
+                eof: 0,
+                avail_in: 0,
+            },
+            |action| {
+                actions.push(action);
+                match action {
+                    GzFetchAction::Look => GzFetchPostActionSnapshot {
+                        state: GzFetchControlState {
+                            how: crate::gzguts_h::GZIP,
+                            have: 0,
+                            eof: 0,
+                            avail_in: 0,
+                        },
+                        result: GzFetchActionResult::Success,
+                    },
+                    GzFetchAction::Gzip => GzFetchPostActionSnapshot {
+                        state: GzFetchControlState {
+                            how: crate::gzguts_h::GZIP,
+                            have: 1,
+                            eof: 0,
+                            avail_in: 0,
+                        },
+                        result: GzFetchActionResult::Success,
+                    },
+                    GzFetchAction::Copy | GzFetchAction::StateCorrupt => unreachable!(),
+                }
+            },
+        );
+
+        assert_eq!(result, GzFetchControlResult::Complete);
+        assert_eq!(actions, vec![GzFetchAction::Look, GzFetchAction::Gzip]);
+    }
+
+    #[test]
+    fn gz_fetch_control_rejects_corrupt_state_without_running_callback() {
+        let mut callback_count = 0;
+
+        let result = gz_fetch_control(
+            GzFetchControlState {
+                how: 99,
+                have: 0,
+                eof: 0,
+                avail_in: 0,
+            },
+            |_| {
+                callback_count += 1;
+                unreachable!()
+            },
+        );
+
+        assert_eq!(result, GzFetchControlResult::StateCorrupt);
+        assert_eq!(callback_count, 0);
+    }
+
+    #[test]
+    fn gz_fetch_control_stops_after_callback_failure() {
+        let mut actions = Vec::new();
+
+        let result = gz_fetch_control(
+            GzFetchControlState {
+                how: crate::gzguts_h::COPY,
+                have: 0,
+                eof: 0,
+                avail_in: 0,
+            },
+            |action| {
+                actions.push(action);
+                GzFetchPostActionSnapshot {
+                    state: GzFetchControlState {
+                        how: crate::gzguts_h::COPY,
+                        have: 3,
+                        eof: 0,
+                        avail_in: 0,
+                    },
+                    result: GzFetchActionResult::Failure,
+                }
+            },
+        );
+
+        assert_eq!(result, GzFetchControlResult::ActionFailed);
+        assert_eq!(actions, vec![GzFetchAction::Copy]);
     }
 
     #[test]

@@ -2375,52 +2375,55 @@ fn pending_output_len(
     clamped_copy_len(pending, avail_out as crate::zutil_h::ulg)
 }
 
-fn flush_pending_accounting(
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FlushPendingResult {
+    copied: ::core::ffi::c_uint,
+    remaining: crate::zutil_h::ulg,
+    avail_out: crate::stdlib::uInt,
+    total_out: crate::stdlib::uLong,
+    reset_pending_out: bool,
+}
+
+fn flush_pending_core(
     pending: crate::zutil_h::ulg,
     avail_out: crate::stdlib::uInt,
     total_out: crate::stdlib::uLong,
-) -> Option<(
-    ::core::ffi::c_uint,
-    crate::zutil_h::ulg,
-    crate::stdlib::uInt,
-    crate::stdlib::uLong,
-    bool,
-)> {
-    let len = pending_output_len(pending, avail_out);
-    if len == 0 {
+) -> Option<FlushPendingResult> {
+    let copied = pending_output_len(pending, avail_out);
+    if copied == 0 {
         return None;
     }
-
-    let remaining = pending.wrapping_sub(len as crate::zutil_h::ulg);
-    Some((
-        len,
+    let remaining = pending.wrapping_sub(copied as crate::zutil_h::ulg);
+    Some(FlushPendingResult {
+        copied,
         remaining,
-        avail_out.wrapping_sub(len),
-        total_out.wrapping_add(len as crate::stdlib::uLong),
-        remaining == 0,
-    ))
+        avail_out: avail_out.wrapping_sub(copied),
+        total_out: total_out.wrapping_add(copied as crate::stdlib::uLong),
+        reset_pending_out: remaining == 0,
+    })
 }
 
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     crate::src::trees::_tr_flush_bits_ffi(state as *mut crate::src::deflate::internal_state);
-    let Some((len, remaining, avail_out, total_out, reset_pending_out)) =
-        flush_pending_accounting(state.pending, (*strm).avail_out, (*strm).total_out)
+    let Some(result) = flush_pending_core(state.pending, (*strm).avail_out, (*strm).total_out)
     else {
         return;
     };
     crate::stdlib::memcpy(
         (*strm).next_out as *mut ::core::ffi::c_void,
         state.pending_out as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
+        result.copied as crate::__stddef_size_t_h::size_t,
     );
-    (*strm).next_out = (*strm).next_out.wrapping_add(len as usize);
-    state.pending_out = state.pending_out.wrapping_add(len as usize);
-    state.pending_out_offset = state.pending_out_offset.wrapping_add(len as usize);
-    (*strm).total_out = total_out;
-    (*strm).avail_out = avail_out;
-    state.pending = remaining;
-    if reset_pending_out {
+    (*strm).next_out = (*strm).next_out.wrapping_add(result.copied as usize);
+    state.pending_out = state.pending_out.wrapping_add(result.copied as usize);
+    state.pending_out_offset = state
+        .pending_out_offset
+        .wrapping_add(result.copied as usize);
+    (*strm).total_out = result.total_out;
+    (*strm).avail_out = result.avail_out;
+    state.pending = result.remaining;
+    if result.reset_pending_out {
         state.pending_out = state.pending_buf;
         state.pending_out_offset = 0;
     }
@@ -4622,7 +4625,7 @@ mod tests {
         fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
-        fill_window_state_after_slide, fill_window_zero_range, flush_pending_accounting,
+        fill_window_state_after_slide, fill_window_zero_range, flush_pending_core,
         gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
         lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
@@ -4636,8 +4639,8 @@ mod tests {
         stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
         stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
         DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, PendingStorageView,
-        ReadBufChecksum, ReadBufResult,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult,
+        PendingStorageView, ReadBufChecksum, ReadBufResult,
     };
 
     #[test]
@@ -5550,16 +5553,36 @@ mod tests {
     }
 
     #[test]
-    fn flush_pending_accounting_preserves_copy_and_reset_transitions() {
-        assert_eq!(flush_pending_accounting(0, 5, 12), None);
+    fn flush_pending_core_copies_partial_pending_output() {
         assert_eq!(
-            flush_pending_accounting(8, 3, 12),
-            Some((3, 5, 0, 15, false))
+            flush_pending_core(5, 3, 12),
+            Some(FlushPendingResult {
+                copied: 3,
+                remaining: 2,
+                avail_out: 0,
+                total_out: 15,
+                reset_pending_out: false,
+            })
         );
+    }
+
+    #[test]
+    fn flush_pending_core_copies_exact_pending_output() {
         assert_eq!(
-            flush_pending_accounting(3, 8, crate::stdlib::uLong::MAX),
-            Some((3, 0, 5, 2, true))
+            flush_pending_core(3, 8, crate::stdlib::uLong::MAX),
+            Some(FlushPendingResult {
+                copied: 3,
+                remaining: 0,
+                avail_out: 5,
+                total_out: 2,
+                reset_pending_out: true,
+            })
         );
+    }
+
+    #[test]
+    fn flush_pending_core_is_a_zero_pending_no_op() {
+        assert_eq!(flush_pending_core(0, 3, 12), None);
     }
 
     #[test]
