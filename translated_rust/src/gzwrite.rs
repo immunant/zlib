@@ -361,18 +361,14 @@ fn gz_write(
     }
     return put;
 }
+// The exported wrapper owns handle validation and binding.  This coordinator
+// operates on that bound state; `gz_write` retains the caller-buffer copy
+// boundary used for buffered and streaming writes.
 pub unsafe extern "C" fn gzwrite(
-    mut file: crate::zlib_h::gzFile,
+    state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return 0 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return 0 as ::core::ffi::c_int;
     }
@@ -398,7 +394,10 @@ pub unsafe extern "C" fn gzwrite_ffi(
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzwrite(file, buf, len)
+    if file.is_null() {
+        return 0 as ::core::ffi::c_int;
+    }
+    gzwrite(&mut *(file as crate::gzguts_h::gz_statep), buf, len)
 }
 pub unsafe extern "C" fn gzfwrite(
     mut buf: crate::stdlib::voidpc,

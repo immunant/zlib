@@ -513,18 +513,14 @@ fn gz_read(
     crate::src::gzlib::gz_read_mark_past(state, len);
     return got;
 }
+// The exported wrapper owns handle validation and binding.  This coordinator
+// operates on that bound state; its caller buffer remains the scoped raw
+// boundary used by `gz_read`.
 pub unsafe extern "C" fn gzread(
-    mut file: crate::zlib_h::gzFile,
+    state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
@@ -564,7 +560,10 @@ pub unsafe extern "C" fn gzread_ffi(
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzread(file, buf, len)
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzread(&mut *(file as crate::gzguts_h::gz_statep), buf, len)
 }
 pub unsafe extern "C" fn gzfread(
     mut buf: crate::stdlib::voidp,
