@@ -2926,6 +2926,36 @@ fn write_stored_block_length(
     true
 }
 
+fn copy_stored_history(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    window: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    len: ::core::ffi::c_uint,
+) -> bool {
+    let Ok(copy) = usize::try_from(len) else {
+        return false;
+    };
+    let Ok(start) = usize::try_from(state.block_start) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(copy) else {
+        return false;
+    };
+    let Some(source) = window.get(start..end) else {
+        return false;
+    };
+    let Some(destination) = output.get_mut(..copy) else {
+        return false;
+    };
+    destination.copy_from_slice(source);
+    strm.next_out = output.as_mut_ptr().wrapping_add(copy);
+    strm.avail_out = strm.avail_out.wrapping_sub(len);
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    state.block_start += len as ::core::ffi::c_long;
+    true
+}
+
 fn update_stored_history(
     state: &mut crate::src::deflate::deflate_state,
     window: &mut [crate::stdlib::Bytef],
@@ -3092,17 +3122,16 @@ unsafe extern "C" fn deflate_stored(
             if left > len {
                 left = len;
             }
-            crate::stdlib::memcpy(
-                (*(*s).strm).next_out as *mut ::core::ffi::c_void,
-                (*s).window.offset((*s).block_start as isize) as *const ::core::ffi::c_void,
-                left as crate::__stddef_size_t_h::size_t,
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            let window = ::core::slice::from_raw_parts(
+                state.window,
+                state.window_size as usize,
             );
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(left as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(left);
-            (*(*s).strm).total_out = (*(*s).strm)
-                .total_out
-                .wrapping_add(left as crate::stdlib::uLong);
-            (*s).block_start += left as ::core::ffi::c_long;
+            let output = ::core::slice::from_raw_parts_mut(strm.next_out, left as usize);
+            if !copy_stored_history(state, strm, window, output, left) {
+                return need_more;
+            }
             len = len.wrapping_sub(left);
         }
         if len != 0 {
