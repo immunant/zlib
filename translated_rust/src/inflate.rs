@@ -864,8 +864,7 @@ macro_rules! inflate_state_check_at_ffi_boundary {
         } else {
             let state = (*strm).state as *mut crate::src::inflate::inflate_state;
             state.is_null()
-                || inflate_state_check_impl(Some(&*strm), Some(&*state), (*state).strm == strm)
-                    != 0
+                || inflate_state_check_impl(Some(&*strm), Some(&*state), (*state).strm == strm) != 0
         }
     }};
 }
@@ -1250,6 +1249,7 @@ unsafe fn updatewindow(
     update_window_state_core(state, window, produced);
     0
 }
+
 pub unsafe extern "C" fn inflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -1285,8 +1285,7 @@ pub unsafe extern "C" fn inflate(
         !(*strm).next_out.is_null(),
         !(*strm).next_in.is_null(),
         (*strm).avail_in,
-    )
-    {
+    ) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
