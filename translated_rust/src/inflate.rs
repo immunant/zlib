@@ -2963,21 +2963,23 @@ pub unsafe extern "C" fn inflateMark_ffi(
     };
     inflate_mark_impl(state)
 }
-pub unsafe extern "C" fn inflateCodesUsed(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_ulong {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+fn inflate_codes_used_impl(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_ulong {
+    state.next as ::core::ffi::c_ulong
+}
+
+fn inflate_codes_used_from_stream(strm: &crate::zlib_h::z_stream_s) -> ::core::ffi::c_ulong {
+    let Some(state) = inflate_mark_state(strm) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return (*state).next as ::core::ffi::c_ulong;
+    };
+    inflate_codes_used_impl(state)
 }
 #[export_name = "inflateCodesUsed"]
 
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
-    inflateCodesUsed(strm)
+    let Some(strm) = (unsafe { strm.as_ref() }) else {
+        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
+    };
+    inflate_codes_used_from_stream(strm)
 }
