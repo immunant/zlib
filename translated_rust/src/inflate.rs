@@ -3135,7 +3135,7 @@ pub fn inflateCopy(
     // The allocator callbacks have completed. Reuse the checked stream/state
     // binding for the final stream copy instead of reopening `source` through
     // a raw dereference.
-    let Some((source, live_state)) = inflateStateCheck(source) else {
+    let Some((source, _live_state)) = inflateStateCheck(source) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let dest = &mut *dest;
@@ -3151,7 +3151,7 @@ pub fn inflateCopy(
             ),
         ))
     };
-    inflate_copy_state(dest, source, copy, &source_state, live_state, window);
+    inflate_copy_state(dest, source, copy, &source_state, &plan, window);
     dest.state =
         copy as *mut crate::src::inflate::inflate_state as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
@@ -3161,6 +3161,18 @@ pub fn inflateCopy(
 struct InflateCopyPlan {
     window_len: Option<usize>,
     window_copy_len: usize,
+    lencode: InflateCopyTableCursor,
+    distcode: InflateCopyTableCursor,
+    next: usize,
+}
+
+// A decode table either remains one of zlib's process-wide fixed tables or
+// starts at a checked element in the source state's owned `codes` workspace.
+// Retaining that distinction as scalar data lets `inflateCopy()` snapshot it
+// before allocator callbacks and publish it into the destination afterwards.
+enum InflateCopyTableCursor {
+    Fixed,
+    Codes(usize),
 }
 
 // Everything needed to decide whether a copied inflater owns a window is
@@ -3180,9 +3192,49 @@ fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> Option<Infla
             return None;
         }
     }
+    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+    let codes_base = state.codes.as_ptr().addr();
+    let lencode = if ::core::ptr::eq(
+        state.lencode,
+        crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
+    ) {
+        InflateCopyTableCursor::Fixed
+    } else {
+        InflateCopyTableCursor::Codes(inflate_codes_cursor_index(
+            state.codes.len(),
+            code_size,
+            codes_base,
+            state.lencode.addr(),
+            false,
+        )?)
+    };
+    let distcode = if ::core::ptr::eq(
+        state.distcode,
+        crate::src::inftrees::inffixed_h::distfix.as_ptr(),
+    ) {
+        InflateCopyTableCursor::Fixed
+    } else {
+        InflateCopyTableCursor::Codes(inflate_codes_cursor_index(
+            state.codes.len(),
+            code_size,
+            codes_base,
+            state.distcode.addr(),
+            false,
+        )?)
+    };
+    let next = inflate_codes_cursor_index(
+        state.codes.len(),
+        code_size,
+        codes_base,
+        state.next.addr(),
+        true,
+    )?;
     Some(InflateCopyPlan {
         window_len,
         window_copy_len,
+        lencode,
+        distcode,
+        next,
     })
 }
 
@@ -3281,46 +3333,26 @@ fn inflate_copy_state(
     source: &crate::zlib_h::z_stream,
     copy: &mut crate::src::inflate::inflate_state,
     state: &crate::src::inflate::inflate_state,
-    live_state: &crate::src::inflate::inflate_state,
+    plan: &InflateCopyPlan,
     window: Option<(&[crate::stdlib::Bytef], &mut [crate::stdlib::Bytef])>,
 ) {
     *dest = *source;
     *copy = *state;
     copy.strm = dest;
 
-    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-    // `state` is a value snapshot taken before the allocator callbacks, so
-    // its `codes` array lives on this stack frame while its cursors still
-    // point into the stream-owned workspace.  Measure those cursors against
-    // the live workspace, not the snapshot array.
-    let source_codes = live_state.codes.as_ptr().addr();
-    let lencode_index = inflate_codes_cursor_index(
-        state.codes.len(),
-        code_size,
-        source_codes,
-        state.lencode.addr(),
-        false,
-    );
-    let distcode_index = inflate_codes_cursor_index(
-        state.codes.len(),
-        code_size,
-        source_codes,
-        state.distcode.addr(),
-        false,
-    );
-    if let (Some(lencode_index), Some(distcode_index)) = (lencode_index, distcode_index) {
-        copy.lencode = copy.codes[lencode_index..].as_ptr();
-        copy.distcode = copy.codes[distcode_index..].as_ptr();
-    }
-    let next_index = inflate_codes_cursor_index(
-        state.codes.len(),
-        code_size,
-        source_codes,
-        state.next.addr(),
-        true,
-    )
-    .expect("live inflater next cursor is in its codes workspace");
-    copy.next = copy.codes[next_index..].as_mut_ptr();
+    // `plan` captured these cursor identities before allocator callbacks.
+    // The state value snapshot retains raw cursors into the original source
+    // workspace, so do not rediscover their offsets against the snapshot
+    // array after those callbacks.
+    copy.lencode = match plan.lencode {
+        InflateCopyTableCursor::Fixed => crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
+        InflateCopyTableCursor::Codes(index) => copy.codes[index..].as_ptr(),
+    };
+    copy.distcode = match plan.distcode {
+        InflateCopyTableCursor::Fixed => crate::src::inftrees::inffixed_h::distfix.as_ptr(),
+        InflateCopyTableCursor::Codes(index) => copy.codes[index..].as_ptr(),
+    };
+    copy.next = copy.codes[plan.next..].as_mut_ptr();
 
     if let Some((source_window, dest_window)) = window {
         dest_window[..source_window.len()].copy_from_slice(source_window);
