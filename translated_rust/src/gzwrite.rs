@@ -782,6 +782,21 @@ fn gz_write_buffered_progress(
     }
 }
 
+fn gz_write_apply_buffered_progress(
+    size: ::core::ffi::c_uint,
+    avail_in: &mut crate::stdlib::uInt,
+    have: &mut ::core::ffi::c_uint,
+    pos: &mut crate::stdlib::off64_t,
+    remaining: &mut crate::stdlib::z_size_t,
+) -> ::core::ffi::c_uint {
+    let progress = gz_write_buffered_progress(size, *have, *avail_in, *pos, *remaining);
+    *avail_in = progress.avail_in;
+    *have = progress.have;
+    *pos = progress.pos;
+    *remaining = progress.remaining;
+    progress.copy
+}
+
 fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let allocation = gz_init_allocation_plan(state.want, state.direct);
     state.in_0 = unsafe {
@@ -1054,13 +1069,13 @@ unsafe fn gz_write(
                 GzWriteBufferedInputAction::KeepPending => {}
             }
             let have = state.x.have;
-            let progress =
-                gz_write_buffered_progress(state.size, have, state.strm.avail_in, state.x.pos, len);
-            let copy = progress.copy;
-            state.strm.avail_in = progress.avail_in;
-            state.x.have = progress.have;
-            state.x.pos = progress.pos;
-            len = progress.remaining;
+            let copy = gz_write_apply_buffered_progress(
+                state.size,
+                &mut state.strm.avail_in,
+                &mut state.x.have,
+                &mut state.x.pos,
+                &mut len,
+            );
             crate::stdlib::memcpy(
                 state.in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
@@ -1467,14 +1482,15 @@ mod tests {
         gz_comp_skips_empty_flush, gz_comp_write_again, gz_comp_write_chunk_len,
         gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result, gz_has_pending_input,
         gz_has_pending_skip, gz_init_allocation_plan, gz_init_mode, gz_init_stream_defaults,
-        gz_write_advanced_pos, gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
-        gz_write_buffered_copy_len, gz_write_buffered_input_action, gz_write_buffered_progress,
-        gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
-        gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
-        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_limits, gz_zero_chunk_step,
-        gz_zero_initial_step, gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
+        gz_write_advanced_pos, gz_write_apply_buffered_progress, gz_write_apply_chunk_progress,
+        gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_input_action,
+        gz_write_buffered_progress, gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed,
+        gz_write_direct_action, gz_write_errno_is_retryable, gz_write_error_result,
+        gz_write_is_empty, gz_write_preparation, gz_write_progress,
+        gz_write_remaining_after_consumption, gz_write_state_is_usable,
+        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
+        gz_zero_chunk_limits, gz_zero_chunk_step, gz_zero_initial_step,
+        gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
         gzclose_buffer_action, gzclose_mode_is_writable, gzclose_w_result, gzflush_action,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
         gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
@@ -2403,6 +2419,45 @@ mod tests {
         assert_eq!(progress.copy, 1);
         assert_eq!(progress.avail_in, 2);
         assert_eq!(progress.have, 0);
+    }
+
+    #[test]
+    fn gz_write_apply_buffered_progress_updates_all_scalars() {
+        let mut avail_in = 17;
+        let mut have = 1000;
+        let mut pos = 10;
+        let mut remaining = 99;
+
+        let copy = gz_write_apply_buffered_progress(
+            1024,
+            &mut avail_in,
+            &mut have,
+            &mut pos,
+            &mut remaining,
+        );
+
+        assert_eq!(copy, 24);
+        assert_eq!(avail_in, 41);
+        assert_eq!(have, 1024);
+        assert_eq!(pos, 34);
+        assert_eq!(remaining, 75);
+    }
+
+    #[test]
+    fn gz_write_apply_buffered_progress_preserves_wrapping_accounting() {
+        let mut avail_in = 1;
+        let mut have = ::core::ffi::c_uint::MAX;
+        let mut pos = 0;
+        let mut remaining = 5;
+
+        let copy =
+            gz_write_apply_buffered_progress(0, &mut avail_in, &mut have, &mut pos, &mut remaining);
+
+        assert_eq!(copy, 1);
+        assert_eq!(avail_in, 2);
+        assert_eq!(have, 0);
+        assert_eq!(pos, 1);
+        assert_eq!(remaining, 4);
     }
 
     #[test]

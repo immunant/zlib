@@ -537,6 +537,17 @@ fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> WindowMetadata {
     }
 }
 
+fn window_metadata_update_plan(
+    current_wsize: ::core::ffi::c_uint,
+    wbits: ::core::ffi::c_uint,
+) -> Option<WindowMetadata> {
+    if current_wsize == 0 {
+        Some(initial_window_metadata(wbits))
+    } else {
+        None
+    }
+}
+
 fn reset_window_history(
     wsize: &mut ::core::ffi::c_uint,
     whave: &mut ::core::ffi::c_uint,
@@ -1034,8 +1045,7 @@ fn update_window_metadata(
     wnext: &mut ::core::ffi::c_uint,
     whave: &mut ::core::ffi::c_uint,
 ) {
-    if *wsize == 0 {
-        let metadata = initial_window_metadata(wbits);
+    if let Some(metadata) = window_metadata_update_plan(*wsize, wbits) {
         *wsize = metadata.wsize;
         *wnext = metadata.wnext;
         *whave = metadata.whave;
@@ -3161,13 +3171,13 @@ mod tests {
         initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
         update_window_buffer_len, update_window_core, update_window_produced_len,
         window_allocation_failed, window_allocation_plan, window_allocation_request,
-        window_allocation_request_for_plan, window_needs_allocation, window_update_plan,
-        DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress, InflateGzipExtraProgress,
-        InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource,
-        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
-        InflateZlibHeaderTransition, InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
-        TYPEDO,
+        window_allocation_request_for_plan, window_metadata_update_plan, window_needs_allocation,
+        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
+        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
+        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
+        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams,
+        WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4285,6 +4295,19 @@ mod tests {
                 whave: 0,
             }
         );
+    }
+
+    #[test]
+    fn window_metadata_update_plan_initializes_only_an_empty_window() {
+        assert_eq!(
+            window_metadata_update_plan(0, 8),
+            Some(super::WindowMetadata {
+                wsize: 256,
+                wnext: 0,
+                whave: 0,
+            })
+        );
+        assert_eq!(window_metadata_update_plan(256, 15), None);
     }
 
     #[test]
