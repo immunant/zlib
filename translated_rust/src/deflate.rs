@@ -1668,6 +1668,65 @@ struct DeflateBoundState {
     gzip_header: Option<DeflateBoundHeader>,
 }
 
+/// Reduce the optional C gzip header to the byte lengths that affect the
+/// compression bound.  The ABI boundary is responsible for constructing the
+/// short-lived `CStr` views; this core never retains them.
+fn deflate_bound_header(
+    extra_len: Option<usize>,
+    name: Option<&::std::ffi::CStr>,
+    comment: Option<&::std::ffi::CStr>,
+    hcrc: bool,
+) -> DeflateBoundHeader {
+    DeflateBoundHeader {
+        extra_len,
+        name_len: name.map(|value| value.to_bytes_with_nul().len()),
+        comment_len: comment.map(|value| value.to_bytes_with_nul().len()),
+        hcrc,
+    }
+}
+
+// The stream and gzip-header pointers remain ABI-owned, including the
+// transient C-string views.  Expand this only at exported boundaries.
+macro_rules! deflate_bound_state_at_boundary {
+    ($strm:expr $(,)?) => {{
+        let strm = $strm;
+        if crate::src::deflate::deflateStateCheck(strm) != 0 {
+            None
+        } else {
+            let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+            let gzip_header = if state.gzhead.is_null() {
+                None
+            } else {
+                let header = &*state.gzhead;
+                let name = if header.name.is_null() {
+                    None
+                } else {
+                    Some(::std::ffi::CStr::from_ptr(header.name.cast()))
+                };
+                let comment = if header.comment.is_null() {
+                    None
+                } else {
+                    Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
+                };
+                Some(crate::src::deflate::deflate_bound_header(
+                    (!header.extra.is_null()).then_some(header.extra_len as usize),
+                    name,
+                    comment,
+                    header.hcrc != 0,
+                ))
+            };
+            Some(crate::src::deflate::DeflateBoundState {
+                wrap: state.wrap,
+                strstart: state.strstart,
+                w_bits: state.w_bits,
+                hash_bits: state.hash_bits,
+                level: state.level,
+                gzip_header,
+            })
+        }
+    }};
+}
+
 fn deflate_bound(
     source_len: crate::stdlib::z_size_t,
     state: Option<DeflateBoundState>,
@@ -1743,46 +1802,7 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let state = if deflateStateCheck(strm) != 0 {
-        None
-    } else {
-        let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
-        let gzip_header = if state.gzhead.is_null() {
-            None
-        } else {
-            let header = &*state.gzhead;
-            Some(DeflateBoundHeader {
-                extra_len: (!header.extra.is_null()).then_some(header.extra_len as usize),
-                name_len: if header.name.is_null() {
-                    None
-                } else {
-                    Some(
-                        ::std::ffi::CStr::from_ptr(header.name.cast())
-                            .to_bytes_with_nul()
-                            .len(),
-                    )
-                },
-                comment_len: if header.comment.is_null() {
-                    None
-                } else {
-                    Some(
-                        ::std::ffi::CStr::from_ptr(header.comment.cast())
-                            .to_bytes_with_nul()
-                            .len(),
-                    )
-                },
-                hcrc: header.hcrc != 0,
-            })
-        };
-        Some(DeflateBoundState {
-            wrap: state.wrap,
-            strstart: state.strstart,
-            w_bits: state.w_bits,
-            hash_bits: state.hash_bits,
-            level: state.level,
-            gzip_header,
-        })
-    };
+    let state = deflate_bound_state_at_boundary!(strm);
     deflate_bound(sourceLen, state)
 }
 #[export_name = "deflateBound"]
@@ -1791,46 +1811,7 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    let state = if deflateStateCheck(strm) != 0 {
-        None
-    } else {
-        let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
-        let gzip_header = if state.gzhead.is_null() {
-            None
-        } else {
-            let header = &*state.gzhead;
-            Some(DeflateBoundHeader {
-                extra_len: (!header.extra.is_null()).then_some(header.extra_len as usize),
-                name_len: if header.name.is_null() {
-                    None
-                } else {
-                    Some(
-                        ::std::ffi::CStr::from_ptr(header.name.cast())
-                            .to_bytes_with_nul()
-                            .len(),
-                    )
-                },
-                comment_len: if header.comment.is_null() {
-                    None
-                } else {
-                    Some(
-                        ::std::ffi::CStr::from_ptr(header.comment.cast())
-                            .to_bytes_with_nul()
-                            .len(),
-                    )
-                },
-                hcrc: header.hcrc != 0,
-            })
-        };
-        Some(DeflateBoundState {
-            wrap: state.wrap,
-            strstart: state.strstart,
-            w_bits: state.w_bits,
-            hash_bits: state.hash_bits,
-            level: state.level,
-            gzip_header,
-        })
-    };
+    let state = deflate_bound_state_at_boundary!(strm);
     deflate_bound(sourceLen as crate::stdlib::z_size_t, state) as crate::stdlib::uLong
 }
 /// Append big-endian zlib wrapper words before advancing the pending cursor.
