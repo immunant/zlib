@@ -675,9 +675,3 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
     (*state).hold = hold;
     (*state).bits = bits;
 }
-pub unsafe extern "C" fn inflate_fast_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
-) {
-    inflate_fast(strm, start)
-}
