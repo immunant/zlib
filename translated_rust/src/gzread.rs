@@ -52,16 +52,18 @@ unsafe extern "C" fn gz_load(
     mut len: ::core::ffi::c_uint,
     mut have: *mut ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
+    let state = &mut *state;
+    let have = &mut *have;
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
-    (*state).again = 0 as ::core::ffi::c_int;
+    state.again = 0 as ::core::ffi::c_int;
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
     loop {
         get = crate::src::gzlib::gz_syscall_chunk(len.wrapping_sub(*have));
         ret = crate::stdlib::read(
-            (*state).fd,
-            buf.offset(*have as isize) as *mut ::core::ffi::c_void,
+            state.fd,
+            buf.wrapping_add(*have as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
         if ret <= 0 as ::core::ffi::c_int {
@@ -76,20 +78,20 @@ unsafe extern "C" fn gz_load(
         if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
             || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
         {
-            (*state).again = 1 as ::core::ffi::c_int;
+            state.again = 1 as ::core::ffi::c_int;
             if *have != 0 as ::core::ffi::c_uint {
                 return 0 as ::core::ffi::c_int;
             }
         }
         crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+            state,
             crate::zlib_h::Z_ERRNO,
             crate::stdlib::strerror(*crate::stdlib::__errno_location()),
         );
         return -1 as ::core::ffi::c_int;
     }
     if ret == 0 as ::core::ffi::c_int {
-        (*state).eof = 1 as ::core::ffi::c_int;
+        state.eof = 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -393,13 +395,14 @@ unsafe extern "C" fn gz_read(
     mut buf: crate::stdlib::voidp,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
+    let state = &mut *state;
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut err: ::core::ffi::c_int = 0;
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -408,55 +411,55 @@ unsafe extern "C" fn gz_read(
         let mut consumed_buffered = false;
         n = crate::src::gzlib::gz_stream_chunk(len);
         's_28: {
-            if (*state).x.have != 0 {
-                n = crate::src::gzlib::gz_buffered_chunk(len, (*state).x.have);
+            if state.x.have != 0 {
+                n = crate::src::gzlib::gz_buffered_chunk(len, state.x.have);
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
-                    (*state).x.next as *const ::core::ffi::c_void,
+                    state.x.next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                n = gz_consume(&mut *state, n as crate::stdlib::off64_t);
+                n = gz_consume(state, n as crate::stdlib::off64_t);
                 consumed_buffered = true;
-                if (*state).err != crate::zlib_h::Z_OK {
+                if state.err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
                 }
             } else {
-                if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
+                if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                     break 's_140;
                 }
-                if (*state).how == crate::gzguts_h::LOOK
-                    || n < (*state).size << 1 as ::core::ffi::c_int
+                if state.how == crate::gzguts_h::LOOK
+                    || n < state.size << 1 as ::core::ffi::c_int
                 {
                     if gz_fetch(state) == -1 as ::core::ffi::c_int
-                        && (*state).x.have == 0 as ::core::ffi::c_uint
+                        && state.x.have == 0 as ::core::ffi::c_uint
                     {
                         err = -1 as ::core::ffi::c_int;
                     }
                     break 's_28;
-                } else if (*state).how == crate::gzguts_h::COPY {
+                } else if state.how == crate::gzguts_h::COPY {
                     err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
                 } else {
-                    (*state).strm.avail_out = n as crate::stdlib::uInt;
-                    (*state).strm.next_out =
+                    state.strm.avail_out = n as crate::stdlib::uInt;
+                    state.strm.next_out =
                         buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
                     err = gz_decomp(state);
-                    n = (*state).x.have;
-                    (*state).x.have = 0 as ::core::ffi::c_uint;
+                    n = state.x.have;
+                    state.x.have = 0 as ::core::ffi::c_uint;
                 }
             }
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
             got = got.wrapping_add(n as crate::stdlib::z_size_t);
             if !consumed_buffered {
-                crate::src::gzlib::gz_advance_pos(&mut *state, n);
+                crate::src::gzlib::gz_advance_pos(state, n);
             }
         }
         if !(len != 0 && err == 0) {
             break;
         }
     }
-    if len != 0 && (*state).eof != 0 {
-        (*state).past = 1 as ::core::ffi::c_int;
+    if len != 0 && state.eof != 0 {
+        state.past = 1 as ::core::ffi::c_int;
     }
     return got;
 }
