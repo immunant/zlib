@@ -279,103 +279,116 @@ fn gz_look_buffers(want: ::core::ffi::c_uint) -> Option<crate::gzguts_h::gz_buff
     crate::gzguts_h::gz_buffers::new(want as usize, Some(output_len))
 }
 
-unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state_ref.size == 0 as ::core::ffi::c_uint {
-        let Some(buffers) = gz_look_buffers(state_ref.want) else {
-            crate::src::gzlib::gz_error_static(
-                state_ref,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0",
-            );
-            return -1;
-        };
-        state_ref.buffers = Some(buffers);
-        state_ref.size = state_ref.want;
-        state_ref.strm.zalloc = None;
-        state_ref.strm.zfree = None;
-        state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        state_ref.strm.avail_in = 0 as crate::stdlib::uInt;
-        state_ref.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        if crate::src::inflate::inflateInit2_(
-            &raw mut state_ref.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        ) != crate::zlib_h::Z_OK
-        {
-            state_ref.buffers = None;
-            state_ref.size = 0;
-            crate::src::gzlib::gz_error_static(
-                state_ref,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0",
-            );
-            return -1;
-        }
-    }
-    let reset_junk = if state_ref.direct == -1 as ::core::ffi::c_int
-        || state_ref.junk == 0 as ::core::ffi::c_int
-    {
-        Some(gz_look_reset_junk(state_ref.junk))
-    } else {
-        if gz_avail(state_ref) == -1 as ::core::ffi::c_int {
-            return -1;
-        }
-        if state_ref.strm.avail_in == 0 as crate::stdlib::uInt
-            || state_ref.again != 0 && state_ref.strm.avail_in < 4 as crate::stdlib::uInt
-        {
-            return 0;
-        }
-        let input_is_gzip = {
-            let Some(buffers) = state_ref.buffers.as_ref() else {
-                return -1;
+// This transitional codec state machine expands only in exported gzip entry
+// points. Its allocator and inflater calls stay at that ABI boundary until
+// inflate has a safe stream-call adapter.
+macro_rules! gz_look_at_boundary {
+    ($state_ref:expr) => {{
+        let state_ref = &mut *$state_ref;
+        'gz_look_result: {
+            if state_ref.size == 0 as ::core::ffi::c_uint {
+                let Some(buffers) = gz_look_buffers(state_ref.want) else {
+                    crate::src::gzlib::gz_error_static(
+                        state_ref,
+                        crate::zlib_h::Z_MEM_ERROR,
+                        b"out of memory\0",
+                    );
+                    break 'gz_look_result -1;
+                };
+                state_ref.buffers = Some(buffers);
+                state_ref.size = state_ref.want;
+                state_ref.strm.zalloc = None;
+                state_ref.strm.zfree = None;
+                state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+                state_ref.strm.avail_in = 0 as crate::stdlib::uInt;
+                state_ref.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                if crate::src::inflate::inflateInit2_(
+                    &raw mut state_ref.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                    15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                ) != crate::zlib_h::Z_OK
+                {
+                    state_ref.buffers = None;
+                    state_ref.size = 0;
+                    crate::src::gzlib::gz_error_static(
+                        state_ref,
+                        crate::zlib_h::Z_MEM_ERROR,
+                        b"out of memory\0",
+                    );
+                    break 'gz_look_result -1;
+                }
+            }
+            let reset_junk = if state_ref.direct == -1 as ::core::ffi::c_int
+                || state_ref.junk == 0 as ::core::ffi::c_int
+            {
+                Some(gz_look_reset_junk(state_ref.junk))
+            } else {
+                if gz_avail(state_ref) == -1 as ::core::ffi::c_int {
+                    break 'gz_look_result -1;
+                }
+                if state_ref.strm.avail_in == 0 as crate::stdlib::uInt
+                    || state_ref.again != 0 && state_ref.strm.avail_in < 4 as crate::stdlib::uInt
+                {
+                    break 'gz_look_result 0;
+                }
+                let input_is_gzip = {
+                    let Some(buffers) = state_ref.buffers.as_ref() else {
+                        break 'gz_look_result -1;
+                    };
+                    let Some(next_index) = gz_owned_buffer_index(
+                        buffers.input.as_ptr() as usize,
+                        buffers.input.len(),
+                        state_ref.strm.next_in as usize,
+                    ) else {
+                        break 'gz_look_result -1;
+                    };
+                    let Some(is_gzip) =
+                        gz_look_input_is_gzip(&buffers.input, next_index, state_ref.strm.avail_in)
+                    else {
+                        break 'gz_look_result -1;
+                    };
+                    is_gzip
+                };
+                input_is_gzip.then_some(1)
+            };
+            if let Some(junk) = reset_junk {
+                crate::src::inflate::inflateReset(&raw mut state_ref.strm);
+                state_ref.how = crate::gzguts_h::GZIP;
+                state_ref.junk = junk;
+                state_ref.direct = 0;
+                break 'gz_look_result 0;
+            }
+            let Some(buffers) = state_ref.buffers.as_mut() else {
+                break 'gz_look_result -1;
             };
             let Some(next_index) = gz_owned_buffer_index(
                 buffers.input.as_ptr() as usize,
                 buffers.input.len(),
                 state_ref.strm.next_in as usize,
             ) else {
-                return -1;
+                break 'gz_look_result -1;
             };
-            let Some(is_gzip) =
-                gz_look_input_is_gzip(&buffers.input, next_index, state_ref.strm.avail_in)
-            else {
-                return -1;
+            let Some(output) = buffers.output.as_mut() else {
+                break 'gz_look_result -1;
             };
-            is_gzip
-        };
-        input_is_gzip.then_some(1)
-    };
-    if let Some(junk) = reset_junk {
-        crate::src::inflate::inflateReset(&raw mut state_ref.strm);
-        state_ref.how = crate::gzguts_h::GZIP;
-        state_ref.junk = junk;
-        state_ref.direct = 0;
-        return 0;
-    }
-    let Some(buffers) = state_ref.buffers.as_mut() else {
-        return -1;
-    };
-    let Some(next_index) = gz_owned_buffer_index(
-        buffers.input.as_ptr() as usize,
-        buffers.input.len(),
-        state_ref.strm.next_in as usize,
-    ) else {
-        return -1;
-    };
-    let Some(output) = buffers.output.as_mut() else {
-        return -1;
-    };
-    if gz_look_copy_pending_input(&buffers.input, next_index, state_ref.strm.avail_in, output)
-        .is_none()
-    {
-        return -1;
-    }
-    state_ref.x.next = output.as_mut_ptr();
-    state_ref.x.have = state_ref.strm.avail_in as ::core::ffi::c_uint;
-    state_ref.strm.avail_in = 0 as crate::stdlib::uInt;
-    state_ref.how = crate::gzguts_h::COPY;
-    0
+            if gz_look_copy_pending_input(
+                &buffers.input,
+                next_index,
+                state_ref.strm.avail_in,
+                output,
+            )
+            .is_none()
+            {
+                break 'gz_look_result -1;
+            }
+            state_ref.x.next = output.as_mut_ptr();
+            state_ref.x.have = state_ref.strm.avail_in as ::core::ffi::c_uint;
+            state_ref.strm.avail_in = 0 as crate::stdlib::uInt;
+            state_ref.how = crate::gzguts_h::COPY;
+            0
+        }
+    }};
 }
 
 /// The safe portion of one gzip inflate step after the boundary has invoked
@@ -449,137 +462,152 @@ fn gz_decomp_finish(
     }
 }
 
-unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let had = state.strm.avail_out as ::core::ffi::c_uint;
-    loop {
-        if state.strm.avail_in == 0 as crate::stdlib::uInt
-            && gz_avail(state) == -1 as ::core::ffi::c_int
-        {
-            ret = state.err;
-            break;
-        } else if state.strm.avail_in == 0 as crate::stdlib::uInt {
-            if state.again == 0 {
-                crate::src::gzlib::gz_error_static(
-                    state,
-                    crate::zlib_h::Z_BUF_ERROR,
-                    b"unexpected end of file\0",
-                );
-            }
-            break;
-        } else {
-            ret = crate::src::inflate::inflate(
-                &mut state.strm as *mut crate::zlib_h::z_stream_s,
-                crate::zlib_h::Z_NO_FLUSH,
-            );
-            match gz_decomp_after_inflate(state, had, ret) {
-                GzDecompInflateStep::Continue => {}
-                GzDecompInflateStep::Break(next_ret) => {
-                    ret = next_ret;
-                    break;
-                }
-                GzDecompInflateStep::DataError => {
-                    // `inflate()` assigns every data-error message from its
-                    // immutable diagnostic table. Match that storage by
-                    // address rather than borrowing an arbitrary C pointer.
-                    // A null message retains zlib's generic diagnostic.
-                    let message = crate::src::inflate::INFLATE_ERROR_MESSAGES
-                        .iter()
-                        .find(|candidate| {
-                            ::core::ptr::eq(
-                                candidate.as_ptr(),
-                                state.strm.msg.cast_const().cast::<u8>(),
-                            )
-                        })
-                        .and_then(|candidate| ::std::ffi::CStr::from_bytes_with_nul(candidate).ok())
-                        .or_else(|| {
-                            ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0").ok()
-                        });
-                    crate::src::gzlib::gz_error_update_state(
+// See `gz_look_at_boundary!`: this contains the legacy inflate call, so it
+// deliberately expands only at an exported ABI boundary.
+macro_rules! gz_decomp_at_boundary {
+    ($state:expr) => {{
+        let state = &mut *$state;
+        let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
+        let had = state.strm.avail_out as ::core::ffi::c_uint;
+        loop {
+            if state.strm.avail_in == 0 as crate::stdlib::uInt
+                && gz_avail(state) == -1 as ::core::ffi::c_int
+            {
+                ret = state.err;
+                break;
+            } else if state.strm.avail_in == 0 as crate::stdlib::uInt {
+                if state.again == 0 {
+                    crate::src::gzlib::gz_error_static(
                         state,
-                        crate::zlib_h::Z_DATA_ERROR,
-                        message,
+                        crate::zlib_h::Z_BUF_ERROR,
+                        b"unexpected end of file\0",
                     );
-                    break;
+                }
+                break;
+            } else {
+                ret = crate::src::inflate::inflate(
+                    &mut state.strm as *mut crate::zlib_h::z_stream_s,
+                    crate::zlib_h::Z_NO_FLUSH,
+                );
+                match gz_decomp_after_inflate(state, had, ret) {
+                    GzDecompInflateStep::Continue => {}
+                    GzDecompInflateStep::Break(next_ret) => {
+                        ret = next_ret;
+                        break;
+                    }
+                    GzDecompInflateStep::DataError => {
+                        // `inflate()` assigns every data-error message from its
+                        // immutable diagnostic table. Match that storage by
+                        // address rather than borrowing an arbitrary C pointer.
+                        // A null message retains zlib's generic diagnostic.
+                        let message = crate::src::inflate::INFLATE_ERROR_MESSAGES
+                            .iter()
+                            .find(|candidate| {
+                                ::core::ptr::eq(
+                                    candidate.as_ptr(),
+                                    state.strm.msg.cast_const().cast::<u8>(),
+                                )
+                            })
+                            .and_then(|candidate| {
+                                ::std::ffi::CStr::from_bytes_with_nul(candidate).ok()
+                            })
+                            .or_else(|| {
+                                ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0")
+                                    .ok()
+                            });
+                        crate::src::gzlib::gz_error_update_state(
+                            state,
+                            crate::zlib_h::Z_DATA_ERROR,
+                            message,
+                        );
+                        break;
+                    }
                 }
             }
         }
-    }
-    gz_decomp_finish(state, had, ret)
+        gz_decomp_finish(state, had, ret)
+    }};
 }
 
-unsafe fn gz_fetch(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    loop {
-        match state_ref.how {
-            crate::gzguts_h::LOOK => {
-                if gz_look(state_ref) == -1 as ::core::ffi::c_int {
-                    return -1 as ::core::ffi::c_int;
+// Fetch can enter both lookahead and inflate. Keep those calls in the same
+// exported expansion rather than retaining a private unsafe forwarding layer.
+macro_rules! gz_fetch_at_boundary {
+    ($state_ref:expr) => {{
+        let state_ref = &mut *$state_ref;
+        'gz_fetch_result: {
+            loop {
+                match state_ref.how {
+                    crate::gzguts_h::LOOK => {
+                        if gz_look_at_boundary!(state_ref) == -1 as ::core::ffi::c_int {
+                            break 'gz_fetch_result -1 as ::core::ffi::c_int;
+                        }
+                        if state_ref.how == crate::gzguts_h::LOOK {
+                            break 'gz_fetch_result 0 as ::core::ffi::c_int;
+                        }
+                    }
+                    crate::gzguts_h::COPY => {
+                        let result = {
+                            let Some(file) = state_ref.file.as_mut() else {
+                                break 'gz_fetch_result -1;
+                            };
+                            let Some(output) = state_ref
+                                .buffers
+                                .as_mut()
+                                .and_then(|buffers| buffers.output.as_mut())
+                            else {
+                                break 'gz_fetch_result -1;
+                            };
+                            gz_load(file, output)
+                        };
+                        let have = match gz_load_commit(state_ref, result) {
+                            Ok(have) => have,
+                            Err(()) => break 'gz_fetch_result -1,
+                        };
+                        let Some(output) = state_ref
+                            .buffers
+                            .as_mut()
+                            .and_then(|buffers| buffers.output.as_mut())
+                        else {
+                            break 'gz_fetch_result -1;
+                        };
+                        state_ref.x.have = have;
+                        state_ref.x.next = output.as_mut_ptr();
+                        break 'gz_fetch_result 0 as ::core::ffi::c_int;
+                    }
+                    crate::gzguts_h::GZIP => {
+                        let Some(output) = state_ref
+                            .buffers
+                            .as_mut()
+                            .and_then(|buffers| buffers.output.as_mut())
+                        else {
+                            break 'gz_fetch_result -1;
+                        };
+                        state_ref.strm.avail_out =
+                            (state_ref.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+                        state_ref.strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
+                        state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
+                        if gz_decomp_at_boundary!(state_ref) == -1 as ::core::ffi::c_int {
+                            break 'gz_fetch_result -1 as ::core::ffi::c_int;
+                        }
+                    }
+                    _ => {
+                        crate::src::gzlib::gz_error_static(
+                            state_ref,
+                            crate::zlib_h::Z_STREAM_ERROR,
+                            b"state corrupt\0",
+                        );
+                        break 'gz_fetch_result -1 as ::core::ffi::c_int;
+                    }
                 }
-                if state_ref.how == crate::gzguts_h::LOOK {
-                    return 0 as ::core::ffi::c_int;
+                if !(state_ref.x.have == 0 as ::core::ffi::c_uint
+                    && (state_ref.eof == 0 || state_ref.strm.avail_in != 0))
+                {
+                    break;
                 }
             }
-            crate::gzguts_h::COPY => {
-                let result = {
-                    let Some(file) = state_ref.file.as_mut() else {
-                        return -1;
-                    };
-                    let Some(output) = state_ref
-                        .buffers
-                        .as_mut()
-                        .and_then(|buffers| buffers.output.as_mut())
-                    else {
-                        return -1;
-                    };
-                    gz_load(file, output)
-                };
-                let have = match gz_load_commit(state_ref, result) {
-                    Ok(have) => have,
-                    Err(()) => return -1,
-                };
-                let Some(output) = state_ref
-                    .buffers
-                    .as_mut()
-                    .and_then(|buffers| buffers.output.as_mut())
-                else {
-                    return -1;
-                };
-                state_ref.x.have = have;
-                state_ref.x.next = output.as_mut_ptr();
-                return 0 as ::core::ffi::c_int;
-            }
-            crate::gzguts_h::GZIP => {
-                let Some(output) = state_ref
-                    .buffers
-                    .as_mut()
-                    .and_then(|buffers| buffers.output.as_mut())
-                else {
-                    return -1;
-                };
-                state_ref.strm.avail_out =
-                    (state_ref.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                state_ref.strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
-                state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
-                if gz_decomp(state_ref) == -1 as ::core::ffi::c_int {
-                    return -1 as ::core::ffi::c_int;
-                }
-            }
-            _ => {
-                crate::src::gzlib::gz_error_static(
-                    state_ref,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"state corrupt\0",
-                );
-                return -1 as ::core::ffi::c_int;
-            }
+            0 as ::core::ffi::c_int
         }
-        if !(state_ref.x.have == 0 as ::core::ffi::c_uint
-            && (state_ref.eof == 0 || state_ref.strm.avail_in != 0))
-        {
-            break;
-        }
-    }
-    return 0 as ::core::ffi::c_int;
+    }};
 }
 
 /// Decide how much already-buffered gzip output a pending forward seek can
@@ -893,7 +921,7 @@ macro_rules! gz_read_at_boundary {
                 match gz_skip(state_ref) {
                     Ok(GzSkipStep::Complete) => break,
                     Ok(GzSkipStep::NeedFetch) => {
-                        if gz_fetch(state_ref) == -1 as ::core::ffi::c_int {
+                        if gz_fetch_at_boundary!(state_ref) == -1 as ::core::ffi::c_int {
                             break 'gz_read_result 0 as crate::stdlib::z_size_t;
                         }
                     }
@@ -961,7 +989,7 @@ macro_rules! gz_read_at_boundary {
                         if state_ref.how == crate::gzguts_h::LOOK
                             || n < state_ref.size << 1 as ::core::ffi::c_int
                         {
-                            if gz_fetch(state_ref) == -1 as ::core::ffi::c_int
+                            if gz_fetch_at_boundary!(state_ref) == -1 as ::core::ffi::c_int
                                 && state_ref.x.have == 0 as ::core::ffi::c_uint
                             {
                                 err = -1 as ::core::ffi::c_int;
@@ -996,7 +1024,7 @@ macro_rules! gz_read_at_boundary {
                             state_ref.strm.next_out =
                                 destination.as_mut_ptr() as *mut crate::stdlib::Bytef;
                             state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
-                            err = gz_decomp(state_ref);
+                            err = gz_decomp_at_boundary!(state_ref);
                             n = state_ref.x.have;
                             state_ref.x.have = 0 as ::core::ffi::c_uint;
                         }
@@ -1276,7 +1304,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
         return -1;
     }
     if state.how == crate::gzguts_h::LOOK && state.x.have == 0 {
-        gz_look(state);
+        gz_look_at_boundary!(state);
     }
     if !gzread_state_is_valid(state.mode, state.err, state.again) {
         return -1;
@@ -1286,7 +1314,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
         match gz_skip(state) {
             Ok(GzSkipStep::Complete) => break,
             Ok(GzSkipStep::NeedFetch) => {
-                if gz_fetch(state) == -1 {
+                if gz_fetch_at_boundary!(state) == -1 {
                     return -1;
                 }
             }
@@ -1376,7 +1404,7 @@ pub unsafe extern "C" fn gzgets_ffi(
         match gz_skip(state) {
             Ok(GzSkipStep::Complete) => break,
             Ok(GzSkipStep::NeedFetch) => {
-                if gz_fetch(state) == -1 {
+                if gz_fetch_at_boundary!(state) == -1 {
                     return ::core::ptr::null_mut();
                 }
             }
@@ -1391,7 +1419,7 @@ pub unsafe extern "C" fn gzgets_ffi(
     }
     let mut left = (destination.len() as ::core::ffi::c_uint).wrapping_sub(1);
     let mut written = 0usize;
-    while left != 0 && !(state.x.have == 0 && gz_fetch(state) == -1) {
+    while left != 0 && !(state.x.have == 0 && gz_fetch_at_boundary!(state) == -1) {
         if state.x.have == 0 {
             state.past = 1;
             break;
@@ -1487,7 +1515,7 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
         && state.how == crate::gzguts_h::LOOK
         && state.x.have == 0
     {
-        gz_look(state);
+        gz_look_at_boundary!(state);
     }
     gzdirect_state(state.direct)
 }
