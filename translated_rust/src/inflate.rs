@@ -617,6 +617,21 @@ enum InflateStateInstallation<'a> {
     },
 }
 
+/// A checked stream carrier for the private state-installation boundary.
+///
+/// The carrier is constructed only from an already-borrowed ABI stream.  It
+/// does not expose raw state storage, and keeps the allocator pairing local to
+/// installation rather than to an exported wrapper.
+struct InflateStateStream<'a> {
+    stream: &'a mut crate::zlib_h::z_stream_s,
+}
+
+impl<'a> InflateStateStream<'a> {
+    fn new(stream: &'a mut crate::zlib_h::z_stream_s) -> Self {
+        Self { stream }
+    }
+}
+
 /// Allocate, initialize, and install an inflater state through the stream's
 /// ABI allocator.
 ///
@@ -624,11 +639,12 @@ enum InflateStateInstallation<'a> {
 /// initialization and copying.  Callers construct codec-owned data first;
 /// this helper alone invokes the paired allocator and writes the resulting
 /// state slot.
-unsafe fn inflate_allocate_state(
-    strm: &mut crate::zlib_h::z_stream_s,
+fn inflate_install_state(
+    stream: InflateStateStream<'_>,
     initialized: crate::src::inflate::inflate_state,
     installation: InflateStateInstallation<'_>,
 ) -> ::core::ffi::c_int {
+    let strm = stream.stream;
     let (source_stream, copied_header, zalloc, zfree, opaque) = match installation {
         InflateStateInstallation::Initialize(_) => {
             (None, None, strm.zalloc, strm.zfree, strm.opaque)
@@ -679,11 +695,13 @@ unsafe fn inflate_allocate_state(
     let (Some(zalloc), Some(_)) = (zalloc, zfree) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let allocation = zalloc(
-        opaque,
-        1,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    );
+    let allocation = unsafe {
+        zalloc(
+            opaque,
+            1,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        )
+    };
     if allocation.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -724,7 +742,7 @@ unsafe fn inflate_allocate_state(
     };
     if !retained {
         inflate_release_owned_state(state.as_deref_mut().expect("unretained state"));
-        zfree.expect("callback pair is validated")(opaque, allocation);
+        unsafe { zfree.expect("callback pair is validated")(opaque, allocation) };
         if source_stream.is_none() {
             strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
         }
@@ -764,45 +782,12 @@ fn inflate_release_owned_state(state: &mut crate::src::inflate::inflate_state) {
 /// The validated, fully Rust-owned portion of public inflater initialization.
 ///
 /// Allocator selection and ownership transfer intentionally happen later in
-/// `inflate_allocate_state()`: only that boundary can pair a caller's `zalloc`
+/// `inflate_install_state()`: only that boundary can pair a caller's `zalloc`
 /// and `zfree` callbacks.  Keeping validation and state construction here
 /// leaves that boundary with one narrow responsibility.
 struct InflateInitPreparation {
     state: crate::src::inflate::inflate_state,
     window_bits: ::core::ffi::c_int,
-}
-
-/// A stream prepared for the public inflater-initialization implementation.
-///
-/// This keeps the ABI carrier at the boundary of initialization.  In
-/// particular, the implementation owns the allocator validation and the
-/// state-storage handoff instead of making either exported entry point manage
-/// callback-owned memory.
-struct InflateInitStream<'a> {
-    stream: &'a mut crate::zlib_h::z_stream_s,
-}
-
-impl<'a> InflateInitStream<'a> {
-    fn new(stream: &'a mut crate::zlib_h::z_stream_s) -> Self {
-        Self { stream }
-    }
-
-    fn clear_message(&mut self) {
-        self.stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-
-    fn install(&mut self, preparation: InflateInitPreparation) -> ::core::ffi::c_int {
-        // `InflateInitStream` is constructed only after the ABI wrapper has
-        // checked the stream pointer.  The remaining unsafety is limited to
-        // the paired allocator callback and its typed-state handoff.
-        unsafe {
-            inflate_allocate_state(
-                self.stream,
-                preparation.state,
-                InflateStateInstallation::Initialize(preparation.window_bits),
-            )
-        }
-    }
 }
 
 fn prepare_inflate_init(
@@ -821,7 +806,7 @@ fn prepare_inflate_init(
 }
 
 fn inflate_init2_impl(
-    mut stream: InflateInitStream<'_>,
+    mut stream: InflateStateStream<'_>,
     window_bits: ::core::ffi::c_int,
     version: Option<::core::ffi::c_char>,
     stream_size: ::core::ffi::c_int,
@@ -830,8 +815,12 @@ fn inflate_init2_impl(
         Ok(preparation) => preparation,
         Err(error) => return error,
     };
-    stream.clear_message();
-    stream.install(preparation)
+    stream.stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    inflate_install_state(
+        stream,
+        preparation.state,
+        InflateStateInstallation::Initialize(preparation.window_bits),
+    )
 }
 
 pub unsafe fn inflateInit2_(
@@ -841,7 +830,7 @@ pub unsafe fn inflateInit2_(
     stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     inflate_init2_impl(
-        InflateInitStream::new(strm),
+        InflateStateStream::new(strm),
         windowBits,
         version,
         stream_size,
@@ -859,7 +848,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_init2_impl(
-        InflateInitStream::new(strm),
+        InflateStateStream::new(strm),
         windowBits,
         version.as_ref().copied(),
         stream_size,
@@ -876,7 +865,7 @@ pub unsafe extern "C" fn inflateInit__ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_init2_impl(
-        InflateInitStream::new(strm),
+        InflateStateStream::new(strm),
         crate::zutil_h::DEF_WBITS,
         version.as_ref().copied(),
         stream_size,
@@ -3459,36 +3448,57 @@ fn inflate_copy_impl(
     Ok(source.state.clone())
 }
 
+/// Copy a fully validated source state into a destination stream.
+///
+/// The exported wrapper has already converted both ABI stream pointers and
+/// the source state link.  Allocation, cloning, and installation remain here
+/// so the wrapper only performs that conversion and dispatches once.
+fn inflate_copy_from_streams(
+    dest: &mut crate::zlib_h::z_stream_s,
+    source: &crate::zlib_h::z_stream_s,
+    state: &crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_int {
+    let copied_state = match inflate_copy_impl(InflateCopyRequest {
+        state,
+        allocators_present: inflate_stream_has_state_allocation(source),
+    }) {
+        Ok(copy) => copy,
+        Err(error) => return error,
+    };
+    inflate_install_state(
+        InflateStateStream::new(dest),
+        copied_state,
+        InflateStateInstallation::Copy {
+            source_stream: source,
+            source_state: state,
+        },
+    )
+}
+
 #[export_name = "inflateCopy"]
 
 pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if dest.is_null() || source.is_null() {
+    let Some(source) = source.as_ref() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let source = *source;
-    let state = source.state as *const crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &*state;
-    let copied_state = match inflate_copy_impl(InflateCopyRequest {
-        state,
-        allocators_present: inflate_stream_has_state_allocation(&source),
-    }) {
-        Ok(copy) => copy,
-        Err(error) => return error,
     };
-    inflate_allocate_state(
-        &mut *dest,
-        copied_state,
-        InflateStateInstallation::Copy {
-            source_stream: &source,
-            source_state: state,
-        },
-    )
+    // Snapshot the ABI carrier before borrowing `dest` mutably.  Besides
+    // matching zlib's copy behavior, this keeps an accidental `dest ==
+    // source` call from creating overlapping Rust references.
+    let source = *source;
+    let Some(state) = source
+        .state
+        .cast::<crate::src::inflate::inflate_state>()
+        .as_ref()
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(dest) = dest.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_copy_from_streams(dest, &source, state)
 }
 fn inflate_undermine_impl(
     strm: &mut crate::zlib_h::z_stream_s,
