@@ -239,8 +239,8 @@ pub unsafe extern "C" fn compress_ffi(
     };
     compress(dest, &mut *destLen, source)
 }
-pub unsafe extern "C" fn compressBound_z(
-    mut sourceLen: crate::stdlib::z_size_t,
+pub fn compressBound_z(
+    sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let mut bound: crate::stdlib::z_size_t = sourceLen
         .wrapping_add(sourceLen >> 12 as ::core::ffi::c_int)
@@ -256,12 +256,12 @@ pub unsafe extern "C" fn compressBound_z(
 #[export_name = "compressBound_z"]
 
 pub unsafe extern "C" fn compressBound_z_ffi(
-    mut sourceLen: crate::stdlib::z_size_t,
+    sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     compressBound_z(sourceLen)
 }
-pub unsafe extern "C" fn compressBound(
-    mut sourceLen: crate::stdlib::uLong,
+pub fn compressBound(
+    sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
     let mut bound: crate::stdlib::z_size_t = compressBound_z(sourceLen as crate::stdlib::z_size_t);
     return if bound != bound {
@@ -273,7 +273,7 @@ pub unsafe extern "C" fn compressBound(
 #[export_name = "compressBound"]
 
 pub unsafe extern "C" fn compressBound_ffi(
-    mut sourceLen: crate::stdlib::uLong,
+    sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
     compressBound(sourceLen)
 }
