@@ -1490,16 +1490,6 @@ pub unsafe extern "C" fn deflatePrime(
     }
     return crate::zlib_h::Z_OK;
 }
-#[export_name = "deflatePrime"]
-
-pub unsafe extern "C" fn deflatePrime_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    deflatePrime(strm, bits, value)
-}
-
 #[derive(Copy, Clone)]
 struct DeflateParamsPlan {
     level: ::core::ffi::c_int,
@@ -1640,6 +1630,15 @@ struct DeflateBoundHeader {
     name_len: Option<usize>,
     comment_len: Option<usize>,
     hcrc: bool,
+}
+#[export_name = "deflatePrime"]
+
+pub unsafe extern "C" fn deflatePrime_ffi(
+    mut strm: crate::zlib_h::z_streamp,
+    mut bits: ::core::ffi::c_int,
+    mut value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    deflatePrime(strm, bits, value)
 }
 
 #[derive(Copy, Clone)]

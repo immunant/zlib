@@ -423,6 +423,9 @@ fn gz_write_direct_progress<'a>(
     before: crate::stdlib::uInt,
     after: crate::stdlib::uInt,
 ) -> Option<(&'a [u8], crate::stdlib::z_size_t, ::core::ffi::c_uint)> {
+    if source.len() != remaining {
+        return None;
+    }
     let consumed = before.checked_sub(after)?;
     let consumed = usize::try_from(consumed).ok()?;
     let next_remaining = remaining.checked_sub(consumed)?;
@@ -438,11 +441,11 @@ fn gz_write_direct_progress<'a>(
 /// wrapping logical-position arithmetic and returns the remaining input.
 fn gz_write_direct_commit_state(
     state: &mut crate::gzguts_h::gz_state,
-    remaining: crate::stdlib::z_size_t,
     consumed: ::core::ffi::c_uint,
+    next_remaining: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
-    remaining.wrapping_sub(consumed as crate::stdlib::z_size_t)
+    next_remaining
 }
 
 /// Write a direct (transparent) gzip payload through the owned descriptor.
@@ -761,7 +764,7 @@ unsafe fn gz_write(
             let n = gz_write_direct_chunk_plan(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            let Some((next_source, _next_len, consumed)) = gz_write_direct_progress(
+            let Some((next_source, next_len, consumed)) = gz_write_direct_progress(
                 source,
                 len,
                 n as crate::stdlib::uInt,
@@ -769,7 +772,7 @@ unsafe fn gz_write(
             ) else {
                 return 0;
             };
-            len = gz_write_direct_commit_state(state, len, consumed);
+            len = gz_write_direct_commit_state(state, consumed, next_len);
             source = next_source;
             if ret == -1 as ::core::ffi::c_int {
                 return gz_write_failure_result(state.again, put, len);
