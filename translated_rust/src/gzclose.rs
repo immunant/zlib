@@ -43,10 +43,15 @@ fn gz_close_action_for_mode(
 
 #[export_name = "gzclose"]
 pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mode =
-        unsafe { (file as *const crate::gzguts_h::gz_state).as_ref() }.map(|state| state.mode);
+    let state = file as *const crate::gzguts_h::gz_state;
+    if state.is_null()
+        || state.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let mode = unsafe { (*state).mode };
 
-    match gz_close_action_for_mode(mode) {
+    match gz_close_action_for_mode(Some(mode)) {
         Err(status) => status,
         Ok(GzCloseAction::Read) => {
             crate::src::gzread::gzclose_r_ffi(file as *mut crate::zlib_h::gzFile_s)
@@ -60,7 +65,7 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
 #[cfg(test)]
 mod tests {
 
-    use super::{gz_close_action_for_mode, GzCloseAction};
+    use super::{gz_close_action_for_mode, gzclose_ffi, GzCloseAction};
 
     #[test]
     fn dispatches_read_mode_to_read_close() {
@@ -92,6 +97,26 @@ mod tests {
         assert_eq!(
             gz_close_action_for_mode(None),
             Err(crate::zlib_h::Z_STREAM_ERROR)
+        );
+    }
+
+    #[test]
+    fn close_rejects_null_handle_without_dispatching() {
+        assert_eq!(
+            unsafe { gzclose_ffi(core::ptr::null_mut()) },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+    }
+
+    #[test]
+    fn close_rejects_misaligned_handle_without_dispatching() {
+        assert!(::core::mem::align_of::<crate::gzguts_h::gz_state>() > 1);
+        let mut bytes = [0_u8; ::core::mem::size_of::<crate::gzguts_h::gz_state>() + 1];
+        let misaligned = bytes.as_mut_ptr().wrapping_add(1) as crate::zlib_h::gzFile;
+
+        assert_eq!(
+            unsafe { gzclose_ffi(misaligned) },
+            crate::zlib_h::Z_STREAM_ERROR
         );
     }
 }
