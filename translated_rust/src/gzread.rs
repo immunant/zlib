@@ -813,25 +813,21 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     gzdirect(file)
 }
 pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_READ {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).size != 0 {
+    if state.size != 0 {
         crate::src::inflate::inflateEnd(
-            &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
-        crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-        crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+        crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+        crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
     }
-    err = if (*state).err == crate::zlib_h::Z_BUF_ERROR {
+    let err = if state.err == crate::zlib_h::Z_BUF_ERROR {
         crate::zlib_h::Z_BUF_ERROR
     } else {
         crate::zlib_h::Z_OK
@@ -841,14 +837,14 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-    ret = crate::stdlib::close((*state).fd);
-    crate::stdlib::free(state as *mut ::core::ffi::c_void);
-    return if ret != 0 {
+    crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
+    let ret = crate::stdlib::close(state.fd);
+    crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
+    if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
         err
-    };
+    }
 }
 #[export_name = "gzclose_r"]
 
