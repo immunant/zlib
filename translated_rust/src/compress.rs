@@ -333,16 +333,14 @@ pub unsafe extern "C" fn compress_ffi(
 }
 
 #[export_name = "compressBound_z"]
-pub unsafe extern "C" fn compressBound_z_ffi(
+pub extern "C" fn compressBound_z_ffi(
     sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     compress_bound_z_impl(sourceLen)
 }
 
 #[export_name = "compressBound"]
-pub unsafe extern "C" fn compressBound_ffi(
-    sourceLen: crate::stdlib::uLong,
-) -> crate::stdlib::uLong {
+pub extern "C" fn compressBound_ffi(sourceLen: crate::stdlib::uLong) -> crate::stdlib::uLong {
     compress_bound(sourceLen)
 }
 
