@@ -1876,39 +1876,64 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
         ::core::slice::from_raw_parts(dictionary.as_ptr().cast_const(), dictLength as usize);
     deflate_set_dictionary_from_stream(strm, dictionary)
 }
-pub unsafe extern "C" fn deflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    let mut len: crate::stdlib::uInt = 0;
-    let Some((_strm, state, _storage)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm, DeflateStorageProjection::None))
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    len = state.strstart.wrapping_add(state.lookahead);
+// A bounded snapshot of the contiguous deflate history.  The callback-owned
+// window remains borrowed only by the stream/state projection, while the
+// output policy below operates exclusively on this pointer-free request.
+struct DeflateDictionaryRequest<'window> {
+    window: &'window [crate::stdlib::Bytef],
+    start: usize,
+    len: usize,
+}
+
+impl DeflateDictionaryRequest<'_> {
+    fn dictionary_len(&self) -> usize {
+        self.len
+    }
+}
+
+// The ABI stream is the only place that carries the opaque state and its
+// callback-owned window.  Snapshot the validated history before dispatching
+// to the raw-pointer-free copy core.
+unsafe fn deflateGetDictionary<'stream>(
+    strm: &'stream mut crate::zlib_h::z_stream_s,
+) -> Option<DeflateDictionaryRequest<'stream>> {
+    let (_strm, state, _storage) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)?;
+    let mut len = state.strstart.wrapping_add(state.lookahead);
     if len > state.w_size {
         len = state.w_size;
     }
-    if !dictionary.is_null() && len != 0 {
-        // The window allocation has exactly `window_size` bytes.  The C API
-        // supplies a destination large enough for the returned dictionary.
-        let window = ::core::slice::from_raw_parts(
+    let len = len as usize;
+    let end = state.strstart.wrapping_add(state.lookahead) as usize;
+    let window = if len == 0 {
+        &[]
+    } else {
+        // The callback allocation has exactly `window_size` bytes, and the
+        // validated deflate state keeps this history range within it.
+        ::core::slice::from_raw_parts(
             state.window.expect("initialized window").as_ptr(),
             state.window_size as usize,
-        );
-        let end = state.strstart.wrapping_add(state.lookahead) as usize;
-        let len = len as usize;
-        let source = &window[end - len..end];
-        let output = ::core::slice::from_raw_parts_mut(dictionary, len);
-        output.copy_from_slice(source);
+        )
+    };
+    Some(DeflateDictionaryRequest {
+        window,
+        start: end - len,
+        len,
+    })
+}
+
+fn deflate_get_dictionary(
+    request: DeflateDictionaryRequest<'_>,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
+) -> ::core::ffi::c_int {
+    if let Some(output) = dictionary {
+        output.copy_from_slice(&request.window[request.start..request.start + request.len]);
     }
-    if !dictLength.is_null() {
-        *dictLength = len;
+    if let Some(dict_length) = dict_length {
+        *dict_length = request.len as crate::stdlib::uInt;
     }
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateGetDictionary"]
 
@@ -1917,7 +1942,24 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateGetDictionary(strm, dictionary, dictLength)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(request) = deflateGetDictionary(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // C defines the dictionary output only when history exists. Convert the
+    // optional caller cursor at this boundary using the validated length, so
+    // the implementation never receives a raw output pointer.
+    let dictionary = if dictionary.is_null() || request.dictionary_len() == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts_mut(
+            dictionary,
+            request.dictionary_len(),
+        ))
+    };
+    deflate_get_dictionary(request, dictionary, dictLength.as_mut())
 }
 // Reset state that contains no allocation handles or stream backlinks.  The
 // ABI-facing caller projects these fields once, leaving reset policy and tree
