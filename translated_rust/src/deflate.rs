@@ -3952,10 +3952,17 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     deflateEnd(strm)
 }
+// This is the pointer-free handoff from an ABI state snapshot to the deep
+// copy plan.  Keeping it separate from the callback transaction lets an
+// owned callback broker reuse the exact validation and safe slice core.
+fn deflate_copy_from_abi(payload: DeflateCopyPayload) -> Option<DeflateCopyPreparation> {
+    prepare_deflate_copy(payload)
+}
+
 // The C ABI still gives us callback-owned allocations and opaque stream
-// pointers.  Keep that projection out of `deflateCopy()` itself: its safe
+// pointers.  Keep that projection out of `deflate_copy_from_abi()`: its safe
 // typed-slice core is also the path used by the eventual allocation owner.
-unsafe fn deflate_copy_from_abi(
+unsafe fn deflate_copy_from_abi_boundary(
     mut dest: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
     source: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
 ) -> ::core::ffi::c_int {
@@ -4036,7 +4043,7 @@ unsafe fn deflate_copy_from_abi(
             storage,
             layout: copy_layout,
         },
-    }) = prepare_deflate_copy(payload)
+    }) = deflate_copy_from_abi(payload)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -4220,7 +4227,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let Some(source) = ::core::ptr::NonNull::new(source) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_copy_from_abi(dest, source)
+    deflate_copy_from_abi_boundary(dest, source)
 }
 struct LongestMatchInput {
     max_chain_length: crate::stdlib::uInt,
