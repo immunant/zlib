@@ -216,7 +216,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1;
         };
-        let Some(mut setup) =
+        let Some(setup) =
             crate::src::gzlib::GzEmbeddedDeflateSetup::from_write_buffers(&mut buffers)
         else {
             state.buffers.clear();
@@ -230,8 +230,23 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1;
         };
-        state.strm.avail_out = setup.output_available();
-        state.strm.next_out = setup.output_mut().as_mut_ptr();
+        // Initialization has no input, but use the complete bounded request
+        // shape already.  Later `gz_comp()` dispatches can use the same owner
+        // for non-empty input without rebuilding a cursor from gzip state.
+        let Some(mut call) = setup.call(&[], 0) else {
+            state.buffers.clear();
+            crate::src::gzlib::GzErrorState {
+                message: &mut state.msg,
+                error: &mut state.err,
+                buffered: &mut state.x.have,
+                again: state.again,
+                path: state.path.as_deref(),
+            }
+            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+            return -1;
+        };
+        state.strm.avail_out = call.output_available();
+        state.strm.next_out = call.output_mut().as_mut_ptr();
         state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
     }
     return 0 as ::core::ffi::c_int;

@@ -238,10 +238,31 @@ pub(crate) struct GzEmbeddedInflateDispatch<'input, 'output> {
 // The write-side counterpart starts with the one part of an embedded deflate
 // call that gzip already owns outright: its bounded compressed-output buffer.
 // Keep that borrow in an owner rather than reconstructing a cursor from
-// `gz_state` in setup.  A later input-request owner can extend this into the
-// complete embedded-deflate call without changing the allocation proof.
+// `gz_state` in setup.  `call()` extends it with the bounded input request
+// and the scalar input count used by deflate, so the next step can move a
+// complete embedded-deflate dispatch out of the ABI-shaped gzip state.
 pub(crate) struct GzEmbeddedDeflateSetup<'a> {
     output: GzCodecOutputView<'a>,
+}
+
+// A complete pointer-free request for gzip's embedded deflate codec.  The
+// current adapter still publishes these views to an ABI `z_stream`, but this
+// owner keeps both cursor bounds with the request that supplied them.
+pub(crate) struct GzEmbeddedDeflateCall<'input, 'output> {
+    input: &'input [u8],
+    input_available: crate::stdlib::uInt,
+    output: GzCodecOutputView<'output>,
+}
+
+// Snapshot the scalar result immediately after the temporary ABI stream
+// projection.  Keeping it pointer-free mirrors the inflate-side result owner
+// and avoids a future deflate loop having to inspect advanced raw cursors.
+pub(crate) struct GzEmbeddedDeflateResult {
+    pub(crate) result: ::core::ffi::c_int,
+    pub(crate) remaining_input: crate::stdlib::uInt,
+    pub(crate) output_available: crate::stdlib::uInt,
+    pub(crate) total_in: crate::stdlib::uLong,
+    pub(crate) total_out: crate::stdlib::uLong,
 }
 
 pub(crate) struct GzCodecOutputView<'a> {
@@ -594,6 +615,50 @@ impl<'a> GzEmbeddedDeflateSetup<'a> {
     // of this owner receive the checked, allocation-backed slice first.
     pub(crate) fn output_mut(&mut self) -> &mut [u8] {
         self.output.bytes_mut()
+    }
+
+    pub(crate) fn call<'input>(
+        self,
+        input: &'input [u8],
+        input_available: crate::stdlib::uInt,
+    ) -> Option<GzEmbeddedDeflateCall<'input, 'a>> {
+        let input_len = usize::try_from(input_available).ok()?;
+        Some(GzEmbeddedDeflateCall {
+            input: input.get(..input_len)?,
+            input_available,
+            output: self.output,
+        })
+    }
+}
+
+impl<'input, 'output> GzEmbeddedDeflateCall<'input, 'output> {
+    pub(crate) fn input(&self) -> &'input [u8] {
+        self.input
+    }
+
+    pub(crate) fn input_available(&self) -> crate::stdlib::uInt {
+        self.input_available
+    }
+
+    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
+        self.output.bytes.len() as crate::stdlib::uInt
+    }
+
+    pub(crate) fn output_mut(&mut self) -> &mut [u8] {
+        self.output.bytes_mut()
+    }
+
+    // The ABI codec reports progress only as remaining input/output counts.
+    // The request's checked bounds make those counts sufficient to retain a
+    // pointer-free result for the surrounding gzip state machine.
+    pub(crate) fn finish(
+        self,
+        snapshot: GzEmbeddedDeflateResult,
+    ) -> Option<GzEmbeddedDeflateResult> {
+        let remaining_input = usize::try_from(snapshot.remaining_input).ok()?;
+        let output_available = usize::try_from(snapshot.output_available).ok()?;
+        (remaining_input <= self.input.len() && output_available <= self.output.bytes.len())
+            .then_some(snapshot)
     }
 }
 
