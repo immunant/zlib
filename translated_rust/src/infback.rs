@@ -244,10 +244,14 @@ pub unsafe extern "C" fn inflateBack(
                             (*state).mode = crate::src::inflate::STORED;
                         }
                         1 => {
+                            let state = &mut *state;
                             crate::src::inftrees::inflate_fixed(
-                                state as *mut crate::src::inflate::inflate_state,
+                                &mut state.lencode,
+                                &mut state.lenbits,
+                                &mut state.distcode,
+                                &mut state.distbits,
                             );
-                            (*state).mode = crate::src::inflate::LEN;
+                            state.mode = crate::src::inflate::LEN;
                         }
                         2 => {
                             (*state).mode = crate::src::inflate::TABLE;

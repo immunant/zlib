@@ -3266,16 +3266,26 @@ fn get_fixed_tables() -> FixedTables {
     }
 }
 
-pub unsafe fn inflate_fixed(state: *mut crate::src::inflate::inflate_state) {
+pub fn inflate_fixed(
+    lencode: &mut crate::src::inflate::CodeTableRef,
+    lenbits: &mut ::core::ffi::c_uint,
+    distcode: &mut crate::src::inflate::CodeTableRef,
+    distbits: &mut ::core::ffi::c_uint,
+) {
     let tables = get_fixed_tables();
-    let state = &mut *state;
-    state.lencode = crate::src::inflate::CodeTableRef::FixedLen;
-    state.lenbits = tables.lenbits;
-    state.distcode = crate::src::inflate::CodeTableRef::FixedDist;
-    state.distbits = tables.distbits;
+    *lencode = crate::src::inflate::CodeTableRef::FixedLen;
+    *lenbits = tables.lenbits;
+    *distcode = crate::src::inflate::CodeTableRef::FixedDist;
+    *distbits = tables.distbits;
 }
 #[export_name = "inflate_fixed"]
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
-    inflate_fixed(state)
+    let state = &mut *state;
+    inflate_fixed(
+        &mut state.lencode,
+        &mut state.lenbits,
+        &mut state.distcode,
+        &mut state.distbits,
+    )
 }
