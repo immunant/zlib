@@ -423,6 +423,17 @@ fn gz_finish_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     0
 }
 
+// Read-side entry points that operate on an already-bound state share this
+// state-only setup. Caller-buffer access and buffer-pointer movement remain
+// in their respective adapters.
+fn gz_prepare_read_operation(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if !crate::src::gzlib::gz_read_state_is_usable(state) {
+        return false;
+    }
+    crate::src::gzlib::gz_clear_read_error(state);
+    gz_finish_skip(state) != -1 as ::core::ffi::c_int
+}
+
 pub(crate) fn gz_consume(
     state: &mut crate::gzguts_h::gz_state,
     limit: crate::stdlib::off64_t,
@@ -648,11 +659,7 @@ pub unsafe extern "C" fn gzungetc(
     if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
         gz_look(state);
     }
-    if !crate::src::gzlib::gz_read_state_is_usable(state) {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::gz_clear_read_error(state);
-    if gz_finish_skip(state) == -1 as ::core::ffi::c_int {
+    if !gz_prepare_read_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
     if c < 0 as ::core::ffi::c_int {
@@ -719,11 +726,7 @@ pub unsafe extern "C" fn gzgets(
     if buf.is_null() || len < 1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    if !crate::src::gzlib::gz_read_state_is_usable(state) {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    crate::src::gzlib::gz_clear_read_error(state);
-    if gz_finish_skip(state) == -1 as ::core::ffi::c_int {
+    if !gz_prepare_read_operation(state) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
