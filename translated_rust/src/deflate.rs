@@ -838,6 +838,50 @@ fn deflate_rle_next_scan_indices(
     (comparisons, comparisons[7])
 }
 
+/// Find the RLE run at `strstart` using only checked window accesses.
+///
+/// The translated loop deliberately reads an unrolled group past the logical
+/// `MAX_MATCH` endpoint before clamping its result.  Keep that order here so
+/// a fully repeated run has the same length, while malformed callback-backed
+/// storage simply declines to produce a match instead of indexing past it.
+fn deflate_rle_scan_match(
+    window: &[crate::stdlib::Bytef],
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+) -> Option<crate::stdlib::uInt> {
+    if !deflate_rle_can_scan_match(lookahead, strstart) {
+        return Some(0);
+    }
+
+    let (previous_index, initial_indices, mut scan, strend) = deflate_rle_scan_indices(strstart);
+    let previous = *window.get(previous_index as usize)?;
+    for index in initial_indices {
+        if *window.get(index as usize)? != previous {
+            return Some(0);
+        }
+    }
+
+    loop {
+        let (comparisons, next_scan) = deflate_rle_next_scan_indices(scan);
+        scan = next_scan;
+        let mut matches = true;
+        for index in comparisons {
+            if *window.get(index as usize)? != previous {
+                matches = false;
+                break;
+            }
+        }
+        if !matches || scan >= strend {
+            break;
+        }
+    }
+
+    Some(deflate_rle_match_length(
+        strend.wrapping_sub(scan),
+        lookahead,
+    ))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DeflateRleTallyPlan {
     MatchWithoutCount,
@@ -5162,43 +5206,12 @@ unsafe fn deflate_rle(
             }
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
-        if deflate_rle_can_scan_match((*s).lookahead, (*s).strstart) {
-            let window = (*s).window;
-            let (previous_index, initial_indices, mut scan, strend) =
-                deflate_rle_scan_indices((*s).strstart);
-            let previous = *window.wrapping_add(previous_index as usize) as crate::stdlib::uInt;
-            if previous == *window.wrapping_add(initial_indices[0] as usize) as crate::stdlib::uInt
-                && previous
-                    == *window.wrapping_add(initial_indices[1] as usize) as crate::stdlib::uInt
-                && previous
-                    == *window.wrapping_add(initial_indices[2] as usize) as crate::stdlib::uInt
+        if !(*s).window.is_null() {
+            let window = &*core::ptr::slice_from_raw_parts((*s).window, (*s).window_size as usize);
+            if let Some(match_length) =
+                deflate_rle_scan_match(window, (*s).lookahead, (*s).strstart)
             {
-                loop {
-                    let (comparisons, next_scan) = deflate_rle_next_scan_indices(scan);
-                    scan = next_scan;
-                    if !(previous
-                        == *window.wrapping_add(comparisons[0] as usize) as crate::stdlib::uInt
-                        && previous
-                            == *window.wrapping_add(comparisons[1] as usize) as crate::stdlib::uInt
-                        && previous
-                            == *window.wrapping_add(comparisons[2] as usize) as crate::stdlib::uInt
-                        && previous
-                            == *window.wrapping_add(comparisons[3] as usize) as crate::stdlib::uInt
-                        && previous
-                            == *window.wrapping_add(comparisons[4] as usize) as crate::stdlib::uInt
-                        && previous
-                            == *window.wrapping_add(comparisons[5] as usize) as crate::stdlib::uInt
-                        && previous
-                            == *window.wrapping_add(comparisons[6] as usize) as crate::stdlib::uInt
-                        && previous
-                            == *window.wrapping_add(comparisons[7] as usize) as crate::stdlib::uInt
-                        && scan < strend)
-                    {
-                        break;
-                    }
-                }
-                (*s).match_length =
-                    deflate_rle_match_length(strend.wrapping_sub(scan), (*s).lookahead);
+                (*s).match_length = match_length;
             }
         }
         let layout =
@@ -5468,9 +5481,9 @@ mod tests {
         deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
         deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_next_scan_indices, deflate_rle_refill_action, deflate_rle_scan_indices,
-        deflate_rle_tally_plan, deflate_set_dictionary_allowed, deflate_should_return_buf_error,
-        deflate_slow_can_search_match, deflate_state_is_usable, deflate_state_status_valid,
-        deflate_version_matches, dictionary_tail_offset, drain_pending,
+        deflate_rle_scan_match, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
+        deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_is_usable,
+        deflate_state_status_valid, deflate_version_matches, dictionary_tail_offset, drain_pending,
         fill_window_available_space, fill_window_cursor, fill_window_has_insertable_match,
         fill_window_hash_update, fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_reinsert, fill_window_should_refill,
@@ -6063,6 +6076,18 @@ mod tests {
                 257,
             ),
         );
+    }
+
+    #[test]
+    fn deflate_rle_scan_match_uses_checked_window_reads_and_preserves_run_length() {
+        let mut window = [b'x'; 300];
+        assert_eq!(deflate_rle_scan_match(&window, 258, 10), Some(258));
+
+        window[11] = b'y';
+        assert_eq!(deflate_rle_scan_match(&window, 258, 10), Some(0));
+        window[11] = b'x';
+        assert_eq!(deflate_rle_scan_match(&window[..12], 258, 10), None);
+        assert_eq!(deflate_rle_scan_match(&window, 2, 10), Some(0));
     }
 
     #[test]
