@@ -1344,21 +1344,6 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         stream_size,
     )
 }
-unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let strm = &*strm;
-    if !deflate_params_stream_is_valid(strm) {
-        return 1 as ::core::ffi::c_int;
-    }
-    let s = &*strm.state;
-    if !deflate_params_state_is_valid(s) {
-        return 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
-}
-
 /// Check the portion of a deflate stream that can be inspected without
 /// following its state link.  Parameter updates use this before borrowing the
 /// state, leaving the raw link crossing confined to the caller.
@@ -1389,14 +1374,24 @@ pub unsafe extern "C" fn deflateSetDictionary(
     let mut wrap: ::core::ffi::c_int = 0;
     let mut avail: ::core::ffi::c_uint = 0;
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if deflateStateCheck(strm) != 0 || dictionary.is_null() {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // `deflateStateCheck()` validated both links above.  Borrow each owner
-    // once so the dictionary setup and its window fills do not repeatedly
-    // traverse the raw ABI/state pointers.
     let strm = &mut *strm;
-    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    if !deflate_params_stream_is_valid(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(s) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !deflate_params_state_is_valid(s) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if dictionary.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // The state link was validated before this one borrow, so dictionary
+    // setup and its window fills do not repeatedly traverse it.
     wrap = (*s).wrap;
     if wrap == 2 as ::core::ffi::c_int
         || wrap == 1 as ::core::ffi::c_int && (*s).status != crate::src::deflate::INIT_STATE
@@ -1497,13 +1492,20 @@ pub unsafe extern "C" fn deflateGetDictionary(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut len: crate::stdlib::uInt = 0;
-    if deflateStateCheck(strm) != 0 {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let strm = &mut *strm;
+    if !deflate_params_stream_is_valid(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(s) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !deflate_params_state_is_valid(s) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     len = (*s).strstart.wrapping_add((*s).lookahead);
     if len > (*s).w_size {
         len = (*s).w_size;
@@ -1536,16 +1538,23 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let strm = &mut *strm;
+    if !deflate_params_stream_is_valid(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(s) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !deflate_params_state_is_valid(s) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     (*strm).total_out = 0 as crate::stdlib::uLong;
     (*strm).total_in = (*strm).total_out;
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     (*strm).data_type = crate::zlib_h::Z_UNKNOWN;
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
     (*s).pending = 0 as crate::zutil_h::ulg;
     (*s).pending_out = 0;
     if (*s).wrap < 0 as ::core::ffi::c_int {
@@ -1669,10 +1678,15 @@ pub unsafe fn deflateSetHeader<F>(
 where
     F: FnOnce() -> Option<GzipHeader>,
 {
-    if deflateStateCheck(strm) != 0 {
+    if !deflate_params_stream_is_valid(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *strm.state;
+    let Some(state) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !deflate_params_state_is_valid(state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     deflate_set_header_impl(state, header())
 }
 #[export_name = "deflateSetHeader"]
@@ -1710,15 +1724,25 @@ pub unsafe extern "C" fn deflatePending(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let strm = &mut *strm;
+    if !deflate_params_stream_is_valid(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !deflate_params_state_is_valid(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if !bits.is_null() {
-        *bits = (*(*strm).state).bi_valid;
+        *bits = state.bi_valid;
     }
     if !pending.is_null() {
-        *pending = (*(*strm).state).pending as ::core::ffi::c_uint;
-        if *pending as crate::zutil_h::ulg != (*(*strm).state).pending {
+        *pending = state.pending as ::core::ffi::c_uint;
+        if *pending as crate::zutil_h::ulg != state.pending {
             *pending = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
             return crate::zlib_h::Z_BUF_ERROR;
         }
