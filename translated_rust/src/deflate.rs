@@ -442,7 +442,7 @@ struct DeflateRleMatchTally {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct DeflateRleLiteralTally {
+struct DeflateLiteralTally {
     cursors: [crate::stdlib::uInt; 3],
     next_sym: crate::stdlib::uInt,
     symbol_bytes: [crate::zutil_h::uchf; 3],
@@ -468,13 +468,13 @@ fn deflate_rle_match_tally_plan(
     }
 }
 
-fn deflate_rle_literal_tally_plan(
+fn deflate_literal_tally_plan(
     literal: crate::zutil_h::uch,
     sym_next: crate::stdlib::uInt,
-) -> DeflateRleLiteralTally {
+) -> DeflateLiteralTally {
     let (cursors, next_sym) = symbol_triplet_cursors(sym_next);
 
-    DeflateRleLiteralTally {
+    DeflateLiteralTally {
         cursors,
         next_sym,
         symbol_bytes: [0, 0, literal as crate::zutil_h::uchf],
@@ -3910,17 +3910,16 @@ unsafe extern "C" fn deflate_slow(
                 .window
                 .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
                 as crate::zutil_h::uch;
-            let c2rust_fresh40 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh40 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh41 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh41 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh42 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh42 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc.value =
-                (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
+            let tally = deflate_literal_tally_plan(cc, (*s).sym_next);
+            (*s).sym_next = tally.next_sym;
+            *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
+            *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
+            *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+            (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
+                [tally.literal_tree_index]
+                .fc
+                .value
+                .wrapping_add(1);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
@@ -3956,17 +3955,16 @@ unsafe extern "C" fn deflate_slow(
             .window
             .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
             as crate::zutil_h::uch;
-        let c2rust_fresh43 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh43 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh44 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh44 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh45 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh45 as isize) = cc_0 as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc_0 as usize].fc.value =
-            (*s).dyn_ltree[cc_0 as usize].fc.value.wrapping_add(1);
+        let tally = deflate_literal_tally_plan(cc_0, (*s).sym_next);
+        (*s).sym_next = tally.next_sym;
+        *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
+        *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
+        *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+        (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
+            [tally.literal_tree_index]
+            .fc
+            .value
+            .wrapping_add(1);
         bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
@@ -4130,7 +4128,7 @@ unsafe fn deflate_rle(
             DeflateRleTallyPlan::Literal => {
                 let literal: crate::zutil_h::uch =
                     *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-                let tally = deflate_rle_literal_tally_plan(literal, (*s).sym_next);
+                let tally = deflate_literal_tally_plan(literal, (*s).sym_next);
                 (*s).sym_next = tally.next_sym;
                 *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
                 *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
@@ -4335,10 +4333,10 @@ mod tests {
         deflate_dictionary_state_after_load, deflate_fast_match_progress,
         deflate_fast_should_insert_match, deflate_final_flush_action, deflate_flush_rank,
         deflate_huff_literal_progress, deflate_insert_after_block,
-        deflate_literal_state_after_emit, deflate_match_refill_action, deflate_pending_value,
-        deflate_preflight, deflate_prime_bits_valid, deflate_request_is_invalid,
-        deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
-        deflate_rle_literal_tally_plan, deflate_rle_match_length,
+        deflate_literal_state_after_emit, deflate_literal_tally_plan, deflate_match_refill_action,
+        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
+        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
+        deflate_rle_clamp_match_length, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
         deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_check_impl,
@@ -4443,15 +4441,15 @@ mod tests {
     }
 
     #[test]
-    fn deflate_rle_literal_tally_plan_preserves_literal_bytes_and_cursor_wrapping() {
-        let normal = deflate_rle_literal_tally_plan(0, 7);
+    fn deflate_literal_tally_plan_preserves_literal_bytes_and_cursor_wrapping() {
+        let normal = deflate_literal_tally_plan(0, 7);
         assert_eq!(normal.cursors, [7, 8, 9]);
         assert_eq!(normal.next_sym, 10);
         assert_eq!(normal.symbol_bytes, [0, 0, 0]);
         assert_eq!(normal.literal_tree_index, 0);
 
         let wrapped =
-            deflate_rle_literal_tally_plan(crate::zutil_h::uch::MAX, crate::stdlib::uInt::MAX);
+            deflate_literal_tally_plan(crate::zutil_h::uch::MAX, crate::stdlib::uInt::MAX);
         assert_eq!(wrapped.cursors, [crate::stdlib::uInt::MAX, 0, 1]);
         assert_eq!(wrapped.next_sym, 2);
         assert_eq!(wrapped.symbol_bytes, [0, 0, crate::zutil_h::uch::MAX]);
