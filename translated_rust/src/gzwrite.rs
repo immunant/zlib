@@ -6,6 +6,7 @@ pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::src::gzlib::gz_clamped_uint;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
+pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_io_chunk_limit;
 pub use crate::src::gzlib::gz_uInt_fits_int;
@@ -468,12 +469,6 @@ pub unsafe extern "C" fn gzwrite_ffi(
     }
     return gz_write(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_int;
 }
-fn gzf_len(
-    size: crate::stdlib::z_size_t,
-    nitems: crate::stdlib::z_size_t,
-) -> Option<crate::stdlib::z_size_t> {
-    size.checked_mul(nitems)
-}
 #[export_name = "gzfwrite"]
 
 pub unsafe extern "C" fn gzfwrite_ffi(
@@ -496,7 +491,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    let Some(len) = gzf_len(size, nitems) else {
+    let Some(len) = gz_file_request_len(size, nitems) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -587,7 +582,7 @@ pub unsafe extern "C" fn gzputs_ffi(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
+    len = ::core::ffi::CStr::from_ptr(s).to_bytes().len() as crate::stdlib::z_size_t;
     if !gzputs_len_fits_int(len) {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,

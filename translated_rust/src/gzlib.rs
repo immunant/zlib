@@ -464,6 +464,13 @@ pub fn gz_z_size_to_uInt_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_u
     }
 }
 
+pub(crate) fn gz_file_request_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<crate::stdlib::z_size_t> {
+    size.checked_mul(nitems)
+}
+
 pub fn gz_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
     errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
 }

@@ -3800,6 +3800,48 @@ fn detect_data_type(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_in
     }
     return crate::zlib_h::Z_BINARY;
 }
+
+#[derive(Copy, Clone)]
+enum FlushBlockChoice {
+    Stored,
+    Static,
+    Dynamic,
+}
+
+fn tr_flush_block_decision(
+    opt_len: crate::zutil_h::ulg,
+    static_len: crate::zutil_h::ulg,
+    stored_len: crate::zutil_h::ulg,
+    strategy: ::core::ffi::c_int,
+    level_positive: bool,
+    buf_present: bool,
+) -> FlushBlockChoice {
+    let (mut opt_lenb, static_lenb) = if level_positive {
+        let mut opt_lenb = opt_len
+            .wrapping_add(3 as crate::zutil_h::ulg)
+            .wrapping_add(7 as crate::zutil_h::ulg)
+            >> 3 as ::core::ffi::c_int;
+        let static_lenb = static_len
+            .wrapping_add(3 as crate::zutil_h::ulg)
+            .wrapping_add(7 as crate::zutil_h::ulg)
+            >> 3 as ::core::ffi::c_int;
+        if static_lenb <= opt_lenb || strategy == crate::zlib_h::Z_FIXED {
+            opt_lenb = static_lenb;
+        }
+        (opt_lenb, static_lenb)
+    } else {
+        let static_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
+        (static_lenb, static_lenb)
+    };
+    if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && buf_present {
+        FlushBlockChoice::Stored
+    } else if static_lenb == opt_lenb {
+        FlushBlockChoice::Static
+    } else {
+        FlushBlockChoice::Dynamic
+    }
+}
+
 #[export_name = "_tr_flush_block"]
 
 pub unsafe extern "C" fn _tr_flush_block_ffi(
@@ -3808,8 +3850,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    let mut opt_lenb: crate::zutil_h::ulg = 0;
-    let mut static_lenb: crate::zutil_h::ulg = 0;
+    let mut level_positive = false;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     if {
         let state = &mut *s;
@@ -3818,6 +3859,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
             if strm.data_type == crate::zlib_h::Z_UNKNOWN {
                 strm.data_type = detect_data_type(state);
             }
+            level_positive = true;
             true
         } else {
             false
@@ -3832,74 +3874,79 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
             &raw mut (*s).d_desc as *mut crate::src::deflate::tree_desc,
         );
         max_blindex = build_bl_tree(s);
-        {
-            let state = &*s;
-            opt_lenb = state
-                .opt_len
-                .wrapping_add(3 as crate::zutil_h::ulg)
-                .wrapping_add(7 as crate::zutil_h::ulg)
-                >> 3 as ::core::ffi::c_int;
-            static_lenb = state
-                .static_len
-                .wrapping_add(3 as crate::zutil_h::ulg)
-                .wrapping_add(7 as crate::zutil_h::ulg)
-                >> 3 as ::core::ffi::c_int;
-            if static_lenb <= opt_lenb || state.strategy == crate::zlib_h::Z_FIXED {
-                opt_lenb = static_lenb;
-            }
-        }
-    } else {
-        static_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
-        opt_lenb = static_lenb;
     }
-    if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
-        _tr_stored_block_ffi(s, buf, stored_len, last);
-    } else if static_lenb == opt_lenb {
-        let bits = send_bits_state(
-            (*s).bi_buf,
-            (*s).bi_valid,
-            ((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
-            3 as ::core::ffi::c_int,
-        );
-        for byte in bits.bytes[..bits.len].iter().copied() {
-            let pending = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(pending as isize) = byte;
-        }
-        (*s).bi_buf = bits.bi_buf;
-        (*s).bi_valid = bits.bi_valid;
-        compress_block(
-            s,
-            &raw const static_ltree as *const crate::src::deflate::ct_data,
-            &raw const static_dtree as *const crate::src::deflate::ct_data,
-        );
+    let decision = if level_positive {
+        let state = &*s;
+        tr_flush_block_decision(
+            state.opt_len,
+            state.static_len,
+            stored_len,
+            state.strategy,
+            true,
+            !buf.is_null(),
+        )
     } else {
-        let bits = send_bits_state(
-            (*s).bi_buf,
-            (*s).bi_valid,
-            ((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
-            3 as ::core::ffi::c_int,
-        );
-        for byte in bits.bytes[..bits.len].iter().copied() {
-            let pending = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(pending as isize) = byte;
+        tr_flush_block_decision(
+            0 as crate::zutil_h::ulg,
+            0 as crate::zutil_h::ulg,
+            stored_len,
+            0 as ::core::ffi::c_int,
+            false,
+            !buf.is_null(),
+        )
+    };
+    match decision {
+        FlushBlockChoice::Stored => {
+            _tr_stored_block_ffi(s, buf, stored_len, last);
         }
-        (*s).bi_buf = bits.bi_buf;
-        (*s).bi_valid = bits.bi_valid;
-        send_all_trees(
-            s,
-            (*s).l_desc.max_code + 1 as ::core::ffi::c_int,
-            (*s).d_desc.max_code + 1 as ::core::ffi::c_int,
-            max_blindex + 1 as ::core::ffi::c_int,
-        );
-        compress_block(
-            s,
-            &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-            &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-        );
+        FlushBlockChoice::Static => {
+            let bits = send_bits_state(
+                (*s).bi_buf,
+                (*s).bi_valid,
+                ((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
+                3 as ::core::ffi::c_int,
+            );
+            for byte in bits.bytes[..bits.len].iter().copied() {
+                let pending = (*s).pending;
+                (*s).pending = (*s).pending.wrapping_add(1);
+                *(*s).pending_buf.offset(pending as isize) = byte;
+            }
+            (*s).bi_buf = bits.bi_buf;
+            (*s).bi_valid = bits.bi_valid;
+            compress_block(
+                s,
+                &raw const static_ltree as *const crate::src::deflate::ct_data,
+                &raw const static_dtree as *const crate::src::deflate::ct_data,
+            );
+        }
+        FlushBlockChoice::Dynamic => {
+            let bits = send_bits_state(
+                (*s).bi_buf,
+                (*s).bi_valid,
+                ((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
+                3 as ::core::ffi::c_int,
+            );
+            for byte in bits.bytes[..bits.len].iter().copied() {
+                let pending = (*s).pending;
+                (*s).pending = (*s).pending.wrapping_add(1);
+                *(*s).pending_buf.offset(pending as isize) = byte;
+            }
+            (*s).bi_buf = bits.bi_buf;
+            (*s).bi_valid = bits.bi_valid;
+            send_all_trees(
+                s,
+                (*s).l_desc.max_code + 1 as ::core::ffi::c_int,
+                (*s).d_desc.max_code + 1 as ::core::ffi::c_int,
+                max_blindex + 1 as ::core::ffi::c_int,
+            );
+            compress_block(
+                s,
+                &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
+                    as *const crate::src::deflate::ct_data,
+                &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
+                    as *const crate::src::deflate::ct_data,
+            );
+        }
     }
     init_block(&mut *s);
     if last != 0 {

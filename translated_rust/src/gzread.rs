@@ -9,6 +9,7 @@ pub use crate::gzguts_h::LOOK;
 pub use crate::src::gzlib::gz_consume_buffered_read_cursor;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
+pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_uInt_fits_int;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
@@ -615,12 +616,6 @@ pub unsafe extern "C" fn gzread_ffi(
     }
     return len as ::core::ffi::c_int;
 }
-fn gzf_len(
-    size: crate::stdlib::z_size_t,
-    nitems: crate::stdlib::z_size_t,
-) -> Option<crate::stdlib::z_size_t> {
-    size.checked_mul(nitems)
-}
 #[export_name = "gzfread"]
 
 pub unsafe extern "C" fn gzfread_ffi(
@@ -643,7 +638,7 @@ pub unsafe extern "C" fn gzfread_ffi(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    let Some(len) = gzf_len(size, nitems) else {
+    let Some(len) = gz_file_request_len(size, nitems) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
