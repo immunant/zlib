@@ -522,25 +522,40 @@ fn gz_read(
     crate::src::gzlib::gz_read_mark_past(state, len);
     return got;
 }
+// This token is created only by the safe request dispatcher. Its concrete
+// length is therefore suitable for the ABI adapter to bind, while rejected
+// requests never carry a caller range to bind.
+enum GzReadRequest {
+    Rejected,
+    Bytes(usize),
+}
+
 // Read request validation must precede binding an FFI caller range: an
 // unusable state, or a request that Rust cannot represent, is not allowed to
-// inspect that range.  Both the Rust-facing and ABI-facing adapters share
-// this coordinator.
-pub fn gzread<'a, F>(
+// inspect that range. The dispatcher records rejected-request errors before
+// either the Rust-facing or ABI-facing adapter considers caller memory.
+fn gzread_dispatch(
     state: &mut crate::gzguts_h::gz_state,
     len: ::core::ffi::c_uint,
-    prepared: Option<Result<usize, ()>>,
-    bind: F,
-) -> ::core::ffi::c_int
-where
-    F: FnOnce(usize) -> Option<&'a mut [::core::ffi::c_uchar]>,
-{
-    let slice_len = match prepared.unwrap_or_else(|| gzread_request_len(state, len)) {
-        Ok(slice_len) => slice_len,
-        Err(()) => return -1 as ::core::ffi::c_int,
+) -> GzReadRequest {
+    match gzread_request_len(state, len) {
+        Ok(len) => GzReadRequest::Bytes(len),
+        Err(()) => GzReadRequest::Rejected,
+    }
+}
+
+// The public coordinator owns buffer-length validation after the safe
+// dispatcher has classified the request.
+fn gzread(
+    state: &mut crate::gzguts_h::gz_state,
+    request: GzReadRequest,
+    buffer: Option<&mut [::core::ffi::c_uchar]>,
+) -> ::core::ffi::c_int {
+    let slice_len = match request {
+        GzReadRequest::Bytes(slice_len) => slice_len,
+        GzReadRequest::Rejected => return -1,
     };
-    let buf = bind(slice_len);
-    let Some(buf) = buf else {
+    let Some(buf) = buffer else {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -576,9 +591,8 @@ where
     read as ::core::ffi::c_int
 }
 
-// State validation and request classification must happen before any caller
-// range is bound. Both the Rust-facing operation and FFI preflight use this
-// same safe coordinator, leaving their adapters to handle only the buffer.
+// State validation and request classification happen in `gzread_dispatch()`
+// before any caller range is bound.
 fn gzread_request_len(
     state: &mut crate::gzguts_h::gz_state,
     len: ::core::ffi::c_uint,
@@ -604,45 +618,6 @@ fn gzread_request_len(
     };
     Ok(slice_len)
 }
-
-// The FFI wrapper asks this safe adapter whether it may bind caller memory.
-// It preserves the public error result while the request coordinator owns all
-// state validation and rejected-request error recording.
-fn gzread_preflight(
-    state: &mut crate::gzguts_h::gz_state,
-    len: ::core::ffi::c_uint,
-) -> Result<usize, ::core::ffi::c_int> {
-    gzread_request_len(state, len).map_err(|()| -1)
-}
-
-// Keep the public result mapping in the established read implementation. The
-// FFI entry point only converts the prepared byte count to a slice, then
-// passes that preflight result through without repeating state validation.
-fn gzread_ffi_dispatch(
-    state: &mut crate::gzguts_h::gz_state,
-    prepared: Result<usize, ::core::ffi::c_int>,
-    buffer: Option<&mut [::core::ffi::c_uchar]>,
-) -> ::core::ffi::c_int {
-    match prepared {
-        Ok(expected_len) => match buffer {
-            Some(buffer) if buffer.len() == expected_len => gzread(
-                state,
-                expected_len as ::core::ffi::c_uint,
-                Some(Ok(expected_len)),
-                |_| Some(buffer),
-            ),
-            _ => {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    Some(b"request does not match caller buffer\0"),
-                );
-                -1
-            }
-        },
-        Err(result) => result,
-    }
-}
 #[export_name = "gzread"]
 
 pub unsafe extern "C" fn gzread_ffi(
@@ -654,35 +629,62 @@ pub unsafe extern "C" fn gzread_ffi(
         return -1 as ::core::ffi::c_int;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let prepared = gzread_preflight(state, len);
-    let buffer = match prepared {
-        Ok(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
-        Ok(len) if !buf.is_null() => Some(::core::slice::from_raw_parts_mut(
-            buf as *mut ::core::ffi::c_uchar,
-            len,
+    let request = gzread_dispatch(state, len);
+    // The request token comes from the implementation dispatcher, so only a
+    // validated range reaches this ABI-only binding step.
+    match request {
+        GzReadRequest::Rejected => gzread(state, request, None),
+        GzReadRequest::Bytes(0) => gzread(state, request, Some(&mut [])),
+        GzReadRequest::Bytes(_) if buf.is_null() => {
+            gzread(state, request, None)
+        }
+        GzReadRequest::Bytes(slice_len) => gzread(state, request, Some(
+            ::core::slice::from_raw_parts_mut(
+                buf as *mut ::core::ffi::c_uchar,
+                slice_len,
+            ),
         )),
-        _ => None,
-    };
-    gzread_ffi_dispatch(state, prepared, buffer)
+    }
 }
 
-// As with `gzread`, decide whether an item request is usable
-// before asking an FFI caller to provide a slice. This keeps all state and
-// request semantics out of `gzfread_ffi`.
-pub fn gzfread<'a, F>(
+// The item-read analogue of `GzReadRequest`; empty requests deliberately do
+// not need a caller buffer.
+enum GzItemReadRequest {
+    Rejected,
+    Empty,
+    Bytes(usize),
+}
+
+// Decide whether an item request is usable before asking an FFI caller to
+// provide a slice. This keeps state and overflow classification in the
+// implementation dispatcher.
+fn gzfread_dispatch(
     state: &mut crate::gzguts_h::gz_state,
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
-    bind: F,
-) -> crate::stdlib::z_size_t
-where
-    F: FnOnce(usize) -> Option<&'a mut [::core::ffi::c_uchar]>,
-{
-    let slice_len = match gzfread_request_len(state, size, nitems) {
-        Ok(Some(slice_len)) => slice_len,
-        Ok(None) | Err(()) => return 0 as crate::stdlib::z_size_t,
+) -> GzItemReadRequest {
+    match gzfread_request_len(state, size, nitems) {
+        Ok(None) => GzItemReadRequest::Empty,
+        Ok(Some(len)) => GzItemReadRequest::Bytes(len),
+        Err(()) => GzItemReadRequest::Rejected,
+    }
+}
+
+// This public coordinator retains buffer-length validation after the safe
+// dispatcher has classified the request.
+fn gzfread(
+    state: &mut crate::gzguts_h::gz_state,
+    size: crate::stdlib::z_size_t,
+    request: GzItemReadRequest,
+    buffer: Option<&mut [::core::ffi::c_uchar]>,
+) -> crate::stdlib::z_size_t {
+    let slice_len = match request {
+        GzItemReadRequest::Bytes(slice_len) => slice_len,
+        GzItemReadRequest::Empty | GzItemReadRequest::Rejected => {
+            return 0 as crate::stdlib::z_size_t
+        }
     };
-    match bind(slice_len) {
+    match buffer {
         Some(buf) if buf.len() == slice_len => gzfread_bound(state, size, buf),
         _ => {
             crate::src::gzlib::gz_error(
@@ -741,38 +743,6 @@ fn gzfread_request_len(
     }
 }
 
-// Like `gzread_preflight`, this adapter exposes only a concrete slice length
-// to the FFI wrapper. Empty requests remain zero-length and need no binding.
-fn gzfread_preflight(
-    state: &mut crate::gzguts_h::gz_state,
-    size: crate::stdlib::z_size_t,
-    nitems: crate::stdlib::z_size_t,
-) -> Result<usize, ()> {
-    gzfread_request_len(state, size, nitems).map(|slice_len| slice_len.unwrap_or(0))
-}
-
-fn gzfread_ffi_dispatch(
-    state: &mut crate::gzguts_h::gz_state,
-    size: crate::stdlib::z_size_t,
-    prepared: Result<usize, ()>,
-    buffer: Option<&mut [::core::ffi::c_uchar]>,
-) -> crate::stdlib::z_size_t {
-    match prepared {
-        Ok(0) => 0,
-        Ok(len) => match buffer {
-            Some(buffer) if buffer.len() == len => gzfread_bound(state, size, buffer),
-            _ => {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    Some(b"request does not match caller buffer\0"),
-                );
-                0
-            }
-        },
-        Err(()) => 0,
-    }
-}
 #[export_name = "gzfread"]
 
 pub unsafe extern "C" fn gzfread_ffi(
@@ -785,16 +755,23 @@ pub unsafe extern "C" fn gzfread_ffi(
         return 0 as crate::stdlib::z_size_t;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let prepared = gzfread_preflight(state, size, nitems);
-    let buffer = match prepared {
-        Ok(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
-        Ok(len) if !buf.is_null() => Some(::core::slice::from_raw_parts_mut(
-            buf as *mut ::core::ffi::c_uchar,
-            len,
+    let request = gzfread_dispatch(state, size, nitems);
+    // Empty, overflowing, and oversized requests never reach the raw range
+    // conversion below.
+    match request {
+        GzItemReadRequest::Rejected | GzItemReadRequest::Empty => {
+            gzfread(state, size, request, None)
+        }
+        GzItemReadRequest::Bytes(_) if buf.is_null() => {
+            gzfread(state, size, request, None)
+        }
+        GzItemReadRequest::Bytes(slice_len) => gzfread(state, size, request, Some(
+            ::core::slice::from_raw_parts_mut(
+                buf as *mut ::core::ffi::c_uchar,
+                slice_len,
+            ),
         )),
-        _ => None,
-    };
-    gzfread_ffi_dispatch(state, size, prepared, buffer)
+    }
 }
 // Reading one byte through `gz_read` preserves the buffered and unbuffered
 // paths' cursor and EOF bookkeeping while keeping the internal buffer access
