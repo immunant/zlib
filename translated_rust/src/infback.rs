@@ -158,38 +158,46 @@ where
     }
 }
 
-pub unsafe extern "C" fn inflateBackInit_(
-    mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
-    mut window: *mut ::core::ffi::c_uchar,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if version.is_null()
-        || *version.offset(0 as isize) as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
+struct BackInitPreparation<'a> {
+    strm: &'a mut crate::zlib_h::z_stream_s,
+    state: crate::src::inflate::inflate_state,
+}
+
+/// Validate the public initialization arguments and construct all Rust-owned
+/// decoder state before asking an ABI allocator for its state slot.
+fn prepare_inflate_back_init<'a>(
+    strm: Option<&'a mut crate::zlib_h::z_stream_s>,
+    window: Option<&mut [u8]>,
+    window_bits: ::core::ffi::c_int,
+    version: Option<::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
+) -> Result<BackInitPreparation<'a>, ::core::ffi::c_int> {
+    if version != Some(crate::zlib_h::ZLIB_VERSION[0])
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
-        return crate::zlib_h::Z_VERSION_ERROR;
+        return Err(crate::zlib_h::Z_VERSION_ERROR);
     }
-    if strm.is_null()
-        || window.is_null()
-        || windowBits < 8 as ::core::ffi::c_int
-        || windowBits > 15 as ::core::ffi::c_int
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
+    if !(8..=15).contains(&window_bits) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    let window_len = 1usize << windowBits;
+    let Some(strm) = strm else {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    };
+    let Some(window) = window else {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    };
+    let window_len = 1usize << window_bits;
+    if window.len() != window_len {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    }
     let mut window_storage = Vec::new();
     if window_storage.try_reserve_exact(window_len).is_err() {
-        return crate::zlib_h::Z_MEM_ERROR;
+        return Err(crate::zlib_h::Z_MEM_ERROR);
     }
     window_storage.resize(window_len, 0);
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -197,33 +205,51 @@ pub unsafe extern "C" fn inflateBackInit_(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
             crate::src::zutil::zcfree
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        1 as crate::stdlib::uInt,
+    let mut state = crate::src::inflate::new_inflate_state();
+    state.dmax = 32768;
+    state.wbits = window_bits as crate::stdlib::uInt;
+    state.wsize = 1u32 << window_bits;
+    state.window = Some(window_storage);
+    state.wnext = 0;
+    state.whave = 0;
+    state.sane = 1;
+    Ok(BackInitPreparation { strm, state })
+}
+
+/// Install a fully prepared back-inflater in storage supplied by the stream's
+/// ABI allocator.  The raw allocation is kept here so preparation stays safe.
+unsafe fn inflate_back_init_boundary(
+    strm: Option<&mut crate::zlib_h::z_stream_s>,
+    window: Option<&mut [u8]>,
+    window_bits: ::core::ffi::c_int,
+    version: Option<::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let BackInitPreparation { strm, state } =
+        match prepare_inflate_back_init(strm, window, window_bits, version, stream_size) {
+            Ok(preparation) => preparation,
+            Err(error) => return error,
+        };
+    let state_allocation = strm.zalloc.expect("prepared stream has an allocator")(
+        strm.opaque,
+        1,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
+    )
+    .cast::<crate::src::inflate::inflate_state>();
+    if state_allocation.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    state.write(crate::src::inflate::new_inflate_state());
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
-    (*state).window = Some(window_storage);
-    (*state).wnext = 0 as ::core::ffi::c_uint;
-    (*state).whave = 0 as ::core::ffi::c_uint;
-    (*state).sane = 1 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_OK;
+    state_allocation.write(state);
+    strm.state = state_allocation.cast::<crate::src::deflate::internal_state>();
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateBackInit_"]
 
@@ -234,7 +260,17 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateBackInit_(strm, windowBits, window, version, stream_size)
+    let stream = strm.as_mut();
+    let version = version.as_ref().copied();
+    let window = if (8..=15).contains(&windowBits) && !window.is_null() {
+        Some(core::slice::from_raw_parts_mut(
+            window,
+            1usize << windowBits,
+        ))
+    } else {
+        None
+    };
+    unsafe { inflate_back_init_boundary(stream, window, windowBits, version, stream_size) }
 }
 fn inflate_back_impl<'a, I, O>(
     strm: &mut crate::zlib_h::z_stream_s,
