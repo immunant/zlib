@@ -1073,41 +1073,47 @@ pub unsafe extern "C" fn gzbuffer_ffi(
 ) -> ::core::ffi::c_int {
     gzbuffer(file, size)
 }
-pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+// Rewind receives an already-bound state from its FFI entry point. Its
+// descriptor and error-record calls retain their established raw boundaries.
+fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
         || state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR
     {
         return -1 as ::core::ffi::c_int;
     }
-    if crate::stdlib::lseek64(
-        state.fd,
-        state.start as crate::stdlib::off64_t,
-        crate::stdlib::SEEK_SET,
-    ) == -1 as crate::stdlib::__off64_t
-    {
+    // SAFETY: `fd` belongs to the bound gzip state and is not retained.
+    if unsafe {
+        crate::stdlib::lseek64(
+            state.fd,
+            state.start as crate::stdlib::off64_t,
+            crate::stdlib::SEEK_SET,
+        ) == -1 as crate::stdlib::__off64_t
+    } {
         return -1 as ::core::ffi::c_int;
     }
     gz_reset(state);
-    gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    return 0 as ::core::ffi::c_int;
+    // SAFETY: this bound state owns the error record; a null message does not
+    // dereference caller memory.
+    unsafe {
+        gz_error(
+            state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+    }
+    0 as ::core::ffi::c_int
 }
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzrewind(file)
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzrewind(&mut *(file as crate::gzguts_h::gz_statep))
 }
 
-// Keep the seek arithmetic and state transitions reference-bound.  The public
-// wrapper retains only the descriptor seek, rewind, and error-allocation
-// boundaries that require the raw gzip handle.
+// Keep seek arithmetic and all state transitions reference-bound.  Descriptor
+// positioning and error-record ownership stay in their narrow raw adapters.
 enum GzSeekPlan {
     Invalid,
     Copy {
@@ -1192,15 +1198,11 @@ fn gz_seek_finish(
     state.x.pos + offset
 }
 
-pub unsafe extern "C" fn gzseek64(
-    mut file: crate::zlib_h::gzFile,
+fn gzseek64(
+    state: &mut crate::gzguts_h::gz_state,
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    if file.is_null() {
-        return -1 as crate::stdlib::off64_t;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
     let plan = gz_seek_plan(state, offset, whence);
     match plan {
         GzSeekPlan::Invalid => -1 as crate::stdlib::off64_t,
@@ -1208,20 +1210,26 @@ pub unsafe extern "C" fn gzseek64(
             offset,
             descriptor_offset,
         } => {
-            if crate::stdlib::lseek64(state.fd, descriptor_offset, crate::stdlib::SEEK_CUR)
-                == -1 as crate::stdlib::__off64_t
-            {
+            // SAFETY: `fd` belongs to the bound gzip state and is not retained.
+            if unsafe {
+                crate::stdlib::lseek64(state.fd, descriptor_offset, crate::stdlib::SEEK_CUR)
+                    == -1 as crate::stdlib::__off64_t
+            } {
                 return -1 as crate::stdlib::off64_t;
             }
-            gz_error(
-                file as crate::gzguts_h::gz_statep,
-                crate::zlib_h::Z_OK,
-                ::core::ptr::null::<::core::ffi::c_char>(),
-            );
+            // SAFETY: this bound state owns the error record; a null message
+            // does not dereference caller memory.
+            unsafe {
+                gz_error(
+                    state,
+                    crate::zlib_h::Z_OK,
+                    ::core::ptr::null::<::core::ffi::c_char>(),
+                );
+            }
             gz_seek_after_copy(state, offset)
         }
         GzSeekPlan::Rewind { offset } => {
-            if gzrewind(file) == -1 as ::core::ffi::c_int {
+            if gzrewind(state) == -1 as ::core::ffi::c_int {
                 return -1 as crate::stdlib::off64_t;
             }
             gz_seek_finish(state, offset)
@@ -1236,20 +1244,27 @@ pub unsafe extern "C" fn gzseek64_ffi(
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    gzseek64(file, offset, whence)
+    if file.is_null() {
+        return -1 as crate::stdlib::off64_t;
+    }
+    gzseek64(
+        &mut *(file as crate::gzguts_h::gz_statep),
+        offset,
+        whence,
+    )
 }
-pub unsafe extern "C" fn gzseek(
-    mut file: crate::zlib_h::gzFile,
-    mut offset: crate::stdlib::off_t,
-    mut whence: ::core::ffi::c_int,
+
+fn gzseek(
+    state: &mut crate::gzguts_h::gz_state,
+    offset: crate::stdlib::off_t,
+    whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzseek64(file, offset, whence);
-    return if ret == ret {
+    let ret = gzseek64(state, offset, whence);
+    if ret == ret {
         ret
     } else {
         -1 as crate::stdlib::off_t
-    };
+    }
 }
 #[export_name = "gzseek"]
 
@@ -1258,7 +1273,10 @@ pub unsafe extern "C" fn gzseek_ffi(
     mut offset: crate::stdlib::off_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
-    gzseek(file, offset, whence)
+    if file.is_null() {
+        return -1 as crate::stdlib::off_t;
+    }
+    gzseek(&mut *(file as crate::gzguts_h::gz_statep), offset, whence)
 }
 pub unsafe extern "C" fn gztell64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
     if file.is_null() {
