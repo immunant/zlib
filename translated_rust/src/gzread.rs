@@ -56,30 +56,33 @@ unsafe extern "C" fn gz_load(
     let have = &mut *have;
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
+    // Keep the byte count local while crossing the raw read boundary.  The
+    // caller only observes it after the descriptor result has been classified.
+    let mut loaded: ::core::ffi::c_uint = 0;
     crate::src::gzlib::gz_begin_io(state);
     *crate::stdlib::__errno_location() = 0;
-    *have = 0;
     loop {
-        get = crate::src::gzlib::gz_load_request(len, *have);
+        get = crate::src::gzlib::gz_load_request(len, loaded);
         ret = crate::stdlib::read(
             state.fd,
-            buf.wrapping_add(*have as usize) as *mut ::core::ffi::c_void,
+            buf.wrapping_add(loaded as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
         if ret <= 0 {
             break;
         }
-        *have = crate::src::gzlib::gz_add_received(*have, ret as ::core::ffi::c_uint);
-        if *have >= len {
+        loaded = crate::src::gzlib::gz_add_received(loaded, ret as ::core::ffi::c_uint);
+        if loaded >= len {
             break;
         }
     }
     if let Err(errno) = crate::src::gzlib::gz_load_result(
         state,
         ret,
-        *have,
+        loaded,
         *crate::stdlib::__errno_location(),
     ) {
+        *have = loaded;
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_ERRNO,
@@ -87,6 +90,7 @@ unsafe extern "C" fn gz_load(
         );
         return -1;
     }
+    *have = loaded;
     0
 }
 
