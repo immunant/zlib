@@ -164,6 +164,10 @@ fn gz_comp_needs_output_write(
             && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
 }
 
+fn gz_comp_needs_reset(avail_in: crate::stdlib::uInt, flush: ::core::ffi::c_int) -> bool {
+    avail_in != 0 || flush != crate::zlib_h::Z_NO_FLUSH
+}
+
 fn gz_comp_write_chunk_len(available: usize, max: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if available > max as usize {
         max
@@ -270,7 +274,7 @@ unsafe extern "C" fn gz_comp(
         return 0 as ::core::ffi::c_int;
     }
     if (*state).reset != 0 {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
+        if !gz_comp_needs_reset((*strm).avail_in, flush) {
             return 0 as ::core::ffi::c_int;
         }
         crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
@@ -771,7 +775,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffered_have, gz_comp_needs_output_write, gz_comp_write_chunk_len,
+        gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_write_chunk_len,
         gz_write_buffered_copy_len, gz_write_chunk_consumed_len, gz_write_chunk_len,
         gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
         gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
@@ -870,6 +874,17 @@ mod tests {
             crate::zlib_h::Z_NO_FLUSH,
             crate::zlib_h::Z_OK
         ));
+    }
+
+    #[test]
+    fn gz_comp_needs_reset_skips_idle_no_flush_calls() {
+        assert!(!gz_comp_needs_reset(0, crate::zlib_h::Z_NO_FLUSH));
+    }
+
+    #[test]
+    fn gz_comp_needs_reset_handles_input_and_flush_requests() {
+        assert!(gz_comp_needs_reset(1, crate::zlib_h::Z_NO_FLUSH));
+        assert!(gz_comp_needs_reset(0, crate::zlib_h::Z_BLOCK));
     }
 
     #[test]

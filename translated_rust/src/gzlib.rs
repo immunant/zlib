@@ -170,6 +170,25 @@ fn gzseek_read_buffer_consumed(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GzSeekReadBufferPlan {
+    consumed: crate::stdlib::uInt,
+    remaining_offset: crate::stdlib::off64_t,
+}
+
+fn gzseek_plan_read_buffer_consumption(
+    avail_in: crate::stdlib::uInt,
+    offset: crate::stdlib::off64_t,
+    int_and_off64_same_width: bool,
+    int_max: crate::stdlib::uInt,
+) -> GzSeekReadBufferPlan {
+    let consumed = gzseek_read_buffer_consumed(avail_in, offset, int_and_off64_same_width, int_max);
+    GzSeekReadBufferPlan {
+        consumed,
+        remaining_offset: offset - consumed as crate::stdlib::off64_t,
+    }
+}
+
 fn gzseek_request_is_valid(
     mode: ::core::ffi::c_int,
     err: ::core::ffi::c_int,
@@ -684,17 +703,18 @@ pub unsafe extern "C" fn gzseek64(
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
-        n = gzseek_read_buffer_consumed(
+        let read_buffer_plan = gzseek_plan_read_buffer_consumption(
             (*state).x.have,
             offset,
             ::core::mem::size_of::<::core::ffi::c_int>()
                 == ::core::mem::size_of::<crate::stdlib::off64_t>(),
             gz_intmax(),
         );
+        n = read_buffer_plan.consumed;
         (*state).x.have = (*state).x.have.wrapping_sub(n);
         (*state).x.next = (*state).x.next.offset(n as isize);
         (*state).x.pos += n as crate::stdlib::off64_t;
-        offset -= n as crate::stdlib::off64_t;
+        offset = read_buffer_plan.remaining_offset;
     }
     (*state).skip = offset;
     return (*state).x.pos + offset;
@@ -978,9 +998,10 @@ mod tests {
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
         gz_prepare_open, gz_reset_core, gzclearerr_core, gzerror_core,
         gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_error_allows_positioning, gzseek_plan_remaining_offset,
+        gzseek_can_fast_forward, gzseek_error_allows_positioning,
+        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
         gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
-        GzResetFields, GzSeekOffsetPlan,
+        GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1145,6 +1166,35 @@ mod tests {
     fn gzseek_preserves_matching_width_large_buffer_rule() {
         assert_eq!(gzseek_read_buffer_consumed(9, 20, true, 8), 20);
         assert_eq!(gzseek_read_buffer_consumed(8, 20, true, 8), 8);
+    }
+
+    #[test]
+    fn gzseek_read_buffer_plan_preserves_consumed_bytes_and_remaining_offset() {
+        assert_eq!(
+            gzseek_plan_read_buffer_consumption(7, 3, false, 0),
+            GzSeekReadBufferPlan {
+                consumed: 3,
+                remaining_offset: 0,
+            }
+        );
+        assert_eq!(
+            gzseek_plan_read_buffer_consumption(7, 9, false, 0),
+            GzSeekReadBufferPlan {
+                consumed: 7,
+                remaining_offset: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn gzseek_read_buffer_plan_preserves_matching_width_large_buffer_quirk() {
+        assert_eq!(
+            gzseek_plan_read_buffer_consumption(9, 20, true, 8),
+            GzSeekReadBufferPlan {
+                consumed: 20,
+                remaining_offset: 0,
+            }
+        );
     }
 
     #[test]

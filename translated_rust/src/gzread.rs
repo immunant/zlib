@@ -581,6 +581,26 @@ fn gz_skip_core(
     n
 }
 
+enum GzSkipAction {
+    ConsumeBuffered,
+    StopAtEof,
+    Fetch,
+}
+
+fn gz_skip_action(
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+) -> GzSkipAction {
+    if have != 0 {
+        GzSkipAction::ConsumeBuffered
+    } else if eof != 0 && avail_in == 0 {
+        GzSkipAction::StopAtEof
+    } else {
+        GzSkipAction::Fetch
+    }
+}
+
 fn gzgets_copy_len(
     have: ::core::ffi::c_uint,
     left: ::core::ffi::c_uint,
@@ -611,20 +631,21 @@ fn gzclose_r_result(
 
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     loop {
-        if (*state).x.have != 0 {
-            let n = gz_skip_core(
-                &mut (*state).x.have,
-                &mut (*state).x.pos,
-                &mut (*state).skip,
-                crate::src::gzlib::gz_intmax(),
-            );
-            (*state).x.next = (*state).x.next.offset(n as isize);
-        } else {
-            if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
-                break;
+        match gz_skip_action((*state).x.have, (*state).eof, (*state).strm.avail_in) {
+            GzSkipAction::ConsumeBuffered => {
+                let n = gz_skip_core(
+                    &mut (*state).x.have,
+                    &mut (*state).x.pos,
+                    &mut (*state).skip,
+                    crate::src::gzlib::gz_intmax(),
+                );
+                (*state).x.next = (*state).x.next.offset(n as isize);
             }
-            if gz_fetch(state) == -1 as ::core::ffi::c_int {
-                return -1 as ::core::ffi::c_int;
+            GzSkipAction::StopAtEof => break,
+            GzSkipAction::Fetch => {
+                if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                    return -1 as ::core::ffi::c_int;
+                }
             }
         }
         if !((*state).skip != 0) {
@@ -932,6 +953,20 @@ mod tests {
         assert_eq!(have, 0);
         assert_eq!(pos, 52);
         assert_eq!(skip, 5);
+    }
+
+    #[test]
+    fn gz_skip_action_prioritizes_buffered_data_over_eof() {
+        assert!(matches!(
+            gz_skip_action(1, 1, 0),
+            GzSkipAction::ConsumeBuffered
+        ));
+    }
+
+    #[test]
+    fn gz_skip_action_stops_only_at_eof_without_input() {
+        assert!(matches!(gz_skip_action(0, 1, 0), GzSkipAction::StopAtEof));
+        assert!(matches!(gz_skip_action(0, 1, 1), GzSkipAction::Fetch));
     }
 
     #[test]
