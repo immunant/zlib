@@ -206,6 +206,13 @@ fn fast_window_distance_is_invalid(
     distance_from_window > window_available && sane
 }
 
+fn fast_match_uses_window(
+    distance: ::core::ffi::c_uint,
+    output_produced: crate::stdlib::uInt,
+) -> bool {
+    distance > output_produced
+}
+
 pub unsafe extern "C" fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -333,8 +340,7 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                             (dist, hold, bits) =
                                 add_and_consume_extra_bits(dist, hold, bits, extra_bits);
-                            op = output_produced;
-                            if dist > op {
+                            if fast_match_uses_window(dist, output_produced) {
                                 c2rust_current_block_141 = 5235537862154438448;
                                 break;
                             } else {
@@ -404,7 +410,7 @@ pub unsafe extern "C" fn inflate_fast(
                         }
                     }
                     _ => {
-                        op = dist.wrapping_sub(op);
+                        op = dist.wrapping_sub(output_produced);
                         if fast_window_distance_is_invalid(op, whave, (*state).sane != 0) {
                             (*strm).msg = b"invalid distance too far back\0".as_ptr()
                                 as *const ::core::ffi::c_char
@@ -580,9 +586,10 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_dist_action, fast_litlen_action, fast_window_distance_is_invalid, input_bytes_needed,
-        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
-        unread_input_state, window_match_start, FastDistAction, FastLitLenAction,
+        fast_dist_action, fast_litlen_action, fast_match_uses_window,
+        fast_window_distance_is_invalid, input_bytes_needed, input_remaining_after_read, low_bits,
+        output_cursor_after_write, subtable_index, unread_input_state, window_match_start,
+        FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -599,6 +606,13 @@ mod tests {
         assert!(!fast_window_distance_is_invalid(3, 4, true));
         assert!(fast_window_distance_is_invalid(5, 4, true));
         assert!(!fast_window_distance_is_invalid(5, 4, false));
+    }
+
+    #[test]
+    fn fast_match_uses_window_only_beyond_produced_output() {
+        assert!(!fast_match_uses_window(4, 4));
+        assert!(!fast_match_uses_window(3, 4));
+        assert!(fast_match_uses_window(5, 4));
     }
 
     #[test]

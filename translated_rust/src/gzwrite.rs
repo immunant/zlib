@@ -720,8 +720,7 @@ unsafe fn gz_write(
     mut buf: crate::stdlib::voidpc,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let mut put: crate::stdlib::z_size_t = len;
-    let mut ret: ::core::ffi::c_int = 0;
+    let put: crate::stdlib::z_size_t = len;
     if gz_write_is_empty(len) {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -733,13 +732,11 @@ unsafe fn gz_write(
     }
     if gz_write_uses_buffered_path(len, (*state).size) {
         loop {
-            let mut have: ::core::ffi::c_uint = 0;
-            let mut copy: ::core::ffi::c_uint = 0;
             if !gz_has_pending_input((*state).strm.avail_in) {
                 (*state).strm.next_in = (*state).in_0;
                 (*state).x.have = 0;
             }
-            have = (*state).x.have;
+            let have = (*state).x.have;
             let progress = gz_write_buffered_progress(
                 (*state).size,
                 have,
@@ -747,7 +744,7 @@ unsafe fn gz_write(
                 (*state).x.pos,
                 len,
             );
-            copy = progress.copy;
+            let copy = progress.copy;
             (*state).strm.avail_in = progress.avail_in;
             (*state).x.have = progress.have;
             (*state).x.pos = progress.pos;
@@ -777,7 +774,7 @@ unsafe fn gz_write(
         loop {
             let n = gz_write_chunk_len(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+            let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
             let progress = gz_write_direct_progress(state.x.pos, len, n, state.strm.avail_in);
             state.x.pos = progress.pos;
             len = progress.remaining;

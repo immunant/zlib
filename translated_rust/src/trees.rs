@@ -3666,6 +3666,13 @@ fn heap_node_precedes(
         || left_frequency == right_frequency && left_depth <= right_depth
 }
 
+fn combined_tree_frequency(
+    left_frequency: crate::zutil_h::ush,
+    right_frequency: crate::zutil_h::ush,
+) -> crate::zutil_h::ush {
+    left_frequency.wrapping_add(right_frequency)
+}
+
 fn supplemental_tree_node(max_code: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
     if *max_code < 2 {
         *max_code += 1;
@@ -4065,10 +4072,10 @@ unsafe fn build_tree(
         (*s).heap[(*s).heap_max as usize] = n;
         (*s).heap_max -= 1;
         (*s).heap[(*s).heap_max as usize] = m;
-        (*tree.offset(node as isize)).fc.value = ((*tree.offset(n as isize)).fc.value
-            as ::core::ffi::c_int
-            + (*tree.offset(m as isize)).fc.value as ::core::ffi::c_int)
-            as crate::zutil_h::ush;
+        (*tree.offset(node as isize)).fc.value = combined_tree_frequency(
+            (*tree.offset(n as isize)).fc.value,
+            (*tree.offset(m as isize)).fc.value,
+        );
         (*s).depth[node as usize] = ((if (*s).depth[n as usize] as ::core::ffi::c_int
             >= (*s).depth[m as usize] as ::core::ffi::c_int
         {
@@ -5183,13 +5190,13 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, bl_tree_header_bit_length,
-        block_bit_length_bytes, block_header_bits, detect_data_type_from_ltree, dist_code_index,
-        heap_node_precedes, last_nonzero_bl_code_rank, next_code_for_len, next_codes,
-        pending_cursor_after_bytes, rebalance_overflowed_bit_lengths, reset_block_trees,
-        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
-        supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
-        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_continues,
-        tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
+        block_bit_length_bytes, block_header_bits, combined_tree_frequency,
+        detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
+        last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
+        rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
+        static_d_desc, static_l_desc, supplemental_tree_node, symbol_buffer_is_full,
+        symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor,
+        tree_run_continues, tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5418,6 +5425,12 @@ mod tests {
         assert!(heap_node_precedes(3, 4, 3, 4));
         assert!(heap_node_precedes(3, 4, 3, 5));
         assert!(!heap_node_precedes(3, 5, 3, 4));
+    }
+
+    #[test]
+    fn combined_tree_frequency_preserves_unsigned_wrapping() {
+        assert_eq!(combined_tree_frequency(4, 9), 13);
+        assert_eq!(combined_tree_frequency(crate::zutil_h::ush::MAX, 1), 0);
     }
 
     #[test]
