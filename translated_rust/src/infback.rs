@@ -269,6 +269,34 @@ fn inflate_back_start_stored_copy(
     state.length = length;
 }
 
+// These transitions happen around output callbacks, but do not themselves
+// touch the callback or its raw window pointer.  Keeping them here makes the
+// ownership boundary explicit: the caller publishes bytes, while this helper
+// maintains decoder bookkeeping and modes.
+fn inflate_back_reset_output_window(state: &mut crate::src::inflate::inflate_state) {
+    state.whave = state.wsize;
+}
+
+fn inflate_back_finish_stored_block(state: &mut crate::src::inflate::inflate_state) {
+    state.mode = crate::src::inflate::TYPE;
+}
+
+fn inflate_back_finish_literal(state: &mut crate::src::inflate::inflate_state) {
+    state.mode = crate::src::inflate::LEN;
+}
+
+fn inflate_back_finish_end_code(state: &mut crate::src::inflate::inflate_state) {
+    state.mode = crate::src::inflate::TYPE;
+}
+
+fn inflate_back_finish_stream(state: &mut crate::src::inflate::inflate_state) {
+    state.mode = crate::src::inflate::DONE;
+}
+
+fn inflate_back_enter_bad(state: &mut crate::src::inflate::inflate_state) {
+    state.mode = crate::src::inflate::BAD;
+}
+
 fn inflate_back_dynamic_header(hold: ::core::ffi::c_ulong) -> InflateBackDynamicHeader {
     InflateBackDynamicHeader {
         nlen: (hold as ::core::ffi::c_uint & 31).wrapping_add(257),
@@ -376,6 +404,14 @@ fn inflate_back_add_distance_extra(
 
 fn inflate_back_finish_dynamic_tables(state: &mut crate::src::inflate::inflate_state) {
     state.mode = crate::src::inflate::LEN;
+}
+
+fn inflate_back_start_dynamic_code_lengths(state: &mut crate::src::inflate::inflate_state) {
+    state.have = 0;
+}
+
+fn inflate_back_has_end_code(state: &crate::src::inflate::inflate_state) -> bool {
+    state.lens[256] != 0
 }
 
 fn inflate_back_length_code_needs_subtable(code: crate::src::inftrees::code) -> bool {
@@ -512,6 +548,13 @@ fn inflate_back_can_use_fast_path(
     left: ::core::ffi::c_uint,
 ) -> bool {
     have >= 6 && left >= 258
+}
+
+fn inflate_back_pending_output(
+    wsize: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    (left < wsize).then(|| wsize.wrapping_sub(left))
 }
 
 fn inflate_back_push_code_length(
@@ -709,7 +752,7 @@ pub unsafe extern "C" fn inflateBack(
                 if (*state).last != 0 {
                     let padding = bits & 7;
                     inflate_back_drop_bits(&mut hold, &mut bits, padding);
-                    (*state).mode = crate::src::inflate::DONE;
+                    inflate_back_finish_stream(&mut *state);
                     continue;
                 } else {
                     while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
@@ -734,7 +777,7 @@ pub unsafe extern "C" fn inflateBack(
                         (*strm).msg = b"invalid block type\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
-                        (*state).mode = crate::src::inflate::BAD;
+                        inflate_back_enter_bad(&mut *state);
                     }
                     continue;
                 }
@@ -774,7 +817,7 @@ pub unsafe extern "C" fn inflateBack(
                         if left == 0 as ::core::ffi::c_uint {
                             put = (*state).window;
                             left = (*state).wsize;
-                            (*state).whave = left;
+                            inflate_back_reset_output_window(&mut *state);
                             if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
@@ -792,13 +835,13 @@ pub unsafe extern "C" fn inflateBack(
                         put = put.wrapping_add(copy as usize);
                         (*state).length = (*state).length.wrapping_sub(copy);
                     }
-                    (*state).mode = crate::src::inflate::TYPE;
+                    inflate_back_finish_stored_block(&mut *state);
                     continue;
                 } else {
                     (*strm).msg = b"invalid stored block lengths\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
+                    inflate_back_enter_bad(&mut *state);
                     continue;
                 }
             }
@@ -825,7 +868,7 @@ pub unsafe extern "C" fn inflateBack(
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
+                    inflate_back_enter_bad(&mut *state);
                     continue;
                 } else {
                     inflate_back_start_code_length_order(&mut *state);
@@ -878,10 +921,10 @@ pub unsafe extern "C" fn inflateBack(
                         (*strm).msg = b"invalid code lengths set\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
-                        (*state).mode = crate::src::inflate::BAD;
+                        inflate_back_enter_bad(&mut *state);
                         continue;
                     } else {
-                        (*state).have = 0 as ::core::ffi::c_uint;
+                        inflate_back_start_dynamic_code_lengths(&mut *state);
                         while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
                             loop {
                                 here = inflate_back_code_table_entry(
@@ -957,7 +1000,7 @@ pub unsafe extern "C" fn inflateBack(
                                     (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    (*state).mode = crate::src::inflate::BAD;
+                                    inflate_back_enter_bad(&mut *state);
                                     break;
                                 };
                                 len = repeated_length;
@@ -975,7 +1018,7 @@ pub unsafe extern "C" fn inflateBack(
                                     (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    (*state).mode = crate::src::inflate::BAD;
+                                    inflate_back_enter_bad(&mut *state);
                                     break;
                                 } else {
                                     inflate_back_push_repeated_code_length(
@@ -992,13 +1035,11 @@ pub unsafe extern "C" fn inflateBack(
                         {
                             continue;
                         }
-                        if (*state).lens[256 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-                            == 0 as ::core::ffi::c_int
-                        {
+                        if !inflate_back_has_end_code(&*state) {
                             (*strm).msg = b"invalid code -- missing end-of-block\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
+                            inflate_back_enter_bad(&mut *state);
                             continue;
                         } else {
                             let literal_length_table =
@@ -1021,7 +1062,7 @@ pub unsafe extern "C" fn inflateBack(
                                 (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
-                                (*state).mode = crate::src::inflate::BAD;
+                                inflate_back_enter_bad(&mut *state);
                                 continue;
                             } else {
                                 let distance_table = inflate_back_distance_table_spec(
@@ -1047,7 +1088,7 @@ pub unsafe extern "C" fn inflateBack(
                                     (*strm).msg = b"invalid distances set\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    (*state).mode = crate::src::inflate::BAD;
+                                    inflate_back_enter_bad(&mut *state);
                                     continue;
                                 } else {
                                     inflate_back_finish_dynamic_tables(&mut *state);
@@ -1156,7 +1197,7 @@ pub unsafe extern "C" fn inflateBack(
                 if left == 0 as ::core::ffi::c_uint {
                     put = (*state).window;
                     left = (*state).wsize;
-                    (*state).whave = left;
+                    inflate_back_reset_output_window(&mut *state);
                     if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break;
@@ -1166,16 +1207,16 @@ pub unsafe extern "C" fn inflateBack(
                 put = put.wrapping_add(1);
                 *c2rust_fresh15 = (*state).length as ::core::ffi::c_uchar;
                 left = left.wrapping_sub(1);
-                (*state).mode = crate::src::inflate::LEN;
+                inflate_back_finish_literal(&mut *state);
                 }
                 InflateBackLengthCode::End => {
-                (*state).mode = crate::src::inflate::TYPE;
+                inflate_back_finish_end_code(&mut *state);
                 }
                 InflateBackLengthCode::Invalid => {
                 (*strm).msg = b"invalid literal/length code\0".as_ptr()
                     as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
-                (*state).mode = crate::src::inflate::BAD;
+                inflate_back_enter_bad(&mut *state);
                 }
                 InflateBackLengthCode::Match { .. } => {
                 if (*state).extra != 0 as ::core::ffi::c_uint {
@@ -1263,7 +1304,7 @@ pub unsafe extern "C" fn inflateBack(
                     InflateBackDistanceCode::Invalid => {
                     (*strm).msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
+                    inflate_back_enter_bad(&mut *state);
                     }
                     InflateBackDistanceCode::Distance { .. } => {
                     if (*state).extra != 0 as ::core::ffi::c_uint {
@@ -1299,13 +1340,13 @@ pub unsafe extern "C" fn inflateBack(
                         (*strm).msg = b"invalid distance too far back\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
-                        (*state).mode = crate::src::inflate::BAD;
+                        inflate_back_enter_bad(&mut *state);
                     } else {
                         loop {
                             if left == 0 as ::core::ffi::c_uint {
                                 put = (*state).window;
                                 left = (*state).wsize;
-                                (*state).whave = left;
+                                inflate_back_reset_output_window(&mut *state);
                                 if out.expect("non-null function pointer")(out_desc, put, left) != 0
                                 {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1344,11 +1385,11 @@ pub unsafe extern "C" fn inflateBack(
             }
         }
     }
-    if left < (*state).wsize {
+    if let Some(pending) = inflate_back_pending_output((*state).wsize, left) {
         if out.expect("non-null function pointer")(
             out_desc,
             (*state).window,
-            (*state).wsize.wrapping_sub(left),
+            pending,
         ) != 0
             && ret == crate::zlib_h::Z_STREAM_END
         {
