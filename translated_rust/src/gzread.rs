@@ -46,10 +46,6 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-fn compact_buffered_input(buffer: &mut [crate::stdlib::Bytef], source_start: usize, len: usize) {
-    buffer.copy_within(source_start..source_start + len, 0);
-}
-
 fn is_gzip_header(input: &[u8]) -> bool {
     input.len() >= 4 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32
 }
@@ -65,6 +61,45 @@ fn copy_through_newline(input: &[u8], output: &mut [u8]) -> (usize, bool) {
         .map_or(input.len(), |newline| newline + 1);
     output[..copied].copy_from_slice(&input[..copied]);
     (copied, copied != input.len())
+}
+
+// A checked view of unread compressed input in gzip's owned input buffer.
+// The ABI stream cursor is projected to an address once at the state boundary;
+// compaction then works only with a mutable slice and checked indices.  Keep
+// this separate from the read state so the eventual gzip owner facade can use
+// the same cursor without retaining `z_stream::next_in`.
+struct GzInputCursor<'a> {
+    buffer: &'a mut [u8],
+    start: usize,
+    have: usize,
+}
+
+impl<'a> GzInputCursor<'a> {
+    fn from_owned_buffer(
+        buffer: &'a mut [u8],
+        cursor_address: usize,
+        have: crate::stdlib::uInt,
+        capacity: usize,
+    ) -> Option<Self> {
+        let buffer = buffer.get_mut(..capacity)?;
+        let start = cursor_address.checked_sub(buffer.as_ptr().addr())?;
+        let have = have as usize;
+        let end = start.checked_add(have)?;
+        buffer.get(start..end)?;
+        Some(Self {
+            buffer,
+            start,
+            have,
+        })
+    }
+
+    fn compact(&mut self) {
+        if self.start != 0 {
+            self.buffer
+                .copy_within(self.start..self.start + self.have, 0);
+            self.start = 0;
+        }
+    }
 }
 
 enum GzLoad {
@@ -199,25 +234,17 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             let strm = &mut state.strm;
             if strm.avail_in != 0 {
                 let buffer = state.in_0.as_deref_mut().unwrap();
-                let p = buffer.as_mut_ptr();
-                let q: *const ::core::ffi::c_uchar = strm.next_in;
-                if q != p as *const ::core::ffi::c_uchar {
-                    let n = strm.avail_in as usize;
-                    let size = state.size as usize;
-                    if p.is_null() || q.is_null() || n > size {
-                        return -1 as ::core::ffi::c_int;
-                    }
-                    // `strm.next_in` is always a cursor in `in_0`: gz_load()
-                    // installs the buffer, and inflate only advances that cursor.
-                    let Some(source_start) = q.addr().checked_sub(p.addr()) else {
-                        return -1 as ::core::ffi::c_int;
-                    };
-                    if source_start <= size && n <= size.wrapping_sub(source_start) {
-                        compact_buffered_input(buffer, source_start, n);
-                    } else {
-                        return -1 as ::core::ffi::c_int;
-                    }
-                }
+                // `strm.next_in` is always a cursor in `in_0`: gz_load()
+                // installs the buffer, and inflate only advances that cursor.
+                let Some(mut input) = GzInputCursor::from_owned_buffer(
+                    buffer,
+                    strm.next_in.addr(),
+                    strm.avail_in,
+                    state.size as usize,
+                ) else {
+                    return -1 as ::core::ffi::c_int;
+                };
+                input.compact();
             }
         }
         let avail_in = state.strm.avail_in;
