@@ -2527,10 +2527,7 @@ fn push_tr_align_bytes(
     }
 }
 
-fn tr_align_bits(
-    mut bi_buf: crate::zutil_h::ush,
-    mut bi_valid: ::core::ffi::c_int,
-) -> TrAlignBits {
+fn tr_align_bits(mut bi_buf: crate::zutil_h::ush, mut bi_valid: ::core::ffi::c_int) -> TrAlignBits {
     let mut bytes = [0; 6];
     let mut len = 0;
     let first = send_bits_state(
@@ -3421,6 +3418,14 @@ pub(crate) fn tr_tally_symbol_bytes(
     ]
 }
 
+pub(crate) fn tr_tally_literal_update(
+    dyn_ltree: &mut [crate::src::deflate::ct_data; 573],
+    literal: crate::zutil_h::uch,
+) -> [crate::zutil_h::uchf; 3] {
+    dyn_ltree[literal as usize].freq = dyn_ltree[literal as usize].freq.wrapping_add(1);
+    tr_tally_symbol_bytes(0, literal as ::core::ffi::c_uint)
+}
+
 pub(crate) fn tr_tally_update_counts(
     dyn_ltree: &mut [crate::src::deflate::ct_data; 573],
     dyn_dtree: &mut [crate::src::deflate::ct_data; 61],
@@ -3442,8 +3447,8 @@ pub(crate) fn dist_code_table_index(dist_minus_one: ::core::ffi::c_uint) -> usiz
     if dist_minus_one < 256 as ::core::ffi::c_uint {
         dist_minus_one as usize
     } else {
-        (256 as ::core::ffi::c_uint)
-            .wrapping_add(dist_minus_one >> 7 as ::core::ffi::c_int) as usize
+        (256 as ::core::ffi::c_uint).wrapping_add(dist_minus_one >> 7 as ::core::ffi::c_int)
+            as usize
     }
 }
 
