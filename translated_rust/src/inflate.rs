@@ -2613,10 +2613,11 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
         in_0 = strm_ref.total_in as ::core::ffi::c_ulong;
         out = strm_ref.total_out as ::core::ffi::c_ulong;
     }
-    inflateReset_ffi(strm);
     {
         let strm_ref = &mut *strm;
         let state_ref = &mut *state;
+        inflate_reset_window_state(state_ref);
+        inflate_reset_keep_state(strm_ref, state_ref);
         strm_ref.total_in = in_0 as crate::stdlib::uLong;
         strm_ref.total_out = out as crate::stdlib::uLong;
         state_ref.flags = flags;

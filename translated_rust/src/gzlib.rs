@@ -543,7 +543,7 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     }
     gz_reset_before_error(state_ref);
     gz_error(
-        state,
+        state_ref,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
@@ -593,11 +593,11 @@ pub unsafe extern "C" fn gzseek64_ffi(
         }
         gz_seek64_prepare_copy_seek(state_ref);
         gz_error(
-            state,
+            state_ref,
             crate::zlib_h::Z_OK,
             ::core::ptr::null::<::core::ffi::c_char>(),
         );
-        return gz_seek64_finish_copy_seek(&mut *state, offset);
+        return gz_seek64_finish_copy_seek(state_ref, offset);
     }
     if offset < 0 as crate::stdlib::off64_t {
         if state_ref.mode != crate::gzguts_h::GZ_READ {
@@ -617,7 +617,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
         }
         gz_reset_before_error(state_ref);
         gz_error(
-            state,
+            state_ref,
             crate::zlib_h::Z_OK,
             ::core::ptr::null::<::core::ffi::c_char>(),
         );
@@ -810,14 +810,13 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     if file.is_null() {
         return;
     }
-    let state_ptr = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state_ptr;
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
     if !gz_state_open(state) {
         return;
     }
     gzclearerr(state);
     gz_error(
-        state_ptr,
+        state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
@@ -832,44 +831,50 @@ fn gz_error_message_capacity(
         .wrapping_add(3 as crate::__stddef_size_t_h::size_t)
 }
 
-pub unsafe fn gz_error(
-    mut state: crate::gzguts_h::gz_statep,
-    mut err: ::core::ffi::c_int,
-    mut msg: *const ::core::ffi::c_char,
+pub fn gz_error(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    msg: *const ::core::ffi::c_char,
 ) {
-    if !(*state).msg.is_null() {
-        if (*state).err != crate::zlib_h::Z_MEM_ERROR {
-            crate::stdlib::free((*state).msg as *mut ::core::ffi::c_void);
+    if !state.msg.is_null() {
+        if state.err != crate::zlib_h::Z_MEM_ERROR {
+            unsafe {
+                crate::stdlib::free(state.msg as *mut ::core::ffi::c_void);
+            }
         }
-        (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    if gz_error_should_clear_buffer(err, (*state).again) {
-        (*state).x.have = 0 as ::core::ffi::c_uint;
+    if gz_error_should_clear_buffer(err, state.again) {
+        state.x.have = 0 as ::core::ffi::c_uint;
     }
-    (*state).err = err;
+    state.err = err;
     if msg.is_null() {
         return;
     }
     if err == crate::zlib_h::Z_MEM_ERROR {
         return;
     }
-    let msg_capacity = gz_error_message_capacity(
-        crate::stdlib::strlen((*state).path),
-        crate::stdlib::strlen(msg),
-    );
-    (*state).msg = crate::stdlib::malloc(msg_capacity) as *mut ::core::ffi::c_char;
-    if (*state).msg.is_null() {
-        (*state).err = crate::zlib_h::Z_MEM_ERROR;
+    let msg_capacity = unsafe {
+        gz_error_message_capacity(
+            crate::stdlib::strlen(state.path),
+            crate::stdlib::strlen(msg),
+        )
+    };
+    state.msg = unsafe { crate::stdlib::malloc(msg_capacity) as *mut ::core::ffi::c_char };
+    if state.msg.is_null() {
+        state.err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
-    crate::stdlib::snprintf(
-        (*state).msg,
-        msg_capacity,
-        b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
-        (*state).path,
-        b": \0".as_ptr() as *const ::core::ffi::c_char,
-        msg,
-    );
+    unsafe {
+        crate::stdlib::snprintf(
+            state.msg,
+            msg_capacity,
+            b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
+            state.path,
+            b": \0".as_ptr() as *const ::core::ffi::c_char,
+            msg,
+        );
+    }
 }
 
 fn gz_error_should_clear_buffer(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {
@@ -882,7 +887,7 @@ pub unsafe extern "C" fn gz_error_ffi(
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    gz_error(state, err, msg)
+    gz_error(&mut *state, err, msg)
 }
 pub fn gz_intmax() -> ::core::ffi::c_uint {
     return crate::limits_h::INT_MAX as ::core::ffi::c_uint;

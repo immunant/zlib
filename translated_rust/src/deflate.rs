@@ -322,11 +322,11 @@ fn slide_hash_entries(entries: &mut [crate::src::deflate::Posf], wsize: crate::s
     }
 }
 
-unsafe fn slide_hash(s: &mut crate::src::deflate::deflate_state) {
+fn slide_hash(s: &mut crate::src::deflate::deflate_state) {
     let wsize = s.w_size;
-    let head = &mut *::core::ptr::slice_from_raw_parts_mut(s.head, s.hash_size as usize);
+    let head = unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(s.head, s.hash_size as usize) };
     slide_hash_entries(head, wsize);
-    let prev = &mut *::core::ptr::slice_from_raw_parts_mut(s.prev, wsize as usize);
+    let prev = unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(s.prev, wsize as usize) };
     slide_hash_entries(prev, wsize);
     s.slid = 1 as ::core::ffi::c_int;
 }
