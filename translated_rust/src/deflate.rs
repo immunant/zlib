@@ -124,7 +124,10 @@ pub struct internal_state {
     pub window: *mut crate::stdlib::Bytef,
     pub window_size: crate::zutil_h::ulg,
     pub prev: *mut crate::src::deflate::Posf,
-    pub head: *mut crate::src::deflate::Posf,
+    // The hash heads are an owned fixed-size table.  `None` is the valid
+    // all-zero initial state used while the surrounding opaque state is
+    // being constructed by the ABI allocator.
+    pub head: Option<Vec<crate::src::deflate::Posf>>,
     pub ins_h: crate::stdlib::uInt,
     pub hash_size: crate::stdlib::uInt,
     pub hash_bits: crate::stdlib::uInt,
@@ -346,7 +349,7 @@ impl internal_state {
         let prev_len = usize::try_from(self.w_size).ok()?;
         let head_len = usize::try_from(self.hash_size).ok()?;
         if self.prev.is_null()
-            || self.head.is_null()
+            || self.head.as_ref().is_none_or(|head| head.len() != head_len)
             || prev_index >= prev_len
             || head_index >= head_len
         {
@@ -354,7 +357,7 @@ impl internal_state {
         }
 
         let previous = unsafe { core::slice::from_raw_parts_mut(self.prev, prev_len) };
-        let heads = unsafe { core::slice::from_raw_parts_mut(self.head, head_len) };
+        let heads = self.head.as_mut()?;
         previous[prev_index] = heads[head_index];
         let hash_head = previous[prev_index] as crate::src::deflate::IPos;
         heads[head_index] = self.strstart as crate::src::deflate::Pos;
@@ -656,10 +659,30 @@ fn slide_positions(positions: &mut [crate::src::deflate::Posf], wsize: crate::st
     }
 }
 
+fn allocate_head_table(len: usize) -> Option<Vec<crate::src::deflate::Posf>> {
+    let mut heads = Vec::new();
+    heads.try_reserve_exact(len).ok()?;
+    heads.resize(len, NIL as crate::src::deflate::Posf);
+    Some(heads)
+}
+
+fn clone_head_table(
+    head: &[crate::src::deflate::Posf],
+) -> Option<Vec<crate::src::deflate::Posf>> {
+    let mut copy = allocate_head_table(head.len())?;
+    copy.copy_from_slice(head);
+    Some(copy)
+}
+
 unsafe fn slide_hash(s: *mut crate::src::deflate::deflate_state) {
     let s = &mut *s;
     let wsize = s.w_size;
-    let head = ::core::slice::from_raw_parts_mut(s.head, s.hash_size as usize);
+    let Some(head) = s.head.as_mut() else {
+        return;
+    };
+    if head.len() != s.hash_size as usize {
+        return;
+    }
     slide_positions(head, wsize);
 
     let prev = ::core::slice::from_raw_parts_mut(s.prev, wsize as usize);
@@ -776,9 +799,15 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                             as isize,
                     ) as crate::stdlib::uInt)
                     & (*s).hash_mask;
-                *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                    *(*s).head.offset((*s).ins_h as isize);
-                *(*s).head.offset((*s).ins_h as isize) =
+                let head_index = (*s).ins_h as usize;
+                let Some(head) = (*s).head.as_mut() else {
+                    return;
+                };
+                let Some(hash_head) = head.get(head_index).copied() else {
+                    return;
+                };
+                *(*s).prev.offset((str & (*s).w_mask) as isize) = hash_head;
+                head[head_index] =
                     str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 str = str.wrapping_add(1);
                 (*s).insert = (*s).insert.wrapping_sub(1);
@@ -968,12 +997,7 @@ pub unsafe extern "C" fn deflateInit2_(
         (*s).w_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*s).head = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        (*s).hash_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
+    (*s).head = Some(allocate_head_table((*s).hash_size as usize).unwrap_or_default());
     (*s).high_water = 0 as crate::zutil_h::ulg;
     (*s).lit_bufsize =
         ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
@@ -987,7 +1011,7 @@ pub unsafe extern "C" fn deflateInit2_(
         ((*s).lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
     if (*s).window.is_null()
         || (*s).prev.is_null()
-        || (*s).head.is_null()
+        || (*s).head.as_ref().is_none_or(|head| head.len() != (*s).hash_size as usize)
         || (*s).pending_buf.is_null()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
@@ -1117,17 +1141,13 @@ pub unsafe extern "C" fn deflateSetDictionary(
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
         if wrap == 0 as ::core::ffi::c_int {
-            *(*s)
-                .head
-                .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                NIL as crate::src::deflate::Posf;
-            crate::stdlib::memset(
-                (*s).head as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                    as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-            );
+            let Some(head) = (*s).head.as_mut() else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            if head.len() != (*s).hash_size as usize {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            head.fill(NIL as crate::src::deflate::Posf);
             (*s).slid = 0 as ::core::ffi::c_int;
             (*s).strstart = 0 as crate::stdlib::uInt;
             (*s).block_start = 0 as ::core::ffi::c_long;
@@ -1153,9 +1173,15 @@ pub unsafe extern "C" fn deflateSetDictionary(
                         .wrapping_sub(1 as crate::stdlib::uInt) as isize,
                 ) as crate::stdlib::uInt)
                 & (*s).hash_mask;
-            *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            *(*s).head.offset((*s).ins_h as isize) =
+            let head_index = (*s).ins_h as usize;
+            let Some(head) = (*s).head.as_mut() else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let Some(hash_head) = head.get(head_index).copied() else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            *(*s).prev.offset((str & (*s).w_mask) as isize) = hash_head;
+            head[head_index] =
                 str as crate::src::deflate::Pos as crate::src::deflate::Posf;
             str = str.wrapping_add(1);
             n = n.wrapping_sub(1);
@@ -1278,10 +1304,15 @@ unsafe fn lm_init(s: *mut crate::src::deflate::deflate_state) {
         .wrapping_mul(s.w_size as crate::zutil_h::ulg);
 
     let head_len = s.hash_size as usize;
-    if head_len == 0 || s.head.is_null() {
+    if head_len == 0 {
         return;
     }
-    let head = unsafe { ::core::slice::from_raw_parts_mut(s.head, head_len) };
+    let Some(head) = s.head.as_mut() else {
+        return;
+    };
+    if head.len() != head_len {
+        return;
+    }
     head[head_len - 1] = NIL as crate::src::deflate::Posf;
     head[..head_len - 1].fill(0 as crate::src::deflate::Posf);
 
@@ -1496,7 +1527,12 @@ pub unsafe fn deflateParams(
                 slide_hash(s as *mut crate::src::deflate::deflate_state);
             } else {
                 let head_len = s.hash_size as usize;
-                let head = ::core::slice::from_raw_parts_mut(s.head, head_len);
+                let Some(head) = s.head.as_mut() else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if head.len() != head_len {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
                 head[..head_len - 1].fill(0 as crate::src::deflate::Posf);
                 head[head_len - 1] = NIL as crate::src::deflate::Posf;
                 s.slid = 0 as ::core::ffi::c_int;
@@ -2244,17 +2280,13 @@ pub unsafe fn deflate(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *(*s)
-                        .head
-                        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                        NIL as crate::src::deflate::Posf;
-                    crate::stdlib::memset(
-                        (*s).head as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                            as crate::__stddef_size_t_h::size_t)
-                            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                    );
+                    let Some(head) = (*s).head.as_mut() else {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    };
+                    if head.len() != (*s).hash_size as usize {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    head.fill(NIL as crate::src::deflate::Posf);
                     (*s).slid = 0 as ::core::ffi::c_int;
                     if (*s).lookahead == 0 as crate::stdlib::uInt {
                         (*s).strstart = 0 as crate::stdlib::uInt;
@@ -2351,7 +2383,7 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let (status, gzhead, allocations, state_allocation) = {
+    let (status, gzhead, head, allocations, state_allocation) = {
         // The state was installed by the initialization boundary and is only
         // retained while this stream owns it.  All later cleanup uses the
         // reference and the allocator that belong to this stream.
@@ -2373,9 +2405,9 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
         (
             state.status,
             state.gzhead,
+            state.head.take(),
             [
                 state.pending_buf.cast::<::core::ffi::c_void>(),
-                state.head.cast::<::core::ffi::c_void>(),
                 state.prev.cast::<::core::ffi::c_void>(),
                 state.window.cast::<::core::ffi::c_void>(),
             ],
@@ -2383,6 +2415,7 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
         )
     };
     gzip_header_remove(gzhead);
+    drop(head);
     let zfree = strm.zfree.expect("non-null function pointer");
     for allocation in allocations {
         if !allocation.is_null() {
@@ -2429,6 +2462,15 @@ pub unsafe extern "C" fn deflateCopy(
     }
     ss = (*source).state as *mut crate::src::deflate::deflate_state;
     let gzhead = gzip_header_clone((*ss).gzhead);
+    let Some(head) = (*ss).head.as_deref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if head.len() != (*ss).hash_size as usize {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(head_copy) = clone_head_table(head) else {
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
     crate::stdlib::memcpy(
         dest as *mut ::core::ffi::c_void,
         source as *const ::core::ffi::c_void,
@@ -2458,6 +2500,10 @@ pub unsafe extern "C" fn deflateCopy(
     // fields. Give the copied stream its own owned header snapshot.
     (*ds).gzhead = gzip_header_store(gzhead);
     (*ds).strm = dest;
+    // `memcpy` copied the source vector's representation.  Replace that
+    // representation without dropping it, then install the independent
+    // cloned table prepared above.
+    ::core::ptr::write(::core::ptr::addr_of_mut!((*ds).head), Some(head_copy));
     (*ds).window = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
@@ -2471,12 +2517,6 @@ pub unsafe extern "C" fn deflateCopy(
         (*ds).w_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*ds).head = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).hash_size,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
     (*ds).pending_buf = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
@@ -2485,7 +2525,7 @@ pub unsafe extern "C" fn deflateCopy(
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     if (*ds).window.is_null()
         || (*ds).prev.is_null()
-        || (*ds).head.is_null()
+        || (*ds).head.as_ref().is_none_or(|head| head.len() != (*ds).hash_size as usize)
         || (*ds).pending_buf.is_null()
     {
         deflateEnd_from_stream_pointer(dest);
@@ -2504,12 +2544,6 @@ pub unsafe extern "C" fn deflateCopy(
         } else {
             (*ss).strstart.wrapping_sub((*ss).insert)
         }) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-    );
-    crate::stdlib::memcpy(
-        (*ds).head as *mut ::core::ffi::c_void,
-        (*ss).head as *const ::core::ffi::c_void,
-        ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
     );
     (*ds).pending_out = (*ss).pending_out;
