@@ -1428,9 +1428,9 @@ pub unsafe fn deflateInit2_(
         initialization.allocation.state.items,
         initialization.allocation.state.size,
     ) as *mut crate::src::deflate::deflate_state;
-    if s.is_null() {
+    let Some(s) = ::core::ptr::NonNull::new(s) else {
         return crate::zlib_h::Z_MEM_ERROR;
-    }
+    };
     // Publish a valid Rust state before invoking the remaining callbacks.
     // This keeps the original allocation order and makes callback re-entry
     // observe the same installed stream state without first writing invalid
@@ -1509,9 +1509,7 @@ pub unsafe fn deflateInit2_(
         slid: 0,
     });
     stream.state = Some(
-        ::core::ptr::NonNull::new(s)
-            .expect("checked state allocation")
-            .cast(),
+        s.cast(),
     );
     // Do not keep a Rust borrow of the installed state across an allocator
     // callback: a caller allocator may observe the stream re-entrantly.
@@ -1527,7 +1525,7 @@ pub unsafe fn deflateInit2_(
         // custom allocators are permitted to inspect the stream re-entrantly.
         // This projection stays at the allocation boundary; the scheduling and
         // completion accounting above remain pointer-free.
-        let state = &mut *s;
+        let state = &mut *s.as_ptr();
         match slot {
             DeflateStorageSlot::Window => {
                 state.window = ::core::ptr::NonNull::new(allocation.cast());
@@ -1545,7 +1543,7 @@ pub unsafe fn deflateInit2_(
         state.callback_storage.record_storage(*slot, allocated);
         allocated
     });
-    let state = &mut *s;
+    let state = &mut *s.as_ptr();
     state.data_type = crate::zlib_h::Z_UNKNOWN;
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = initialization.layout.lit_bufsize;
