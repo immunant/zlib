@@ -1481,6 +1481,13 @@ enum GzSkipAction {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+enum GzSkipStep {
+    ConsumeBuffered(GzSkipProgress),
+    StopAtEof,
+    Fetch,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 enum GzSkipLoopDecision {
     Error,
     Done,
@@ -1498,6 +1505,23 @@ fn gz_skip_action(
         GzSkipAction::StopAtEof
     } else {
         GzSkipAction::Fetch
+    }
+}
+
+fn gz_skip_step(
+    have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    intmax: ::core::ffi::c_uint,
+) -> GzSkipStep {
+    match gz_skip_action(have, eof, avail_in) {
+        GzSkipAction::ConsumeBuffered => {
+            GzSkipStep::ConsumeBuffered(gz_skip_progress(have, pos, skip, intmax))
+        }
+        GzSkipAction::StopAtEof => GzSkipStep::StopAtEof,
+        GzSkipAction::Fetch => GzSkipStep::Fetch,
     }
 }
 
@@ -1595,26 +1619,26 @@ fn gzclose_r_result(
 
 unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
-        let action = gz_skip_action(state.x.have, state.eof, state.strm.avail_in);
-        if matches!(action, GzSkipAction::ConsumeBuffered) {
-            let progress = gz_skip_progress(
-                state.x.have,
-                state.x.pos,
-                state.skip,
-                crate::src::gzlib::gz_intmax(),
-            );
-            gz_skip_apply_progress(
-                &mut state.x.have,
-                &mut state.x.pos,
-                &mut state.skip,
-                &progress,
-            );
-            state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
-        }
-        let fetch_result = if matches!(action, GzSkipAction::Fetch) {
-            Some(gz_fetch(state))
-        } else {
-            None
+        let (action, fetch_result) = match gz_skip_step(
+            state.x.have,
+            state.x.pos,
+            state.skip,
+            state.eof,
+            state.strm.avail_in,
+            crate::src::gzlib::gz_intmax(),
+        ) {
+            GzSkipStep::ConsumeBuffered(progress) => {
+                gz_skip_apply_progress(
+                    &mut state.x.have,
+                    &mut state.x.pos,
+                    &mut state.skip,
+                    &progress,
+                );
+                state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
+                (GzSkipAction::ConsumeBuffered, None)
+            }
+            GzSkipStep::StopAtEof => (GzSkipAction::StopAtEof, None),
+            GzSkipStep::Fetch => (GzSkipAction::Fetch, Some(gz_fetch(state))),
         };
         let fetch_failed = gz_skip_fetch_failed(&action, fetch_result);
         match gz_skip_loop_decision(action, fetch_failed, state.skip) {
@@ -3108,6 +3132,25 @@ mod tests {
     fn gz_skip_action_stops_only_at_eof_without_input() {
         assert!(matches!(gz_skip_action(0, 1, 0), GzSkipAction::StopAtEof));
         assert!(matches!(gz_skip_action(0, 1, 1), GzSkipAction::Fetch));
+    }
+
+    #[test]
+    fn gz_skip_step_pairs_buffered_input_with_its_progress() {
+        assert_eq!(
+            gz_skip_step(10, 42, 3, 1, 0, 5),
+            GzSkipStep::ConsumeBuffered(GzSkipProgress {
+                remaining_have: 7,
+                pos: 45,
+                remaining_skip: 0,
+                consumed: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn gz_skip_step_preserves_eof_and_fetch_boundaries() {
+        assert_eq!(gz_skip_step(0, 42, 3, 1, 0, 5), GzSkipStep::StopAtEof);
+        assert_eq!(gz_skip_step(0, 42, 3, 0, 0, 5), GzSkipStep::Fetch);
     }
 
     #[test]
