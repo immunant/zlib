@@ -49,8 +49,6 @@ pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
 pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core::ffi::c_uint) {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut last: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -74,24 +72,26 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    state = strm.state as *mut crate::src::inflate::inflate_state;
+    // The existing engine boundary validates this initialized stream before
+    // entering the fast path. Keep the one raw handle conversion here, then
+    // use the resulting borrow for all state access below.
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     in_0 = strm.next_in as *mut ::core::ffi::c_uchar;
     last = in_0.wrapping_offset(strm.avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
     out = strm.next_out as *mut ::core::ffi::c_uchar;
     beg = out
         .wrapping_offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
     end = out.wrapping_offset(strm.avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
-    wsize = (*state).wsize;
-    whave = (*state).whave;
-    wnext = (*state).wnext;
-    window = (*state).window;
-    hold = (*state).hold;
-    bits = (*state).bits;
-    lcode = (*state).lencode;
-    dcode = (*state).distcode;
-    lmask = ((1 as ::core::ffi::c_uint) << (*state).lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
-    dmask =
-        ((1 as ::core::ffi::c_uint) << (*state).distbits).wrapping_sub(1 as ::core::ffi::c_uint);
+    wsize = state.wsize;
+    whave = state.whave;
+    wnext = state.wnext;
+    window = state.window;
+    hold = state.hold;
+    bits = state.bits;
+    lcode = state.lencode;
+    dcode = state.distcode;
+    lmask = ((1 as ::core::ffi::c_uint) << state.lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
+    dmask = ((1 as ::core::ffi::c_uint) << state.distbits).wrapping_sub(1 as ::core::ffi::c_uint);
     's_627: loop {
         if bits < 15 as ::core::ffi::c_uint {
             let c2rust_fresh0 = in_0;
@@ -180,11 +180,11 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                         if dist > op {
                             op = dist.wrapping_sub(op);
                             if op > whave {
-                                if (*state).sane != 0 {
+                                if state.sane != 0 {
                                     strm.msg = b"invalid distance too far back\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    (*state).mode = crate::src::inflate::BAD;
+                                    state.mode = crate::src::inflate::BAD;
                                     break 's_627;
                                 }
                             }
@@ -352,7 +352,7 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                     } else {
                         strm.msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
-                        (*state).mode = crate::src::inflate::BAD;
+                        state.mode = crate::src::inflate::BAD;
                         break 's_627;
                     }
                 }
@@ -366,12 +366,12 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                                 as ::core::ffi::c_ulong) as isize,
                     );
             } else if op & 32 as ::core::ffi::c_uint != 0 {
-                (*state).mode = crate::src::inflate::TYPE;
+                state.mode = crate::src::inflate::TYPE;
                 break 's_627;
             } else {
                 strm.msg = b"invalid literal/length code\0".as_ptr() as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
-                (*state).mode = crate::src::inflate::BAD;
+                state.mode = crate::src::inflate::BAD;
                 break 's_627;
             }
         }
@@ -398,8 +398,8 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
     } else {
         (257usize).wrapping_sub(out.addr().wrapping_sub(end.addr()))
     }) as ::core::ffi::c_uint as crate::stdlib::uInt;
-    (*state).hold = hold;
-    (*state).bits = bits;
+    state.hold = hold;
+    state.bits = bits;
 }
 #[export_name = "inflate_fast"]
 
