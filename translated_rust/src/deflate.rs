@@ -1564,13 +1564,26 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    if deflate_state_check_at_boundary!(strm) != 0
-        || (*(*strm).state).wrap != 2 as ::core::ffi::c_int
-    {
+    if deflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*(*strm).state).gzhead = head;
-    return crate::zlib_h::Z_OK;
+    // The boundary validation above established that both records are live.
+    // Keep the retained C header pointer assignment here; the pointer-free
+    // policy decision belongs to the safe state helper.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    if !deflate_allows_gzip_header(state.wrap) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    state.gzhead = head;
+    crate::zlib_h::Z_OK
+}
+
+/// A gzip header can only be installed for a gzip-format deflater.  Keeping
+/// this decision independent of the ABI header pointer lets internal callers
+/// share the format rule without handling an FFI pointer.
+fn deflate_allows_gzip_header(wrap: ::core::ffi::c_int) -> bool {
+    wrap == 2
 }
 fn deflate_pending_state(
     state: &crate::src::deflate::deflate_state,
