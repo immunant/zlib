@@ -1118,106 +1118,160 @@ fn initial_hash(
         & hash_mask
 }
 
+// The dictionary setter only needs a small scalar portion of the deflate
+// state once its three callback-owned allocations have been projected.  Keep
+// that policy separate so dictionary copying and hash construction never
+// need to touch ABI stream cursors or raw allocations.
+struct DictionaryState {
+    wrap: ::core::ffi::c_int,
+    status: ::core::ffi::c_int,
+    lookahead: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+    slid: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+    insert: crate::stdlib::uInt,
+    ins_h: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    prev_length: crate::stdlib::uInt,
+    match_length: crate::stdlib::uInt,
+    match_available: ::core::ffi::c_int,
+    high_water: crate::zutil_h::ulg,
+}
+
+fn set_dictionary_core(
+    state: &mut DictionaryState,
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    dictionary: &[crate::stdlib::Bytef],
+    checksum: crate::stdlib::uLong,
+) -> Result<Option<crate::stdlib::uLong>, ()> {
+    let wrap = state.wrap;
+    if wrap == 2
+        || wrap == 1 && state.status != crate::src::deflate::INIT_STATE
+        || state.lookahead != 0
+    {
+        return Err(());
+    }
+    let checksum = (wrap == 1).then(|| crate::src::adler32::adler32(checksum, dictionary));
+    state.wrap = 0;
+    let dictionary = if dictionary.len() >= state.w_size as usize {
+        if wrap == 0 {
+            clear_hash_table(head);
+            state.slid = 0;
+            state.strstart = 0;
+            state.block_start = 0;
+            state.insert = 0;
+        }
+        &dictionary[dictionary.len() - state.w_size as usize..]
+    } else {
+        dictionary
+    };
+    window[..dictionary.len()].copy_from_slice(dictionary);
+    state.lookahead = dictionary.len() as crate::stdlib::uInt;
+    if state.lookahead.wrapping_add(state.insert)
+        >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+    {
+        state.ins_h = initial_hash(window, state.strstart, state.hash_shift, state.hash_mask);
+    }
+    while state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        let str = state.strstart;
+        let count = state
+            .lookahead
+            .wrapping_sub((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt);
+        (state.strstart, state.ins_h) = insert_dictionary_hashes(
+            window,
+            head,
+            prev,
+            state.ins_h,
+            state.hash_shift,
+            state.hash_mask,
+            state.w_mask,
+            str,
+            count,
+        );
+        state.lookahead = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+    }
+    state.strstart = state.strstart.wrapping_add(state.lookahead);
+    state.block_start = state.strstart as ::core::ffi::c_long;
+    state.insert = state.lookahead;
+    state.lookahead = 0;
+    state.prev_length = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+    state.match_length = state.prev_length;
+    state.match_available = 0;
+    state.high_water = initialize_window_high_water(
+        window,
+        state.high_water,
+        state.strstart,
+        state.lookahead,
+    );
+    state.wrap = wrap;
+    Ok(checksum)
+}
+
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut str: crate::stdlib::uInt = 0;
-    let mut n: crate::stdlib::uInt = 0;
-    let mut wrap: ::core::ffi::c_int = 0;
-    let mut avail: ::core::ffi::c_uint = 0;
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if deflateStateCheck(strm) != 0 || dictionary.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    wrap = (*s).wrap;
-    if wrap == 2 as ::core::ffi::c_int
-        || wrap == 1 as ::core::ffi::c_int && (*s).status != crate::src::deflate::INIT_STATE
-        || (*s).lookahead != 0
-    {
+    let dictionary = ::core::slice::from_raw_parts(dictionary, dictLength as usize);
+    let strm = &mut *strm;
+    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    let window = ::core::slice::from_raw_parts_mut(
+        s.window.expect("initialized window").as_ptr(),
+        s.window_size as usize,
+    );
+    let head = ::core::slice::from_raw_parts_mut(
+        s.head.expect("initialized head table").as_ptr(),
+        s.hash_size as usize,
+    );
+    let prev = ::core::slice::from_raw_parts_mut(
+        s.prev.expect("initialized prev table").as_ptr(),
+        s.w_size as usize,
+    );
+    let mut state = DictionaryState {
+        wrap: s.wrap,
+        status: s.status,
+        lookahead: s.lookahead,
+        w_size: s.w_size,
+        slid: s.slid,
+        strstart: s.strstart,
+        block_start: s.block_start,
+        insert: s.insert,
+        ins_h: s.ins_h,
+        hash_shift: s.hash_shift,
+        hash_mask: s.hash_mask,
+        w_mask: s.w_mask,
+        prev_length: s.prev_length,
+        match_length: s.match_length,
+        match_available: s.match_available,
+        high_water: s.high_water,
+    };
+    let Ok(checksum) = set_dictionary_core(&mut state, window, head, prev, dictionary, strm.adler)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    s.wrap = state.wrap;
+    s.slid = state.slid;
+    s.strstart = state.strstart;
+    s.block_start = state.block_start;
+    s.insert = state.insert;
+    s.ins_h = state.ins_h;
+    s.lookahead = state.lookahead;
+    s.prev_length = state.prev_length;
+    s.match_length = state.match_length;
+    s.match_available = state.match_available;
+    s.high_water = state.high_water;
+    if let Some(checksum) = checksum {
+        strm.adler = checksum;
     }
-    if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32(
-            (*strm).adler,
-            ::core::slice::from_raw_parts(dictionary, dictLength as usize),
-        );
-    }
-    (*s).wrap = 0 as ::core::ffi::c_int;
-    if dictLength >= (*s).w_size {
-        if wrap == 0 as ::core::ffi::c_int {
-            // `head` has exactly `hash_size` elements from `deflateInit2_()`
-            // or `deflateCopy()`.
-            let head = ::core::slice::from_raw_parts_mut(
-                (*s).head.expect("initialized head table").as_ptr(),
-                (*s).hash_size as usize,
-            );
-            clear_hash_table(head);
-            (*s).slid = 0 as ::core::ffi::c_int;
-            (*s).strstart = 0 as crate::stdlib::uInt;
-            (*s).block_start = 0 as ::core::ffi::c_long;
-            (*s).insert = 0 as crate::stdlib::uInt;
-        }
-        // The retained dictionary suffix is within the caller-provided
-        // dictionary range.  Keep this C cursor adjustment as safe address
-        // arithmetic; `fill_window()` immediately consumes `dictLength`
-        // bytes from it.
-        dictionary = dictionary.wrapping_add(dictLength.wrapping_sub((*s).w_size) as usize);
-        dictLength = (*s).w_size;
-    }
-    avail = (*strm).avail_in as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    (*strm).avail_in = dictLength;
-    (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
-    fill_window(s);
-    while (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-        str = (*s).strstart;
-        n = (*s).lookahead.wrapping_sub(
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        );
-        let window = ::core::slice::from_raw_parts(
-            (*s).window.expect("initialized window").as_ptr(),
-            (*s).window_size as usize,
-        );
-        let head = ::core::slice::from_raw_parts_mut(
-            (*s).head.expect("initialized head table").as_ptr(),
-            (*s).hash_size as usize,
-        );
-        let prev = ::core::slice::from_raw_parts_mut(
-            (*s).prev.expect("initialized prev table").as_ptr(),
-            (*s).w_size as usize,
-        );
-        (str, (*s).ins_h) = insert_dictionary_hashes(
-            window,
-            head,
-            prev,
-            (*s).ins_h,
-            (*s).hash_shift,
-            (*s).hash_mask,
-            (*s).w_mask,
-            str,
-            n,
-        );
-        (*s).strstart = str;
-        (*s).lookahead =
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        fill_window(s);
-    }
-    (*s).strstart = (*s).strstart.wrapping_add((*s).lookahead);
-    (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-    (*s).insert = (*s).lookahead;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = avail as crate::stdlib::uInt;
-    (*s).wrap = wrap;
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateSetDictionary"]
 
