@@ -146,8 +146,6 @@ pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
-pub use crate::src::zutil::zcalloc;
-pub use crate::src::zutil::zcfree;
 pub use crate::stdlib::charf;
 
 pub use crate::stdlib::uInt;
@@ -611,7 +609,7 @@ pub unsafe extern "C" fn deflateInit2_(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
+            crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
                     ::core::ffi::c_uint,
@@ -622,7 +620,7 @@ pub unsafe extern "C" fn deflateInit2_(
     }
     if (*strm).zfree.is_none() {
         (*strm).zfree = Some(
-            crate::src::zutil::zcfree
+            crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
@@ -759,6 +757,17 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         stream_size,
     )
 }
+fn deflate_status_is_valid(status: ::core::ffi::c_int) -> bool {
+    status == crate::src::deflate::INIT_STATE
+        || status == crate::src::deflate::GZIP_STATE
+        || status == crate::src::deflate::EXTRA_STATE
+        || status == crate::src::deflate::NAME_STATE
+        || status == crate::src::deflate::COMMENT_STATE
+        || status == crate::src::deflate::HCRC_STATE
+        || status == crate::src::deflate::BUSY_STATE
+        || status == crate::src::deflate::FINISH_STATE
+}
+
 unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
@@ -766,17 +775,7 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null()
-        || (*s).strm != strm
-        || (*s).status != crate::src::deflate::INIT_STATE
-            && (*s).status != crate::src::deflate::GZIP_STATE
-            && (*s).status != crate::src::deflate::EXTRA_STATE
-            && (*s).status != crate::src::deflate::NAME_STATE
-            && (*s).status != crate::src::deflate::COMMENT_STATE
-            && (*s).status != crate::src::deflate::HCRC_STATE
-            && (*s).status != crate::src::deflate::BUSY_STATE
-            && (*s).status != crate::src::deflate::FINISH_STATE
-    {
+    if s.is_null() || (*s).strm != strm || !deflate_status_is_valid((*s).status) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;

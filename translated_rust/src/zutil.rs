@@ -131,7 +131,9 @@ pub fn zError(err: ::core::ffi::c_int) -> &'static [u8] {
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     zError(err).as_ptr() as *const ::core::ffi::c_char
 }
-pub unsafe extern "C" fn zcalloc(
+#[export_name = "zcalloc"]
+
+pub unsafe extern "C" fn zcalloc_ffi(
     mut _opaque: crate::stdlib::voidpf,
     mut items: ::core::ffi::c_uint,
     mut size: ::core::ffi::c_uint,
@@ -145,26 +147,11 @@ pub unsafe extern "C" fn zcalloc(
         )
     };
 }
-#[export_name = "zcalloc"]
+#[export_name = "zcfree"]
 
-pub unsafe extern "C" fn zcalloc_ffi(
-    mut opaque: crate::stdlib::voidpf,
-    mut items: ::core::ffi::c_uint,
-    mut size: ::core::ffi::c_uint,
-) -> crate::stdlib::voidpf {
-    zcalloc(opaque, items, size)
-}
-pub unsafe extern "C" fn zcfree(
+pub unsafe extern "C" fn zcfree_ffi(
     mut _opaque: crate::stdlib::voidpf,
     mut ptr: crate::stdlib::voidpf,
 ) {
     crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
-}
-#[export_name = "zcfree"]
-
-pub unsafe extern "C" fn zcfree_ffi(
-    mut opaque: crate::stdlib::voidpf,
-    mut ptr: crate::stdlib::voidpf,
-) {
-    zcfree(opaque, ptr)
 }

@@ -119,8 +119,6 @@ pub use crate::src::inftrees::ENOUGH;
 pub use crate::src::inftrees::ENOUGH_DISTS;
 pub use crate::src::inftrees::ENOUGH_LENS;
 pub use crate::src::inftrees::LENS;
-pub use crate::src::zutil::zcalloc;
-pub use crate::src::zutil::zcfree;
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -152,6 +150,10 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
+fn inflate_mode_is_valid(mode: crate::src::inflate::inflate_mode) -> bool {
+    mode >= crate::src::inflate::HEAD && mode <= crate::src::inflate::SYNC
+}
+
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
@@ -159,13 +161,7 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if state.is_null()
-        || (*state).strm != strm
-        || ((*state).mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || (*state).mode as ::core::ffi::c_uint
-            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
+    if state.is_null() || (*state).strm != strm || !inflate_mode_is_valid((*state).mode) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -297,7 +293,7 @@ pub unsafe extern "C" fn inflateInit2_(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
+            crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
                     ::core::ffi::c_uint,
@@ -308,7 +304,7 @@ pub unsafe extern "C" fn inflateInit2_(
     }
     if (*strm).zfree.is_none() {
         (*strm).zfree = Some(
-            crate::src::zutil::zcfree
+            crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
@@ -2137,12 +2133,16 @@ pub unsafe extern "C" fn inflateGetHeader(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+    if !inflate_get_header_allowed(&*state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     (*state).head = head;
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
+}
+
+fn inflate_get_header_allowed(state: &crate::src::inflate::inflate_state) -> bool {
+    state.wrap & 2 as ::core::ffi::c_int != 0 as ::core::ffi::c_int
 }
 #[export_name = "inflateGetHeader"]
 
