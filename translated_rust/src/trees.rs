@@ -1,6 +1,6 @@
 // =============== BEGIN trees_h ================
 #[no_mangle]
-pub static mut _dist_code: [crate::zutil_h::uch; 512] = [
+pub static _dist_code: [crate::zutil_h::uch; 512] = [
     0 as crate::zutil_h::uch,
     1 as crate::zutil_h::uch,
     2 as crate::zutil_h::uch,
@@ -516,7 +516,7 @@ pub static mut _dist_code: [crate::zutil_h::uch; 512] = [
 ];
 #[no_mangle]
 
-pub static mut _length_code: [crate::zutil_h::uch; 256] = [
+pub static _length_code: [crate::zutil_h::uch; 256] = [
     0 as crate::zutil_h::uch,
     1 as crate::zutil_h::uch,
     2 as crate::zutil_h::uch,
@@ -2065,7 +2065,7 @@ pub mod trees_h {
         },
     ];
 
-    pub static mut base_length: [::core::ffi::c_int; 29] = [
+    pub static base_length: [::core::ffi::c_int; 29] = [
         0 as ::core::ffi::c_int,
         1 as ::core::ffi::c_int,
         2 as ::core::ffi::c_int,
@@ -2097,7 +2097,7 @@ pub mod trees_h {
         0 as ::core::ffi::c_int,
     ];
 
-    pub static mut base_dist: [::core::ffi::c_int; 30] = [
+    pub static base_dist: [::core::ffi::c_int; 30] = [
         0 as ::core::ffi::c_int,
         1 as ::core::ffi::c_int,
         2 as ::core::ffi::c_int,
@@ -2288,7 +2288,7 @@ static extra_blbits: [::core::ffi::c_int; 19] = [
     7 as ::core::ffi::c_int,
 ];
 
-static mut bl_order: [crate::zutil_h::uch; 19] = [
+static bl_order: [crate::zutil_h::uch; 19] = [
     16 as crate::zutil_h::uch,
     17 as crate::zutil_h::uch,
     18 as crate::zutil_h::uch,
