@@ -738,8 +738,10 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     // This reset is intentionally before refill: opening a normal gzip read
     // starts with `junk == 0`, and the original ordering resets the embedded
-    // codec before it attempts any file I/O.
-    if state.direct == -1 || state.junk == 0 {
+    // codec before it attempts any file I/O.  Both this path and a detected
+    // gzip header perform the exact same reset, so carry the action to one
+    // dispatch site below rather than duplicating the codec boundary.
+    let action = if state.direct == -1 || state.junk == 0 {
         let action = gz_look_step(GzLookState {
             direct: &mut state.direct,
             junk: &mut state.junk,
@@ -751,50 +753,50 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         if !matches!(action, Ok(GzLookAction::ResetGzip)) {
             return -1;
         }
-        crate::src::inflate::inflateReset(&mut state.strm);
-        return 0;
-    }
-    let Some(mut input_cursor) = state.buffers.input_cursor.take() else {
-        return -1 as ::core::ffi::c_int;
+        action
+    } else {
+        let Some(mut input_cursor) = state.buffers.input_cursor.take() else {
+            return -1 as ::core::ffi::c_int;
+        };
+        let refill = gz_avail(GzAvailState {
+            err: &mut state.err,
+            eof: &mut state.eof,
+            input_cursor: &mut input_cursor,
+            size: state.buffers.size as usize,
+            input: &mut state.buffers.input,
+            fd: state.fd.as_ref().expect("gzip state has an open file"),
+            again: &mut state.again,
+            message: &mut state.msg,
+            buffered: &mut state.x.have,
+            path: state.path.as_deref(),
+        });
+        state.buffers.input_cursor = Some(input_cursor);
+        if refill.is_none() {
+            return -1 as ::core::ffi::c_int;
+        }
+        let input_cursor = state.buffers.input_cursor.as_ref().unwrap();
+        state.strm.next_in = state.buffers.input.as_deref_mut().unwrap().as_mut_ptr();
+        state.strm.avail_in = input_cursor.available();
+        // The successful refill above leaves a checked owner cursor.  Retain that
+        // index through copy detection instead of rebuilding a view from the ABI
+        // stream pointer that is published only for the subsequent codec call.
+        let Some(input) = state
+            .buffers
+            .input
+            .as_deref()
+            .and_then(|buffer| input_cursor.bytes(buffer))
+        else {
+            return -1 as ::core::ffi::c_int;
+        };
+        gz_look_step(GzLookState {
+            direct: &mut state.direct,
+            junk: &mut state.junk,
+            how: &mut state.how,
+            again: state.again,
+            input,
+            output: state.buffers.output.as_deref_mut(),
+        })
     };
-    let refill = gz_avail(GzAvailState {
-        err: &mut state.err,
-        eof: &mut state.eof,
-        input_cursor: &mut input_cursor,
-        size: state.buffers.size as usize,
-        input: &mut state.buffers.input,
-        fd: state.fd.as_ref().expect("gzip state has an open file"),
-        again: &mut state.again,
-        message: &mut state.msg,
-        buffered: &mut state.x.have,
-        path: state.path.as_deref(),
-    });
-    state.buffers.input_cursor = Some(input_cursor);
-    if refill.is_none() {
-        return -1 as ::core::ffi::c_int;
-    }
-    let input_cursor = state.buffers.input_cursor.as_ref().unwrap();
-    state.strm.next_in = state.buffers.input.as_deref_mut().unwrap().as_mut_ptr();
-    state.strm.avail_in = input_cursor.available();
-    // The successful refill above leaves a checked owner cursor.  Retain that
-    // index through copy detection instead of rebuilding a view from the ABI
-    // stream pointer that is published only for the subsequent codec call.
-    let Some(input) = state
-        .buffers
-        .input
-        .as_deref()
-        .and_then(|buffer| input_cursor.bytes(buffer))
-    else {
-        return -1 as ::core::ffi::c_int;
-    };
-    let action = gz_look_step(GzLookState {
-        direct: &mut state.direct,
-        junk: &mut state.junk,
-        how: &mut state.how,
-        again: state.again,
-        input,
-        output: state.buffers.output.as_deref_mut(),
-    });
     match action {
         Ok(GzLookAction::ResetGzip) => {
             crate::src::inflate::inflateReset(&mut state.strm);
