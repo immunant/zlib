@@ -187,12 +187,24 @@ pub fn gzdopen(
     file: std::fs::File,
     mode: &std::ffi::CStr,
 ) -> Option<Box<crate::gzguts_h::gz_state>> {
-    let mode = parse_gz_mode(mode)?;
     use std::os::fd::AsRawFd as _;
 
+    let mode = parse_gz_mode(mode)?;
     let path = std::ffi::CString::new(format!("<fd:{}>", file.as_raw_fd()))
         .expect("a formatted file descriptor contains no NUL");
-    Some(gzopen_with_file(path, mode, file))
+    Some(gzdopen_with_mode(path, mode, file))
+}
+
+/// Finish adopting a descriptor after its mode has been validated.
+///
+/// Keeping this separate lets the C adapter reject an invalid mode before it
+/// takes ownership of the caller's raw descriptor, matching zlib's behavior.
+fn gzdopen_with_mode(
+    path: std::ffi::CString,
+    mode: GzOpenMode,
+    file: std::fs::File,
+) -> Box<crate::gzguts_h::gz_state> {
+    gzopen_with_file(path, mode, file)
 }
 
 /// Apply gzdopen's mode-controlled descriptor flags through Rustix's safe
@@ -226,9 +238,9 @@ pub unsafe extern "C" fn gzdopen_ffi(
     };
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
     configure_gzdopen_file(&file, &settings);
-    let Some(state) = gzdopen(file, mode) else {
-        return ::core::ptr::null_mut();
-    };
+    let path = std::ffi::CString::new(format!("<fd:{fd}>"))
+        .expect("a formatted file descriptor contains no NUL");
+    let state = gzdopen_with_mode(path, settings, file);
     Box::into_raw(state) as crate::zlib_h::gzFile
 }
 /// Set the requested buffer size before any gzip I/O has started.
