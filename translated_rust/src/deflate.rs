@@ -3442,7 +3442,8 @@ fn deflate_copy_prev_len(
     }
 }
 
-pub unsafe extern "C" fn deflateCopy(
+#[export_name = "deflateCopy"]
+pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -3548,14 +3549,6 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).sym_next as crate::__stddef_size_t_h::size_t,
     );
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "deflateCopy"]
-
-pub unsafe extern "C" fn deflateCopy_ffi(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    deflateCopy(dest, source)
 }
 fn longest_match_limit(
     strstart: crate::stdlib::uInt,
