@@ -1018,9 +1018,15 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 ) -> ::core::ffi::c_int {
     deflateResetKeep(strm)
 }
-unsafe fn lm_init(mut state: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *state;
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+// This private reset helper receives the state pointer that its validated
+// deflater caller already owns. The state and hash bindings stay scoped here.
+fn lm_init(state: *mut crate::src::deflate::deflate_state) {
+    // SAFETY: `deflateReset()` has validated this state pointer before reset.
+    let state = unsafe { &mut *state };
+    // SAFETY: the validated deflater owns a `hash_size`-entry head allocation.
+    let head = unsafe {
+        ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
+    };
     lm_init_state(state, head);
 }
 
