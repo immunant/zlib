@@ -3687,7 +3687,7 @@ pub fn inflate(
         // decoded input/output progress, mode, or bit state this call publishes.
         // Reusing this plan keeps the history decision and final ABI accounting
         // tied to the same scalar snapshot.
-        let (exit, window_error, produced) = {
+        {
             let strm_ref = &mut *strm;
             let state_ref = &mut *state;
             strm_ref.next_out = put as *mut crate::stdlib::Bytef;
@@ -3772,16 +3772,10 @@ pub fn inflate(
                 }
                 (false, produced)
             };
-            (exit, window_error, produced)
-        };
-        if window_error {
-            let state_ref = &mut *state;
-            state_ref.mode = crate::src::inflate::MEM;
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-        {
-            let strm_ref = &mut *strm;
-            let state_ref = &mut *state;
+            if window_error {
+                state_ref.mode = crate::src::inflate::MEM;
+                return crate::zlib_h::Z_MEM_ERROR;
+            }
             in_0 = exit.input_used;
             out = exit.output_used;
             strm_ref.total_in = strm_ref
