@@ -78,6 +78,10 @@ pub mod gzguts_h {
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
         pub buffers: Option<gz_buffers>,
+        // Cursor into `buffers.input` corresponding to `strm.next_in`.
+        // This opaque-state sidecar keeps normal gzip read logic off the ABI
+        // raw cursor; exported codec boundaries synchronize it after inflate.
+        pub input_index: usize,
         pub direct: ::core::ffi::c_int,
         pub junk: ::core::ffi::c_int,
         pub how: ::core::ffi::c_int,

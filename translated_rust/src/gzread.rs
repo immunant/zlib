@@ -81,6 +81,20 @@ fn gz_avail_retain_input(
     Some(())
 }
 
+/// Advance the owned input cursor after one inflate call. The boundary passes
+/// only scalar availability snapshots, so this remains independent of the
+/// ABI raw cursor.
+fn gz_input_advance(
+    index: usize,
+    before: crate::stdlib::uInt,
+    after: crate::stdlib::uInt,
+    input_len: usize,
+) -> Option<usize> {
+    let consumed = before.checked_sub(after)? as usize;
+    let next = index.checked_add(consumed)?;
+    (next <= input_len && after as usize <= input_len.saturating_sub(next)).then_some(next)
+}
+
 /// Inspect the pending compressed-input prefix without dereferencing the ABI
 /// stream cursor.  `start` is the boundary-reconciled index of that cursor.
 fn gz_look_input_is_gzip(
@@ -222,15 +236,7 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 return -1;
             };
             if state.strm.avail_in != 0 {
-                let input = buffers.input.as_mut_ptr();
-                let Some(next_index) = gz_owned_buffer_index(
-                    input as usize,
-                    buffers.input.len(),
-                    state.strm.next_in as usize,
-                ) else {
-                    return -1;
-                };
-                if gz_avail_retain_input(&mut buffers.input, next_index, state.strm.avail_in)
+                if gz_avail_retain_input(&mut buffers.input, state.input_index, state.strm.avail_in)
                     .is_none()
                 {
                     return -1;
@@ -256,7 +262,8 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             None => return -1,
         };
         state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
-        state.strm.next_in = input as *mut crate::stdlib::Bytef;
+        state.strm.next_in = input;
+        state.input_index = 0;
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -299,6 +306,7 @@ macro_rules! gz_look_at_boundary {
                 state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
                 state_ref.strm.avail_in = 0 as crate::stdlib::uInt;
                 state_ref.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                state_ref.input_index = 0;
                 if crate::src::inflate::inflate_init2_at_boundary!(
                     &raw mut state_ref.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
                     15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
@@ -333,16 +341,11 @@ macro_rules! gz_look_at_boundary {
                     let Some(buffers) = state_ref.buffers.as_ref() else {
                         break 'gz_look_result -1;
                     };
-                    let Some(next_index) = gz_owned_buffer_index(
-                        buffers.input.as_ptr() as usize,
-                        buffers.input.len(),
-                        state_ref.strm.next_in as usize,
+                    let Some(is_gzip) = gz_look_input_is_gzip(
+                        &buffers.input,
+                        state_ref.input_index,
+                        state_ref.strm.avail_in,
                     ) else {
-                        break 'gz_look_result -1;
-                    };
-                    let Some(is_gzip) =
-                        gz_look_input_is_gzip(&buffers.input, next_index, state_ref.strm.avail_in)
-                    else {
                         break 'gz_look_result -1;
                     };
                     is_gzip
@@ -359,19 +362,12 @@ macro_rules! gz_look_at_boundary {
             let Some(buffers) = state_ref.buffers.as_mut() else {
                 break 'gz_look_result -1;
             };
-            let Some(next_index) = gz_owned_buffer_index(
-                buffers.input.as_ptr() as usize,
-                buffers.input.len(),
-                state_ref.strm.next_in as usize,
-            ) else {
-                break 'gz_look_result -1;
-            };
             let Some(output) = buffers.output.as_mut() else {
                 break 'gz_look_result -1;
             };
             if gz_look_copy_pending_input(
                 &buffers.input,
-                next_index,
+                state_ref.input_index,
                 state_ref.strm.avail_in,
                 output,
             )
@@ -382,6 +378,7 @@ macro_rules! gz_look_at_boundary {
             state_ref.x.next = output.as_mut_ptr();
             state_ref.x.have = state_ref.strm.avail_in as ::core::ffi::c_uint;
             state_ref.strm.avail_in = 0 as crate::stdlib::uInt;
+            state_ref.input_index = 0;
             state_ref.how = crate::gzguts_h::COPY;
             0
         }
@@ -493,10 +490,36 @@ macro_rules! gz_decomp_at_boundary {
                 }
                 break;
             } else {
+                let input_before = state.strm.avail_in;
+                let input_len = match state.buffers.as_ref() {
+                    Some(buffers) => buffers.input.len(),
+                    None => {
+                        crate::src::gzlib::gz_error_static(
+                            state,
+                            crate::zlib_h::Z_STREAM_ERROR,
+                            b"internal error: inflate stream corrupt\0",
+                        );
+                        break;
+                    }
+                };
                 ret = crate::src::inflate::inflate(
                     &mut state.strm as *mut crate::zlib_h::z_stream_s,
                     crate::zlib_h::Z_NO_FLUSH,
                 );
+                let Some(next_input_index) = gz_input_advance(
+                    state.input_index,
+                    input_before,
+                    state.strm.avail_in,
+                    input_len,
+                ) else {
+                    crate::src::gzlib::gz_error_static(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal error: inflate stream corrupt\0",
+                    );
+                    break;
+                };
+                state.input_index = next_input_index;
                 let step = gz_decomp_after_inflate(state.strm.avail_out, ret, state.junk);
                 if state.strm.avail_out < had {
                     state.junk = 0;
@@ -525,6 +548,7 @@ macro_rules! gz_decomp_at_boundary {
                     }
                     GzDecompInflateStep::EndOfMember => {
                         state.strm.avail_in = 0;
+                        state.input_index = 0;
                         state.eof = 1;
                         state.how = crate::gzguts_h::LOOK;
                         ret = crate::zlib_h::Z_OK;
