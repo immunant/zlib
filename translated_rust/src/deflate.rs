@@ -1770,14 +1770,14 @@ macro_rules! deflate_params_at_boundary {
             }
             let s = (*strm).state as *mut crate::src::deflate::deflate_state;
             let Some(plan) = crate::src::deflate::deflate_params_plan(
-                level,
-                strategy,
-                (*s).level,
-                (*s).strategy,
-                (*s).last_flush,
-            ) else {
-                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-            };
+                    level,
+                    strategy,
+                    (*s).level,
+                    (*s).strategy,
+                    (*s).last_flush,
+                ) else {
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                };
             if plan.needs_block_flush {
                 let err = crate::src::deflate::deflate(strm, crate::zlib_h::Z_BLOCK);
                 if err == crate::zlib_h::Z_STREAM_ERROR {
@@ -1796,11 +1796,11 @@ macro_rules! deflate_params_at_boundary {
                 {
                     if (*s).matches == 1 as crate::stdlib::uInt {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                            };
                         let Ok(prev_len) = usize::try_from((*s).w_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                            };
                         if (head_len != 0 && (*s).head.is_null())
                             || (prev_len != 0 && (*s).prev.is_null())
                         {
@@ -1820,8 +1820,8 @@ macro_rules! deflate_params_at_boundary {
                         (*s).slid = 1;
                     } else {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                            };
                         if head_len != 0 && (*s).head.is_null() {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         }
@@ -2344,21 +2344,25 @@ fn set_stored_block_length_state(
     true
 }
 
-unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
+/// Flush pending output and return the stream's post-flush output capacity.
+///
+/// The stream is adopted once here, so callers that need the capacity do not
+/// need to dereference its raw compatibility pointer a second time.
+unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate::stdlib::uInt {
     if strm.is_null() {
-        return;
+        return 0;
     }
     let strm = &mut *strm;
     let state = strm.state as *mut crate::src::deflate::deflate_state;
     if state.is_null() {
-        return;
+        return strm.avail_out;
     }
     let s = &mut *state;
     let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
-        return;
+        return strm.avail_out;
     };
     if pending_len != 0 && s.pending_buf.is_null() {
-        return;
+        return strm.avail_out;
     }
     let pending_buf = if pending_len == 0 {
         &mut []
@@ -2369,43 +2373,43 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let Some((len, reset_pending_out)) =
         flush_pending_state(s.pending_buf_size, &mut s.pending, strm.avail_out)
     else {
-        return;
+        return strm.avail_out;
     };
     if len == 0 {
-        return;
+        return strm.avail_out;
     }
     let Ok(len) = usize::try_from(len) else {
-        return;
+        return strm.avail_out;
     };
     if (len != 0 && (strm.next_out.is_null() || s.pending_out.is_null()))
         || len > strm.avail_out as usize
     {
-        return;
+        return strm.avail_out;
     }
     // `memcpy` required raw cursors even after their bounds had been
     // validated.  Keep the ABI lends here, reject aliasing just as C
     // `memcpy` requires, then perform the actual copy in the slice core.
     let Some(output_end) = (strm.next_out as usize).checked_add(len) else {
-        return;
+        return strm.avail_out;
     };
     let Some(pending_end) = (s.pending_out as usize).checked_add(len) else {
-        return;
+        return strm.avail_out;
     };
     if (strm.next_out as usize) < pending_end && (s.pending_out as usize) < output_end {
-        return;
+        return strm.avail_out;
     }
     let Some(pending_start) = (s.pending_out as usize).checked_sub(s.pending_buf as usize) else {
-        return;
+        return strm.avail_out;
     };
     let Some(pending_end) = pending_start.checked_add(len) else {
-        return;
+        return strm.avail_out;
     };
     let Some(pending) = pending_buf.get(pending_start..pending_end) else {
-        return;
+        return strm.avail_out;
     };
     let output = ::core::slice::from_raw_parts_mut(strm.next_out, len);
     if !flush_pending_copy_state(output, pending) {
-        return;
+        return strm.avail_out;
     }
     // The copied length is bounded by the validated output and pending
     // spans above. Preserve zlib's cursor advance without an unsafe pointer
@@ -2417,6 +2421,7 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     if reset_pending_out {
         s.pending_out = s.pending_buf;
     }
+    strm.avail_out
 }
 
 /// Build the big-endian words emitted at the start of a zlib-wrapped stream.
@@ -4101,8 +4106,7 @@ unsafe fn deflate_fast(
                 let state = &mut *s;
                 state.block_start = strstart as ::core::ffi::c_long;
                 let strm = state.strm;
-                flush_pending(strm);
-                (&mut *strm).avail_out
+                flush_pending(strm)
             };
             if avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
@@ -4143,8 +4147,7 @@ unsafe fn deflate_fast(
             let state = &mut *s;
             state.block_start = state.strstart as ::core::ffi::c_long;
             let strm = state.strm;
-            flush_pending(strm);
-            (&mut *strm).avail_out
+            flush_pending(strm)
         };
         if avail_out == 0 as crate::stdlib::uInt {
             return (if true {
@@ -4179,8 +4182,7 @@ unsafe fn deflate_fast(
             let state = &mut *s;
             state.block_start = state.strstart as ::core::ffi::c_long;
             let strm = state.strm;
-            flush_pending(strm);
-            (&mut *strm).avail_out
+            flush_pending(strm)
         };
         if avail_out == 0 as crate::stdlib::uInt {
             return (if false {
@@ -4415,8 +4417,7 @@ unsafe fn deflate_slow(
                     let state = &mut *s;
                     state.block_start = strstart as ::core::ffi::c_long;
                     let strm = state.strm;
-                    flush_pending(strm);
-                    (&mut *strm).avail_out
+                    flush_pending(strm)
                 };
                 if avail_out == 0 as crate::stdlib::uInt {
                     return (if false {
@@ -4555,8 +4556,7 @@ unsafe fn deflate_slow(
             let state = &mut *s;
             state.block_start = strstart as ::core::ffi::c_long;
             let strm = state.strm;
-            flush_pending(strm);
-            (&mut *strm).avail_out
+            flush_pending(strm)
         };
         if avail_out == 0 as crate::stdlib::uInt {
             return (if true {
@@ -4591,8 +4591,7 @@ unsafe fn deflate_slow(
             let state = &mut *s;
             state.block_start = strstart as ::core::ffi::c_long;
             let strm = state.strm;
-            flush_pending(strm);
-            (&mut *strm).avail_out
+            flush_pending(strm)
         };
         if avail_out == 0 as crate::stdlib::uInt {
             return (if false {
@@ -4921,8 +4920,7 @@ unsafe fn deflate_rle(
                 let state = &mut *s;
                 state.block_start = strstart as ::core::ffi::c_long;
                 let strm = state.strm;
-                flush_pending(strm);
-                (&mut *strm).avail_out
+                flush_pending(strm)
             };
             if avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
@@ -4957,8 +4955,7 @@ unsafe fn deflate_rle(
             let state = &mut *s;
             state.block_start = strstart as ::core::ffi::c_long;
             let strm = state.strm;
-            flush_pending(strm);
-            (&mut *strm).avail_out
+            flush_pending(strm)
         };
         if avail_out == 0 as crate::stdlib::uInt {
             return (if true {
@@ -4993,8 +4990,7 @@ unsafe fn deflate_rle(
             let state = &mut *s;
             state.block_start = strstart as ::core::ffi::c_long;
             let strm = state.strm;
-            flush_pending(strm);
-            (&mut *strm).avail_out
+            flush_pending(strm)
         };
         if avail_out == 0 as crate::stdlib::uInt {
             return (if false {
@@ -5082,8 +5078,7 @@ unsafe fn deflate_huff(
                 let state = &mut *s;
                 state.block_start = strstart as ::core::ffi::c_long;
                 let strm = state.strm;
-                flush_pending(strm);
-                (&mut *strm).avail_out
+                flush_pending(strm)
             };
             if avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
@@ -5118,8 +5113,7 @@ unsafe fn deflate_huff(
             let state = &mut *s;
             state.block_start = strstart as ::core::ffi::c_long;
             let strm = state.strm;
-            flush_pending(strm);
-            (&mut *strm).avail_out
+            flush_pending(strm)
         };
         if avail_out == 0 as crate::stdlib::uInt {
             return (if true {
@@ -5154,8 +5148,7 @@ unsafe fn deflate_huff(
             let state = &mut *s;
             state.block_start = strstart as ::core::ffi::c_long;
             let strm = state.strm;
-            flush_pending(strm);
-            (&mut *strm).avail_out
+            flush_pending(strm)
         };
         if avail_out == 0 as crate::stdlib::uInt {
             return (if false {
