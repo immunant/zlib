@@ -151,6 +151,61 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
+fn inflate_mode_is_valid(mode: inflate_mode) -> bool {
+    mode >= HEAD && mode <= SYNC
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct WindowUpdate {
+    replace: bool,
+    first: ::core::ffi::c_uint,
+    second: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+}
+
+fn window_update_plan(
+    wsize: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    copy: ::core::ffi::c_uint,
+) -> WindowUpdate {
+    if copy >= wsize {
+        return WindowUpdate {
+            replace: true,
+            first: wsize,
+            second: 0,
+            wnext: 0,
+            whave: wsize,
+        };
+    }
+
+    let first = wsize.wrapping_sub(wnext).min(copy);
+    let second = copy.wrapping_sub(first);
+    if second != 0 {
+        WindowUpdate {
+            replace: false,
+            first,
+            second,
+            wnext: second,
+            whave: wsize,
+        }
+    } else {
+        let next = wnext.wrapping_add(first);
+        WindowUpdate {
+            replace: false,
+            first,
+            second,
+            wnext: if next == wsize { 0 } else { next },
+            whave: if whave < wsize {
+                whave.wrapping_add(first)
+            } else {
+                whave
+            },
+        }
+    }
+}
+
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
@@ -158,13 +213,7 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if state.is_null()
-        || (*state).strm != strm
-        || ((*state).mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || (*state).mode as ::core::ffi::c_uint
-            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
+    if state.is_null() || (*state).strm != strm || !inflate_mode_is_valid((*state).mode) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -418,7 +467,7 @@ unsafe extern "C" fn updatewindow(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut dist: ::core::ffi::c_uint = 0;
+    let plan: WindowUpdate;
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).window.is_null() {
         (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
@@ -436,43 +485,29 @@ unsafe extern "C" fn updatewindow(
         (*state).wnext = 0 as ::core::ffi::c_uint;
         (*state).whave = 0 as ::core::ffi::c_uint;
     }
-    if copy >= (*state).wsize {
+    plan = window_update_plan((*state).wsize, (*state).wnext, (*state).whave, copy);
+    if plan.replace {
         crate::stdlib::memcpy(
             (*state).window as *mut ::core::ffi::c_void,
             end.offset(-((*state).wsize as isize)) as *const ::core::ffi::c_void,
             (*state).wsize as crate::__stddef_size_t_h::size_t,
         );
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = (*state).wsize;
     } else {
-        dist = (*state).wsize.wrapping_sub((*state).wnext);
-        if dist > copy {
-            dist = copy;
-        }
         crate::stdlib::memcpy(
             (*state).window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
             end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-            dist as crate::__stddef_size_t_h::size_t,
+            plan.first as crate::__stddef_size_t_h::size_t,
         );
-        copy = copy.wrapping_sub(dist);
-        if copy != 0 {
+        if plan.second != 0 {
             crate::stdlib::memcpy(
                 (*state).window as *mut ::core::ffi::c_void,
-                end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
+                end.offset(-(plan.second as isize)) as *const ::core::ffi::c_void,
+                plan.second as crate::__stddef_size_t_h::size_t,
             );
-            (*state).wnext = copy;
-            (*state).whave = (*state).wsize;
-        } else {
-            (*state).wnext = (*state).wnext.wrapping_add(dist);
-            if (*state).wnext == (*state).wsize {
-                (*state).wnext = 0 as ::core::ffi::c_uint;
-            }
-            if (*state).whave < (*state).wsize {
-                (*state).whave = (*state).whave.wrapping_add(dist);
-            }
         }
     }
+    (*state).wnext = plan.wnext;
+    (*state).whave = plan.whave;
     return 0 as ::core::ffi::c_int;
 }
 pub unsafe extern "C" fn inflate(
@@ -2487,8 +2522,8 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 }
 
 #[cfg(test)]
-mod syncsearch_tests {
-    use super::syncsearch_safe;
+mod tests {
+    use super::{inflate_mode_is_valid, syncsearch_safe, window_update_plan, BAD, HEAD, SYNC};
 
     #[test]
     fn syncsearch_preserves_partial_marker_across_chunks() {
@@ -2504,5 +2539,48 @@ mod syncsearch_tests {
         let mut have = 3;
         assert_eq!(syncsearch_safe(&mut have, &[1, 0, 0, 0xff, 0xff]), 5);
         assert_eq!(have, 4);
+    }
+
+    #[test]
+    fn inflate_mode_validation_accepts_only_known_range() {
+        assert!(inflate_mode_is_valid(HEAD));
+        assert!(inflate_mode_is_valid(BAD));
+        assert!(inflate_mode_is_valid(SYNC));
+        assert!(!inflate_mode_is_valid(HEAD - 1));
+        assert!(!inflate_mode_is_valid(SYNC + 1));
+    }
+
+    #[test]
+    fn window_update_plan_handles_replace_append_and_wrap() {
+        assert_eq!(
+            window_update_plan(8, 3, 5, 8),
+            super::WindowUpdate {
+                replace: true,
+                first: 8,
+                second: 0,
+                wnext: 0,
+                whave: 8,
+            }
+        );
+        assert_eq!(
+            window_update_plan(8, 3, 5, 2),
+            super::WindowUpdate {
+                replace: false,
+                first: 2,
+                second: 0,
+                wnext: 5,
+                whave: 7,
+            }
+        );
+        assert_eq!(
+            window_update_plan(8, 6, 8, 4),
+            super::WindowUpdate {
+                replace: false,
+                first: 2,
+                second: 2,
+                wnext: 2,
+                whave: 8,
+            }
+        );
     }
 }

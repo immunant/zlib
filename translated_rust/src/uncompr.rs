@@ -27,6 +27,41 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct UncompressProgress {
+    remaining: crate::stdlib::z_size_t,
+}
+
+impl UncompressProgress {
+    fn new(total: crate::stdlib::z_size_t) -> Self {
+        Self { remaining: total }
+    }
+
+    fn refill(&mut self, available: &mut crate::stdlib::uInt) {
+        if *available == 0 {
+            *available = self
+                .remaining
+                .min(crate::stdlib::uInt::MAX as crate::stdlib::z_size_t)
+                as crate::stdlib::uInt;
+            self.remaining = self
+                .remaining
+                .wrapping_sub(*available as crate::stdlib::z_size_t);
+        }
+    }
+
+    fn finish(self, available: crate::stdlib::uInt) -> crate::stdlib::z_size_t {
+        self.remaining
+            .wrapping_add(available as crate::stdlib::z_size_t)
+    }
+
+    fn consumed(
+        total: crate::stdlib::z_size_t,
+        remaining: crate::stdlib::z_size_t,
+    ) -> crate::stdlib::z_size_t {
+        total.wrapping_sub(remaining)
+    }
+}
+
 fn normalize_uncompress_status(
     err: ::core::ffi::c_int,
     input_remaining: crate::stdlib::z_size_t,
@@ -90,22 +125,11 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         return err;
     }
 
-    let max = crate::stdlib::uInt::MAX;
-    let mut input_remaining = source_len;
-    let mut output_remaining = dest_len;
+    let mut input_progress = UncompressProgress::new(source_len);
+    let mut output_progress = UncompressProgress::new(dest_len);
     let err = loop {
-        if stream.avail_out == 0 {
-            stream.avail_out =
-                output_remaining.min(max as crate::stdlib::z_size_t) as crate::stdlib::uInt;
-            output_remaining =
-                output_remaining.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
-        }
-        if stream.avail_in == 0 {
-            stream.avail_in =
-                input_remaining.min(max as crate::stdlib::z_size_t) as crate::stdlib::uInt;
-            input_remaining =
-                input_remaining.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
-        }
+        output_progress.refill(&mut stream.avail_out);
+        input_progress.refill(&mut stream.avail_in);
         let err = crate::src::inflate::inflate(
             &raw mut stream as *mut crate::zlib_h::z_stream_s,
             crate::zlib_h::Z_NO_FLUSH,
@@ -114,11 +138,11 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
             break err;
         }
     };
-    input_remaining = input_remaining.wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
-    output_remaining = output_remaining.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
+    let input_remaining = input_progress.finish(stream.avail_in);
+    let output_remaining = output_progress.finish(stream.avail_out);
     let status = normalize_uncompress_status(err, input_remaining);
-    *sourceLen = source_len.wrapping_sub(input_remaining);
-    *destLen = dest_len.wrapping_sub(output_remaining);
+    *sourceLen = UncompressProgress::consumed(source_len, input_remaining);
+    *destLen = UncompressProgress::consumed(dest_len, output_remaining);
     crate::src::inflate::inflateEnd(&raw mut stream as *mut crate::zlib_h::z_stream_s);
     status
 }
@@ -161,4 +185,39 @@ pub unsafe extern "C" fn uncompress_ffi(
 ) -> ::core::ffi::c_int {
     let mut used = sourceLen;
     uncompress2_ffi(dest, destLen, source, &raw mut used)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UncompressProgress;
+
+    #[test]
+    fn progress_refills_in_uint_sized_chunks() {
+        let Some(total) = (crate::stdlib::uInt::MAX as crate::stdlib::z_size_t).checked_add(3)
+        else {
+            return;
+        };
+        let mut progress = UncompressProgress::new(total);
+        let mut available = 0;
+        progress.refill(&mut available);
+        assert_eq!(available, crate::stdlib::uInt::MAX);
+        assert_eq!(progress.remaining, 3);
+        available = 0;
+        progress.refill(&mut available);
+        assert_eq!(available, 3);
+        assert_eq!(progress.remaining, 0);
+    }
+
+    #[test]
+    fn progress_keeps_scheduled_availability_and_accounts_consumption() {
+        let mut progress = UncompressProgress::new(10);
+        let mut available = 0;
+        progress.refill(&mut available);
+        assert_eq!(available, 10);
+        available = 7;
+        progress.refill(&mut available);
+        assert_eq!(available, 7);
+        assert_eq!(progress.finish(available), 7);
+        assert_eq!(UncompressProgress::consumed(10, 7), 3);
+    }
 }
