@@ -1061,6 +1061,12 @@ fn update_owned_inflate_window(
 /// construction into either algorithm.
 enum CallbackInflateWindowOperation<'a> {
     Update(&'a [crate::stdlib::Bytef]),
+    CopyMatch {
+        source_index: usize,
+        output: &'a mut [crate::stdlib::Bytef],
+        output_index: usize,
+        len: usize,
+    },
     Fast {
         strm: &'a mut crate::zlib_h::z_stream,
         out: crate::stdlib::uInt,
@@ -1085,6 +1091,19 @@ fn use_callback_inflate_window(
         CallbackInflateWindowOperation::Update(input) => {
             InflateWindow::borrowed(window).update(state, input)
         }
+        CallbackInflateWindowOperation::CopyMatch {
+            source_index,
+            output,
+            output_index,
+            len,
+        } => {
+            let source_end = source_index.checked_add(len).ok_or(())?;
+            let output_end = output_index.checked_add(len).ok_or(())?;
+            let source = window.get(source_index..source_end).ok_or(())?;
+            let destination = output.get_mut(output_index..output_end).ok_or(())?;
+            destination.copy_from_slice(source);
+            Ok(())
+        }
         CallbackInflateWindowOperation::Fast {
             strm,
             out,
@@ -1102,6 +1121,43 @@ fn use_callback_inflate_window(
             );
             Ok(())
         }
+    }
+}
+
+/// Copy a match from the history window without exposing the callback-owned
+/// allocation to the decoder. Default-allocator windows stay in their safe
+/// owner; callback and caller-borrowed windows use the existing synchronous
+/// type-specific boundary.
+fn copy_from_inflate_window(
+    state: &mut crate::src::inflate::inflate_state,
+    source_index: usize,
+    output: &mut [crate::stdlib::Bytef],
+    output_index: usize,
+    len: usize,
+) -> Result<(), ()> {
+    if let Some(mut owned_window) = state.window_storage.take_owned() {
+        let result = (|| {
+            let window = owned_window.window(state).ok_or(())?;
+            let source_end = source_index.checked_add(len).ok_or(())?;
+            let output_end = output_index.checked_add(len).ok_or(())?;
+            let source = window.bytes.get(source_index..source_end).ok_or(())?;
+            let destination = output.get_mut(output_index..output_end).ok_or(())?;
+            destination.copy_from_slice(source);
+            Ok(())
+        })();
+        state.window_storage.install_owned(owned_window);
+        result
+    } else {
+        use_callback_inflate_window(
+            state,
+            state.wsize as usize,
+            CallbackInflateWindowOperation::CopyMatch {
+                source_index,
+                output,
+                output_index,
+                len,
+            },
+        )
     }
 }
 
@@ -1209,7 +1265,6 @@ pub fn inflate(
         let mut in_0: ::core::ffi::c_uint = 0;
         let mut out: ::core::ffi::c_uint = 0;
         let mut copy: ::core::ffi::c_uint = 0;
-        let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
         let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
             op: 0,
             bits: 0,
@@ -2977,6 +3032,7 @@ pub fn inflate(
             }
             let produced_before_match = out.wrapping_sub(left);
             copy = produced_before_match;
+            let mut window_source_index = None;
             if state.offset > copy {
                 copy = state.offset.wrapping_sub(copy);
                 if copy > state.whave {
@@ -2987,21 +3043,17 @@ pub fn inflate(
                         continue;
                     }
                 }
-                let Some(window) = state.window else {
+                if state.window.is_none() {
                     strm.msg = INFLATE_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     state.mode = crate::src::inflate::BAD;
                     continue;
-                };
+                }
                 if copy > state.wnext {
                     copy = copy.wrapping_sub(state.wnext);
-                    from = window
-                        .as_ptr()
-                        .wrapping_add(state.wsize.wrapping_sub(copy) as usize);
+                    window_source_index = usize::try_from(state.wsize.wrapping_sub(copy)).ok();
                 } else {
-                    from = window
-                        .as_ptr()
-                        .wrapping_add(state.wnext.wrapping_sub(copy) as usize);
+                    window_source_index = usize::try_from(state.wnext.wrapping_sub(copy)).ok();
                 }
                 if copy > state.length {
                     copy = state.length;
@@ -3043,19 +3095,18 @@ pub fn inflate(
                 }
                 put_index = put_end;
             } else {
-                for _ in 0..copy_len {
-                    let c2rust_fresh30 = from;
-                    from = from.wrapping_add(1);
-                    let byte = *c2rust_fresh30;
-                    let Some(destination) = output.get_mut(put_index) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    *destination = byte;
-                    let Some(next_put_index) = put_index.checked_add(1) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    put_index = next_put_index;
+                let Some(source_index) = window_source_index else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let Some(put_end) = put_index.checked_add(copy_len) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if copy_from_inflate_window(state, source_index, output, put_index, copy_len)
+                    .is_err()
+                {
+                    return crate::zlib_h::Z_STREAM_ERROR;
                 }
+                put_index = put_end;
             }
             if state.length == 0 as ::core::ffi::c_uint {
                 state.mode = crate::src::inflate::LEN;
