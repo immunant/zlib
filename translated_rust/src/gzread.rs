@@ -454,6 +454,7 @@ unsafe fn gz_decomp(
                 crate::zlib_h::Z_NO_FLUSH,
                 input,
                 &mut output[..output_len],
+                None,
                 &mut inflate_message,
             );
             if state.strm.avail_out < had {

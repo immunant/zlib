@@ -762,6 +762,7 @@ pub unsafe fn inflate(
     mut flush: ::core::ffi::c_int,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
+    mut header: Option<&mut crate::zlib_h::gz_header_s>,
     message: &mut Option<&'static ::core::ffi::CStr>,
 ) -> ::core::ffi::c_int {
     let mut strm = InflateStream(strm);
@@ -821,15 +822,9 @@ pub unsafe fn inflate(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let mut state = InflateState(state);
-    // The stream state retains this caller-owned header for the duration of
-    // inflate().  Borrow it once, so header field access below stays within
-    // the safe decoder state machine rather than repeatedly dereferencing the
-    // ABI pointer.
-    let mut header = if state.head.is_null() {
-        None
-    } else {
-        Some(&mut *state.head)
-    };
+    // The exported boundary resolves the caller-owned progressive gzip header
+    // once for this call.  The decoder itself only observes this bounded
+    // borrow, rather than following the state-held ABI pointer.
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
     {
@@ -2477,18 +2472,6 @@ pub unsafe fn inflate(
     *message = error_message;
     return ret;
 }
-/// Enter the slice-based decoder after the exported boundary has validated
-/// and borrowed the ABI buffers.
-fn inflate_from_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
-    input: &[crate::stdlib::Bytef],
-    output: &mut [crate::stdlib::Bytef],
-) -> ::core::ffi::c_int {
-    let mut message = None;
-    unsafe { inflate(strm, flush, input, output, &mut message) }
-}
-
 #[export_name = "inflate"]
 pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -2509,7 +2492,17 @@ pub unsafe extern "C" fn inflate_ffi(
     };
     // zlib requires `next_out` even for a zero-sized output range.
     let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
-    inflate_from_stream(strm, flush, input, output)
+    // `inflateGetHeader()` retains this caller-owned pointer in the opaque
+    // stream state.  Resolve it at the ABI boundary so the decoder never
+    // dereferences that raw carrier directly.
+    let header = if strm.state.is_null() {
+        None
+    } else {
+        let state = strm.state.cast::<crate::src::inflate::inflate_state>();
+        unsafe { state.as_mut().and_then(|state| state.head.as_mut()) }
+    };
+    let mut message = None;
+    inflate(strm, flush, input, output, header, &mut message)
 }
 pub unsafe fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if inflate_validate_state(strm).is_none() {

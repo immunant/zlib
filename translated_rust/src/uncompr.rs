@@ -436,6 +436,7 @@ pub unsafe extern "C" fn uncompress2_z(
             crate::zlib_h::Z_NO_FLUSH,
             input,
             output,
+            None,
             &mut inflate_message,
         );
         if err != crate::zlib_h::Z_OK {
