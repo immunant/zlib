@@ -694,6 +694,37 @@ fn inflate_code_length_repeat_range(
     (end <= lens_len).then_some(start..end)
 }
 
+/// Compute a bounded root-table index from the current bit buffer.  The
+/// ordinary decoder retains cursor gathering and diagnostic publication, but
+/// all Huffman table lookups share this checked mask calculation so malformed
+/// opaque root widths cannot request an oversized Rust shift.
+fn inflate_root_code_index(
+    hold: ::core::ffi::c_ulong,
+    root_bits: ::core::ffi::c_uint,
+) -> Option<usize> {
+    let mask = (1 as ::core::ffi::c_uint)
+        .checked_shl(root_bits)?
+        .wrapping_sub(1);
+    usize::try_from(hold as ::core::ffi::c_uint & mask).ok()
+}
+
+/// Compute a bounded subtable index after a root-table entry selected a
+/// second-level table.  Table reads remain checked slice accesses at the
+/// decoder boundary; this helper only preserves zlib's wrapping table-base
+/// arithmetic while validating the two shift widths.
+fn inflate_subtable_code_index(
+    hold: ::core::ffi::c_ulong,
+    last: crate::src::inftrees::code,
+) -> Option<usize> {
+    let root_bits = last.bits as ::core::ffi::c_uint;
+    let total_bits = root_bits.checked_add(last.op as ::core::ffi::c_uint)?;
+    let mask = (1 as ::core::ffi::c_uint)
+        .checked_shl(total_bits)?
+        .wrapping_sub(1);
+    let suffix = (hold as ::core::ffi::c_uint & mask).checked_shr(root_bits)?;
+    usize::try_from((last.val as ::core::ffi::c_uint).wrapping_add(suffix)).ok()
+}
+
 /// Select the source and bounded progress for one ordinary-inflate match.
 /// The legacy decoder still owns its ABI cursor lends and the bytewise copy
 /// (output-backed matches deliberately overlap), but the distance and
@@ -2260,9 +2291,17 @@ pub fn inflate(
                                                                                     )
                                                                             {
                                                                                 loop {
-                                                                                    let index = (hold as ::core::ffi::c_uint
-                                                                                        & ((1 as ::core::ffi::c_uint) << state_ref.lenbits)
-                                                                                            .wrapping_sub(1 as ::core::ffi::c_uint)) as usize;
+                                                                                    let Some(index) = inflate_root_code_index(
+                                                                                        hold,
+                                                                                        state_ref.lenbits,
+                                                                                    ) else {
+                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[8]
+                                                                                            .as_ptr()
+                                                                                            as *const ::core::ffi::c_char
+                                                                                            as *mut ::core::ffi::c_char;
+                                                                                        state_ref.mode = crate::src::inflate::BAD;
+                                                                                        continue '_inf_leave;
+                                                                                    };
                                                                                     let Some(code) = lcode.get(index).copied() else {
                                                                                         strm_ref.msg = INFLATE_ERROR_MESSAGES[8]
                                                                                             .as_ptr()
@@ -2895,11 +2934,18 @@ pub fn inflate(
                                                 };
                                                 state_ref.back = 0 as ::core::ffi::c_int;
                                                 loop {
-                                                    let index = (hold as ::core::ffi::c_uint
-                                                        & ((1 as ::core::ffi::c_uint)
-                                                            << state_ref.lenbits)
-                                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                        as usize;
+                                                    let Some(index) = inflate_root_code_index(
+                                                        hold,
+                                                        state_ref.lenbits,
+                                                    ) else {
+                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[14]
+                                                            .as_ptr()
+                                                            as *const ::core::ffi::c_char
+                                                            as *mut ::core::ffi::c_char;
+                                                        state_ref.mode = crate::src::inflate::BAD;
+                                                        ret = crate::zlib_h::Z_DATA_ERROR;
+                                                        break '_inf_leave;
+                                                    };
                                                     let Some(code) = lcode.get(index) else {
                                                         strm_ref.msg = INFLATE_ERROR_MESSAGES[14]
                                                             .as_ptr()
@@ -2933,20 +2979,18 @@ pub fn inflate(
                                                 {
                                                     last = here;
                                                     loop {
-                                                        let index = (last.val as ::core::ffi::c_uint)
-                                                        .wrapping_add(
-                                                            (hold as ::core::ffi::c_uint
-                                                                & ((1 as ::core::ffi::c_uint)
-                                                                    << last.bits
-                                                                        as ::core::ffi::c_int
-                                                                        + last.op
-                                                                            as ::core::ffi::c_int)
-                                                                    .wrapping_sub(
-                                                                        1 as ::core::ffi::c_uint,
-                                                                    ))
-                                                                >> last.bits as ::core::ffi::c_int,
-                                                        )
-                                                        as usize;
+                                                        let Some(index) =
+                                                            inflate_subtable_code_index(hold, last)
+                                                        else {
+                                                            strm_ref.msg =
+                                                                INFLATE_ERROR_MESSAGES[14].as_ptr()
+                                                                    as *const ::core::ffi::c_char
+                                                                    as *mut ::core::ffi::c_char;
+                                                            state_ref.mode =
+                                                                crate::src::inflate::BAD;
+                                                            ret = crate::zlib_h::Z_DATA_ERROR;
+                                                            break '_inf_leave;
+                                                        };
                                                         let Some(code) = lcode.get(index) else {
                                                             strm_ref.msg =
                                                                 INFLATE_ERROR_MESSAGES[14].as_ptr()
@@ -3203,10 +3247,14 @@ pub fn inflate(
                                 continue '_inf_leave;
                             };
                             loop {
-                                let index = (hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint) << state_ref.distbits)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    as usize;
+                                let Some(index) = inflate_root_code_index(hold, state_ref.distbits)
+                                else {
+                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
+                                        as *const ::core::ffi::c_char
+                                        as *mut ::core::ffi::c_char;
+                                    state_ref.mode = crate::src::inflate::BAD;
+                                    continue '_inf_leave;
+                                };
                                 let Some(code) = dcode.get(index).copied() else {
                                     strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
                                         as *const ::core::ffi::c_char
@@ -3234,14 +3282,14 @@ pub fn inflate(
                             {
                                 last = here;
                                 loop {
-                                    let index = (last.val as ::core::ffi::c_uint).wrapping_add(
-                                        (hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << last.bits as ::core::ffi::c_int
-                                                    + last.op as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                                            >> last.bits as ::core::ffi::c_int,
-                                    ) as usize;
+                                    let Some(index) = inflate_subtable_code_index(hold, last)
+                                    else {
+                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
+                                            as *const ::core::ffi::c_char
+                                            as *mut ::core::ffi::c_char;
+                                        state_ref.mode = crate::src::inflate::BAD;
+                                        continue '_inf_leave;
+                                    };
                                     let Some(code) = dcode.get(index).copied() else {
                                         strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
                                             as *const ::core::ffi::c_char
