@@ -891,17 +891,16 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     if !gzsetparams_needs_update(state.level, state.strategy, level, strategy) {
         return crate::zlib_h::Z_OK;
     }
-    let strm = &raw mut state.strm as crate::zlib_h::z_streamp;
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
     if state.size != 0 {
-        if (*strm).avail_in != 0
+        if state.strm.avail_in != 0
             && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
             return state.err;
         }
-        crate::src::deflate::deflateParams(strm as *mut crate::zlib_h::z_stream_s, level, strategy);
+        crate::src::deflate::deflateParams(&raw mut state.strm, level, strategy);
     }
     state.level = level;
     state.strategy = strategy;
