@@ -40,8 +40,11 @@ pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &*(file as crate::gzguts_h::gz_statep);
-    match gzclose_route(state.mode) {
+    let route = {
+        let state = &*(file as crate::gzguts_h::gz_statep);
+        gzclose_route(state.mode)
+    };
+    match route {
         GzCloseRoute::Read => {
             return crate::src::gzread::gzclose_r_ffi(file as *mut crate::zlib_h::gzFile_s);
         }

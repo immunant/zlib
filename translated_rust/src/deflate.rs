@@ -1192,7 +1192,8 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::deflate::deflate_state);
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
         || (state.lit_bufsize as crate::zutil_h::ulg)
