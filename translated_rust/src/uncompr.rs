@@ -52,6 +52,56 @@ fn uncompress2_final_status(
     }
 }
 
+struct Uncompress2ArgPlan {
+    input_left: crate::stdlib::z_size_t,
+    output_left: crate::stdlib::z_size_t,
+    use_reserved_out: bool,
+}
+
+fn uncompress2_arg_plan(
+    source_len: Option<crate::stdlib::z_size_t>,
+    source_is_null: bool,
+    dest_len: Option<crate::stdlib::z_size_t>,
+    dest_is_null: bool,
+) -> Option<Uncompress2ArgPlan> {
+    let input_left = source_len?;
+    let output_left = dest_len?;
+    if input_left > 0 as crate::stdlib::z_size_t && source_is_null
+        || output_left > 0 as crate::stdlib::z_size_t && dest_is_null
+    {
+        None
+    } else {
+        Some(Uncompress2ArgPlan {
+            input_left,
+            output_left,
+            use_reserved_out: output_left == 0 as crate::stdlib::z_size_t && dest_is_null,
+        })
+    }
+}
+
+struct Uncompress2Account {
+    source_used: crate::stdlib::z_size_t,
+    dest_produced: crate::stdlib::z_size_t,
+    remaining_input: crate::stdlib::z_size_t,
+}
+
+fn uncompress2_account(
+    source_capacity: crate::stdlib::z_size_t,
+    dest_capacity: crate::stdlib::z_size_t,
+    unissued_input: crate::stdlib::z_size_t,
+    unissued_output: crate::stdlib::z_size_t,
+    avail_in: crate::stdlib::uInt,
+    avail_out: crate::stdlib::uInt,
+) -> Uncompress2Account {
+    let remaining_input = unissued_input.wrapping_add(avail_in as crate::stdlib::z_size_t);
+    let remaining_output = unissued_output.wrapping_add(avail_out as crate::stdlib::z_size_t);
+    Uncompress2Account {
+        source_used: source_capacity.wrapping_sub(remaining_input),
+        dest_produced: dest_capacity.wrapping_sub(remaining_output),
+        remaining_input,
+    }
+}
+
 #[export_name = "uncompress2_z"]
 pub unsafe extern "C" fn uncompress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -78,16 +128,27 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     let mut err: ::core::ffi::c_int = 0;
     let mut len: crate::stdlib::z_size_t = 0;
     let mut left: crate::stdlib::z_size_t = 0;
-    if sourceLen.is_null()
-        || *sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
+    let source_capacity = if sourceLen.is_null() {
+        None
+    } else {
+        Some(*sourceLen)
+    };
+    let dest_capacity = if destLen.is_null() {
+        None
+    } else {
+        Some(*destLen)
+    };
+    let Some(plan) = uncompress2_arg_plan(
+        source_capacity,
+        source.is_null(),
+        dest_capacity,
+        dest.is_null(),
+    ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    len = *sourceLen;
-    left = *destLen;
-    if left == 0 as crate::stdlib::z_size_t && dest.is_null() {
+    };
+    len = plan.input_left;
+    left = plan.output_left;
+    if plan.use_reserved_out {
         dest = &raw mut stream.reserved as *mut crate::stdlib::Bytef;
     }
     stream.next_in = source as *mut crate::stdlib::Bytef;
@@ -120,14 +181,20 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
             break;
         }
     }
-    len = len.wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
-    left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
-    *sourceLen = (*sourceLen).wrapping_sub(len);
-    *destLen = (*destLen).wrapping_sub(left);
+    let accounting = uncompress2_account(
+        plan.input_left,
+        plan.output_left,
+        len,
+        left,
+        stream.avail_in,
+        stream.avail_out,
+    );
+    *sourceLen = accounting.source_used;
+    *destLen = accounting.dest_produced;
     crate::src::inflate::inflateEnd_ffi(
         &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
     );
-    return uncompress2_final_status(err, len);
+    return uncompress2_final_status(err, accounting.remaining_input);
 }
 #[export_name = "uncompress2"]
 pub unsafe extern "C" fn uncompress2_ffi(

@@ -51,6 +51,22 @@ fn compress2_produced(
     capacity.wrapping_sub(unissued.wrapping_add(available as crate::stdlib::z_size_t))
 }
 
+fn compress2_arg_capacity(
+    source_len: crate::stdlib::z_size_t,
+    source_is_null: bool,
+    dest_capacity: Option<crate::stdlib::z_size_t>,
+    dest_is_null: bool,
+) -> Option<crate::stdlib::z_size_t> {
+    let dest_capacity = dest_capacity?;
+    if source_len > 0 as crate::stdlib::z_size_t && source_is_null
+        || dest_capacity > 0 as crate::stdlib::z_size_t && dest_is_null
+    {
+        None
+    } else {
+        Some(dest_capacity)
+    }
+}
+
 #[export_name = "compress2_z"]
 pub unsafe extern "C" fn compress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -78,13 +94,17 @@ pub unsafe extern "C" fn compress2_z_ffi(
     let mut err: ::core::ffi::c_int = 0;
     let mut capacity: crate::stdlib::z_size_t = 0;
     let mut left: crate::stdlib::z_size_t = 0;
-    if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
+    let dest_capacity = if destLen.is_null() {
+        None
+    } else {
+        Some(*destLen)
+    };
+    let Some(planned_capacity) =
+        compress2_arg_capacity(sourceLen, source.is_null(), dest_capacity, dest.is_null())
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    left = *destLen;
+    };
+    left = planned_capacity;
     capacity = left;
     *destLen = 0 as crate::stdlib::z_size_t;
     stream.zalloc = None;

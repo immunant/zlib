@@ -2358,11 +2358,14 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         }
         InflateDictionaryState::CheckId => {
             dictid = crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
-            dictid = crate::src::adler32::adler32_ffi(
-                dictid as crate::stdlib::uLong,
-                dictionary,
-                dictLength,
-            ) as ::core::ffi::c_ulong;
+            if dictLength != 0 as crate::stdlib::uInt || !dictionary.is_null() {
+                let dictionary_slice =
+                    ::core::slice::from_raw_parts(dictionary, dictLength as usize);
+                dictid = crate::src::adler32::adler32_update(
+                    dictid as crate::stdlib::uLong,
+                    dictionary_slice,
+                ) as ::core::ffi::c_ulong;
+            }
             if !inflate_dictionary_id_matches(dictid, (*state).check) {
                 return crate::zlib_h::Z_DATA_ERROR;
             }

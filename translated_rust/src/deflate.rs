@@ -793,7 +793,8 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32_ffi((*strm).adler, dictionary, dictLength);
+        let dictionary_slice = ::core::slice::from_raw_parts(dictionary, dictLength as usize);
+        (*strm).adler = crate::src::adler32::adler32_update((*strm).adler, dictionary_slice);
     }
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
