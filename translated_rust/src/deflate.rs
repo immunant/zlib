@@ -2236,22 +2236,23 @@ fn deflate_tune_state(
     return crate::zlib_h::Z_OK;
 }
 
-/// Validate the ABI stream before borrowing the deflate state it owns.
+/// Validate the ABI stream and its already-borrowed deflate state.
 ///
-/// The exported wrapper only converts its raw stream argument and dispatches
-/// here; this adapter retains the state-specific validation outside the FFI
-/// entry point.
+/// The exported wrapper only converts the ABI state link; all validation and
+/// tuning remain in this implementation boundary.
 pub unsafe fn deflateTune(
     strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::deflate::deflate_state,
     good_length: ::core::ffi::c_int,
     max_lazy: ::core::ffi::c_int,
     nice_length: ::core::ffi::c_int,
     max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if !deflate_params_stream_is_valid(strm) {
+    if !deflate_params_stream_is_valid(strm)
+        || !core::ptr::eq(strm.state.cast_const(), core::ptr::from_ref(state))
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *strm.state;
     deflate_tune_state(state, good_length, max_lazy, nice_length, max_chain)
 }
 
@@ -2267,7 +2268,10 @@ pub unsafe extern "C" fn deflateTune_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
+    let Some(state) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflateTune(strm, state, good_length, max_lazy, nice_length, max_chain)
 }
 /// Compute a deflate bound after the ABI stream link has been converted at
 /// the caller boundary.  Keeping validation here lets both exported bounds
