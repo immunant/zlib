@@ -2593,8 +2593,9 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     if !inflate_get_header_allowed(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let head_ref = &mut *head;
     state.head = head;
-    (*head).done = 0 as ::core::ffi::c_int;
+    head_ref.done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
 fn syncsearch(

@@ -767,8 +767,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state_ptr = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state_ptr;
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
     if state.mode != crate::gzguts_h::GZ_WRITE {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -791,6 +790,6 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         ret,
         crate::stdlib::close(state.fd) == -1 as ::core::ffi::c_int,
     );
-    crate::stdlib::free(state_ptr as *mut ::core::ffi::c_void);
+    crate::stdlib::free(file as *mut ::core::ffi::c_void);
     return ret;
 }

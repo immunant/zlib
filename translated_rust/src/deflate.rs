@@ -1273,7 +1273,10 @@ pub unsafe extern "C" fn deflateParams_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state_ptr = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let state_ptr = {
+        let strm_ref = &mut *strm;
+        strm_ref.state as *mut crate::src::deflate::deflate_state
+    };
     level = deflate_params_level(level);
     if !deflate_params_valid(level, strategy) {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -1283,7 +1286,11 @@ pub unsafe extern "C" fn deflateParams_ffi(
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if !deflate_params_drained(&*state_ptr, (*strm).avail_in) {
+        let avail_in = {
+            let strm_ref = &mut *strm;
+            strm_ref.avail_in
+        };
+        if !deflate_params_drained(&*state_ptr, avail_in) {
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }

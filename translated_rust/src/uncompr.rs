@@ -229,7 +229,7 @@ pub unsafe extern "C" fn uncompress_z_ffi(
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
     let mut used: crate::stdlib::z_size_t = sourceLen;
-    return uncompress2_z_body!(dest, destLen, source, &raw mut used);
+    uncompress2_z_ffi(dest, destLen, source, &raw mut used)
 }
 #[export_name = "uncompress"]
 pub unsafe extern "C" fn uncompress_ffi(
@@ -238,12 +238,5 @@ pub unsafe extern "C" fn uncompress_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    let mut used: crate::stdlib::uLong = sourceLen;
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    let mut used_z: crate::stdlib::z_size_t = used as crate::stdlib::z_size_t;
-    ret = uncompress2_z_body!(dest, &raw mut got, source, &raw mut used_z);
-    used = used_z as crate::stdlib::uLong;
-    *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    return ret;
+    uncompress2_ffi(dest, destLen, source, &raw mut sourceLen)
 }

@@ -184,13 +184,13 @@ pub unsafe extern "C" fn compress_z_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    return compress2_z_body!(
+    compress2_z_ffi(
         dest,
         destLen,
         source,
         sourceLen,
         crate::zlib_h::Z_DEFAULT_COMPRESSION,
-    );
+    )
 }
 #[export_name = "compress"]
 pub unsafe extern "C" fn compress_ffi(
@@ -199,17 +199,13 @@ pub unsafe extern "C" fn compress_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    ret = compress2_z_body!(
+    compress2_ffi(
         dest,
-        &raw mut got,
+        destLen,
         source,
-        sourceLen as crate::stdlib::z_size_t,
+        sourceLen,
         crate::zlib_h::Z_DEFAULT_COMPRESSION,
-    );
-    *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    return ret;
+    )
 }
 pub fn compressBound_z(sourceLen: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
     let bound: crate::stdlib::z_size_t = sourceLen

@@ -45,11 +45,7 @@ pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core:
         gzclose_route(state.mode)
     };
     match route {
-        GzCloseRoute::Read => {
-            return crate::src::gzread::gzclose_r_ffi(file as *mut crate::zlib_h::gzFile_s);
-        }
-        GzCloseRoute::Write => {
-            return crate::src::gzwrite::gzclose_w_ffi(file as *mut crate::zlib_h::gzFile_s);
-        }
+        GzCloseRoute::Read => return crate::src::gzread::gzclose_r_ffi(file),
+        GzCloseRoute::Write => return crate::src::gzwrite::gzclose_w_ffi(file),
     }
 }
