@@ -2895,21 +2895,21 @@ pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if inflateStateCheck(source).is_none() || dest.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*source).state as *mut crate::src::inflate::inflate_state;
     // Derive all source-state information needed after allocation before
     // calling the source allocator. This value snapshot prevents a Rust
     // reference to source state from spanning that user callback.
-    let state = &*state;
-    let plan = inflate_copy_plan(state);
-    let source_state = *state;
+    let (plan, source_state) = {
+        let Some((_source, state)) = inflateStateCheck(source) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if dest.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        (inflate_copy_plan(state), *state)
+    };
     copy = Some((*source).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*source).opaque,
