@@ -2771,6 +2771,51 @@ fn update_stored_history_state(
     true
 }
 
+struct StoredBlockPlan {
+    len: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    last: ::core::ffi::c_int,
+}
+
+fn stored_block_plan(
+    min_block: ::core::ffi::c_uint,
+    bi_valid: ::core::ffi::c_int,
+    avail_out: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> Option<StoredBlockPlan> {
+    let mut len = MAX_STORED as ::core::ffi::c_uint;
+    let bit_bytes = (bi_valid as ::core::ffi::c_uint).wrapping_add(42) >> 3;
+    if avail_out < bit_bytes {
+        return None;
+    }
+    let have = avail_out.wrapping_sub(bit_bytes);
+    let left = (strstart as ::core::ffi::c_long - block_start) as ::core::ffi::c_uint;
+    if len as crate::zutil_h::ulg
+        > (left as crate::zutil_h::ulg).wrapping_add(avail_in as crate::zutil_h::ulg)
+    {
+        len = left.wrapping_add(avail_in);
+    }
+    if len > have {
+        len = have;
+    }
+    if len < min_block
+        && (len == 0 && flush != crate::zlib_h::Z_FINISH
+            || flush == crate::zlib_h::Z_NO_FLUSH
+            || len != left.wrapping_add(avail_in))
+    {
+        return None;
+    }
+    Some(StoredBlockPlan {
+        len,
+        left,
+        last: (flush == crate::zlib_h::Z_FINISH && len == left.wrapping_add(avail_in))
+            as ::core::ffi::c_int,
+    })
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -2789,38 +2834,20 @@ unsafe extern "C" fn deflate_stored(
     let mut have: ::core::ffi::c_uint = 0;
     let mut used: ::core::ffi::c_uint = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     loop {
-        len = MAX_STORED as ::core::ffi::c_uint;
-        have = ((*s).bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
-            >> 3 as ::core::ffi::c_int;
-        if (*(*s).strm).avail_out < have {
+        let Some(plan) = stored_block_plan(
+            min_block,
+            (*s).bi_valid,
+            (*(*s).strm).avail_out,
+            (*s).strstart,
+            (*s).block_start,
+            (*(*s).strm).avail_in,
+            flush,
+        ) else {
             break;
-        }
-        have = ((*(*s).strm).avail_out as ::core::ffi::c_uint).wrapping_sub(have);
-        left = ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as ::core::ffi::c_uint;
-        if len as crate::zutil_h::ulg
-            > (left as crate::zutil_h::ulg)
-                .wrapping_add((*(*s).strm).avail_in as crate::zutil_h::ulg)
-        {
-            len = (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in)
-                as ::core::ffi::c_uint;
-        }
-        if len > have {
-            len = have;
-        }
-        if len < min_block
-            && (len == 0 as ::core::ffi::c_uint && flush != crate::zlib_h::Z_FINISH
-                || flush == crate::zlib_h::Z_NO_FLUSH
-                || len != (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in))
-        {
-            break;
-        }
-        last = if flush == crate::zlib_h::Z_FINISH
-            && len == (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in)
-        {
-            1 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
         };
+        len = plan.len;
+        left = plan.left;
+        last = plan.last;
         crate::src::trees::_tr_stored_block(
             s as *mut crate::src::deflate::internal_state,
             ::core::ptr::null_mut::<crate::stdlib::charf>(),
