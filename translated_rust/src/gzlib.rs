@@ -212,13 +212,26 @@ fn gzseek_read_buffer_consumed(
     int_and_off64_same_width: bool,
     int_max: crate::stdlib::uInt,
 ) -> crate::stdlib::uInt {
-    if (int_and_off64_same_width && avail_in > int_max)
-        || avail_in as crate::stdlib::off64_t > offset
-    {
+    if gzseek_read_buffer_uses_requested_offset(
+        avail_in,
+        offset,
+        int_and_off64_same_width,
+        int_max,
+    ) {
         offset as crate::stdlib::uInt
     } else {
         avail_in
     }
+}
+
+fn gzseek_read_buffer_uses_requested_offset(
+    avail_in: crate::stdlib::uInt,
+    offset: crate::stdlib::off64_t,
+    int_and_off64_same_width: bool,
+    int_max: crate::stdlib::uInt,
+) -> bool {
+    (int_and_off64_same_width && avail_in > int_max)
+        || avail_in as crate::stdlib::off64_t > offset
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1124,7 +1137,8 @@ mod tests {
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
         gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
-        gzseek_plan_remaining_offset, gzseek_read_buffer_consumed, gzseek_request_is_valid,
+        gzseek_plan_remaining_offset, gzseek_read_buffer_consumed,
+        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid,
         gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan,
         GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
@@ -1500,6 +1514,14 @@ mod tests {
     fn gzseek_consumes_only_requested_buffered_input() {
         assert_eq!(gzseek_read_buffer_consumed(7, 3, false, 0), 3);
         assert_eq!(gzseek_read_buffer_consumed(7, 0, false, 0), 0);
+    }
+
+    #[test]
+    fn gzseek_read_buffer_limit_detects_offset_and_matching_width_boundaries() {
+        assert!(gzseek_read_buffer_uses_requested_offset(7, 6, false, 0));
+        assert!(!gzseek_read_buffer_uses_requested_offset(7, 7, false, 0));
+        assert!(gzseek_read_buffer_uses_requested_offset(9, 20, true, 8));
+        assert!(!gzseek_read_buffer_uses_requested_offset(8, 20, true, 8));
     }
 
     #[test]

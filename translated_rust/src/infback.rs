@@ -143,6 +143,29 @@ struct InflateBackBlockHeader {
     bits: ::core::ffi::c_uint,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum InflateBackMatchSource {
+    Ahead(usize),
+    Behind(usize),
+}
+
+fn inflate_back_match_copy_plan(
+    window_size: ::core::ffi::c_uint,
+    offset: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    length: ::core::ffi::c_uint,
+) -> (InflateBackMatchSource, ::core::ffi::c_uint) {
+    let copy = window_size.wrapping_sub(offset);
+    if copy < left {
+        (
+            InflateBackMatchSource::Ahead(copy as usize),
+            left.wrapping_sub(copy).min(length),
+        )
+    } else {
+        (InflateBackMatchSource::Behind(offset as usize), left.min(length))
+    }
+}
+
 fn inflate_back_block_header(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -1003,17 +1026,21 @@ pub unsafe extern "C" fn inflateBack(
                                     break 's_69;
                                 }
                             }
-                            copy = (*state).wsize.wrapping_sub((*state).offset);
-                            if copy < left {
-                                from = put.wrapping_add(copy as usize);
-                                copy = left.wrapping_sub(copy);
-                            } else {
-                                from = put.wrapping_sub((*state).offset as usize);
-                                copy = left;
-                            }
-                            if copy > (*state).length {
-                                copy = (*state).length;
-                            }
+                            let (source, planned_copy) = inflate_back_match_copy_plan(
+                                (*state).wsize,
+                                (*state).offset,
+                                left,
+                                (*state).length,
+                            );
+                            from = match source {
+                                InflateBackMatchSource::Ahead(distance) => {
+                                    put.wrapping_add(distance)
+                                }
+                                InflateBackMatchSource::Behind(distance) => {
+                                    put.wrapping_sub(distance)
+                                }
+                            };
+                            copy = planned_copy;
                             (*state).length = (*state).length.wrapping_sub(copy);
                             left = left.wrapping_sub(copy);
                             loop {

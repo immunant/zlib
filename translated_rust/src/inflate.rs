@@ -2115,40 +2115,36 @@ pub unsafe extern "C" fn inflate(
         if left == 0 as ::core::ffi::c_uint {
             break;
         }
-        copy = inflate_cursor_progress(out, left);
-        if (*state).offset > copy {
-            copy = (*state).offset.wrapping_sub(copy);
-            if copy > (*state).whave {
-                if (*state).sane != 0 {
-                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
-                    continue;
-                }
-            }
-            if copy > (*state).wnext {
-                copy = copy.wrapping_sub((*state).wnext);
-                from = (*state)
-                    .window
-                    .offset((*state).wsize.wrapping_sub(copy) as isize);
-            } else {
-                from = (*state)
-                    .window
-                    .offset((*state).wnext.wrapping_sub(copy) as isize);
-            }
-            if copy > (*state).length {
-                copy = (*state).length;
-            }
-        } else {
-            from = put.offset(-((*state).offset as isize));
-            copy = (*state).length;
-        }
-        if copy > left {
-            copy = left;
-        }
-        left = left.wrapping_sub(copy);
-        (*state).length = (*state).length.wrapping_sub(copy);
+        let match_plan = inflate_match_copy_plan(
+            (*state).offset,
+            inflate_cursor_progress(out, left),
+            (*state).whave,
+            (*state).wnext,
+            (*state).wsize,
+            (*state).length,
+            left,
+            (*state).sane != 0,
+        );
+        let InflateMatchPlan::Copy {
+            source,
+            count,
+            remaining_output,
+            remaining_length,
+        } = match_plan
+        else {
+            (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+            (*state).mode = crate::src::inflate::BAD;
+            continue;
+        };
+        from = match source {
+            InflateMatchSource::Window { index } => (*state).window.offset(index as isize),
+            InflateMatchSource::Output { offset } => put.offset(-(offset as isize)),
+        };
+        copy = count;
+        left = remaining_output;
+        (*state).length = remaining_length;
         loop {
             let c2rust_fresh30 = from;
             from = from.offset(1);
@@ -2415,6 +2411,58 @@ fn inflate_cursor_progress(
     remaining: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
     initial.wrapping_sub(remaining)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum InflateMatchSource {
+    Window { index: ::core::ffi::c_uint },
+    Output { offset: ::core::ffi::c_uint },
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum InflateMatchPlan {
+    InvalidDistance,
+    Copy {
+        source: InflateMatchSource,
+        count: ::core::ffi::c_uint,
+        remaining_output: ::core::ffi::c_uint,
+        remaining_length: ::core::ffi::c_uint,
+    },
+}
+
+fn inflate_match_copy_plan(
+    offset: ::core::ffi::c_uint,
+    output_written: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+    length: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    sane: bool,
+) -> InflateMatchPlan {
+    let source = if offset > output_written {
+        let distance = offset.wrapping_sub(output_written);
+        if distance > whave && sane {
+            return InflateMatchPlan::InvalidDistance;
+        }
+
+        let index = if distance > wnext {
+            wsize.wrapping_sub(distance.wrapping_sub(wnext))
+        } else {
+            wnext.wrapping_sub(distance)
+        };
+        InflateMatchSource::Window { index }
+    } else {
+        InflateMatchSource::Output { offset }
+    };
+    let count = length.min(left);
+
+    InflateMatchPlan::Copy {
+        source,
+        count,
+        remaining_output: left.wrapping_sub(count),
+        remaining_length: length.wrapping_sub(count),
+    }
 }
 
 fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
@@ -2762,7 +2810,7 @@ mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header,
-        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_progress,
+        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_match_copy_plan, inflate_copy_progress,
         inflate_data_type_value, inflate_dictionary_is_allowed, inflate_get_dictionary_result,
         gzip_extra_copy_bounds,
         inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_mark_progress,
@@ -2774,8 +2822,8 @@ mod tests {
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, initial_window_metadata, stored_block_length, syncsearch_safe,
         window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT,
-        HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        InflateMatchPlan, InflateMatchSource, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2796,6 +2844,54 @@ mod tests {
             ::core::ffi::c_uint::MAX,
             ::core::ffi::c_uint::MAX
         ));
+    }
+
+    #[test]
+    fn inflate_match_copy_plan_selects_output_and_window_sources() {
+        assert_eq!(
+            inflate_match_copy_plan(3, 5, 0, 0, 0, 9, 4, true),
+            InflateMatchPlan::Copy {
+                source: InflateMatchSource::Output { offset: 3 },
+                count: 4,
+                remaining_output: 0,
+                remaining_length: 5,
+            }
+        );
+        assert_eq!(
+            inflate_match_copy_plan(9, 2, 8, 6, 8, 3, 5, true),
+            InflateMatchPlan::Copy {
+                source: InflateMatchSource::Window { index: 7 },
+                count: 3,
+                remaining_output: 2,
+                remaining_length: 0,
+            }
+        );
+        assert_eq!(
+            inflate_match_copy_plan(5, 2, 3, 6, 8, 7, 4, true),
+            InflateMatchPlan::Copy {
+                source: InflateMatchSource::Window { index: 3 },
+                count: 4,
+                remaining_output: 0,
+                remaining_length: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn inflate_match_copy_plan_rejects_only_sane_out_of_window_distances() {
+        assert_eq!(
+            inflate_match_copy_plan(10, 2, 7, 4, 8, 3, 3, true),
+            InflateMatchPlan::InvalidDistance
+        );
+        assert_eq!(
+            inflate_match_copy_plan(10, 2, 7, 4, 8, 3, 3, false),
+            InflateMatchPlan::Copy {
+                source: InflateMatchSource::Window { index: 4 },
+                count: 3,
+                remaining_output: 0,
+                remaining_length: 0,
+            }
+        );
     }
 
     #[test]

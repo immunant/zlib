@@ -1531,15 +1531,41 @@ fn pending_output_len(
     clamped_copy_len(pending, avail_out as crate::zutil_h::ulg)
 }
 
+fn flush_pending_accounting(
+    pending: crate::zutil_h::ulg,
+    avail_out: crate::stdlib::uInt,
+    total_out: crate::stdlib::uLong,
+) -> Option<(
+    ::core::ffi::c_uint,
+    crate::zutil_h::ulg,
+    crate::stdlib::uInt,
+    crate::stdlib::uLong,
+    bool,
+)> {
+    let len = pending_output_len(pending, avail_out);
+    if len == 0 {
+        return None;
+    }
+
+    let remaining = pending.wrapping_sub(len as crate::zutil_h::ulg);
+    Some((
+        len,
+        remaining,
+        avail_out.wrapping_sub(len),
+        total_out.wrapping_add(len as crate::stdlib::uLong),
+        remaining == 0,
+    ))
+}
+
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
     crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
-    len = pending_output_len((*s).pending, (*strm).avail_out);
-    if len == 0 as ::core::ffi::c_uint {
+    let Some((len, remaining, avail_out, total_out, reset_pending_out)) =
+        flush_pending_accounting((*s).pending, (*strm).avail_out, (*strm).total_out)
+    else {
         return;
-    }
+    };
     crate::stdlib::memcpy(
         (*strm).next_out as *mut ::core::ffi::c_void,
         (*s).pending_out as *const ::core::ffi::c_void,
@@ -1547,10 +1573,10 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     );
     (*strm).next_out = (*strm).next_out.wrapping_add(len as usize);
     (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
-    (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
-    (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
-    (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if (*s).pending == 0 as crate::zutil_h::ulg {
+    (*strm).total_out = total_out;
+    (*strm).avail_out = avail_out;
+    (*s).pending = remaining;
+    if reset_pending_out {
         (*s).pending_out = (*s).pending_buf;
     }
 }
@@ -3657,10 +3683,10 @@ mod tests {
         deflate_pending_value, deflate_prime_bits_valid, deflate_should_return_buf_error,
         deflate_state_status_valid, deflate_version_matches, fill_window_available_space,
         fill_window_cursor, fill_window_insert_after_slide, fill_window_zero_range,
-        gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        normalize_deflate_params, pending_output_len, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_min_size, stored_insert_after_input,
-        symbol_triplet_cursors, zlib_header,
+        flush_pending_accounting, gzip_header_crc, gzip_header_crc_pending,
+        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len, read_buf_len,
+        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry, stored_block_min_size,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header,
     };
 
     #[test]
@@ -3803,6 +3829,19 @@ mod tests {
         assert_eq!(pending_output_len(3, 5), 3);
         assert_eq!(pending_output_len(5, 5), 5);
         assert_eq!(pending_output_len(8, 5), 5);
+    }
+
+    #[test]
+    fn flush_pending_accounting_preserves_copy_and_reset_transitions() {
+        assert_eq!(flush_pending_accounting(0, 5, 12), None);
+        assert_eq!(
+            flush_pending_accounting(8, 3, 12),
+            Some((3, 5, 0, 15, false))
+        );
+        assert_eq!(
+            flush_pending_accounting(3, 8, crate::stdlib::uLong::MAX),
+            Some((3, 0, 5, 2, true))
+        );
     }
 
     #[test]
