@@ -258,23 +258,13 @@ unsafe extern "C" fn gz_open(
     gz_reset(&mut *state);
     return state as crate::zlib_h::gzFile;
 }
-pub unsafe extern "C" fn gzopen(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    return gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    );
-}
 #[export_name = "gzopen"]
 
 pub unsafe extern "C" fn gzopen_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen(path, mode)
+    gz_open(path.cast(), -1 as ::core::ffi::c_int, mode)
 }
 pub unsafe extern "C" fn gzopen64(
     mut path: *const ::core::ffi::c_char,
