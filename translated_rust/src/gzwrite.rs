@@ -1412,7 +1412,9 @@ pub unsafe extern "C" fn gzwrite_ffi(
     };
     return gz_write(state, buf, len) as ::core::ffi::c_int;
 }
-pub unsafe extern "C" fn gzfwrite(
+#[export_name = "gzfwrite"]
+
+pub unsafe extern "C" fn gzfwrite_ffi(
     mut buf: crate::stdlib::voidpc,
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
@@ -1441,17 +1443,7 @@ pub unsafe extern "C" fn gzfwrite(
         );
         return 0 as crate::stdlib::z_size_t;
     };
-    return gzfwrite_result(size, len, gz_write(state, buf, len));
-}
-#[export_name = "gzfwrite"]
-
-pub unsafe extern "C" fn gzfwrite_ffi(
-    mut buf: crate::stdlib::voidpc,
-    mut size: crate::stdlib::z_size_t,
-    mut nitems: crate::stdlib::z_size_t,
-    mut file: crate::zlib_h::gzFile,
-) -> crate::stdlib::z_size_t {
-    gzfwrite(buf, size, nitems, file)
+    gzfwrite_result(size, len, gz_write(state, buf, len))
 }
 pub unsafe extern "C" fn gzputc(
     mut file: crate::zlib_h::gzFile,

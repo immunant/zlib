@@ -3,7 +3,6 @@ pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
-pub use crate::src::deflate::deflateInit_;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -225,9 +224,13 @@ pub unsafe extern "C" fn compress2_z_ffi(
         adler: 0,
         reserved: 0,
     };
-    let init_status = crate::src::deflate::deflateInit_(
+    let init_status = crate::src::deflate::deflateInit2_(
         &mut stream,
         level,
+        crate::zlib_h::Z_DEFLATED,
+        crate::stdlib::MAX_WBITS,
+        crate::zutil_h::DEF_MEM_LEVEL,
+        crate::zlib_h::Z_DEFAULT_STRATEGY,
         crate::zlib_h::ZLIB_VERSION.as_ptr(),
         ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
     );
