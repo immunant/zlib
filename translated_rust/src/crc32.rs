@@ -4763,6 +4763,7 @@ pub unsafe extern "C" fn get_crc_table_ffi() -> *const crate::stdlib::z_crc_t {
     crc_table_ref().as_ptr()
 }
 const CRC32_MASK: crate::stdlib::uLong = 0xffff_ffff;
+pub const CRC32_INITIAL: crate::stdlib::uLong = 0;
 
 fn crc32_initial_state(crc: crate::stdlib::uLong) -> crate::stdlib::uLong {
     !crc & CRC32_MASK
@@ -4914,7 +4915,7 @@ mod tests {
         crc32, crc32_combine, crc32_combine64, crc32_combine_gen64, crc32_combine_op,
         crc32_combine_operator, crc32_from_state, crc32_initial_state, crc32_update_byte,
         crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term, x2n_table, x2nmodp,
-        CRC32_MASK, POLY,
+        CRC32_INITIAL, CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -4936,6 +4937,17 @@ mod tests {
         );
         assert_eq!(unsafe { super::crc32_z_ffi(seed, core::ptr::null(), 0) }, 0);
         assert_eq!(unsafe { super::crc32_ffi(seed, core::ptr::null(), 0) }, 0);
+    }
+
+    #[test]
+    fn initial_value_matches_safe_and_ffi_null_input_behavior() {
+        assert_eq!(CRC32_INITIAL, crc32_z(0, &[]));
+        assert_eq!(CRC32_INITIAL, unsafe {
+            super::crc32_z_ffi(0, core::ptr::null(), 0)
+        });
+        assert_eq!(CRC32_INITIAL, unsafe {
+            super::crc32_ffi(0, core::ptr::null(), 0)
+        });
     }
 
     #[test]
