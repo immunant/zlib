@@ -2370,6 +2370,15 @@ struct SendBitsResult {
     bi_valid: ::core::ffi::c_int,
 }
 
+const SEND_ALL_TREES_MAX_BYTES: usize = ((3 + crate::src::deflate::BL_CODES) as usize) * 2;
+
+struct SendAllTreesHeaderBits {
+    bytes: [crate::stdlib::Byte; SEND_ALL_TREES_MAX_BYTES],
+    len: usize,
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+}
+
 fn send_bits_state(
     bi_buf: crate::zutil_h::ush,
     bi_valid: ::core::ffi::c_int,
@@ -2397,6 +2406,77 @@ fn send_bits_state(
             bi_buf: (bi_buf as ::core::ffi::c_int | val << bi_valid) as crate::zutil_h::ush,
             bi_valid: bi_valid + bit_len,
         }
+    }
+}
+
+fn push_send_bits_result(
+    out: &mut [crate::stdlib::Byte; SEND_ALL_TREES_MAX_BYTES],
+    out_len: &mut usize,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+    bit_len: ::core::ffi::c_int,
+) {
+    let bits = send_bits_state(*bi_buf, *bi_valid, value, bit_len);
+    for byte in bits.bytes[..bits.len].iter().copied() {
+        out[*out_len] = byte;
+        *out_len += 1;
+    }
+    *bi_buf = bits.bi_buf;
+    *bi_valid = bits.bi_valid;
+}
+
+fn send_all_trees_header_bits(
+    lcodes: ::core::ffi::c_int,
+    dcodes: ::core::ffi::c_int,
+    blcodes: ::core::ffi::c_int,
+    bl_tree: &[crate::src::deflate::ct_data],
+    mut bi_buf: crate::zutil_h::ush,
+    mut bi_valid: ::core::ffi::c_int,
+) -> SendAllTreesHeaderBits {
+    let mut bytes = [0; SEND_ALL_TREES_MAX_BYTES];
+    let mut len = 0;
+    push_send_bits_result(
+        &mut bytes,
+        &mut len,
+        &mut bi_buf,
+        &mut bi_valid,
+        lcodes - 257 as ::core::ffi::c_int,
+        5 as ::core::ffi::c_int,
+    );
+    push_send_bits_result(
+        &mut bytes,
+        &mut len,
+        &mut bi_buf,
+        &mut bi_valid,
+        dcodes - 1 as ::core::ffi::c_int,
+        5 as ::core::ffi::c_int,
+    );
+    push_send_bits_result(
+        &mut bytes,
+        &mut len,
+        &mut bi_buf,
+        &mut bi_valid,
+        blcodes - 4 as ::core::ffi::c_int,
+        4 as ::core::ffi::c_int,
+    );
+    let mut rank = 0 as ::core::ffi::c_int;
+    while rank < blcodes {
+        push_send_bits_result(
+            &mut bytes,
+            &mut len,
+            &mut bi_buf,
+            &mut bi_valid,
+            bl_tree[bl_order[rank as usize] as usize].dad as ::core::ffi::c_int,
+            3 as ::core::ffi::c_int,
+        );
+        rank += 1;
+    }
+    SendAllTreesHeaderBits {
+        bytes,
+        len,
+        bi_buf,
+        bi_valid,
     }
 }
 
@@ -3256,62 +3336,23 @@ unsafe extern "C" fn send_all_trees(
     mut dcodes: ::core::ffi::c_int,
     mut blcodes: ::core::ffi::c_int,
 ) {
-    let mut rank: ::core::ffi::c_int = 0;
-    let bits = send_bits_state(
-        (*s).bi_buf,
-        (*s).bi_valid,
-        lcodes - 257 as ::core::ffi::c_int,
-        5 as ::core::ffi::c_int,
-    );
-    for byte in bits.bytes[..bits.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_buf = bits.bi_buf;
-    (*s).bi_valid = bits.bi_valid;
-    let bits = send_bits_state(
-        (*s).bi_buf,
-        (*s).bi_valid,
-        dcodes - 1 as ::core::ffi::c_int,
-        5 as ::core::ffi::c_int,
-    );
-    for byte in bits.bytes[..bits.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_buf = bits.bi_buf;
-    (*s).bi_valid = bits.bi_valid;
-    let bits = send_bits_state(
-        (*s).bi_buf,
-        (*s).bi_valid,
-        blcodes - 4 as ::core::ffi::c_int,
-        4 as ::core::ffi::c_int,
-    );
-    for byte in bits.bytes[..bits.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_buf = bits.bi_buf;
-    (*s).bi_valid = bits.bi_valid;
-    rank = 0 as ::core::ffi::c_int;
-    while rank < blcodes {
-        let bits = send_bits_state(
-            (*s).bi_buf,
-            (*s).bi_valid,
-            (*s).bl_tree[bl_order[rank as usize] as usize].dad as ::core::ffi::c_int,
-            3 as ::core::ffi::c_int,
+    {
+        let state = &mut *s;
+        let header_bits = send_all_trees_header_bits(
+            lcodes,
+            dcodes,
+            blcodes,
+            &state.bl_tree,
+            state.bi_buf,
+            state.bi_valid,
         );
-        for byte in bits.bytes[..bits.len].iter().copied() {
-            let pending = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(pending as isize) = byte;
+        for byte in header_bits.bytes[..header_bits.len].iter().copied() {
+            let pending = state.pending;
+            state.pending = state.pending.wrapping_add(1);
+            *state.pending_buf.offset(pending as isize) = byte;
         }
-        (*s).bi_buf = bits.bi_buf;
-        (*s).bi_valid = bits.bi_valid;
-        rank += 1;
+        state.bi_buf = header_bits.bi_buf;
+        state.bi_valid = header_bits.bi_valid;
     }
     send_tree(
         s,

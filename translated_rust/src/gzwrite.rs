@@ -387,6 +387,14 @@ fn gz_fill_zero(buf: &mut [crate::stdlib::Bytef]) {
     buf.fill(0);
 }
 
+fn gz_store_buffered_byte(
+    buf: &mut [crate::stdlib::Bytef],
+    offset: ::core::ffi::c_uint,
+    c: ::core::ffi::c_int,
+) {
+    buf[offset as usize] = c as ::core::ffi::c_uchar;
+}
+
 fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
 }
@@ -497,7 +505,8 @@ pub unsafe extern "C" fn gzputc_ffi(
         }
         have = gz_buffered_input_used(&*state);
         if have < (*state).size {
-            *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
+            let buf = ::core::slice::from_raw_parts_mut((*state).in_0, (*state).size as usize);
+            gz_store_buffered_byte(buf, have, c);
             gz_note_buffered_input(&mut *state, 1 as ::core::ffi::c_uint);
             return c & 0xff as ::core::ffi::c_int;
         }
