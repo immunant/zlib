@@ -123,7 +123,7 @@ unsafe extern "C" fn gz_comp(
             while state.strm.avail_in != 0 {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 crate::src::gzlib::gz_begin_io(state);
-                put = crate::src::gzlib::gz_syscall_chunk(state.strm.avail_in);
+                put = crate::src::gzlib::gz_comp_direct_write_request(state);
                 writ = crate::stdlib::write(
                     state.fd,
                     state.strm.next_in as *const ::core::ffi::c_void,
@@ -158,9 +158,7 @@ unsafe extern "C" fn gz_comp(
             while state.strm.next_out > state.x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 crate::src::gzlib::gz_begin_io(state);
-                put = crate::src::gzlib::gz_syscall_chunk(
-                    crate::src::gzlib::gz_comp_output_pending(state),
-                );
+                put = crate::src::gzlib::gz_comp_output_write_request(state);
                 writ = crate::stdlib::write(
                     state.fd,
                     state.x.next as *const ::core::ffi::c_void,
@@ -175,7 +173,10 @@ unsafe extern "C" fn gz_comp(
                     );
                     return -1 as ::core::ffi::c_int;
                 }
-                state.x.next = state.x.next.wrapping_add(writ as usize);
+                crate::src::gzlib::gz_comp_output_write_progress(
+                    state,
+                    writ as ::core::ffi::c_uint,
+                );
             }
             if plan.reset {
                 crate::src::gzlib::gz_comp_reset_output(state);
@@ -258,18 +259,15 @@ unsafe extern "C" fn gz_write(
     }
     if crate::src::gzlib::gz_write_uses_buffer(state, len) {
         loop {
-            let mut have: ::core::ffi::c_uint = 0;
-            let mut copy: ::core::ffi::c_uint = 0;
-            have = crate::src::gzlib::gz_buffered_input_len(state);
-            copy = crate::src::gzlib::gz_buffer_space(state.size, have, len);
+            let plan = crate::src::gzlib::gz_buffered_copy_plan(state, len);
             crate::stdlib::memcpy(
-                state.in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
+                state.in_0.wrapping_add(plan.offset as usize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
+                plan.len as crate::__stddef_size_t_h::size_t,
             );
-            crate::src::gzlib::gz_buffered_copy_progress(state, &mut len, copy);
+            crate::src::gzlib::gz_buffered_copy_progress(state, &mut len, plan.len);
             buf = (buf as *const ::core::ffi::c_char)
-                .wrapping_add(copy as usize)
+                .wrapping_add(plan.len as usize)
                 as crate::stdlib::voidpc;
             if len == 0 as crate::stdlib::z_size_t {
                 break;
@@ -396,31 +394,29 @@ pub unsafe extern "C" fn gzputc(
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut strm: crate::zlib_h::z_streamp = ::core::ptr::null_mut::<crate::zlib_h::z_stream>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    let state = &mut *state;
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
+        state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).size != 0 {
-        have = crate::src::gzlib::gz_buffered_input_len(&mut *state);
-        if have < (*state).size {
-            *(*state).in_0.wrapping_add(have as usize) = c as ::core::ffi::c_uchar;
-            (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
-            crate::src::gzlib::gz_advance_pos(&mut *state, 1);
+    if state.size != 0 {
+        have = crate::src::gzlib::gz_buffered_input_len(state);
+        if have < state.size {
+            *state.in_0.wrapping_add(have as usize) = c as ::core::ffi::c_uchar;
+            crate::src::gzlib::gz_putc_buffered_progress(state);
             return c & 0xff as ::core::ffi::c_int;
         }
     }

@@ -298,6 +298,28 @@ pub(crate) fn gz_comp_output_pending(
         .wrapping_sub(state.x.next.addr()) as ::core::ffi::c_uint
 }
 
+// Keep the request sizing for the two gz_comp write adapters with the
+// associated state accounting.  The adapters retain their distinct raw input
+// pointers and descriptor calls.
+pub(crate) fn gz_comp_direct_write_request(
+    state: &crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_uint {
+    gz_syscall_chunk(state.strm.avail_in)
+}
+
+pub(crate) fn gz_comp_output_write_request(
+    state: &crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_uint {
+    gz_syscall_chunk(gz_comp_output_pending(state))
+}
+
+pub(crate) fn gz_comp_output_write_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    written: ::core::ffi::c_uint,
+) {
+    state.x.next = state.x.next.wrapping_add(written as usize);
+}
+
 pub(crate) fn gz_comp_output_plan(
     state: &crate::gzguts_h::gz_state,
     flush: ::core::ffi::c_int,
@@ -399,6 +421,11 @@ pub(crate) fn gz_write_uses_buffer(
     remaining < state.size as crate::stdlib::z_size_t
 }
 
+pub(crate) struct GzBufferedCopyPlan {
+    pub offset: ::core::ffi::c_uint,
+    pub len: ::core::ffi::c_uint,
+}
+
 // The gzip input buffer is contiguous.  Keep its cursor setup and byte count
 // out of the copy adapter, which is the only write-path code that needs the
 // raw source and destination pointers.
@@ -414,6 +441,19 @@ pub(crate) fn gz_buffered_input_len(state: &mut crate::gzguts_h::gz_state) -> ::
         .wrapping_sub(state.in_0.addr()) as ::core::ffi::c_uint
 }
 
+// Select the destination offset and copy size before the raw copy adapter
+// touches either source or destination memory.
+pub(crate) fn gz_buffered_copy_plan(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: crate::stdlib::z_size_t,
+) -> GzBufferedCopyPlan {
+    let offset = gz_buffered_input_len(state);
+    GzBufferedCopyPlan {
+        offset,
+        len: gz_buffer_space(state.size, offset, remaining),
+    }
+}
+
 pub(crate) fn gz_buffered_copy_progress(
     state: &mut crate::gzguts_h::gz_state,
     remaining: &mut crate::stdlib::z_size_t,
@@ -421,6 +461,10 @@ pub(crate) fn gz_buffered_copy_progress(
 ) {
     gz_append_input(state, copied);
     *remaining = remaining.wrapping_sub(copied as crate::stdlib::z_size_t);
+}
+
+pub(crate) fn gz_putc_buffered_progress(state: &mut crate::gzguts_h::gz_state) {
+    gz_append_input(state, 1);
 }
 
 pub(crate) fn gz_stream_write_progress(
