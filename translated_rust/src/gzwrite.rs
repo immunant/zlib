@@ -211,6 +211,13 @@ fn gz_comp_remaining_direct_input(
     avail_in.wrapping_sub(written as crate::stdlib::uInt)
 }
 
+fn gz_comp_output_produced(
+    avail_out_before: ::core::ffi::c_uint,
+    avail_out_after: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    avail_out_before.wrapping_sub(avail_out_after)
+}
+
 fn gz_write_buffered_progress(
     pos: crate::stdlib::off64_t,
     remaining: crate::stdlib::z_size_t,
@@ -372,7 +379,7 @@ unsafe extern "C" fn gz_comp(
             );
             return -1 as ::core::ffi::c_int;
         }
-        have = have.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+        have = gz_comp_output_produced(have, (*strm).avail_out as ::core::ffi::c_uint);
         if !(have != 0) {
             break;
         }
@@ -829,7 +836,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset,
+        gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
         gz_comp_remaining_direct_input, gz_comp_write_chunk_len, gz_write_apply_direct_progress,
         gz_write_buffered_copy_len, gz_write_buffered_progress, gz_write_chunk_consumed_len,
         gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
@@ -975,6 +982,17 @@ mod tests {
             gz_comp_remaining_direct_input(0, 1),
             crate::stdlib::uInt::MAX
         );
+    }
+
+    #[test]
+    fn gz_comp_output_produced_subtracts_remaining_output_space() {
+        assert_eq!(gz_comp_output_produced(1024, 24), 1000);
+        assert_eq!(gz_comp_output_produced(1024, 1024), 0);
+    }
+
+    #[test]
+    fn gz_comp_output_produced_preserves_wrapping_accounting() {
+        assert_eq!(gz_comp_output_produced(0, 1), ::core::ffi::c_uint::MAX);
     }
 
     #[test]

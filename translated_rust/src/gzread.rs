@@ -89,6 +89,10 @@ fn gz_load_read_len(
     }
 }
 
+fn gz_avail_can_load(err: ::core::ffi::c_int) -> bool {
+    err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR
+}
+
 fn gz_fread_request_len(
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
@@ -282,7 +286,7 @@ unsafe extern "C" fn gz_load(
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut got: ::core::ffi::c_uint = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
+    if !gz_avail_can_load((*state).err) {
         return -1 as ::core::ffi::c_int;
     }
     if (*state).eof == 0 as ::core::ffi::c_int {
@@ -778,6 +782,13 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gz_avail_can_load_accepts_only_refillable_stream_errors() {
+        assert!(gz_avail_can_load(crate::zlib_h::Z_OK));
+        assert!(gz_avail_can_load(crate::zlib_h::Z_BUF_ERROR));
+        assert!(!gz_avail_can_load(crate::zlib_h::Z_DATA_ERROR));
+    }
 
     #[test]
     fn gz_decomp_input_action_prioritizes_load_failure() {

@@ -1260,32 +1260,39 @@ pub unsafe extern "C" fn deflateTune_ffi(
 ) -> ::core::ffi::c_int {
     deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
 }
+fn deflate_bound_lengths(
+    source_len: crate::stdlib::z_size_t,
+) -> (crate::stdlib::z_size_t, crate::stdlib::z_size_t) {
+    let mut fixedlen = source_len
+        .wrapping_add(source_len >> 3 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 8 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 9 as ::core::ffi::c_int)
+        .wrapping_add(4 as crate::stdlib::z_size_t);
+    if fixedlen < source_len {
+        fixedlen = -1 as ::core::ffi::c_int as crate::stdlib::z_size_t;
+    }
+    let mut storelen = source_len
+        .wrapping_add(source_len >> 5 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 7 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 11 as ::core::ffi::c_int)
+        .wrapping_add(7 as crate::stdlib::z_size_t);
+    if storelen < source_len {
+        storelen = -1 as ::core::ffi::c_int as crate::stdlib::z_size_t;
+    }
+    (fixedlen, storelen)
+}
+
 pub unsafe extern "C" fn deflateBound_z(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut fixedlen: crate::stdlib::z_size_t = 0;
-    let mut storelen: crate::stdlib::z_size_t = 0;
+    let fixedlen: crate::stdlib::z_size_t;
+    let storelen: crate::stdlib::z_size_t;
     let mut wraplen: crate::stdlib::z_size_t = 0;
     let mut bound: crate::stdlib::z_size_t = 0;
-    fixedlen = sourceLen
-        .wrapping_add(sourceLen >> 3 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 8 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 9 as ::core::ffi::c_int)
-        .wrapping_add(4 as crate::stdlib::z_size_t);
-    if fixedlen < sourceLen {
-        fixedlen = -1 as ::core::ffi::c_int as crate::stdlib::z_size_t;
-    }
-    storelen = sourceLen
-        .wrapping_add(sourceLen >> 5 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 7 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 11 as ::core::ffi::c_int)
-        .wrapping_add(7 as crate::stdlib::z_size_t);
-    if storelen < sourceLen {
-        storelen = -1 as ::core::ffi::c_int as crate::stdlib::z_size_t;
-    }
+    (fixedlen, storelen) = deflate_bound_lengths(sourceLen);
     if deflateStateCheck(strm) != 0 {
         bound = if fixedlen > storelen {
             fixedlen
@@ -3556,8 +3563,8 @@ unsafe extern "C" fn deflate_huff(
 #[cfg(test)]
 mod tests {
     use super::{
-        deflate_copyright, deflate_version_matches, gzip_header_crc, gzip_header_crc_pending,
-        pending_output_len,
+        deflate_bound_lengths, deflate_copyright, deflate_version_matches, gzip_header_crc,
+        gzip_header_crc_pending, pending_output_len,
     };
 
     #[test]
@@ -3602,6 +3609,20 @@ mod tests {
         assert_eq!(pending_output_len(3, 5), 3);
         assert_eq!(pending_output_len(5, 5), 5);
         assert_eq!(pending_output_len(8, 5), 5);
+    }
+
+    #[test]
+    fn deflate_bound_lengths_match_the_translated_formulas() {
+        assert_eq!(deflate_bound_lengths(0), (4, 7));
+        assert_eq!(deflate_bound_lengths(1), (5, 8));
+        assert_eq!(deflate_bound_lengths(1024), (1162, 1071));
+    }
+
+    #[test]
+    fn deflate_bound_lengths_saturate_on_wrapping_overflow() {
+        let max = crate::stdlib::z_size_t::MAX;
+
+        assert_eq!(deflate_bound_lengths(max), (max, max));
     }
 
     #[test]
