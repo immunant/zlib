@@ -397,9 +397,14 @@ impl<'a> PendingStorageView<'a> {
         bytes: &'a mut [crate::stdlib::Bytef],
         layout: PendingStorageLayout,
     ) -> Option<Self> {
+        // A caller can pass a larger established buffer, but this view never
+        // exposes bytes after the callback-allocation layout.  This keeps the
+        // temporal pending/symbol owner bounded without requiring callers to
+        // split a larger borrowed buffer first.
         if bytes.len() < layout.total_len {
             return None;
         }
+        let bytes = bytes.get_mut(..layout.total_len)?;
         Some(Self { bytes, layout })
     }
 
@@ -532,9 +537,13 @@ impl<'a> PendingStorageReadView<'a> {
         bytes: &'a [crate::stdlib::Bytef],
         layout: PendingStorageLayout,
     ) -> Option<Self> {
+        // Match the mutable view's bounded-prefix behavior so deflateCopy's
+        // source and destination describe the same callback allocation even
+        // when their established backing views are larger.
         if bytes.len() < layout.total_len {
             return None;
         }
+        let bytes = bytes.get(..layout.total_len)?;
         Some(Self { bytes, layout })
     }
 
@@ -6772,6 +6781,19 @@ mod tests {
         assert_eq!(storage.symbol_bytes().len(), 12);
         assert!(!storage.append_pending(&mut pending, &[0; 14]));
         assert_eq!(pending, 3);
+    }
+
+    #[test]
+    fn pending_storage_read_view_limits_a_larger_backing_slice_to_its_layout() {
+        let layout = pending_storage_layout(4);
+        let bytes = [0x5a; 20];
+        let storage = super::PendingStorageReadView::new(&bytes, layout).unwrap();
+
+        assert_eq!(
+            storage.pending_range(0, layout.total_len),
+            Some(&bytes[..16])
+        );
+        assert_eq!(storage.pending_range(layout.total_len, 1), None);
     }
 
     #[test]
