@@ -2679,95 +2679,31 @@ fn deflateParams(
     crate::zlib_h::Z_OK
 }
 
-// The stream-facing adapter keeps the callback-owned table projection at the
-// same boundary as opaque-state validation.  `deflateParams()` itself only
-// receives the completed pointer-free owner above.
-pub unsafe fn deflate_params_from_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
-        level = 6 as ::core::ffi::c_int;
-    }
-    if level < 0 as ::core::ffi::c_int
-        || level > 9 as ::core::ffi::c_int
-        || strategy < 0 as ::core::ffi::c_int
-        || strategy > crate::zlib_h::Z_FIXED
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // Project the ABI stream and its opaque state once for each phase.  The
-    // block flush can re-enter the dispatcher, so do not retain either Rust
-    // borrow across that call; reproject afterwards instead of indexing the
-    // raw cursors throughout the parameter policy.
-    let needs_flush = {
-        let Some((_stream, state, _storage, _)) =
-            deflate_stream_and_state(strm, DeflateStorageProjection::None, None)
-        else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        let algorithm = configuration_table[state.level as usize].algorithm;
-        (strategy != state.strategy || algorithm != configuration_table[level as usize].algorithm)
-            && state.last_flush != -2 as ::core::ffi::c_int
-    };
-    if needs_flush {
-        let mut err: ::core::ffi::c_int =
-            deflate_dispatch_from_abi_stream(strm, crate::zlib_h::Z_BLOCK);
-        if err == crate::zlib_h::Z_STREAM_ERROR {
-            return err;
+// Parameter admission is independent of the ABI stream.  Keep the default
+// level normalization and range checks pointer-free so the shared scalar
+// projection below owns the only stream/state association.
+struct DeflateParameterPlan {
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+}
+
+impl DeflateParameterPlan {
+    fn parse(
+        mut level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    ) -> Result<Self, ::core::ffi::c_int> {
+        if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
+            level = 6 as ::core::ffi::c_int;
         }
+        if level < 0 as ::core::ffi::c_int
+            || level > 9 as ::core::ffi::c_int
+            || strategy < 0 as ::core::ffi::c_int
+            || strategy > crate::zlib_h::Z_FIXED
+        {
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
+        }
+        Ok(Self { level, strategy })
     }
-    // After a requested block flush, combine its completion check with the
-    // existing dictionary-table projection below.  The dispatcher has
-    // returned, so this is the next (and only) stream/state association;
-    // retaining it through the parameter update avoids reprojecting the same
-    // callback-owned state solely to inspect its scalar cursors.
-    let Some((stream, state, storage, _)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary, None)
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if needs_flush
-        && (stream.avail_in != 0
-            || state.strstart as ::core::ffi::c_long - state.block_start
-                + state.lookahead as ::core::ffi::c_long
-                != 0)
-    {
-        return crate::zlib_h::Z_BUF_ERROR;
-    }
-    let needs_table_cleanup = state.level != level && state.level == 0 && state.matches != 0;
-    let tables = if needs_table_cleanup {
-        // `head` and (for the single-match case) `prev` are the bounded
-        // callback-storage views established with state validation above.
-        let prev = if state.matches == 1 {
-            Some(storage.prev.expect("parameter previous-table projection"))
-        } else {
-            None
-        };
-        Some(DeflateCallbackHashStorage {
-            head: storage.head.expect("parameter hash-table projection"),
-            prev,
-        })
-    } else {
-        None
-    };
-    let scalars = DeflateParameterScalars {
-        current_level: &mut state.level,
-        current_strategy: &mut state.strategy,
-        matches: &mut state.matches,
-        slid: &mut state.slid,
-        max_lazy_match: &mut state.max_lazy_match,
-        good_match: &mut state.good_match,
-        nice_match: &mut state.nice_match,
-        max_chain_length: &mut state.max_chain_length,
-        w_size: state.w_size,
-    };
-    deflateParams(
-        DeflateParameterOwner::from_callback_storage(scalars, tables),
-        level,
-        strategy,
-    )
 }
 #[export_name = "deflateParams"]
 
@@ -2779,7 +2715,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_params_from_stream(strm, level, strategy)
+    deflateTune(strm, DeflateScalarAction::Params { level, strategy })
 }
 fn deflate_tune_values(
     good_length: ::core::ffi::c_int,
@@ -2809,6 +2745,10 @@ pub(crate) enum DeflateScalarAction<'a> {
     // scalar controls. Its full variant additionally selects the bounded
     // hash-table view before entering the pointer-free reset cores.
     Reset(DeflateResetKind),
+    Params {
+        level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    },
     Prime {
         bits: ::core::ffi::c_int,
         value: ::core::ffi::c_int,
@@ -2828,17 +2768,87 @@ pub(crate) enum DeflateScalarAction<'a> {
     },
 }
 
-// The export wrapper owns the nullable ABI-stream conversion.  Retuning only
-// mutates scalar state, so this shared implementation retains the one
-// opaque-state projection and keeps each action's policy over ordinary
-// values.
+// The export wrapper owns the nullable ABI-stream conversion.  Scalar
+// controls, including the two-phase parameter transition, retain their
+// stream/state and callback-storage projection here while their policy stays
+// over ordinary values and bounded slices.
 pub(crate) unsafe fn deflateTune(
     strm: &mut crate::zlib_h::z_stream_s,
     action: DeflateScalarAction<'_>,
 ) -> ::core::ffi::c_int {
+    if let DeflateScalarAction::Params { level, strategy } = &action {
+        let Ok(plan) = DeflateParameterPlan::parse(*level, *strategy) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        // The block flush can re-enter the dispatcher, so do not retain the
+        // first stream/state borrow across it. Reproject exactly once after
+        // it returns for the completion check and parameter update.
+        let needs_flush = {
+            let Some((_stream, state, _storage, _)) =
+                deflate_stream_and_state(strm, DeflateStorageProjection::None, None)
+            else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let algorithm = configuration_table[state.level as usize].algorithm;
+            (plan.strategy != state.strategy
+                || algorithm != configuration_table[plan.level as usize].algorithm)
+                && state.last_flush != -2 as ::core::ffi::c_int
+        };
+        if needs_flush {
+            let err = deflate_dispatch_from_abi_stream(strm, crate::zlib_h::Z_BLOCK);
+            if err == crate::zlib_h::Z_STREAM_ERROR {
+                return err;
+            }
+        }
+        let Some((stream, state, storage, _)) =
+            deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary, None)
+        else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if needs_flush
+            && (stream.avail_in != 0
+                || state.strstart as ::core::ffi::c_long - state.block_start
+                    + state.lookahead as ::core::ffi::c_long
+                    != 0)
+        {
+            return crate::zlib_h::Z_BUF_ERROR;
+        }
+        let needs_table_cleanup =
+            state.level != plan.level && state.level == 0 && state.matches != 0;
+        let tables = if needs_table_cleanup {
+            let prev = if state.matches == 1 {
+                Some(storage.prev.expect("parameter previous-table projection"))
+            } else {
+                None
+            };
+            Some(DeflateCallbackHashStorage {
+                head: storage.head.expect("parameter hash-table projection"),
+                prev,
+            })
+        } else {
+            None
+        };
+        let scalars = DeflateParameterScalars {
+            current_level: &mut state.level,
+            current_strategy: &mut state.strategy,
+            matches: &mut state.matches,
+            slid: &mut state.slid,
+            max_lazy_match: &mut state.max_lazy_match,
+            good_match: &mut state.good_match,
+            nice_match: &mut state.nice_match,
+            max_chain_length: &mut state.max_chain_length,
+            w_size: state.w_size,
+        };
+        return deflateParams(
+            DeflateParameterOwner::from_callback_storage(scalars, tables),
+            plan.level,
+            plan.strategy,
+        );
+    }
     let projection = match action {
         DeflateScalarAction::Reset(DeflateResetKind::Keep) => DeflateStorageProjection::None,
         DeflateScalarAction::Reset(DeflateResetKind::Full) => DeflateStorageProjection::Hash,
+        DeflateScalarAction::Params { .. } => unreachable!("handled before stream projection"),
         DeflateScalarAction::Prime { .. } => DeflateStorageProjection::Complete,
         DeflateScalarAction::Pending { .. }
         | DeflateScalarAction::Used { .. }
@@ -2901,6 +2911,7 @@ pub(crate) unsafe fn deflateTune(
             }
             crate::zlib_h::Z_OK
         }
+        DeflateScalarAction::Params { .. } => unreachable!("handled before stream projection"),
         DeflateScalarAction::Prime { bits, value } => {
             let pending_buf = s
                 .callback_storage

@@ -14,7 +14,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflate_dispatch_from_abi_stream as deflate;
-pub use crate::src::deflate::deflate_params_from_stream as deflateParams;
 pub use crate::src::deflate::internal_state;
 use crate::src::deflate::DeflateResetKind;
 use crate::src::deflate::{deflateTune, DeflateScalarAction};
@@ -975,10 +974,12 @@ unsafe fn gz_comp(
                     GzCompCodecResult::Complete
                 }
                 GzCompCodecAction::Retune(retune) => {
-                    crate::src::deflate::deflate_params_from_stream(
+                    deflateTune(
                         strm,
-                        retune.level,
-                        retune.strategy,
+                        DeflateScalarAction::Params {
+                            level: retune.level,
+                            strategy: retune.strategy,
+                        },
                     );
                     GzCompCodecResult::Complete
                 }
