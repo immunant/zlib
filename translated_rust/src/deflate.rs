@@ -1132,7 +1132,7 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         stream_size,
     )
 }
-fn deflate_state_values_are_valid(
+pub(crate) fn deflate_state_values_are_valid(
     has_zalloc: bool,
     has_zfree: bool,
     state_matches_stream: bool,
@@ -1234,27 +1234,32 @@ fn deflate_copy_owned_buffers(
     true
 }
 
-pub(crate) unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return 1;
-    }
-    let strm_ref = &*strm;
-    let state = strm_ref.state as *mut crate::src::deflate::deflate_state;
-    if state.is_null() {
-        return 1;
-    }
-    let state = &*state;
-    if deflate_state_values_are_valid(
-        strm_ref.zalloc.is_some(),
-        strm_ref.zfree.is_some(),
-        state.strm == strm,
-        state.status,
-    ) {
-        0
-    } else {
-        1
-    }
+// This expands only at ABI boundaries. The stream and state are callback-owned
+// compatibility records, so their raw validation belongs at the boundary; the
+// validity decision itself remains a pointer-free core.
+macro_rules! deflate_state_check_at_boundary {
+    ($strm:expr $(,)?) => {{
+        let strm = $strm;
+        if strm.is_null() {
+            1
+        } else {
+            let strm_ref = &*strm;
+            let state = strm_ref.state as *mut crate::src::deflate::deflate_state;
+            if state.is_null() {
+                1
+            } else {
+                let state = &*state;
+                (!crate::src::deflate::deflate_state_values_are_valid(
+                    strm_ref.zalloc.is_some(),
+                    strm_ref.zfree.is_some(),
+                    state.strm == strm,
+                    state.status,
+                )) as ::core::ffi::c_int
+            }
+        }
+    }};
 }
+pub(crate) use deflate_state_check_at_boundary;
 #[export_name = "deflateSetDictionary"]
 pub unsafe extern "C" fn deflateSetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -1266,7 +1271,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     let mut wrap: ::core::ffi::c_int = 0;
     let mut avail: ::core::ffi::c_uint = 0;
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if deflateStateCheck(strm) != 0 || dictionary.is_null() {
+    if deflate_state_check_at_boundary!(strm) != 0 || dictionary.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
@@ -1393,7 +1398,7 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if deflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
@@ -1453,7 +1458,7 @@ pub(crate) fn deflate_reset_keep_state(
 macro_rules! deflate_reset_keep_at_boundary {
     ($strm:expr $(,)?) => {{
         let strm = $strm;
-        if crate::src::deflate::deflateStateCheck(strm) != 0 {
+        if crate::src::deflate::deflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
             let state = (*strm).state as *mut crate::src::deflate::deflate_state;
@@ -1510,7 +1515,7 @@ pub(crate) fn lm_init_state(
 macro_rules! deflate_reset_at_boundary {
     ($strm:expr $(,)?) => {{
         let strm = $strm;
-        if crate::src::deflate::deflateStateCheck(strm) != 0 {
+        if crate::src::deflate::deflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
             let state = (*strm).state as *mut crate::src::deflate::deflate_state;
@@ -1542,7 +1547,9 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
+    if deflate_state_check_at_boundary!(strm) != 0
+        || (*(*strm).state).wrap != 2 as ::core::ffi::c_int
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     (*(*strm).state).gzhead = head;
@@ -1561,7 +1568,7 @@ pub unsafe extern "C" fn deflatePending_ffi(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if deflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
@@ -1592,7 +1599,7 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if deflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if !bits.is_null() {
@@ -1639,7 +1646,7 @@ pub unsafe extern "C" fn deflatePrime_ffi(
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
+    if deflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
@@ -1727,7 +1734,7 @@ macro_rules! deflate_params_at_boundary {
         let level = $level;
         let strategy = $strategy;
         'deflate_params_result: {
-            if crate::src::deflate::deflateStateCheck(strm) != 0 {
+            if crate::src::deflate::deflate_state_check_at_boundary!(strm) != 0 {
                 break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
             }
             let s = (*strm).state as *mut crate::src::deflate::deflate_state;
@@ -1839,7 +1846,7 @@ pub unsafe extern "C" fn deflateTune_ffi(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if deflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
@@ -1885,7 +1892,7 @@ fn deflate_bound_header(
 macro_rules! deflate_bound_state_at_boundary {
     ($strm:expr $(,)?) => {{
         let strm = $strm;
-        if crate::src::deflate::deflateStateCheck(strm) != 0 {
+        if crate::src::deflate::deflate_state_check_at_boundary!(strm) != 0 {
             None
         } else {
             let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
@@ -3033,7 +3040,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(source) != 0 || dest.is_null() || dest == source {
+    if deflate_state_check_at_boundary!(source) != 0 || dest.is_null() || dest == source {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let source_stream = &*source;
