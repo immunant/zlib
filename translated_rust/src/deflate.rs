@@ -827,21 +827,23 @@ fn deflate_status_is_valid(status: ::core::ffi::c_int) -> bool {
             | crate::src::deflate::FINISH_STATE
     )
 }
-pub unsafe extern "C" fn deflateSetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
+// The ABI wrapper has already bound both caller-owned ranges. Dictionary
+// installation itself only needs those bounded views and the validated stream
+// state, so keep it as ordinary reference-and-slice work.
+pub fn deflateSetDictionary(
+    strm: &mut crate::zlib_h::z_stream,
+    dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    let Some((stream, state)) = deflateStateCheck(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if dictionary.is_null() {
+    if dictionary.len() > crate::stdlib::uInt::MAX as usize {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let Some((stream, state)) = deflateStateCheck(strm as *mut _) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let avail_in = stream.avail_in;
     let next_in = stream.next_in;
-    stream.avail_in = dictLength;
-    stream.next_in = dictionary as *mut crate::stdlib::Bytef;
+    stream.avail_in = dictionary.len() as crate::stdlib::uInt;
+    stream.next_in = dictionary.as_ptr() as *mut crate::stdlib::Bytef;
     let result = fill_window(
         state,
         stream,
@@ -980,7 +982,15 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateSetDictionary(strm, dictionary, dictLength)
+    if strm.is_null() || deflateStateCheck(strm).is_none() || dictionary.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dictionary = if dictLength == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
+    };
+    deflateSetDictionary(&mut *strm, dictionary)
 }
 pub unsafe extern "C" fn deflateGetDictionary(
     mut strm: crate::zlib_h::z_streamp,
