@@ -595,20 +595,16 @@ pub fn deflateInit_(
         ),
         DeflateInitMode::Gzip { strategy } => (15 + 16, 8, strategy),
     };
-    // The safe inputs above establish the version, stream, and wrapper-mode
-    // invariants that the translated initializer still expects as raw arguments.
-    unsafe {
-        deflateInit2_(
-            strm,
-            level,
-            crate::zlib_h::Z_DEFLATED,
-            window_bits,
-            mem_level,
-            strategy,
-            ::core::ptr::from_ref(version),
-            stream_size,
-        )
-    }
+    deflateInit2_(
+        strm,
+        level,
+        crate::zlib_h::Z_DEFLATED,
+        window_bits,
+        mem_level,
+        strategy,
+        version,
+        stream_size,
+    )
 }
 #[export_name = "deflateInit_"]
 
@@ -626,33 +622,29 @@ pub unsafe extern "C" fn deflateInit__ffi(
         DeflateInitMode::Zlib,
     )
 }
-pub unsafe extern "C" fn deflateInit2_(
-    mut strm: crate::zlib_h::z_streamp,
+pub fn deflateInit2_(
+    strm: &mut crate::zlib_h::z_stream,
     mut level: ::core::ffi::c_int,
     mut method: ::core::ffi::c_int,
     mut windowBits: ::core::ffi::c_int,
     mut memLevel: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
+    version: &::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
     let my_version = crate::zlib_h::ZLIB_VERSION;
-    if version.is_null()
-        || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
+    if *version as ::core::ffi::c_int
+        != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
         || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>()
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -660,10 +652,10 @@ pub unsafe extern "C" fn deflateInit2_(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
             crate::src::zutil::zcfree
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
@@ -697,21 +689,22 @@ pub unsafe extern "C" fn deflateInit2_(
     if windowBits == 8 as ::core::ffi::c_int {
         windowBits = 9 as ::core::ffi::c_int;
     }
-    s = Some((*strm).zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
+    s = unsafe { Some(strm.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
+        strm.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
+    ) as *mut crate::src::deflate::deflate_state };
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    unsafe {
     crate::stdlib::memset(
         s as *mut ::core::ffi::c_void,
         0 as ::core::ffi::c_int,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
     );
-    (*strm).state = s as *mut crate::src::deflate::internal_state;
-    (*s).strm = strm;
+    strm.state = s as *mut crate::src::deflate::internal_state;
+    (*s).strm = ::core::ptr::from_mut(strm);
     (*s).status = crate::src::deflate::INIT_STATE;
     (*s).wrap = wrap;
     (*s).gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
@@ -726,31 +719,31 @@ pub unsafe extern "C" fn deflateInit2_(
         .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-    (*s).window = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).window = Some(strm.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm.opaque,
         (*s).w_size,
         (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
             as crate::stdlib::uInt,
     ) as *mut crate::stdlib::Bytef;
-    (*s).prev = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).prev = Some(strm.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm.opaque,
         (*s).w_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*s).head = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).head = Some(strm.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm.opaque,
         (*s).hash_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
     (*s).high_water = 0 as crate::zutil_h::ulg;
     (*s).lit_bufsize =
         ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).pending_buf = Some(strm.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm.opaque,
         (*s).lit_bufsize,
         4 as crate::stdlib::uInt,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
@@ -762,9 +755,9 @@ pub unsafe extern "C" fn deflateInit2_(
         || (*s).pending_buf.is_null()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
-        (*strm).msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
+        strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
             .load(::core::sync::atomic::Ordering::Relaxed);
-        deflateEnd(&mut *strm);
+        deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     (*s).sym_buf =
@@ -776,10 +769,11 @@ pub unsafe extern "C" fn deflateInit2_(
     (*s).level = level;
     (*s).strategy = strategy;
     (*s).method = method as crate::stdlib::Byte;
-    let stream = &mut *strm;
+    let stream = strm;
     let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
     let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
     return deflate_reset(stream, state, head);
+    }
 }
 #[export_name = "deflateInit2_"]
 
@@ -793,6 +787,12 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(version) = version.as_ref() else {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    };
     deflateInit2_(
         strm,
         level,
