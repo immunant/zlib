@@ -518,7 +518,7 @@ pub mod crc32_h {
         0x8def022d00000000 as z_word_t,
     ];
 
-    pub static mut crc_braid_table: [[crate::stdlib::z_crc_t; 256]; 8] = [
+    pub static crc_braid_table: [[crate::stdlib::z_crc_t; 256]; 8] = [
         [
             0 as crate::stdlib::z_crc_t,
             0xaf449247 as crate::stdlib::z_crc_t,
@@ -2585,7 +2585,7 @@ pub mod crc32_h {
         ],
     ];
 
-    pub static mut crc_braid_big_table: [[z_word_t; 256]; 8] = [
+    pub static crc_braid_big_table: [[z_word_t; 256]; 8] = [
         [
             0 as z_word_t,
             0xf390f23600000000 as z_word_t,
