@@ -741,6 +741,20 @@ struct WindowMatchSegment {
     len: usize,
 }
 
+/// One bounded read from an initialized history window.
+///
+/// `next_index` is set only when a full circular history has more requested
+/// bytes beyond this contiguous allocation suffix.  Match copying must make a
+/// new request for that prefix instead of treating the backing allocation as
+/// a single wrapping slice.  A partial history has no such prefix: its
+/// initialized range ends at `whave`.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct WindowMatchStep {
+    segment: WindowMatchSegment,
+    remaining: ::core::ffi::c_uint,
+    next_index: Option<::core::ffi::c_uint>,
+}
+
 impl WindowHistory {
     fn new(
         size: ::core::ffi::c_uint,
@@ -880,6 +894,24 @@ impl WindowHistory {
             len: requested.min(initialized_end.checked_sub(start)?),
         })
     }
+
+    fn match_step(
+        &self,
+        index: ::core::ffi::c_uint,
+        requested: ::core::ffi::c_uint,
+    ) -> Option<WindowMatchStep> {
+        let segment = self.match_segment(index, requested)?;
+        let copied = ::core::ffi::c_uint::try_from(segment.len).ok()?;
+        let remaining = requested.checked_sub(copied)?;
+        let next_index = (remaining != 0 && self.have == self.size)
+            .then_some(0);
+
+        Some(WindowMatchStep {
+            segment,
+            remaining,
+            next_index,
+        })
+    }
 }
 
 /// A validated read-only view of the initialized inflate history window.
@@ -916,9 +948,21 @@ impl<'a> WindowStorage<'a> {
         index: ::core::ffi::c_uint,
         requested: ::core::ffi::c_uint,
     ) -> Option<&[crate::stdlib::Bytef]> {
-        let segment = self.history.match_segment(index, requested)?;
+        let segment = self.history.match_step(index, requested)?.segment;
         self.bytes
             .get(segment.start..segment.start.checked_add(segment.len)?)
+    }
+
+    fn match_step(
+        &self,
+        index: ::core::ffi::c_uint,
+        requested: ::core::ffi::c_uint,
+    ) -> Option<(&[crate::stdlib::Bytef], ::core::ffi::c_uint, Option<::core::ffi::c_uint>)> {
+        let step = self.history.match_step(index, requested)?;
+        let bytes = self
+            .bytes
+            .get(step.segment.start..step.segment.start.checked_add(step.segment.len)?)?;
+        Some((bytes, step.remaining, step.next_index))
     }
 }
 
@@ -5871,6 +5915,28 @@ mod tests {
         assert_eq!(wrapped.match_bytes(6, 5), Some(&b"gh"[..]));
         assert_eq!(wrapped.match_bytes(8, 0), None);
         assert_eq!(wrapped.match_bytes(3, 0), Some(&b""[..]));
+    }
+
+    #[test]
+    fn window_storage_match_step_requires_an_explicit_wrapped_prefix() {
+        let wrapped_window = *b"abcdefgh";
+        let wrapped = super::WindowStorage::new(&wrapped_window, 3, 8).unwrap();
+
+        assert_eq!(
+            wrapped.match_step(6, 5),
+            Some((&b"gh"[..], 3, Some(0)))
+        );
+        assert_eq!(
+            wrapped.match_step(0, 3),
+            Some((&b"abc"[..], 0, None))
+        );
+
+        let partial_window = *b"abc_____";
+        let partial = super::WindowStorage::new(&partial_window, 3, 3).unwrap();
+
+        // A partial history has no initialized prefix to wrap into.
+        assert_eq!(partial.match_step(1, 8), Some((&b"bc"[..], 6, None)));
+        assert_eq!(partial.match_step(3, 1), None);
     }
 
     #[test]
