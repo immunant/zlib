@@ -422,34 +422,6 @@ pub(crate) fn clear_hash_state(
     *slid = 0;
 }
 
-/// Translate the legacy state-owned hash allocations into temporary slices for
-/// the pre-existing private window-fill adapter.  `fill_window` has already
-/// adopted this state record before calling here, so this adapter does not
-/// need another raw state boundary.
-pub(crate) unsafe fn slide_hash(state: &mut crate::src::deflate::deflate_state) {
-    let Ok(head_len) = usize::try_from(state.hash_size) else {
-        return;
-    };
-    let Ok(prev_len) = usize::try_from(state.w_size) else {
-        return;
-    };
-    if (head_len != 0 && state.head.is_null()) || (prev_len != 0 && state.prev.is_null()) {
-        return;
-    }
-    let head = if head_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(state.head, head_len)
-    };
-    let prev = if prev_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-    };
-    slide_hash_state(head, prev, state.w_size);
-    state.slid = 1;
-}
-
 fn read_buf_state(
     input: &[crate::stdlib::Byte],
     output: &mut [crate::stdlib::Byte],
@@ -819,18 +791,21 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         let (space, should_slide) =
             fill_window_space_state(state.window_size, state.lookahead, state.strstart, wsize);
         more = space;
+        // Lend the window once for this iteration.  Both the slide path and
+        // the post-refill hash insertion use the same checked allocation, so
+        // retaining this one view avoids a second raw window adapter.
+        let Ok(window_len) = usize::try_from(state.window_size) else {
+            return;
+        };
+        if window_len != 0 && state.window.is_null() {
+            return;
+        }
+        let window = if window_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(state.window, window_len)
+        };
         if should_slide {
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return;
-            };
-            if window_len != 0 && state.window.is_null() {
-                return;
-            }
-            let window = if window_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.window, window_len)
-            };
             let Some(next_more) = slide_window_state(
                 window,
                 wsize,
@@ -842,7 +817,31 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             ) else {
                 return;
             };
-            slide_hash(state);
+            // `fill_window` is the sole transitional owner of these
+            // callback-allocated hash buffers. Lend them directly to the
+            // safe sliding routine instead of routing through a second
+            // unsafe implementation adapter.
+            let Ok(head_len) = usize::try_from(state.hash_size) else {
+                return;
+            };
+            let Ok(prev_len) = usize::try_from(state.w_size) else {
+                return;
+            };
+            if (head_len != 0 && state.head.is_null()) || (prev_len != 0 && state.prev.is_null()) {
+                return;
+            }
+            let head = if head_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.head, head_len)
+            };
+            let prev = if prev_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+            };
+            slide_hash_state(head, prev, wsize);
+            state.slid = 1;
             more = next_more;
         }
         // `read_buf()` consumes at most this exact available-input snapshot.
@@ -862,26 +861,15 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         if state.lookahead.wrapping_add(state.insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return;
-            };
             let Ok(head_len) = usize::try_from(state.hash_size) else {
                 return;
             };
             let Ok(prev_len) = usize::try_from(state.w_size) else {
                 return;
             };
-            if (window_len != 0 && state.window.is_null())
-                || (head_len != 0 && state.head.is_null())
-                || (prev_len != 0 && state.prev.is_null())
-            {
+            if (head_len != 0 && state.head.is_null()) || (prev_len != 0 && state.prev.is_null()) {
                 return;
             }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
             let head = if head_len == 0 {
                 &mut []
             } else {
