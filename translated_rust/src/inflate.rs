@@ -116,6 +116,9 @@ pub(crate) enum InflateTableRef {
 #[repr(C)]
 pub struct inflate_state {
     pub strm: usize,
+    // Pointer-free allocator origin retained for the future owned-storage
+    // switch.  The live allocation still follows the ABI callbacks.
+    pub(crate) allocator_provenance: crate::src::zutil::AllocatorProvenance,
     pub mode: crate::src::inflate::inflate_mode,
     pub last: ::core::ffi::c_int,
     pub wrap: ::core::ffi::c_int,
@@ -266,6 +269,7 @@ fn inflate_window_layout_valid(state: &inflate_state) -> bool {
 pub(crate) fn empty_inflate_state() -> inflate_state {
     inflate_state {
         strm: 0,
+        allocator_provenance: crate::src::zutil::UNKNOWN_ALLOCATOR_PROVENANCE,
         mode: crate::src::inflate::HEAD,
         last: 0,
         wrap: 0,
@@ -310,6 +314,7 @@ pub(crate) fn empty_inflate_state() -> inflate_state {
 fn copy_inflate_state(source: &inflate_state) -> inflate_state {
     inflate_state {
         strm: source.strm,
+        allocator_provenance: source.allocator_provenance,
         mode: source.mode,
         last: source.last,
         wrap: source.wrap,
@@ -567,8 +572,10 @@ pub unsafe extern "C" fn inflateReset2_ffi(
 fn initialize_inflate_state_base(
     state: &mut crate::src::inflate::inflate_state,
     strm: &mut crate::zlib_h::z_stream,
+    allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) {
     state.strm = stream_identity(strm);
+    state.allocator_provenance = allocator_provenance;
     state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     state.mode = crate::src::inflate::HEAD;
 }
@@ -579,6 +586,7 @@ fn initialize_inflate_state_base(
 fn initialize_allocated_inflate_state(
     strm: &mut crate::zlib_h::z_stream,
     window_bits: ::core::ffi::c_int,
+    allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
     let state = unsafe {
         Some(strm.zalloc.expect("non-null function pointer"))
@@ -594,7 +602,7 @@ fn initialize_allocated_inflate_state(
     strm.state = state.cast::<crate::src::deflate::internal_state>();
     let state_ref = unsafe { &mut *state };
     *state_ref = empty_inflate_state();
-    initialize_inflate_state_base(state_ref, strm);
+    initialize_inflate_state_base(state_ref, strm, allocator_provenance);
     let ret = inflateReset2(strm, state_ref, window_bits);
     if ret != crate::zlib_h::Z_OK {
         unsafe {
@@ -620,8 +628,8 @@ pub fn inflateInit2_(
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    crate::src::zutil::install_default_allocators(strm);
-    initialize_allocated_inflate_state(strm, windowBits)
+    let allocator_provenance = crate::src::zutil::install_default_allocators(strm);
+    initialize_allocated_inflate_state(strm, windowBits, allocator_provenance)
 }
 #[export_name = "inflateInit2_"]
 

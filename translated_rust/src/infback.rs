@@ -144,6 +144,7 @@ fn initialize_allocated_inflate_back_state(
     strm: &mut crate::zlib_h::z_stream,
     window_bits: ::core::ffi::c_int,
     window: &mut [::core::ffi::c_uchar],
+    allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
     // The ABI allocator and its returned raw storage remain confined to this
     // ownership boundary. Initialize the allocation before exposing it via the
@@ -162,6 +163,7 @@ fn initialize_allocated_inflate_back_state(
     unsafe {
         let state = &mut *state;
         *state = crate::src::inflate::empty_inflate_state();
+        state.allocator_provenance = allocator_provenance;
         initialize_inflate_back_state(state, window_bits);
         state.window = window.as_mut_ptr();
     }
@@ -193,8 +195,8 @@ pub fn inflateBackInit_(
     let strm = strm.expect("checked non-null stream");
     let window = window.expect("checked non-null window");
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    crate::src::zutil::install_default_allocators(strm);
-    initialize_allocated_inflate_back_state(strm, windowBits, window)
+    let allocator_provenance = crate::src::zutil::install_default_allocators(strm);
+    initialize_allocated_inflate_back_state(strm, windowBits, window, allocator_provenance)
 }
 #[export_name = "inflateBackInit_"]
 

@@ -18,6 +18,20 @@ enum ZAllocation {
     Uninitialized(Vec<MaybeUninit<ZAllocationByte>>),
     Zeroed(Vec<ZAllocationByte>),
 }
+
+/// Records which half of an initializer's allocator pair was supplied by the
+/// caller.  This is deliberately pointer-free: future owned stream storage
+/// can opt in only for a fully default pair without comparing ABI callback
+/// pointers or treating a custom callback as a Rust allocator.
+pub(crate) type AllocatorProvenance = (bool, bool);
+
+pub(crate) const UNKNOWN_ALLOCATOR_PROVENANCE: AllocatorProvenance = (false, false);
+
+pub(crate) const fn allocator_pair_is_fully_default(
+    provenance: AllocatorProvenance,
+) -> bool {
+    provenance.0 && provenance.1
+}
 #[no_mangle]
 
 pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; 10] = [
@@ -139,14 +153,19 @@ fn zallocations() -> &'static Mutex<HashMap<usize, ZAllocation>> {
 /// either callback retain that exact callback and opaque value.  Keeping this
 /// policy in safe implementation code lets the stream initializers share it
 /// without treating arbitrary ABI callbacks as safe Rust functions.
-pub(crate) fn install_default_allocators(strm: &mut crate::zlib_h::z_stream) {
-    if strm.zalloc.is_none() {
+pub(crate) fn install_default_allocators(
+    strm: &mut crate::zlib_h::z_stream,
+) -> AllocatorProvenance {
+    let zalloc_defaulted = strm.zalloc.is_none();
+    let zfree_defaulted = strm.zfree.is_none();
+    if zalloc_defaulted {
         strm.zalloc = Some(zcalloc);
         strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if strm.zfree.is_none() {
+    if zfree_defaulted {
         strm.zfree = Some(zcfree);
     }
+    (zalloc_defaulted, zfree_defaulted)
 }
 
 pub extern "C" fn zcalloc(

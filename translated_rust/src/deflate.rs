@@ -85,6 +85,9 @@ pub struct internal_state {
     // implementation code compares identities only; the legacy FFI tree
     // bridge is the sole place that recreates the raw stream handle.
     pub strm: usize,
+    // Preserve initializer-time allocator origin without carrying callback
+    // pointers into the eventual owned-storage facade.
+    pub(crate) allocator_provenance: crate::src::zutil::AllocatorProvenance,
     pub status: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
@@ -826,11 +829,13 @@ fn normalize_deflate_init_config(
 fn initialize_deflate_state_base(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
+    allocator_provenance: crate::src::zutil::AllocatorProvenance,
     wrap: ::core::ffi::c_int,
     window_bits: ::core::ffi::c_int,
     mem_level: ::core::ffi::c_int,
 ) {
     state.strm = stream_identity(strm);
+    state.allocator_provenance = allocator_provenance;
     state.status = crate::src::deflate::INIT_STATE;
     state.wrap = wrap;
     state.gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
@@ -862,6 +867,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
     };
     crate::src::deflate::deflate_state {
         strm: 0,
+        allocator_provenance: crate::src::zutil::UNKNOWN_ALLOCATOR_PROVENANCE,
         status: 0,
         pending_buf: ::core::ptr::null_mut(),
         pending_buf_size: 0,
@@ -949,6 +955,7 @@ fn initialize_allocated_deflate_state(
     method: ::core::ffi::c_int,
     mem_level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
+    allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
     let Some(storage) = DeflateStorageLayout::from_init(config.window_bits, mem_level) else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -967,7 +974,14 @@ fn initialize_allocated_deflate_state(
         strm.state = state as *mut crate::src::deflate::internal_state;
         let state = &mut *state;
         *state = empty_deflate_state();
-        initialize_deflate_state_base(state, strm, config.wrap, config.window_bits, mem_level);
+        initialize_deflate_state_base(
+            state,
+            strm,
+            allocator_provenance,
+            config.wrap,
+            config.window_bits,
+            mem_level,
+        );
         state.window = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
@@ -1087,12 +1101,19 @@ pub fn deflateInit2_(
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    crate::src::zutil::install_default_allocators(strm);
+    let allocator_provenance = crate::src::zutil::install_default_allocators(strm);
     let Some(config) = normalize_deflate_init_config(level, method, windowBits, memLevel, strategy)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    initialize_allocated_deflate_state(strm, config, method, memLevel, strategy)
+    initialize_allocated_deflate_state(
+        strm,
+        config,
+        method,
+        memLevel,
+        strategy,
+        allocator_provenance,
+    )
 }
 #[export_name = "deflateInit2_"]
 
