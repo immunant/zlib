@@ -353,7 +353,7 @@ fn gzfwrite_length(
 // admission and return conventions. Keep those conventions together so the
 // gzip-state adapter remains the single boundary that reaches the embedded
 // deflater.
-enum GzWriteFlavor {
+pub(crate) enum GzWriteFlavor {
     Bytes,
     Items {
         size: crate::stdlib::z_size_t,
@@ -404,10 +404,10 @@ enum GzWritePlan<'a> {
     },
 }
 
-// Every gzip writer request crosses one persistent codec owner. A flush has
-// no input cursor, while a write retains its bounded caller slice until the
-// adapter has accounted for it.
-enum GzWriteOperation<'a> {
+// Every gzip writer request crosses one persistent codec owner. A flush and
+// close have no caller input cursor, while a write retains its bounded caller
+// slice until the adapter has accounted for it.
+pub(crate) enum GzWriteOperation<'a> {
     Write {
         input: &'a [u8],
         flavor: GzWriteFlavor,
@@ -419,6 +419,7 @@ enum GzWriteOperation<'a> {
         level: ::core::ffi::c_int,
         strategy: ::core::ffi::c_int,
     },
+    Close,
 }
 
 fn gzwrite_plan<'input>(
@@ -1097,11 +1098,40 @@ unsafe fn gz_comp(
 // This is the only ABI-shaped write adapter.  The persistent `GzWriteOwner`
 // supplies the owned input cursor and deflater lifecycle; the adapter merely
 // projects those bounded requests through the legacy gzip/deflate state.
-unsafe fn gzip_write_state_adapter(
+pub(crate) unsafe fn gzip_write_state_adapter(
     state: &mut crate::gzguts_h::gz_state,
     operation: GzWriteOperation<'_>,
 ) -> crate::stdlib::z_size_t {
     let (transaction, result) = match operation {
+        // Close is a write-side codec request followed by the pointer-free
+        // resource transaction.  Keep it in this established state adapter
+        // so the close path does not need a second ABI-shaped gzip facade.
+        GzWriteOperation::Close => {
+            let Some(mut result) = GzWriteCloseResult::begin(state.mode) else {
+                return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
+            };
+            let mut deflater_closed = false;
+            gz_comp(
+                state,
+                crate::zlib_h::Z_FINISH,
+                None,
+                None,
+                Some(GzWriteCloseCodec {
+                    result: &mut result,
+                    deflater_closed: &mut deflater_closed,
+                }),
+                GzSkipMaterialization::None,
+            );
+            let mut resources = GzWriteCloseResources::take(
+                &mut state.buffers,
+                &mut state.fd,
+                &mut state.path,
+                &mut state.msg,
+                &mut state.err,
+            );
+            resources.release_write_buffers(deflater_closed);
+            return result.finish(resources.finish()) as crate::stdlib::z_size_t;
+        }
         GzWriteOperation::Flush { flush } => {
             let policy = GzWritePolicy {
                 mode: state.mode,
@@ -1486,32 +1516,6 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     };
     gzip_write_state_adapter(state, GzWriteOperation::SetParams { level, strategy })
         as ::core::ffi::c_int
-}
-pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let Some(mut result) = GzWriteCloseResult::begin(state.mode) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let mut deflater_closed = false;
-    gz_comp(
-        state,
-        crate::zlib_h::Z_FINISH,
-        None,
-        None,
-        Some(GzWriteCloseCodec {
-            result: &mut result,
-            deflater_closed: &mut deflater_closed,
-        }),
-        GzSkipMaterialization::None,
-    );
-    let mut resources = GzWriteCloseResources::take(
-        &mut state.buffers,
-        &mut state.fd,
-        &mut state.path,
-        &mut state.msg,
-        &mut state.err,
-    );
-    resources.release_write_buffers(deflater_closed);
-    result.finish(resources.finish())
 }
 #[export_name = "gzclose_w"]
 

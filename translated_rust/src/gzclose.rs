@@ -7,7 +7,6 @@ pub use crate::stdlib::off64_t;
 
 pub use crate::src::deflate::internal_state;
 use crate::src::gzread::{gzclose_r, GzReadCloseState};
-pub use crate::src::gzwrite::gzclose_w;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
@@ -64,7 +63,10 @@ pub(crate) unsafe fn gzclose(
             path: &mut state.path,
             fd: &mut state.fd,
         }),
-        Some(GzCloseAction::Write) => crate::src::gzwrite::gzclose_w(state),
+        Some(GzCloseAction::Write) => crate::src::gzwrite::gzip_write_state_adapter(
+            state,
+            crate::src::gzwrite::GzWriteOperation::Close,
+        ) as ::core::ffi::c_int,
         None => return crate::zlib_h::Z_STREAM_ERROR,
     };
     // `gz_open()` allocated this opaque handle as one Box.  The selected
