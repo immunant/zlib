@@ -169,6 +169,41 @@ fn gz_open_state(
     Some((state, oflag, exclusive))
 }
 
+fn gz_open_file(
+    path: &::core::ffi::CStr,
+    mode: ::core::ffi::c_int,
+    exclusive: ::core::ffi::c_int,
+    oflag: ::core::ffi::c_int,
+) -> Option<::core::ffi::c_int> {
+    use std::os::fd::IntoRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut options = std::fs::OpenOptions::new();
+    if mode == crate::gzguts_h::GZ_READ {
+        options.read(true);
+    } else {
+        options.write(true).create(true);
+        if exclusive != 0 {
+            options.create_new(true);
+        } else if mode == crate::gzguts_h::GZ_WRITE {
+            options.truncate(true);
+        } else {
+            options.append(true);
+        }
+    }
+    options.mode(0o666).custom_flags(
+        oflag
+            & (crate::stdlib::O_CLOEXEC
+                | crate::stdlib::O_LARGEFILE
+                | crate::stdlib::O_NONBLOCK),
+    );
+    options
+        .open(std::ffi::OsStr::from_bytes(path.to_bytes()))
+        .ok()
+        .map(|file| file.into_raw_fd())
+}
+
 unsafe extern "C" fn gz_open(
     path: *const ::core::ffi::c_void,
     fd: ::core::ffi::c_int,
@@ -217,7 +252,10 @@ unsafe extern "C" fn gz_open(
                 })
         });
     if fd == -1 as ::core::ffi::c_int {
-        state.fd = crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
+        state.fd = match gz_open_file(path, state.mode, exclusive, oflag) {
+            Some(fd) => fd,
+            None => -1 as ::core::ffi::c_int,
+        };
     } else {
         if oflag & crate::stdlib::O_NONBLOCK != 0 {
             crate::stdlib::fcntl(
