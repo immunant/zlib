@@ -2862,22 +2862,30 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
 ) -> ::core::ffi::c_int {
     inflateUndermine(strm, subvert)
 }
-pub unsafe extern "C" fn inflateValidate(
-    mut strm: crate::zlib_h::z_streamp,
-    mut check: ::core::ffi::c_int,
+fn inflate_validate_state(
+    strm: &mut crate::zlib_h::z_stream_s,
+) -> Option<&mut crate::src::inflate::inflate_state> {
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return None;
+    }
+    let state = strm.state.cast::<crate::src::inflate::inflate_state>();
+    let state = unsafe { state.as_mut() }?;
+    inflate_state_mode_valid(state).then_some(state)
+}
+
+fn inflate_validate_impl(
+    strm: &mut crate::zlib_h::z_stream_s,
+    check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some(state) = inflate_validate_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if check != 0 && (*state).wrap != 0 {
-        (*state).wrap |= 4 as ::core::ffi::c_int;
+    };
+    if check != 0 && state.wrap != 0 {
+        state.wrap |= 4 as ::core::ffi::c_int;
     } else {
-        (*state).wrap &= !(4 as ::core::ffi::c_int);
+        state.wrap &= !(4 as ::core::ffi::c_int);
     }
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateValidate"]
 
@@ -2885,7 +2893,10 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateValidate(strm, check)
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_validate_impl(strm, check)
 }
 fn inflate_mark_impl(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_long {
     ((state.back as ::core::ffi::c_long as ::core::ffi::c_ulong)
