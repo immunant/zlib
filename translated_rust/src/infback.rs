@@ -1267,52 +1267,55 @@ where
     owner.commit(completion)
 }
 
-// Run a complete callback-back request after its ABI stream/state association
-// has been projected into the pointer-free owner.  Keeping this separately
-// named lets later owner work remove that association without moving callback
-// or diagnostic policy into the export wrapper.
+// Run a complete callback-back request after the shared normal-inflate stream
+// adapter has projected the durable decoder payload and owned back window.
+// This implementation owns every callback/window borrow and returns only the
+// pointer-free scalar completion for that adapter to publish.
 fn inflate_back_from_stream<InputVisitor, OutputVisitor>(
-    owner: &mut InflateBackStateOwner<'_>,
+    normal: &mut crate::src::inflate::InflateNormalState,
+    back_window: &mut crate::src::inflate::InflateBackWindow,
     input_visit: InputVisitor,
     output_visit: OutputVisitor,
-) -> InflateBackDecodeResult
+) -> crate::src::inflate::InflateBackDispatchResult
 where
     InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
     OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
 {
-    inflateBack(owner, input_visit, output_visit)
+    let mut owner = InflateBackStateOwner::new(normal, back_window);
+    let result = inflateBack(&mut owner, input_visit, output_visit);
+    crate::src::inflate::InflateBackDispatchResult {
+        status: result.status,
+        message: result.message,
+    }
 }
 
-// This is the complete ABI projection boundary.  It only associates the
-// validated stream with its callback-backed state, builds the pointer-free
-// owner, and publishes the completed diagnostic.  Decoder work remains in
-// `inflate_back_from_stream()` above.
-unsafe fn inflate_back_from_abi_stream<InputVisitor, OutputVisitor>(
-    strm: &mut crate::zlib_h::z_stream_s,
+// This bridges the callback cursor facades supplied by the export to the
+// pointer-free request accepted by the shared stream adapter. Its fields are
+// generic safe visitors, not persistent ABI handles; each is consumed within
+// exactly one dispatch call.
+struct InflateBackStreamDispatch<InputVisitor, OutputVisitor> {
     input_visit: InputVisitor,
     output_visit: OutputVisitor,
-) -> ::core::ffi::c_int
+}
+
+impl<InputVisitor, OutputVisitor> crate::src::inflate::InflateBackDispatch
+    for InflateBackStreamDispatch<InputVisitor, OutputVisitor>
 where
     InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
     OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
 {
-    // Keep this state borrow tied to the stream for the entire invocation.
-    // The decoder tables and owned back-mode workspace cannot outlive either
-    // the stream association check or the callback-backed state.
-    let Some((strm, raw_state)) = crate::src::inflate::inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let (normal, back_window) = (
-        &mut raw_state.decoder.normal,
-        raw_state.back_window.as_mut().expect("inflateBack window"),
-    );
-    let mut owner = InflateBackStateOwner::new(normal, back_window);
-    let result = inflate_back_from_stream(&mut owner, input_visit, output_visit);
-    if let Some(message) = result.message {
-        strm.msg = message.as_ptr().cast_mut().cast();
+    fn dispatch(
+        &mut self,
+        normal: &mut crate::src::inflate::InflateNormalState,
+        back_window: &mut crate::src::inflate::InflateBackWindow,
+    ) -> crate::src::inflate::InflateBackDispatchResult {
+        inflate_back_from_stream(
+            normal,
+            back_window,
+            |consume| (self.input_visit)(consume),
+            |bytes| (self.output_visit)(bytes),
+        )
     }
-    result.status
 }
 #[export_name = "inflateBack"]
 
@@ -1336,9 +1339,8 @@ pub unsafe extern "C" fn inflateBack_ffi(
     } else {
         strm.avail_in as ::core::ffi::c_uint
     };
-    let status = inflate_back_from_abi_stream(
-        strm,
-        |consume| {
+    let mut dispatch = InflateBackStreamDispatch {
+        input_visit: |consume: &mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize| {
             if have == 0 {
                 have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
                 if have == 0 {
@@ -1347,24 +1349,29 @@ pub unsafe extern "C" fn inflateBack_ffi(
                 }
             }
             // The callback cursor is exposed only for this invocation of the
-            // continuation.  It never escapes as a fabricated long-lived
+            // continuation. It never escapes as a fabricated long-lived
             // slice or reference.
             let bytes = ::core::slice::from_raw_parts(next, have as usize);
             let used = consume(bytes).min(bytes.len());
             next = next.wrapping_add(used);
             have = have.wrapping_sub(used as ::core::ffi::c_uint);
         },
-        |bytes| {
+        output_visit: |bytes: &[::core::ffi::c_uchar]| {
             out.expect("non-null function pointer")(
                 out_desc,
                 bytes.as_ptr().cast_mut(),
                 bytes.len() as u32,
             )
         },
+    };
+    let status = crate::src::inflate::inflate_from_stream(
+        strm,
+        crate::src::inflate::InflateStreamRequest::Back(&mut dispatch),
+        None,
     );
     strm.next_in = next.cast::<crate::stdlib::Bytef>();
     strm.avail_in = have as crate::stdlib::uInt;
-    status
+    status.status()
 }
 #[export_name = "inflateBackEnd"]
 

@@ -1505,6 +1505,27 @@ struct InflateDecoderResult {
     publication: Option<HeaderPublication>,
 }
 
+// Callback-back mode borrows only the normal decoder payload and its owned
+// work window after the shared stream/state adapter has validated the opaque
+// association.  Its completion keeps the diagnostic as stable bytes until
+// that adapter publishes the ABI `msg` slot.
+pub(crate) struct InflateBackDispatchResult {
+    pub(crate) status: ::core::ffi::c_int,
+    pub(crate) message: Option<&'static [u8]>,
+}
+
+// The shared stream adapter knows when it is safe to lend callback-back's
+// pointer-free decoder payload.  The callback module supplies the bounded
+// request implementation; this trait deliberately cannot expose any ABI
+// stream, state, cursor, or callback handle.
+pub(crate) trait InflateBackDispatch {
+    fn dispatch(
+        &mut self,
+        normal: &mut InflateNormalState,
+        window: &mut InflateBackWindow,
+    ) -> InflateBackDispatchResult;
+}
+
 // Both the public bounded decoder and the exported fast-path symbol need the
 // same stream/state association.  Keep their selector pointer-free so that
 // all ABI cursor construction and publication remains at this one adapter.
@@ -1520,6 +1541,7 @@ pub(crate) enum InflateStreamRequest<'request> {
     },
     SetDictionary(&'request [crate::stdlib::Bytef]),
     Header,
+    Back(&'request mut dyn InflateBackDispatch),
 }
 
 // The ABI adapter can service both streaming and scalar normal-inflate
@@ -1531,7 +1553,7 @@ pub(crate) enum InflateStreamResult {
 }
 
 impl InflateStreamResult {
-    fn status(self) -> ::core::ffi::c_int {
+    pub(crate) fn status(self) -> ::core::ffi::c_int {
         match self {
             Self::Status(status) => status,
             Self::Scalar(result) => result.status(),
@@ -3271,7 +3293,8 @@ pub(crate) unsafe fn inflate_from_stream(
             | InflateStreamRequest::Reset(_)
             | InflateStreamRequest::Dictionary { .. }
             | InflateStreamRequest::SetDictionary(_)
-            | InflateStreamRequest::Header => {
+            | InflateStreamRequest::Header
+            | InflateStreamRequest::Back(_) => {
                 InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR)
             }
         };
@@ -3306,6 +3329,17 @@ pub(crate) unsafe fn inflate_from_stream(
             header.done = 0;
         }
         return InflateStreamResult::Status(crate::zlib_h::Z_OK);
+    }
+    if let InflateStreamRequest::Back(dispatch) = request {
+        strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        let Some(back_window) = state.back_window.as_mut() else {
+            return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
+        };
+        let result = dispatch.dispatch(&mut state.decoder.normal, back_window);
+        if let Some(message) = result.message {
+            strm.msg = message.as_ptr().cast_mut().cast();
+        }
+        return InflateStreamResult::Status(result.status);
     }
     if let InflateStreamRequest::Reset(kind) = request {
         // Reset shares this established stream/state projection with normal
