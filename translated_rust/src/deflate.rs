@@ -1247,6 +1247,39 @@ fn deflate_slow_can_search_match(
         && can_search_hash_match(hash_head, strstart, w_size)
 }
 
+/// Insert the current three-byte string into the deflate hash chains.
+///
+/// The callback-backed buffers are established by the adapter below.  This
+/// core keeps the actual update slice-only and preflights every access before
+/// changing the rolling hash or either chain, so malformed bounded storage
+/// leaves the working set unchanged.
+fn deflate_slow_insert_hash_core(
+    window: &[crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    strstart: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    ins_h: &mut crate::stdlib::uInt,
+) -> Option<crate::src::deflate::IPos> {
+    let byte_index = usize::try_from(strstart.wrapping_add(2)).ok()?;
+    let next_byte = *window.get(byte_index)? as crate::stdlib::uInt;
+    let next_hash = (*ins_h << hash_shift ^ next_byte) & hash_mask;
+    let hash_index = usize::try_from(next_hash).ok()?;
+    let prev_index = usize::try_from(strstart & w_mask).ok()?;
+    let hash_head = *head.get(hash_index)?;
+
+    // Check both mutable destinations before mutating either one.  The
+    // `get()` above also avoids changing `ins_h` on a malformed view.
+    prev.get(prev_index)?;
+    head.get(hash_index)?;
+    *prev.get_mut(prev_index)? = hash_head;
+    *head.get_mut(hash_index)? = strstart as crate::src::deflate::Posf;
+    *ins_h = next_hash;
+    Some(hash_head as crate::src::deflate::IPos)
+}
+
 fn read_buf_len(
     available: ::core::ffi::c_uint,
     requested: ::core::ffi::c_uint,
@@ -5099,16 +5132,33 @@ unsafe extern "C" fn deflate_slow(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                    (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                ) as isize) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            let ref mut c2rust_fresh35 = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize);
-            *c2rust_fresh35 = *(*s).head.wrapping_add((*s).ins_h as usize);
-            hash_head = *c2rust_fresh35 as crate::src::deflate::IPos;
-            *(*s).head.wrapping_add((*s).ins_h as usize) =
-                (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+            let state = &mut *s;
+            // Keep the callback-backed working-set crossings short and local
+            // to this strategy.  The insertion itself is slice-only.
+            let inserted = if state.window.is_null() || state.head.is_null() || state.prev.is_null()
+            {
+                None
+            } else {
+                let window =
+                    &*core::ptr::slice_from_raw_parts(state.window, state.window_size as usize);
+                let head =
+                    &mut *core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
+                let prev =
+                    &mut *core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
+                deflate_slow_insert_hash_core(
+                    window,
+                    head,
+                    prev,
+                    state.strstart,
+                    state.w_mask,
+                    state.hash_shift,
+                    state.hash_mask,
+                    &mut state.ins_h,
+                )
+            };
+            if let Some(inserted) = inserted {
+                hash_head = inserted;
+            }
         }
         (*s).prev_length = (*s).match_length;
         (*s).prev_match = (*s).match_start as crate::src::deflate::IPos;
@@ -5165,18 +5215,35 @@ unsafe extern "C" fn deflate_slow(
             loop {
                 (*s).strstart = (*s).strstart.wrapping_add(1);
                 if (*s).strstart <= max_insert {
-                    (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                        ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                            (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int)
-                                as crate::stdlib::uInt,
-                        ) as isize) as crate::stdlib::uInt)
-                        & (*s).hash_mask;
-                    let ref mut c2rust_fresh39 =
-                        *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize);
-                    *c2rust_fresh39 = *(*s).head.wrapping_add((*s).ins_h as usize);
-                    hash_head = *c2rust_fresh39 as crate::src::deflate::IPos;
-                    *(*s).head.wrapping_add((*s).ins_h as usize) =
-                        (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                    let state = &mut *s;
+                    hash_head =
+                        if state.window.is_null() || state.head.is_null() || state.prev.is_null() {
+                            NIL as crate::src::deflate::IPos
+                        } else {
+                            let window = &*core::ptr::slice_from_raw_parts(
+                                state.window,
+                                state.window_size as usize,
+                            );
+                            let head = &mut *core::ptr::slice_from_raw_parts_mut(
+                                state.head,
+                                state.hash_size as usize,
+                            );
+                            let prev = &mut *core::ptr::slice_from_raw_parts_mut(
+                                state.prev,
+                                state.w_size as usize,
+                            );
+                            deflate_slow_insert_hash_core(
+                                window,
+                                head,
+                                prev,
+                                state.strstart,
+                                state.w_mask,
+                                state.hash_shift,
+                                state.hash_mask,
+                                &mut state.ins_h,
+                            )
+                            .unwrap_or(NIL as crate::src::deflate::IPos)
+                        };
                 }
                 (*s).prev_length = (*s).prev_length.wrapping_sub(1);
                 if !((*s).prev_length != 0 as crate::stdlib::uInt) {
@@ -5636,11 +5703,12 @@ mod tests {
         deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_next_scan_indices, deflate_rle_refill_action, deflate_rle_scan_indices,
         deflate_rle_scan_match, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
-        deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_is_usable,
-        deflate_state_status_valid, deflate_tally_literal, deflate_tally_match,
-        deflate_version_matches, dictionary_tail_offset, drain_pending,
-        fill_window_available_space, fill_window_cursor, fill_window_has_insertable_match,
-        fill_window_hash_update, fill_window_high_water_after_zero, fill_window_insert_after_slide,
+        deflate_should_return_buf_error, deflate_slow_can_search_match,
+        deflate_slow_insert_hash_core, deflate_state_is_usable, deflate_state_status_valid,
+        deflate_tally_literal, deflate_tally_match, deflate_version_matches,
+        dictionary_tail_offset, drain_pending, fill_window_available_space, fill_window_cursor,
+        fill_window_has_insertable_match, fill_window_hash_update,
+        fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_reinsert, fill_window_should_refill,
         fill_window_should_slide, fill_window_slide, fill_window_state_after_slide,
         fill_window_zero, fill_window_zero_range, flush_pending_core, gzip_custom_header_bytes,
@@ -6480,6 +6548,38 @@ mod tests {
             0,
             w_size,
         ));
+    }
+
+    #[test]
+    fn deflate_slow_hash_insert_updates_the_rolling_hash_and_chain_order() {
+        let window = [10, 20, 42, 99];
+        let mut head = [3, 4, 77, 6, 7, 8, 9, 10];
+        let mut prev = [0; 4];
+        let mut ins_h = 1;
+
+        let hash_head =
+            deflate_slow_insert_hash_core(&window, &mut head, &mut prev, 0, 3, 5, 7, &mut ins_h);
+
+        assert_eq!(hash_head, Some(77));
+        assert_eq!(ins_h, 2);
+        assert_eq!(prev[0], 77);
+        assert_eq!(head[2], 0);
+    }
+
+    #[test]
+    fn deflate_slow_hash_insert_rejects_short_views_without_mutation() {
+        let window = [10, 20];
+        let mut head = [3, 4, 77];
+        let mut prev = [8, 9];
+        let mut ins_h = 1;
+
+        assert_eq!(
+            deflate_slow_insert_hash_core(&window, &mut head, &mut prev, 0, 1, 5, 7, &mut ins_h,),
+            None,
+        );
+        assert_eq!(head, [3, 4, 77]);
+        assert_eq!(prev, [8, 9]);
+        assert_eq!(ins_h, 1);
     }
 
     #[test]

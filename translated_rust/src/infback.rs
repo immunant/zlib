@@ -80,6 +80,22 @@ fn inflate_back_window_size(window_bits: ::core::ffi::c_int) -> Option<::core::f
     }
 }
 
+/// Check the portion of an inflateBack state that describes its caller-owned
+/// history window at initialization.
+///
+/// `inflateBack` is the one inflate entry point whose window is supplied by
+/// its caller rather than by `zalloc`.  Keeping that distinction checked at
+/// the setup seam prevents the initialization fields from drifting apart as
+/// the eventual caller-window owner is introduced. `inflateBack` never
+/// advances `wnext`: it fills and flushes the supplied window as a whole.
+fn inflate_back_caller_window_is_valid(state: &crate::src::inflate::inflate_state) -> bool {
+    state.window_ownership == crate::src::inflate::WindowOwnership::CallerBorrowed.raw()
+        && !state.window.is_null()
+        && inflate_back_window_size(state.wbits as ::core::ffi::c_int) == Some(state.wsize)
+        && state.wnext == 0
+        && state.whave <= state.wsize
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct InflateBackInitPlan {
     window_bits: ::core::ffi::c_int,
@@ -449,6 +465,7 @@ fn inflate_back_initialize_state(
     state.wnext = 0;
     state.whave = 0;
     state.sane = 1;
+    debug_assert!(inflate_back_caller_window_is_valid(state));
 }
 #[export_name = "inflateBackInit_"]
 
@@ -1256,12 +1273,13 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 mod tests {
     use super::{
         inflate_back_align_to_byte_boundary, inflate_back_block_header,
-        inflate_back_code_length_repeat, inflate_back_code_length_repeat_extra_bits,
-        inflate_back_code_length_repeat_plan, inflate_back_consume_input_byte,
-        inflate_back_copy_count, inflate_back_copy_match, inflate_back_discard_bits,
-        inflate_back_distance_exceeds_window, inflate_back_fill_code_length_run,
-        inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
-        inflate_back_init_plan, inflate_back_initial_input_count, inflate_back_initialize_state,
+        inflate_back_caller_window_is_valid, inflate_back_code_length_repeat,
+        inflate_back_code_length_repeat_extra_bits, inflate_back_code_length_repeat_plan,
+        inflate_back_consume_input_byte, inflate_back_copy_count, inflate_back_copy_match,
+        inflate_back_discard_bits, inflate_back_distance_exceeds_window,
+        inflate_back_fill_code_length_run, inflate_back_finish_flush_status,
+        inflate_back_init_metadata_is_valid, inflate_back_init_plan,
+        inflate_back_initial_input_count, inflate_back_initialize_state,
         inflate_back_litlen_action, inflate_back_low_bits, inflate_back_match_copy_plan,
         inflate_back_root_table_index, inflate_back_stored_block_length,
         inflate_back_subtable_index, inflate_back_take_bits, inflate_back_window_bits_are_valid,
@@ -1372,6 +1390,29 @@ mod tests {
         for window_bits in [::core::ffi::c_int::MIN, -1, 7, 16, ::core::ffi::c_int::MAX] {
             assert_eq!(inflate_back_window_size(window_bits), None);
         }
+    }
+
+    #[test]
+    fn inflate_back_caller_window_state_validation_rejects_mismatched_metadata() {
+        let mut state = crate::src::inflate::inflate_state::newly_allocated();
+        let mut window = [0_u8; 256];
+        state.wbits = 8;
+        state.wsize = window.len() as ::core::ffi::c_uint;
+        state.window = window.as_mut_ptr();
+        state.window_ownership = crate::src::inflate::WindowOwnership::CallerBorrowed.raw();
+
+        assert!(inflate_back_caller_window_is_valid(&state));
+
+        state.window_ownership = crate::src::inflate::WindowOwnership::CallbackOwned.raw();
+        assert!(!inflate_back_caller_window_is_valid(&state));
+
+        state.window_ownership = crate::src::inflate::WindowOwnership::CallerBorrowed.raw();
+        state.wsize = 512;
+        assert!(!inflate_back_caller_window_is_valid(&state));
+
+        state.wsize = window.len() as ::core::ffi::c_uint;
+        state.wnext = 1;
+        assert!(!inflate_back_caller_window_is_valid(&state));
     }
 
     #[test]
