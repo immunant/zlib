@@ -3253,7 +3253,11 @@ pub unsafe extern "C" fn inflate_table(
     let table_entries = ::core::slice::from_raw_parts_mut(table_start, table_len);
     match inflate_table_impl(type_0, lens, codes, table_entries, bits, work) {
         Ok(used) => {
-            *table = table_start.wrapping_add(used);
+            // `inflate_table_impl()` only reports entries it initialized in
+            // the bounded table view above. Publish its cursor through that
+            // checked slice rather than rebuilding it with raw-pointer
+            // arithmetic.
+            *table = table_entries[used..].as_mut_ptr();
             0
         }
         Err(error) => error,
