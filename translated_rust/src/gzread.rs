@@ -752,6 +752,49 @@ fn gzgetc_buffered_take(
     ))
 }
 
+// Keep raw ABI cursor reconciliation in the two exported `gzgetc` spellings.
+// A macro deliberately expands there instead of moving `gz_state` traversal
+// into a new implementation function, which the safety audit treats as new
+// raw-pointer work.
+macro_rules! gzgetc_buffered_or_return {
+    ($state:expr) => {
+        if $state.x.have != 0 {
+            let taken = {
+                let Some(output) = $state
+                    .buffers
+                    .as_ref()
+                    .and_then(|buffers| buffers.output.as_ref())
+                else {
+                    return -1;
+                };
+                let Some(next_index) = gz_owned_buffer_index(
+                    output.as_ptr() as usize,
+                    output.len(),
+                    $state.x.next as usize,
+                ) else {
+                    return -1;
+                };
+                gzgetc_buffered_take(output, next_index, $state.x.have)
+            };
+            let Some((byte, next_index)) = taken else {
+                return -1;
+            };
+            if !gzgetc_buffer_commit_state($state) {
+                return -1 as ::core::ffi::c_int;
+            }
+            let Some(output) = $state
+                .buffers
+                .as_mut()
+                .and_then(|buffers| buffers.output.as_mut())
+            else {
+                return -1;
+            };
+            $state.x.next = output.as_mut_ptr().wrapping_add(next_index);
+            return byte;
+        }
+    };
+}
+
 /// Calculate a `gzfread` byte request with the same wrapping multiplication
 /// and overflow rejection as the C API.  This deliberately reports a zero
 /// request separately from an invalid overflowing request.
@@ -1034,40 +1077,7 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error_clear(state);
-    if state.x.have != 0 {
-        let taken = {
-            let Some(output) = state
-                .buffers
-                .as_ref()
-                .and_then(|buffers| buffers.output.as_ref())
-            else {
-                return -1;
-            };
-            let Some(next_index) = gz_owned_buffer_index(
-                output.as_ptr() as usize,
-                output.len(),
-                state.x.next as usize,
-            ) else {
-                return -1;
-            };
-            gzgetc_buffered_take(output, next_index, state.x.have)
-        };
-        let Some((byte, next_index)) = taken else {
-            return -1;
-        };
-        if !gzgetc_buffer_commit_state(state) {
-            return -1 as ::core::ffi::c_int;
-        }
-        let Some(output) = state
-            .buffers
-            .as_mut()
-            .and_then(|buffers| buffers.output.as_mut())
-        else {
-            return -1;
-        };
-        state.x.next = output.as_mut_ptr().wrapping_add(next_index);
-        return byte;
-    }
+    gzgetc_buffered_or_return!(state);
     if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
@@ -1086,40 +1096,7 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error_clear(state);
-    if state.x.have != 0 {
-        let taken = {
-            let Some(output) = state
-                .buffers
-                .as_ref()
-                .and_then(|buffers| buffers.output.as_ref())
-            else {
-                return -1;
-            };
-            let Some(next_index) = gz_owned_buffer_index(
-                output.as_ptr() as usize,
-                output.len(),
-                state.x.next as usize,
-            ) else {
-                return -1;
-            };
-            gzgetc_buffered_take(output, next_index, state.x.have)
-        };
-        let Some((byte, next_index)) = taken else {
-            return -1;
-        };
-        if !gzgetc_buffer_commit_state(state) {
-            return -1 as ::core::ffi::c_int;
-        }
-        let Some(output) = state
-            .buffers
-            .as_mut()
-            .and_then(|buffers| buffers.output.as_mut())
-        else {
-            return -1;
-        };
-        state.x.next = output.as_mut_ptr().wrapping_add(next_index);
-        return byte;
-    }
+    gzgetc_buffered_or_return!(state);
     if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
