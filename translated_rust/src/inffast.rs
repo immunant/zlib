@@ -28,6 +28,38 @@ pub(crate) struct InflateFastCompletion {
     pub(crate) output_len: usize,
 }
 
+// Cursor and scalar publication must stay separate from the ABI stream
+// projection.  This is deliberately a pointer-free value: both the direct
+// fast entry point and a future owned inflate stream can consume the same
+// completion without retaining a caller cursor or an opaque state borrow.
+pub(crate) struct InflateFastStreamUpdate {
+    pub(crate) input_used: usize,
+    pub(crate) input_remaining: usize,
+    pub(crate) output_used: usize,
+    pub(crate) output_remaining: usize,
+    pub(crate) hold: u64,
+    pub(crate) bits: u32,
+    pub(crate) exit: FastExit,
+}
+
+impl InflateFastStreamUpdate {
+    pub(crate) fn from_completion(completion: InflateFastCompletion) -> Self {
+        Self {
+            input_used: completion.result.input_used,
+            input_remaining: completion
+                .input_len
+                .wrapping_sub(completion.result.input_used),
+            output_used: completion.result.output_used,
+            output_remaining: completion
+                .output_len
+                .wrapping_sub(completion.result.output_used),
+            hold: completion.hold,
+            bits: completion.bits,
+            exit: completion.result.exit,
+        }
+    }
+}
+
 // Normal inflate keeps its history allocation separate from the caller's
 // output.  inflateBack, however, deliberately uses its caller window for
 // both roles.  Represent that relationship explicitly instead of forming
@@ -389,18 +421,14 @@ pub(crate) unsafe fn inflate_fast_from_stream(
     let Some(request) = request else {
         return;
     };
-    let completion = inflate_fast_from_abi_boundary(request);
-    strm.next_in = strm.next_in.wrapping_add(completion.result.input_used);
-    strm.avail_in = completion
-        .input_len
-        .wrapping_sub(completion.result.input_used) as crate::stdlib::uInt;
-    strm.next_out = output_start.wrapping_add(completion.result.output_used);
-    strm.avail_out = completion
-        .output_len
-        .wrapping_sub(completion.result.output_used) as crate::stdlib::uInt;
-    state.hold = completion.hold;
-    state.bits = completion.bits;
-    match completion.result.exit {
+    let update = InflateFastStreamUpdate::from_completion(inflate_fast_from_abi_boundary(request));
+    strm.next_in = strm.next_in.wrapping_add(update.input_used);
+    strm.avail_in = update.input_remaining as crate::stdlib::uInt;
+    strm.next_out = output_start.wrapping_add(update.output_used);
+    strm.avail_out = update.output_remaining as crate::stdlib::uInt;
+    state.hold = update.hold;
+    state.bits = update.bits;
+    match update.exit {
         FastExit::Continue => {}
         FastExit::Type => state.mode = TYPE,
         FastExit::InvalidDistance => {
