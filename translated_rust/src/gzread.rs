@@ -597,6 +597,31 @@ fn gz_shift_pushback_buffer(buf: &mut [crate::stdlib::Bytef], have: usize) -> us
     next
 }
 
+enum GzUngetcPlan {
+    Empty { write_index: usize },
+    Full,
+    Existing { shift_to_end: bool },
+}
+
+fn gzungetc_pushback_plan(
+    have: crate::stdlib::uInt,
+    size: crate::stdlib::uInt,
+    next_at_out: bool,
+) -> GzUngetcPlan {
+    let capacity = size << 1 as ::core::ffi::c_int;
+    if have == 0 as crate::stdlib::uInt {
+        GzUngetcPlan::Empty {
+            write_index: capacity.wrapping_sub(1 as crate::stdlib::uInt) as usize,
+        }
+    } else if have == capacity {
+        GzUngetcPlan::Full
+    } else {
+        GzUngetcPlan::Existing {
+            shift_to_end: next_at_out,
+        }
+    }
+}
+
 fn gzgets_copy_len(
     buffered: &[crate::stdlib::Bytef],
     left: ::core::ffi::c_uint,
@@ -766,32 +791,37 @@ pub unsafe extern "C" fn gzungetc_ffi(
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).x.have == 0 as ::core::ffi::c_uint {
-        (*state).x.have = 1 as ::core::ffi::c_uint;
-        (*state).x.next = (*state)
-            .out
-            .wrapping_add(((*state).size << 1 as ::core::ffi::c_int) as usize)
-            .wrapping_sub(1);
-        *(*state).x.next = c as ::core::ffi::c_uchar;
-        (*state).x.pos -= 1;
-        (*state).past = 0 as ::core::ffi::c_int;
-        return c;
-    }
-    if (*state).x.have == (*state).size << 1 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_DATA_ERROR,
-            b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).x.next == (*state).out {
-        let out = ::core::slice::from_raw_parts_mut(
-            (*state).out as *mut crate::stdlib::Bytef,
-            ((*state).size << 1 as ::core::ffi::c_int) as usize,
-        );
-        let next = gz_shift_pushback_buffer(out, (*state).x.have as usize);
-        (*state).x.next = (*state).out.wrapping_add(next);
+    match gzungetc_pushback_plan(
+        (*state).x.have,
+        (*state).size,
+        (*state).x.next == (*state).out,
+    ) {
+        GzUngetcPlan::Empty { write_index } => {
+            (*state).x.have = 1 as ::core::ffi::c_uint;
+            (*state).x.next = (*state).out.wrapping_add(write_index);
+            *(*state).x.next = c as ::core::ffi::c_uchar;
+            (*state).x.pos -= 1;
+            (*state).past = 0 as ::core::ffi::c_int;
+            return c;
+        }
+        GzUngetcPlan::Full => {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_DATA_ERROR,
+                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        GzUngetcPlan::Existing { shift_to_end } => {
+            if shift_to_end {
+                let out = ::core::slice::from_raw_parts_mut(
+                    (*state).out as *mut crate::stdlib::Bytef,
+                    ((*state).size << 1 as ::core::ffi::c_int) as usize,
+                );
+                let next = gz_shift_pushback_buffer(out, (*state).x.have as usize);
+                (*state).x.next = (*state).out.wrapping_add(next);
+            }
+        }
     }
     (*state).x.have = (*state).x.have.wrapping_add(1);
     (*state).x.next = (*state).x.next.wrapping_sub(1);

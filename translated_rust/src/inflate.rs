@@ -570,6 +570,35 @@ fn inflate_data_type(
         })
 }
 
+fn inflate_should_update_window(
+    wsize: ::core::ffi::c_uint,
+    produced: ::core::ffi::c_uint,
+    mode: crate::src::inflate::inflate_mode,
+    flush: ::core::ffi::c_int,
+) -> bool {
+    wsize != 0
+        || produced != 0
+            && (mode as ::core::ffi::c_uint) < crate::src::inflate::BAD as ::core::ffi::c_uint
+            && ((mode as ::core::ffi::c_uint) < crate::src::inflate::CHECK as ::core::ffi::c_uint
+                || flush != crate::zlib_h::Z_FINISH)
+}
+
+fn inflate_finish_return(
+    ret: ::core::ffi::c_int,
+    consumed: ::core::ffi::c_uint,
+    produced: ::core::ffi::c_uint,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if (consumed == 0 as ::core::ffi::c_uint && produced == 0 as ::core::ffi::c_uint
+        || flush == crate::zlib_h::Z_FINISH)
+        && ret == crate::zlib_h::Z_OK
+    {
+        crate::zlib_h::Z_BUF_ERROR
+    } else {
+        ret
+    }
+}
+
 fn inflate_state_fields_are_valid(state: &crate::src::inflate::inflate_state) -> bool {
     inflate_mode_is_valid(state.mode)
 }
@@ -2154,20 +2183,9 @@ pub unsafe extern "C" fn inflate_ffi(
     (*strm).avail_in = have as crate::stdlib::uInt;
     (*state).hold = hold;
     (*state).bits = bits;
-    if (*state).wsize != 0
-        || out != (*strm).avail_out
-            && ((*state).mode as ::core::ffi::c_uint)
-                < crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
-            && (((*state).mode as ::core::ffi::c_uint)
-                < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
-                || flush != crate::zlib_h::Z_FINISH)
-    {
-        if updatewindow(
-            strm,
-            (*strm).next_out,
-            out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint),
-        ) != 0
-        {
+    let produced = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+    if inflate_should_update_window((*state).wsize, produced, (*state).mode, flush) {
+        if updatewindow(strm, (*strm).next_out, produced) != 0 {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2194,13 +2212,7 @@ pub unsafe extern "C" fn inflate_ffi(
         (*strm).adler = (*state).check as crate::stdlib::uLong;
     }
     (*strm).data_type = inflate_data_type((*state).bits, (*state).last, (*state).mode);
-    if (in_0 == 0 as ::core::ffi::c_uint && out == 0 as ::core::ffi::c_uint
-        || flush == crate::zlib_h::Z_FINISH)
-        && ret == crate::zlib_h::Z_OK
-    {
-        ret = crate::zlib_h::Z_BUF_ERROR;
-    }
-    return ret;
+    return inflate_finish_return(ret, in_0, out, flush);
 }
 #[export_name = "inflateEnd"]
 
@@ -2362,6 +2374,39 @@ fn syncsearch(
     }
     (got, next)
 }
+
+struct InflateSyncDrain {
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    bytes: [::core::ffi::c_uchar; 4],
+    len: usize,
+}
+
+fn inflate_sync_drain_pending_bytes(
+    mut hold: ::core::ffi::c_ulong,
+    mut bits: ::core::ffi::c_uint,
+) -> InflateSyncDrain {
+    let discard = bits & 7 as ::core::ffi::c_uint;
+    hold >>= discard;
+    bits = bits.wrapping_sub(discard);
+
+    let mut bytes = [0 as ::core::ffi::c_uchar; 4];
+    let mut len = 0usize;
+    while bits >= 8 as ::core::ffi::c_uint && len < bytes.len() {
+        bytes[len] = hold as ::core::ffi::c_uchar;
+        len += 1;
+        hold >>= 8 as ::core::ffi::c_int;
+        bits = bits.wrapping_sub(8 as ::core::ffi::c_uint);
+    }
+
+    InflateSyncDrain {
+        hold,
+        bits,
+        bytes,
+        len,
+    }
+}
+
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
@@ -2369,7 +2414,6 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     let mut flags: ::core::ffi::c_int = 0;
     let mut in_0: ::core::ffi::c_ulong = 0;
     let mut out: ::core::ffi::c_ulong = 0;
-    let mut buf: [::core::ffi::c_uchar; 4] = [0; 4];
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
@@ -2388,20 +2432,11 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
             != crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             state_ref.mode = crate::src::inflate::SYNC;
-            state_ref.hold >>= state_ref.bits & 7 as ::core::ffi::c_uint;
-            state_ref.bits = state_ref
-                .bits
-                .wrapping_sub(state_ref.bits & 7 as ::core::ffi::c_uint);
-            len = 0 as ::core::ffi::c_uint;
-            while state_ref.bits >= 8 as ::core::ffi::c_uint {
-                let c2rust_fresh35 = len;
-                len = len.wrapping_add(1);
-                buf[c2rust_fresh35 as usize] = state_ref.hold as ::core::ffi::c_uchar;
-                state_ref.hold >>= 8 as ::core::ffi::c_int;
-                state_ref.bits = state_ref.bits.wrapping_sub(8 as ::core::ffi::c_uint);
-            }
+            let drain = inflate_sync_drain_pending_bytes(state_ref.hold, state_ref.bits);
+            state_ref.hold = drain.hold;
+            state_ref.bits = drain.bits;
             state_ref.have = 0 as ::core::ffi::c_uint;
-            let (have, _) = syncsearch(state_ref.have, &buf[..len as usize]);
+            let (have, _) = syncsearch(state_ref.have, &drain.bytes[..drain.len]);
             state_ref.have = have;
         }
         let input = if strm_ref.avail_in == 0 as crate::stdlib::uInt {
