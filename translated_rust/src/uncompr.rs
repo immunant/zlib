@@ -96,10 +96,7 @@ pub unsafe extern "C" fn uncompress2_z(
             };
             len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
         }
-        err = crate::src::inflate::inflate(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            crate::zlib_h::Z_NO_FLUSH,
-        );
+        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH);
         if err != crate::zlib_h::Z_OK {
             break;
         }

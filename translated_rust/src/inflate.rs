@@ -537,12 +537,43 @@ unsafe extern "C" fn updatewindow(
     }
     return 0 as ::core::ffi::c_int;
 }
-pub unsafe extern "C" fn inflate(
-    mut strm: crate::zlib_h::z_streamp,
+struct InflateStream<'a>(&'a mut crate::zlib_h::z_stream_s);
+
+impl ::core::ops::Deref for InflateStream<'_> {
+    type Target = crate::zlib_h::z_stream_s;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl ::core::ops::DerefMut for InflateStream<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+
+struct InflateState<'a>(&'a mut crate::src::inflate::inflate_state);
+
+impl ::core::ops::Deref for InflateState<'_> {
+    type Target = crate::src::inflate::inflate_state;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl ::core::ops::DerefMut for InflateState<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+
+pub unsafe fn inflate(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
+    let mut strm = InflateStream(strm);
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
@@ -587,13 +618,13 @@ pub unsafe extern "C" fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if inflateStateCheck(strm) != 0
+    if inflateStateCheck(strm.0) != 0
         || (*strm).next_out.is_null()
         || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let mut state = InflateState(&mut *((*strm).state as *mut crate::src::inflate::inflate_state));
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
     {
@@ -1719,7 +1750,7 @@ pub unsafe extern "C" fn inflate(
                                             (*state).hold = hold;
                                             (*state).bits = bits;
                                             crate::src::inffast::inflate_fast(
-                                                strm as *mut crate::zlib_h::z_stream_s,
+                                                strm.0,
                                                 out,
                                             );
                                             put = (*strm).next_out as *mut ::core::ffi::c_uchar;
@@ -2220,7 +2251,7 @@ pub unsafe extern "C" fn inflate(
                 || flush != crate::zlib_h::Z_FINISH)
     {
         if updatewindow(
-            strm,
+            strm.0,
             (*strm).next_out,
             out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint),
         ) != 0
@@ -2287,7 +2318,10 @@ pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflate(strm, flush)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    inflate(&mut *strm, flush)
 }
 pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
