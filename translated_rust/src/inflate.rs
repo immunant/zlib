@@ -270,6 +270,72 @@ pub(crate) fn inflate_code_length_repeat_fits(
     have.wrapping_add(copy) <= nlen.wrapping_add(ndist)
 }
 
+struct InflateGzipHeaderFieldScan {
+    consumed: usize,
+    terminated: bool,
+}
+
+fn inflate_gzip_header_field_scan(input: &[crate::stdlib::Bytef]) -> InflateGzipHeaderFieldScan {
+    match input.iter().position(|&byte| byte == 0) {
+        Some(index) => InflateGzipHeaderFieldScan {
+            consumed: index + 1,
+            terminated: true,
+        },
+        None => InflateGzipHeaderFieldScan {
+            consumed: input.len(),
+            terminated: false,
+        },
+    }
+}
+
+enum InflateMatchCopySource {
+    Output { distance: crate::stdlib::uInt },
+    Window { index: crate::stdlib::uInt },
+}
+
+struct InflateMatchCopyPlan {
+    source: InflateMatchCopySource,
+    copy: crate::stdlib::uInt,
+}
+
+fn inflate_match_copy_plan(
+    offset: crate::stdlib::uInt,
+    produced: crate::stdlib::uInt,
+    whave: crate::stdlib::uInt,
+    wnext: crate::stdlib::uInt,
+    wsize: crate::stdlib::uInt,
+    length: crate::stdlib::uInt,
+    left: crate::stdlib::uInt,
+    sane: bool,
+) -> Option<InflateMatchCopyPlan> {
+    let mut copy;
+    let source;
+    if offset > produced {
+        copy = offset.wrapping_sub(produced);
+        if copy > whave && sane {
+            return None;
+        }
+        let index = if copy > wnext {
+            copy = copy.wrapping_sub(wnext);
+            wsize.wrapping_sub(copy)
+        } else {
+            wnext.wrapping_sub(copy)
+        };
+        if copy > length {
+            copy = length;
+        }
+        source = InflateMatchCopySource::Window { index };
+    } else {
+        source = InflateMatchCopySource::Output { distance: offset };
+        copy = length;
+    }
+    if copy > left {
+        copy = left;
+    }
+
+    Some(InflateMatchCopyPlan { source, copy })
+}
+
 fn inflate_direct_copy_len(
     length: ::core::ffi::c_uint,
     have: ::core::ffi::c_uint,
@@ -1794,11 +1860,14 @@ pub unsafe extern "C" fn inflate_ffi(
                     if have == 0 as ::core::ffi::c_uint {
                         break;
                     }
-                    copy = 0 as ::core::ffi::c_uint;
-                    loop {
-                        let c2rust_fresh5 = copy;
-                        copy = copy.wrapping_add(1);
-                        len = *next.offset(c2rust_fresh5 as isize) as ::core::ffi::c_uint;
+                    let input = ::core::slice::from_raw_parts(
+                        next,
+                        have as crate::__stddef_size_t_h::size_t,
+                    );
+                    let scan = inflate_gzip_header_field_scan(input);
+                    copy = scan.consumed as ::core::ffi::c_uint;
+                    for &byte in &input[..scan.consumed] {
+                        len = byte as ::core::ffi::c_uint;
                         if !(*state).head.is_null()
                             && !(*(*state).head).name.is_null()
                             && (*state).length < (*(*state).head).name_max
@@ -1807,9 +1876,6 @@ pub unsafe extern "C" fn inflate_ffi(
                             (*state).length = (*state).length.wrapping_add(1);
                             *(*(*state).head).name.offset(c2rust_fresh6 as isize) =
                                 len as crate::stdlib::Bytef;
-                        }
-                        if !(len != 0 && copy < have) {
-                            break;
                         }
                     }
                     if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
@@ -1821,7 +1887,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     }
                     have = have.wrapping_sub(copy);
                     next = next.offset(copy as isize);
-                    if len != 0 {
+                    if !scan.terminated {
                         break;
                     }
                 } else if !(*state).head.is_null() {
@@ -1908,11 +1974,14 @@ pub unsafe extern "C" fn inflate_ffi(
                     if have == 0 as ::core::ffi::c_uint {
                         break;
                     }
-                    copy = 0 as ::core::ffi::c_uint;
-                    loop {
-                        let c2rust_fresh7 = copy;
-                        copy = copy.wrapping_add(1);
-                        len = *next.offset(c2rust_fresh7 as isize) as ::core::ffi::c_uint;
+                    let input = ::core::slice::from_raw_parts(
+                        next,
+                        have as crate::__stddef_size_t_h::size_t,
+                    );
+                    let scan = inflate_gzip_header_field_scan(input);
+                    copy = scan.consumed as ::core::ffi::c_uint;
+                    for &byte in &input[..scan.consumed] {
+                        len = byte as ::core::ffi::c_uint;
                         if !(*state).head.is_null()
                             && !(*(*state).head).comment.is_null()
                             && (*state).length < (*(*state).head).comm_max
@@ -1921,9 +1990,6 @@ pub unsafe extern "C" fn inflate_ffi(
                             (*state).length = (*state).length.wrapping_add(1);
                             *(*(*state).head).comment.offset(c2rust_fresh8 as isize) =
                                 len as crate::stdlib::Bytef;
-                        }
-                        if !(len != 0 && copy < have) {
-                            break;
                         }
                     }
                     if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
@@ -1935,7 +2001,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     }
                     have = have.wrapping_sub(copy);
                     next = next.offset(copy as isize);
-                    if len != 0 {
+                    if !scan.terminated {
                         break;
                     }
                 } else if !(*state).head.is_null() {
@@ -2012,38 +2078,26 @@ pub unsafe extern "C" fn inflate_ffi(
         if left == 0 as ::core::ffi::c_uint {
             break;
         }
-        copy = out.wrapping_sub(left);
-        if (*state).offset > copy {
-            copy = (*state).offset.wrapping_sub(copy);
-            if copy > (*state).whave {
-                if (*state).sane != 0 {
-                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
-                    continue;
-                }
-            }
-            if copy > (*state).wnext {
-                copy = copy.wrapping_sub((*state).wnext);
-                from = (*state)
-                    .window
-                    .offset((*state).wsize.wrapping_sub(copy) as isize);
-            } else {
-                from = (*state)
-                    .window
-                    .offset((*state).wnext.wrapping_sub(copy) as isize);
-            }
-            if copy > (*state).length {
-                copy = (*state).length;
-            }
-        } else {
-            from = put.offset(-((*state).offset as isize));
-            copy = (*state).length;
-        }
-        if copy > left {
-            copy = left;
-        }
+        let Some(copy_plan) = inflate_match_copy_plan(
+            (*state).offset,
+            out.wrapping_sub(left),
+            (*state).whave,
+            (*state).wnext,
+            (*state).wsize,
+            (*state).length,
+            left,
+            (*state).sane != 0,
+        ) else {
+            (*strm).msg = b"invalid distance too far back\0".as_ptr() as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+            (*state).mode = crate::src::inflate::BAD;
+            continue;
+        };
+        from = match copy_plan.source {
+            InflateMatchCopySource::Output { distance } => put.offset(-(distance as isize)),
+            InflateMatchCopySource::Window { index } => (*state).window.offset(index as isize),
+        };
+        copy = copy_plan.copy;
         left = left.wrapping_sub(copy);
         (*state).length = (*state).length.wrapping_sub(copy);
         loop {
