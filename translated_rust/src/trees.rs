@@ -3319,8 +3319,12 @@ pub unsafe extern "C" fn _tr_flush_block(
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let state = &mut *s;
     if state.level > 0 as ::core::ffi::c_int {
-        if (*state.strm).data_type == crate::zlib_h::Z_UNKNOWN {
-            (*state.strm).data_type = detect_data_type_impl(&state.dyn_ltree);
+        // The stream is a separate ABI allocation.  Project it once for the
+        // data-type update so the tree construction below stays on the state
+        // and its pointer-free arrays.
+        let strm = &mut *state.strm;
+        if strm.data_type == crate::zlib_h::Z_UNKNOWN {
+            strm.data_type = detect_data_type_impl(&state.dyn_ltree);
         }
         build_tree(
             &mut state.dyn_ltree,
