@@ -4302,7 +4302,7 @@ fn send_all_trees(
 pub fn tr_stored_block(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Byte],
-    source: Option<&[crate::stdlib::charf]>,
+    source: Option<&[crate::stdlib::Bytef]>,
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
@@ -4325,7 +4325,7 @@ pub fn tr_stored_block(
         let start = state.pending as usize;
         let end = start + source.len();
         for (dest, source) in pending_buf[start..end].iter_mut().zip(source) {
-            *dest = *source as crate::stdlib::Byte;
+            *dest = *source;
         }
     }
     state.pending = state.pending.wrapping_add(stored_len);
@@ -4347,7 +4347,10 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     let source = if stored_len == 0 {
         None
     } else {
-        Some(::core::slice::from_raw_parts(buf, stored_len as usize))
+        Some(::core::slice::from_raw_parts(
+            buf as *const crate::stdlib::Bytef,
+            stored_len as usize,
+        ))
     };
     tr_stored_block(state, pending_buf, source, stored_len, last)
 }
@@ -4467,7 +4470,7 @@ pub fn tr_flush_block(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
     pending_buf: &mut [crate::stdlib::Byte],
-    source: Option<&[crate::stdlib::charf]>,
+    source: Option<&[crate::stdlib::Bytef]>,
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
@@ -4558,7 +4561,10 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     } else if stored_len == 0 {
         Some(&[][..])
     } else {
-        Some(::core::slice::from_raw_parts(buf, stored_len as usize))
+        Some(::core::slice::from_raw_parts(
+            buf as *const crate::stdlib::Bytef,
+            stored_len as usize,
+        ))
     };
     tr_flush_block(state, strm, pending_buf, source, stored_len, last)
 }
