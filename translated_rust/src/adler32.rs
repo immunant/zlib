@@ -21,6 +21,15 @@ fn reduce(adler: u64, sum2: u64) -> (u64, u64) {
     (adler % BASE_U64, sum2 % BASE_U64)
 }
 
+fn accumulate_block(mut sum1: u64, mut sum2: u64, block: &[Bytef]) -> (u64, u64) {
+    for &byte in block {
+        sum1 += byte as u64;
+        sum2 += sum1;
+    }
+
+    reduce(sum1, sum2)
+}
+
 fn reduce_combine_sums(mut sum1: u64, mut sum2: u64) -> (u64, u64) {
     if sum1 >= BASE_U64 {
         sum1 -= BASE_U64;
@@ -44,11 +53,7 @@ pub fn adler32_z(adler: uLong, buf: &[Bytef]) -> uLong {
     let mut adler = adler & 0xffff;
 
     for block in buf.chunks(NMAX_USIZE) {
-        for &byte in block {
-            adler += byte as u64;
-            sum2 += adler;
-        }
-        (adler, sum2) = reduce(adler, sum2);
+        (adler, sum2) = accumulate_block(adler, sum2, block);
     }
 
     (adler, sum2) = reduce(adler, sum2);
@@ -140,6 +145,17 @@ mod tests {
         assert_eq!(adler32_z(1, b""), 1);
         assert_eq!(adler32_z(1, b"Wikipedia"), 0x11e6_0398);
         assert_eq!(adler32(1, b"123456789"), 0x091e_01de);
+    }
+
+    #[test]
+    fn accumulates_a_block_from_seed_sums() {
+        let seed = 0x1234_5678 as uLong;
+        let block = b"block input";
+        let sum1 = seed as u64 & 0xffff;
+        let sum2 = (seed as u64 >> 16) & 0xffff;
+        let (sum1, sum2) = accumulate_block(sum1, sum2, block);
+
+        assert_eq!((sum1 | sum2 << 16) as uLong, reference_adler32(seed, block));
     }
 
     #[test]

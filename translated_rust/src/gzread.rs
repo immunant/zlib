@@ -262,7 +262,7 @@ fn gz_read_needs_fetch(
     chunk_len: ::core::ffi::c_uint,
     size: ::core::ffi::c_uint,
 ) -> bool {
-    how == crate::gzguts_h::LOOK || chunk_len < size << 1 as ::core::ffi::c_int
+    how == crate::gzguts_h::LOOK || chunk_len < gz_output_buffer_len(size)
 }
 
 fn gz_read_stops_at_eof(eof: ::core::ffi::c_int, avail_in: crate::stdlib::uInt) -> bool {
@@ -390,7 +390,7 @@ fn gz_ungetc_buffer_state(
 ) -> GzUngetcBufferState {
     if have == 0 {
         GzUngetcBufferState::Empty
-    } else if have == size << 1 as ::core::ffi::c_int {
+    } else if have == gz_output_buffer_len(size) {
         GzUngetcBufferState::Full
     } else {
         GzUngetcBufferState::Pushable
@@ -508,8 +508,8 @@ fn gz_look_needs_more_input(avail_in: crate::stdlib::uInt, again: ::core::ffi::c
     avail_in == 0 || again != 0 && avail_in < 4
 }
 
-fn gz_look_output_buffer_len(want: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
-    want << 1 as ::core::ffi::c_int
+fn gz_output_buffer_len(size: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    size << 1 as ::core::ffi::c_int
 }
 
 enum GzLookGzipSource {
@@ -553,7 +553,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*state).in_0 = crate::stdlib::malloc((*state).want as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar;
         (*state).out = crate::stdlib::malloc(
-            gz_look_output_buffer_len((*state).want) as crate::__stddef_size_t_h::size_t
+            gz_output_buffer_len((*state).want) as crate::__stddef_size_t_h::size_t
         ) as *mut ::core::ffi::c_uchar;
         if (*state).in_0.is_null() || (*state).out.is_null() {
             crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
@@ -832,7 +832,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 if gz_load(
                     state,
                     (*state).out,
-                    (*state).size << 1 as ::core::ffi::c_int,
+                    gz_output_buffer_len((*state).size),
                     &raw mut (*state).x.have,
                 ) == -1 as ::core::ffi::c_int
                 {
@@ -843,7 +843,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
             }
             GzFetchAction::Gzip => {
                 (*strm).avail_out =
-                    ((*state).size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+                    gz_output_buffer_len((*state).size) as crate::stdlib::uInt;
                 (*strm).next_out = (*state).out as *mut crate::stdlib::Bytef;
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
@@ -1681,10 +1681,10 @@ mod tests {
     }
 
     #[test]
-    fn gz_look_output_buffer_len_doubles_with_unsigned_wrapping() {
-        assert_eq!(gz_look_output_buffer_len(8), 16);
+    fn gz_output_buffer_len_doubles_with_unsigned_wrapping() {
+        assert_eq!(gz_output_buffer_len(8), 16);
         assert_eq!(
-            gz_look_output_buffer_len(::core::ffi::c_uint::MAX),
+            gz_output_buffer_len(::core::ffi::c_uint::MAX),
             ::core::ffi::c_uint::MAX - 1
         );
     }
@@ -2203,7 +2203,7 @@ pub unsafe extern "C" fn gzungetc(
             (*state).x.have = have;
             (*state).x.next = (*state)
                 .out
-                .offset(((*state).size << 1 as ::core::ffi::c_int) as isize)
+                .offset(gz_output_buffer_len((*state).size) as isize)
                 .offset(-(1 as ::core::ffi::c_int as isize));
             *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
             (*state).x.pos = pos;
@@ -2224,7 +2224,7 @@ pub unsafe extern "C" fn gzungetc(
         let mut src: *mut ::core::ffi::c_uchar = (*state).out.offset((*state).x.have as isize);
         let mut dest: *mut ::core::ffi::c_uchar = (*state)
             .out
-            .offset(((*state).size << 1 as ::core::ffi::c_int) as isize);
+            .offset(gz_output_buffer_len((*state).size) as isize);
         while src > (*state).out {
             src = src.offset(-1);
             dest = dest.offset(-1);

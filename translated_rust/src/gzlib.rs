@@ -935,7 +935,7 @@ pub unsafe extern "C" fn gzeof_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::
         return 0 as ::core::ffi::c_int;
     }
 
-    let state = file as crate::gzguts_h::gz_statep;
+    let state = &*(file as crate::gzguts_h::gz_statep);
     gzeof_result((*state).mode, (*state).past)
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

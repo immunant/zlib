@@ -2853,6 +2853,12 @@ fn table_inputs_fit(codes: usize, work_len: usize, table_cursor: usize, table_le
     codes <= u16::MAX as usize && work_len >= codes && table_cursor <= table_len
 }
 
+fn table_index(table_start: usize, table_offset: usize, entry_offset: usize) -> Option<usize> {
+    table_start
+        .checked_add(table_offset)?
+        .checked_add(entry_offset)
+}
+
 fn table_usage_fits(type_0: CodeType, used: u32, table_start: usize, table_len: usize) -> bool {
     let within_type_capacity = match type_0 {
         CodeType::Codes => true,
@@ -3020,7 +3026,13 @@ pub fn inflate_table_safe(
         let next_table_size = fill;
         loop {
             fill -= increment;
-            let index = table_start + next + ((huff >> drop_bits) + fill) as usize;
+            let Some(index) = table_index(
+                table_start,
+                next,
+                ((huff >> drop_bits) + fill) as usize,
+            ) else {
+                return 1;
+            };
             let Some(entry) = table.get_mut(index) else {
                 return 1;
             };
@@ -3076,7 +3088,10 @@ pub fn inflate_table_safe(
                 return 1;
             }
             low = huff & mask;
-            let Some(entry) = table.get_mut(table_start + low as usize) else {
+            let Some(index) = table_index(table_start, 0, low as usize) else {
+                return 1;
+            };
+            let Some(entry) = table.get_mut(index) else {
                 return 1;
             };
             entry.op = curr as u8;
@@ -3086,7 +3101,10 @@ pub fn inflate_table_safe(
     }
 
     if huff != 0 {
-        let Some(entry) = table.get_mut(table_start + next + huff as usize) else {
+        let Some(index) = table_index(table_start, next, huff as usize) else {
+            return 1;
+        };
+        let Some(entry) = table.get_mut(index) else {
             return 1;
         };
         *entry = crate::src::inftrees::code {
@@ -3095,7 +3113,10 @@ pub fn inflate_table_safe(
             val: 0,
         };
     }
-    *table_cursor = table_start + used as usize;
+    let Some(table_end) = table_index(table_start, 0, used as usize) else {
+        return 1;
+    };
+    *table_cursor = table_end;
     *bits = root;
     0
 }
@@ -3193,6 +3214,13 @@ mod tests {
         assert!(!table_inputs_fit(u16::MAX as usize + 1, usize::MAX, 0, 0));
         assert!(!table_inputs_fit(2, 1, 0, 0));
         assert!(!table_inputs_fit(0, 0, 3, 2));
+    }
+
+    #[test]
+    fn table_index_combines_offsets_without_overflow() {
+        assert_eq!(table_index(3, 4, 5), Some(12));
+        assert_eq!(table_index(usize::MAX, 1, 0), None);
+        assert_eq!(table_index(usize::MAX - 1, 1, 1), None);
     }
 
     #[test]
