@@ -874,16 +874,14 @@ unsafe fn gz_comp(
     if !gz_buffer_is_initialized(state.size) && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
-    let out_pending = &mut state.out_pending;
     if gz_comp_is_direct(state.direct) {
-        while (*strm).avail_in != 0 {
+        while state.strm.avail_in != 0 {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
             state.again = 0 as ::core::ffi::c_int;
-            put = gz_comp_write_chunk_len((*strm).avail_in as usize, max);
+            put = gz_comp_write_chunk_len(state.strm.avail_in as usize, max);
             writ = crate::stdlib::write(
                 state.fd,
-                (*strm).next_in as *const ::core::ffi::c_void,
+                state.strm.next_in as *const ::core::ffi::c_void,
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             let errno = *crate::stdlib::__errno_location();
@@ -899,18 +897,18 @@ unsafe fn gz_comp(
                 }
                 GzCompWriteResult::Written(written) => writ = written,
             }
-            let progress = gz_comp_direct_write_progress((*strm).avail_in, writ);
-            (*strm).avail_in = progress.remaining_input;
-            (*strm).next_in = (*strm).next_in.wrapping_add(progress.cursor_advance);
+            let progress = gz_comp_direct_write_progress(state.strm.avail_in, writ);
+            state.strm.avail_in = progress.remaining_input;
+            state.strm.next_in = state.strm.next_in.wrapping_add(progress.cursor_advance);
         }
         return 0 as ::core::ffi::c_int;
     }
     let mut reset = state.reset;
-    let reset_action = gz_comp_reset_action(reset, (*strm).avail_in, flush);
+    let reset_action = gz_comp_reset_action(reset, state.strm.avail_in, flush);
     match &reset_action {
         GzCompResetAction::Skip => return 0 as ::core::ffi::c_int,
         GzCompResetAction::Reset => {
-            crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
+            crate::src::deflate::deflateReset(&mut state.strm as *mut crate::zlib_h::z_stream_s);
         }
         GzCompResetAction::Continue => {}
     }
@@ -918,8 +916,8 @@ unsafe fn gz_comp(
     state.reset = reset;
     ret = crate::zlib_h::Z_OK;
     loop {
-        if gz_comp_needs_output_write((*strm).avail_out, flush, ret) {
-            while let Some(chunk_len) = gz_comp_output_write_chunk_len(*out_pending, max) {
+        if gz_comp_needs_output_write(state.strm.avail_out, flush, ret) {
+            while let Some(chunk_len) = gz_comp_output_write_chunk_len(state.out_pending, max) {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 state.again = 0 as ::core::ffi::c_int;
                 put = chunk_len;
@@ -941,23 +939,24 @@ unsafe fn gz_comp(
                     }
                     GzCompWriteResult::Written(written) => writ = written,
                 }
-                let progress = gz_comp_output_write_progress(*out_pending, writ);
+                let progress = gz_comp_output_write_progress(state.out_pending, writ);
                 state.x.next = state.x.next.wrapping_add(progress.cursor_advance);
-                *out_pending = progress.remaining_pending;
+                state.out_pending = progress.remaining_pending;
             }
-            match gz_comp_output_buffer_action((*strm).avail_out) {
+            match gz_comp_output_buffer_action(state.strm.avail_out) {
                 GzCompOutputBufferAction::Keep => {}
                 GzCompOutputBufferAction::Reset => {
-                    (*strm).avail_out = state.size as crate::stdlib::uInt;
-                    (*strm).next_out = state.out;
+                    state.strm.avail_out = state.size as crate::stdlib::uInt;
+                    state.strm.next_out = state.out;
                     state.x.next = state.out;
-                    *out_pending = 0;
+                    state.out_pending = 0;
                 }
             }
         }
-        have = (*strm).avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
-        let produced = gz_comp_output_produced(have, (*strm).avail_out as ::core::ffi::c_uint);
+        have = state.strm.avail_out as ::core::ffi::c_uint;
+        ret =
+            crate::src::deflate::deflate(&mut state.strm as *mut crate::zlib_h::z_stream_s, flush);
+        let produced = gz_comp_output_produced(have, state.strm.avail_out as ::core::ffi::c_uint);
         match gz_comp_deflate_action(ret, produced) {
             GzCompDeflateAction::Error => {
                 crate::src::gzlib::gz_error(
@@ -971,9 +970,9 @@ unsafe fn gz_comp(
             GzCompDeflateAction::Done => break,
             GzCompDeflateAction::Continue => {
                 have = gz_comp_apply_deflate_progress(
-                    out_pending,
+                    &mut state.out_pending,
                     have,
-                    (*strm).avail_out as ::core::ffi::c_uint,
+                    state.strm.avail_out as ::core::ffi::c_uint,
                 );
             }
         }
