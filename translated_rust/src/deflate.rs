@@ -459,7 +459,7 @@ fn read_buf_progress_state(
     )
 }
 
-/// Scalar progress returned by the raw stream adapter.  Keeping the updated
+/// Scalar progress returned by the raw stream adapter. Keeping the updated
 /// input availability with the copied length lets callers make their next
 /// refill decision without re-dereferencing the compatibility stream.
 #[derive(Copy, Clone, Default)]
@@ -742,7 +742,7 @@ fn read_buf(
         );
         strm.avail_in = avail_in;
         strm.adler = adler;
-        // `len` is bounded by the validated input slice above.  Preserve the
+        // `len` is bounded by the validated input slice above. Preserve the
         // translated cursor arithmetic without performing an unsafe raw-pointer
         // offset in this private adapter.
         strm.next_in = strm.next_in.wrapping_add(len as usize);

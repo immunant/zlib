@@ -335,6 +335,18 @@ fn inflate_trailer_checksum_matches(
     wrap & 4 as ::core::ffi::c_int == 0 || inflate_trailer_checksum(flags, hold) == check
 }
 
+/// Validate gzip's final uncompressed-size word after the decoder boundary
+/// has gathered it.  Wrapper selection and byte gathering remain at that
+/// boundary; this scalar core preserves zlib's low-32-bit comparison without
+/// consulting retained ABI state.
+fn inflate_trailer_length_matches(
+    wrap: ::core::ffi::c_int,
+    hold: ::core::ffi::c_ulong,
+    total: ::core::ffi::c_ulong,
+) -> bool {
+    wrap & 4 as ::core::ffi::c_int == 0 || hold == total & 0xffffffff as ::core::ffi::c_ulong
+}
+
 /// Update the gzip-header CRC from an already-bounded byte span.  The
 /// transitional decoder owns any raw cursor lending; header parsing itself
 /// only carries this scalar checksum and a safe byte slice.
@@ -1995,10 +2007,11 @@ pub fn inflate(
                                                                                                         );
                                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                 }
-                                                                                                if state_ref.wrap & 4 as ::core::ffi::c_int != 0
-                                                                                                    && hold
-                                                                                                        != state_ref.total & 0xffffffff as ::core::ffi::c_ulong
-                                                                                                {
+                                                                                                if !inflate_trailer_length_matches(
+                                                                                                    state_ref.wrap,
+                                                                                                    hold,
+                                                                                                    state_ref.total,
+                                                                                                ) {
                                                                                                     strm_ref.msg = INFLATE_ERROR_MESSAGES[7].as_ptr()
                                                                                                         as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
                                                                                                     state_ref.mode = crate::src::inflate::BAD;
