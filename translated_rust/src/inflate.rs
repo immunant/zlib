@@ -4765,6 +4765,65 @@ mod tests {
     }
 
     #[test]
+    fn inflate_ffi_preserves_window_history_across_output_buffers() {
+        // The second call has fresh output storage, so its matches must read
+        // the callback-owned inflate window established by the first call.
+        // Both buffers stay below inflate_fast()'s output threshold.
+        let mut input = [
+            120, 156, 75, 76, 74, 78, 73, 77, 75, 207, 72, 196, 65, 3, 0, 206, 192, 12, 145,
+        ];
+        let mut first_output = [0_u8; 8];
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: input.as_mut_ptr(),
+            avail_in: input.len() as crate::stdlib::uInt,
+            total_in: 0,
+            next_out: first_output.as_mut_ptr(),
+            avail_out: first_output.len() as crate::stdlib::uInt,
+            total_out: 0,
+            msg: core::ptr::null_mut(),
+            state: core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(
+            unsafe { super::inflate_ffi(&mut stream, crate::zlib_h::Z_NO_FLUSH) },
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(first_output, *b"abcdefgh");
+        assert_eq!(stream.total_out, first_output.len() as crate::stdlib::uLong);
+
+        let mut second_output = [0_u8; 24];
+        stream.next_out = second_output.as_mut_ptr();
+        stream.avail_out = second_output.len() as crate::stdlib::uInt;
+        assert_eq!(
+            unsafe { super::inflate_ffi(&mut stream, crate::zlib_h::Z_NO_FLUSH) },
+            crate::zlib_h::Z_STREAM_END
+        );
+        assert_eq!(second_output, *b"abcdefghabcdefghabcdefgh");
+        assert_eq!(stream.total_out, 32);
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut stream) },
+            crate::zlib_h::Z_OK
+        );
+    }
+
+    #[test]
     fn inflate_window_match_copy_stops_at_the_wrapped_suffix() {
         let window = *b"abcdefgh";
         let mut output = *b"____";
