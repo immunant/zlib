@@ -1,419 +1,247 @@
-pub use crate::src::inflate::inflate_mode;
-pub use crate::src::inflate::inflate_state;
-pub use crate::src::inflate::BAD;
-pub use crate::src::inflate::CHECK;
-pub use crate::src::inflate::CODELENS;
-pub use crate::src::inflate::COMMENT;
-pub use crate::src::inflate::COPY_;
-pub use crate::src::inflate::COPY_1;
-pub use crate::src::inflate::DICT;
-pub use crate::src::inflate::DICTID;
-pub use crate::src::inflate::DIST;
-pub use crate::src::inflate::DISTEXT;
-pub use crate::src::inflate::DONE;
-pub use crate::src::inflate::EXLEN;
-pub use crate::src::inflate::EXTRA;
-pub use crate::src::inflate::FLAGS;
-pub use crate::src::inflate::HCRC;
-pub use crate::src::inflate::HEAD;
-pub use crate::src::inflate::LEN;
-pub use crate::src::inflate::LENEXT;
-pub use crate::src::inflate::LENGTH;
-pub use crate::src::inflate::LENLENS;
-pub use crate::src::inflate::LEN_;
-pub use crate::src::inflate::LIT;
-pub use crate::src::inflate::MATCH;
-pub use crate::src::inflate::MEM;
-pub use crate::src::inflate::NAME;
-pub use crate::src::inflate::OS;
-pub use crate::src::inflate::STORED;
-pub use crate::src::inflate::SYNC;
-pub use crate::src::inflate::TABLE;
-pub use crate::src::inflate::TIME;
-pub use crate::src::inflate::TYPE;
-pub use crate::src::inflate::TYPEDO;
-pub use crate::src::inftrees::code;
+use crate::src::inflate::{inflate_state, CodeTableRef, BAD, TYPE};
+use crate::src::inftrees::code;
 
-pub use crate::src::deflate::internal_state;
-pub use crate::stdlib::uInt;
-pub use crate::stdlib::uLong;
-pub use crate::stdlib::voidpf;
-pub use crate::stdlib::Byte;
-pub use crate::stdlib::Bytef;
-pub use crate::zlib_h::alloc_func;
-pub use crate::zlib_h::free_func;
-pub use crate::zlib_h::gz_header;
-pub use crate::zlib_h::gz_header_s;
-pub use crate::zlib_h::gz_headerp;
-pub use crate::zlib_h::z_stream;
-pub use crate::zlib_h::z_stream_s;
-pub use crate::zlib_h::z_streamp;
-pub unsafe extern "C" fn inflate_fast(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
-) {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut last: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut beg: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut end: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut wsize: ::core::ffi::c_uint = 0;
-    let mut whave: ::core::ffi::c_uint = 0;
-    let mut wnext: ::core::ffi::c_uint = 0;
-    let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut hold: ::core::ffi::c_ulong = 0;
-    let mut bits: ::core::ffi::c_uint = 0;
-    let mut lcode = crate::src::inflate::CodeTableRef::Dynamic(0);
-    let mut dcode = crate::src::inflate::CodeTableRef::Dynamic(0);
-    let mut lmask: ::core::ffi::c_uint = 0;
-    let mut dmask: ::core::ffi::c_uint = 0;
-    let mut here = crate::src::inftrees::code {
-        op: 0,
-        bits: 0,
-        val: 0,
-    };
-    let mut op: ::core::ffi::c_uint = 0;
-    let mut len: ::core::ffi::c_uint = 0;
-    let mut dist: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    last = in_0.offset((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
-    out = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as isize));
-    end = out.offset((*strm).avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
-    wsize = (*state).wsize;
-    whave = (*state).whave;
-    wnext = (*state).wnext;
-    // A fresh normal-inflate stream reaches this path before `updatewindow()`
-    // has materialized history.  The fast decoder already handles the null
-    // local in that case; keep the optional owner out of the core state.
-    window = (*state)
-        .window
-        .map_or(::core::ptr::null_mut::<::core::ffi::c_uchar>(), |window| {
-            window.as_ptr()
-        });
-    hold = (*state).hold;
-    bits = (*state).bits;
-    lcode = (*state).lencode;
-    dcode = (*state).distcode;
-    lmask = ((1 as ::core::ffi::c_uint) << (*state).lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
-    dmask =
-        ((1 as ::core::ffi::c_uint) << (*state).distbits).wrapping_sub(1 as ::core::ffi::c_uint);
-    's_627: loop {
-        if bits < 15 as ::core::ffi::c_uint {
-            let c2rust_fresh0 = in_0;
-            in_0 = in_0.offset(1);
-            hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
-            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-            let c2rust_fresh1 = in_0;
-            in_0 = in_0.offset(1);
-            hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
-            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+enum FastExit {
+    Continue,
+    Type,
+    InvalidDistance,
+    InvalidCode,
+}
+
+struct FastResult {
+    input_used: usize,
+    output_used: usize,
+    hold: u64,
+    bits: u32,
+    exit: FastExit,
+}
+
+#[inline]
+fn table_entry(table: CodeTableRef, codes: &[code], index: usize) -> code {
+    code::copied_from(table.get(codes, index as isize))
+}
+
+#[inline]
+fn pull_byte(input: &[u8], input_pos: &mut usize, hold: &mut u64, bits: &mut u32) {
+    *hold = hold.wrapping_add((input[*input_pos] as u64) << *bits);
+    *input_pos += 1;
+    *bits += 8;
+}
+
+// This decoder deliberately takes only bounded views and scalar state.  The
+// caller creates those views from the ABI stream, and publishes the resulting
+// cursor progress after the fast loop returns.
+fn inflate_fast_core(
+    input: &[u8],
+    output: &mut [u8],
+    mut output_pos: usize,
+    window: Option<&[u8]>,
+    wsize: usize,
+    whave: usize,
+    wnext: usize,
+    mut hold: u64,
+    mut bits: u32,
+    lcode: CodeTableRef,
+    dcode: CodeTableRef,
+    lmask: u32,
+    dmask: u32,
+    codes: &[code],
+    sane: bool,
+) -> FastResult {
+    let mut input_pos = 0;
+    let last = input.len().saturating_sub(5);
+    let end = output.len().saturating_sub(257);
+    let mut exit = FastExit::Continue;
+
+    'outer: loop {
+        if bits < 15 {
+            pull_byte(input, &mut input_pos, &mut hold, &mut bits);
+            pull_byte(input, &mut input_pos, &mut hold, &mut bits);
         }
-        here = crate::src::inftrees::code::copied_from(lcode.get(
-            &(*state).codes,
-            (hold & lmask as ::core::ffi::c_ulong) as isize,
-        ));
-        's_92: loop {
-            op = here.bits as ::core::ffi::c_uint;
+        let mut here = table_entry(lcode, codes, (hold as u32 & lmask) as usize);
+        'literal: loop {
+            let mut op = here.bits as u32;
             hold >>= op;
-            bits = bits.wrapping_sub(op);
-            op = here.op as ::core::ffi::c_uint;
-            if op == 0 as ::core::ffi::c_uint {
-                let c2rust_fresh2 = out;
-                out = out.offset(1);
-                *c2rust_fresh2 = here.val as ::core::ffi::c_uchar;
+            bits -= op;
+            op = here.op as u32;
+            if op == 0 {
+                output[output_pos] = here.val as u8;
+                output_pos += 1;
                 break;
-            } else if op & 16 as ::core::ffi::c_uint != 0 {
-                len = here.val as ::core::ffi::c_uint;
-                op &= 15 as ::core::ffi::c_uint;
+            }
+            if op & 16 != 0 {
+                let mut len = here.val as usize;
+                op &= 15;
                 if op != 0 {
                     if bits < op {
-                        let c2rust_fresh3 = in_0;
-                        in_0 = in_0.offset(1);
-                        hold = hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
-                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                        pull_byte(input, &mut input_pos, &mut hold, &mut bits);
                     }
-                    len = len.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << op)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                    );
+                    len += (hold as u32 & ((1u32 << op) - 1)) as usize;
                     hold >>= op;
-                    bits = bits.wrapping_sub(op);
+                    bits -= op;
                 }
-                if bits < 15 as ::core::ffi::c_uint {
-                    let c2rust_fresh4 = in_0;
-                    in_0 = in_0.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh4 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                    let c2rust_fresh5 = in_0;
-                    in_0 = in_0.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh5 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                if bits < 15 {
+                    pull_byte(input, &mut input_pos, &mut hold, &mut bits);
+                    pull_byte(input, &mut input_pos, &mut hold, &mut bits);
                 }
-                here = crate::src::inftrees::code::copied_from(dcode.get(
-                    &(*state).codes,
-                    (hold & dmask as ::core::ffi::c_ulong) as isize,
-                ));
+                here = table_entry(dcode, codes, (hold as u32 & dmask) as usize);
                 loop {
-                    op = here.bits as ::core::ffi::c_uint;
+                    op = here.bits as u32;
                     hold >>= op;
-                    bits = bits.wrapping_sub(op);
-                    op = here.op as ::core::ffi::c_uint;
-                    if op & 16 as ::core::ffi::c_uint != 0 {
-                        dist = here.val as ::core::ffi::c_uint;
-                        op &= 15 as ::core::ffi::c_uint;
+                    bits -= op;
+                    op = here.op as u32;
+                    if op & 16 != 0 {
+                        let mut dist = here.val as usize;
+                        op &= 15;
                         if bits < op {
-                            let c2rust_fresh6 = in_0;
-                            in_0 = in_0.offset(1);
-                            hold =
-                                hold.wrapping_add((*c2rust_fresh6 as ::core::ffi::c_ulong) << bits);
-                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            pull_byte(input, &mut input_pos, &mut hold, &mut bits);
                             if bits < op {
-                                let c2rust_fresh7 = in_0;
-                                in_0 = in_0.offset(1);
-                                hold = hold
-                                    .wrapping_add((*c2rust_fresh7 as ::core::ffi::c_ulong) << bits);
-                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                pull_byte(input, &mut input_pos, &mut hold, &mut bits);
                             }
                         }
-                        dist = dist.wrapping_add(
-                            hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << op)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                        );
+                        dist += (hold as u32 & ((1u32 << op) - 1)) as usize;
                         hold >>= op;
-                        bits = bits.wrapping_sub(op);
-                        op = out.offset_from(beg) as ::core::ffi::c_uint;
-                        if dist > op {
-                            op = dist.wrapping_sub(op);
-                            if op > whave {
-                                if (*state).sane != 0 {
-                                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                                        as *const ::core::ffi::c_char
-                                        as *mut ::core::ffi::c_char;
-                                    (*state).mode = crate::src::inflate::BAD;
-                                    break 's_627;
-                                }
+                        bits -= op;
+                        let produced = output_pos;
+                        if dist > produced {
+                            let missing = dist - produced;
+                            if missing > whave && sane {
+                                exit = FastExit::InvalidDistance;
+                                break 'outer;
                             }
-                            from = window;
-                            if wnext == 0 as ::core::ffi::c_uint {
-                                from = from.offset(wsize.wrapping_sub(op) as isize);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh8 = from;
-                                        from = from.offset(1);
-                                        let c2rust_fresh9 = out;
-                                        out = out.offset(1);
-                                        *c2rust_fresh9 = *c2rust_fresh8;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    from = out.offset(-(dist as isize));
-                                }
-                            } else if wnext < op {
-                                from = from
-                                    .offset(wsize.wrapping_add(wnext).wrapping_sub(op) as isize);
-                                op = op.wrapping_sub(wnext);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh10 = from;
-                                        from = from.offset(1);
-                                        let c2rust_fresh11 = out;
-                                        out = out.offset(1);
-                                        *c2rust_fresh11 = *c2rust_fresh10;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    from = window;
-                                    if wnext < len {
-                                        op = wnext;
-                                        len = len.wrapping_sub(op);
-                                        loop {
-                                            let c2rust_fresh12 = from;
-                                            from = from.offset(1);
-                                            let c2rust_fresh13 = out;
-                                            out = out.offset(1);
-                                            *c2rust_fresh13 = *c2rust_fresh12;
-                                            op = op.wrapping_sub(1);
-                                            if op == 0 {
-                                                break;
-                                            }
-                                        }
-                                        from = out.offset(-(dist as isize));
-                                    }
-                                }
+                            let history = window.unwrap_or(&[]);
+                            let (first_from, first_len) = if wnext == 0 {
+                                (wsize - missing, missing)
+                            } else if wnext < missing {
+                                (wsize + wnext - missing, missing - wnext)
                             } else {
-                                from = from.offset(wnext.wrapping_sub(op) as isize);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh14 = from;
-                                        from = from.offset(1);
-                                        let c2rust_fresh15 = out;
-                                        out = out.offset(1);
-                                        *c2rust_fresh15 = *c2rust_fresh14;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    from = out.offset(-(dist as isize));
+                                (wnext - missing, missing)
+                            };
+                            let first = first_len.min(len);
+                            for offset in 0..first {
+                                let from = first_from + offset;
+                                output[output_pos] = history[from];
+                                output_pos += 1;
+                            }
+                            len -= first;
+                            if len != 0 && wnext != 0 && wnext < missing {
+                                let second = wnext.min(len);
+                                for from in 0..second {
+                                    output[output_pos] = history[from];
+                                    output_pos += 1;
                                 }
+                                len -= second;
                             }
-                            while len > 2 as ::core::ffi::c_uint {
-                                let c2rust_fresh16 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh17 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh17 = *c2rust_fresh16;
-                                let c2rust_fresh18 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh19 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh19 = *c2rust_fresh18;
-                                let c2rust_fresh20 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh21 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh21 = *c2rust_fresh20;
-                                len = len.wrapping_sub(3 as ::core::ffi::c_uint);
-                            }
-                            if len != 0 {
-                                let c2rust_fresh22 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh23 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh23 = *c2rust_fresh22;
-                                if len > 1 as ::core::ffi::c_uint {
-                                    let c2rust_fresh24 = from;
-                                    from = from.offset(1);
-                                    let c2rust_fresh25 = out;
-                                    out = out.offset(1);
-                                    *c2rust_fresh25 = *c2rust_fresh24;
-                                }
-                            }
-                            break 's_92;
-                        } else {
-                            from = out.offset(-(dist as isize));
-                            loop {
-                                let c2rust_fresh26 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh27 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh27 = *c2rust_fresh26;
-                                let c2rust_fresh28 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh29 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh29 = *c2rust_fresh28;
-                                let c2rust_fresh30 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh31 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh31 = *c2rust_fresh30;
-                                len = len.wrapping_sub(3 as ::core::ffi::c_uint);
-                                if len <= 2 as ::core::ffi::c_uint {
-                                    break;
-                                }
-                            }
-                            if len != 0 {
-                                let c2rust_fresh32 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh33 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh33 = *c2rust_fresh32;
-                                if len > 1 as ::core::ffi::c_uint {
-                                    let c2rust_fresh34 = from;
-                                    from = from.offset(1);
-                                    let c2rust_fresh35 = out;
-                                    out = out.offset(1);
-                                    *c2rust_fresh35 = *c2rust_fresh34;
-                                }
-                            }
-                            break 's_92;
                         }
-                    } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                        here = crate::src::inftrees::code::copied_from(
-                            dcode.get(
-                                &(*state).codes,
-                                (here.val as ::core::ffi::c_int as isize)
-                                    + (hold
-                                        & ((1 as ::core::ffi::c_uint) << op)
-                                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                                            as ::core::ffi::c_ulong)
-                                        as isize,
-                            ),
+                        if len != 0 {
+                            let mut from = output_pos - dist;
+                            for _ in 0..len {
+                                let byte = output[from];
+                                output[output_pos] = byte;
+                                from += 1;
+                                output_pos += 1;
+                            }
+                        }
+                        break 'literal;
+                    }
+                    if op & 64 == 0 {
+                        here = table_entry(
+                            dcode,
+                            codes,
+                            here.val as usize + (hold as u32 & ((1u32 << op) - 1)) as usize,
                         );
                     } else {
-                        (*strm).msg = b"invalid distance code\0".as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
-                        (*state).mode = crate::src::inflate::BAD;
-                        break 's_627;
+                        exit = FastExit::InvalidCode;
+                        break 'outer;
                     }
                 }
-            } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                here = crate::src::inftrees::code::copied_from(
-                    lcode.get(
-                        &(*state).codes,
-                        (here.val as ::core::ffi::c_int as isize)
-                            + (hold
-                                & ((1 as ::core::ffi::c_uint) << op)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint)
-                                    as ::core::ffi::c_ulong) as isize,
-                    ),
+            } else if op & 64 == 0 {
+                here = table_entry(
+                    lcode,
+                    codes,
+                    here.val as usize + (hold as u32 & ((1u32 << op) - 1)) as usize,
                 );
-            } else if op & 32 as ::core::ffi::c_uint != 0 {
-                (*state).mode = crate::src::inflate::TYPE;
-                break 's_627;
+            } else if op & 32 != 0 {
+                exit = FastExit::Type;
+                break 'outer;
             } else {
-                (*strm).msg = b"invalid literal/length code\0".as_ptr()
-                    as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-                (*state).mode = crate::src::inflate::BAD;
-                break 's_627;
+                exit = FastExit::InvalidCode;
+                break 'outer;
             }
         }
-        if !(in_0 < last && out < end) {
+        if input_pos >= last || output_pos >= end {
             break;
         }
     }
-    len = bits >> 3 as ::core::ffi::c_int;
-    in_0 = in_0.offset(-(len as isize));
-    bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
-    hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
-        as ::core::ffi::c_ulong;
-    (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
-    (*strm).next_out = out as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = (if in_0 < last {
-        5 as isize + last.offset_from(in_0)
-    } else {
-        5 as isize - in_0.offset_from(last)
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
-    (*strm).avail_out = (if out < end {
-        257 as isize + end.offset_from(out)
-    } else {
-        257 as isize - out.offset_from(end)
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
-    (*state).hold = hold;
-    (*state).bits = bits;
+    let unused = (bits >> 3) as usize;
+    input_pos -= unused;
+    bits -= (unused as u32) << 3;
+    hold &= (1u64 << bits) - 1;
+    FastResult {
+        input_used: input_pos,
+        output_used: output_pos,
+        hold,
+        bits,
+        exit,
+    }
 }
-#[export_name = "inflate_fast"]
 
+pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::core::ffi::c_uint) {
+    let state = &mut *((*strm).state as *mut inflate_state);
+    let input = core::slice::from_raw_parts((*strm).next_in, (*strm).avail_in as usize);
+    let written = start.wrapping_sub((*strm).avail_out) as usize;
+    let output_start = (*strm).next_out.sub(written);
+    let output = core::slice::from_raw_parts_mut(output_start, start as usize);
+    let window = state
+        .window
+        .map(|window| core::slice::from_raw_parts(window.as_ptr(), state.wsize as usize));
+    let result = inflate_fast_core(
+        input,
+        output,
+        written,
+        window,
+        state.wsize as usize,
+        state.whave as usize,
+        state.wnext as usize,
+        state.hold,
+        state.bits,
+        state.lencode,
+        state.distcode,
+        (1u32 << state.lenbits) - 1,
+        (1u32 << state.distbits) - 1,
+        &state.codes,
+        state.sane != 0,
+    );
+    (*strm).next_in = (*strm).next_in.add(result.input_used);
+    (*strm).avail_in = input.len().wrapping_sub(result.input_used) as crate::stdlib::uInt;
+    (*strm).next_out = output_start.add(result.output_used);
+    (*strm).avail_out = output.len().wrapping_sub(result.output_used) as crate::stdlib::uInt;
+    state.hold = result.hold;
+    state.bits = result.bits;
+    match result.exit {
+        FastExit::Continue => {}
+        FastExit::Type => state.mode = TYPE,
+        FastExit::InvalidDistance => {
+            (*strm).msg = b"invalid distance too far back\0"
+                .as_ptr()
+                .cast_mut()
+                .cast();
+            state.mode = BAD;
+        }
+        FastExit::InvalidCode => {
+            (*strm).msg = b"invalid literal/length or distance code\0"
+                .as_ptr()
+                .cast_mut()
+                .cast();
+            state.mode = BAD;
+        }
+    }
+}
+
+#[export_name = "inflate_fast"]
 pub unsafe extern "C" fn inflate_fast_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
+    strm: crate::zlib_h::z_streamp,
+    start: ::core::ffi::c_uint,
 ) {
     inflate_fast(strm, start)
 }
