@@ -143,6 +143,18 @@ fn gz_write_chunk_consumed_len(
     chunk_len.wrapping_sub(remaining_avail_in as ::core::ffi::c_uint)
 }
 
+fn gz_zero_apply_progress(
+    pos: &mut crate::stdlib::off64_t,
+    skip: &mut crate::stdlib::off64_t,
+    chunk_len: ::core::ffi::c_uint,
+    remaining_avail_in: crate::stdlib::uInt,
+) -> bool {
+    let consumed = gz_write_chunk_consumed_len(chunk_len, remaining_avail_in);
+    *pos += consumed as crate::stdlib::off64_t;
+    *skip -= consumed as crate::stdlib::off64_t;
+    *skip != 0
+}
+
 fn gzputs_result(
     requested: crate::stdlib::z_size_t,
     written: crate::stdlib::z_size_t,
@@ -367,13 +379,17 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*strm).avail_in = n as crate::stdlib::uInt;
         (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        n = n.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-        (*state).x.pos += n as crate::stdlib::off64_t;
-        (*state).skip -= n as crate::stdlib::off64_t;
+        let remaining_avail_in = (*strm).avail_in;
+        let has_skip = gz_zero_apply_progress(
+            &mut (*state).x.pos,
+            &mut (*state).skip,
+            n,
+            remaining_avail_in,
+        );
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
-        if !((*state).skip != 0) {
+        if !has_skip {
             break;
         }
     }
@@ -776,11 +792,10 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 mod tests {
     use super::{
         gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_write_chunk_len,
-        gz_write_errno_is_retryable,
         gz_write_buffered_copy_len, gz_write_chunk_consumed_len, gz_write_chunk_len,
-        gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
-        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
-        gzwrite_len_fits_int,
+        gz_write_errno_is_retryable, gz_write_error_result, gz_write_uses_buffered_path,
+        gz_zero_apply_progress, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
+        gzputs_len_fits_int, gzputs_result, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1030,5 +1045,45 @@ mod tests {
     #[test]
     fn gz_write_chunk_consumed_len_preserves_wrapping_accounting() {
         assert_eq!(gz_write_chunk_consumed_len(0, 1), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn gz_zero_apply_progress_accounts_for_partial_consumption() {
+        let mut pos = 10;
+        let mut skip = 100;
+
+        assert!(gz_zero_apply_progress(&mut pos, &mut skip, 80, 20));
+        assert_eq!(pos, 70);
+        assert_eq!(skip, 40);
+    }
+
+    #[test]
+    fn gz_zero_apply_progress_keeps_state_for_zero_consumption() {
+        let mut pos = 10;
+        let mut skip = 100;
+
+        assert!(gz_zero_apply_progress(&mut pos, &mut skip, 80, 80));
+        assert_eq!(pos, 10);
+        assert_eq!(skip, 100);
+    }
+
+    #[test]
+    fn gz_zero_apply_progress_reports_exact_skip_exhaustion() {
+        let mut pos = 10;
+        let mut skip = 80;
+
+        assert!(!gz_zero_apply_progress(&mut pos, &mut skip, 80, 0));
+        assert_eq!(pos, 90);
+        assert_eq!(skip, 0);
+    }
+
+    #[test]
+    fn gz_zero_apply_progress_preserves_wrapping_consumed_behavior() {
+        let mut pos = 0;
+        let mut skip = ::core::ffi::c_uint::MAX as crate::stdlib::off64_t;
+
+        assert!(!gz_zero_apply_progress(&mut pos, &mut skip, 0, 1));
+        assert_eq!(pos, ::core::ffi::c_uint::MAX as crate::stdlib::off64_t);
+        assert_eq!(skip, 0);
     }
 }

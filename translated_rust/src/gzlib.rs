@@ -73,6 +73,12 @@ fn gz_clear_read_flags(eof: &mut ::core::ffi::c_int, past: &mut ::core::ffi::c_i
     *past = 0;
 }
 
+fn gzseek_fast_forward_reset(state: &mut crate::gzguts_h::gz_state) {
+    state.x.have = 0;
+    gz_clear_read_flags(&mut state.eof, &mut state.past);
+    state.skip = 0;
+}
+
 fn gzclearerr_core(
     mode: ::core::ffi::c_int,
     eof: &mut ::core::ffi::c_int,
@@ -687,9 +693,7 @@ pub unsafe extern "C" fn gzseek64(
         if ret == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
-        (*state).x.have = 0 as ::core::ffi::c_uint;
-        gz_clear_read_flags(&mut (*state).eof, &mut (*state).past);
-        (*state).skip = 0 as crate::stdlib::off64_t;
+        gzseek_fast_forward_reset(&mut *state);
         gz_error(
             state,
             crate::zlib_h::Z_OK,
@@ -1001,9 +1005,9 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
-        gz_prepare_open, gz_reset_core, gzclearerr_core, gzerror_core,
-        gzbuffer_normalized_want, gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_error_allows_positioning,
+        gz_prepare_open, gz_reset_core, gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
+        gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
+        gzseek_can_fast_forward, gzseek_error_allows_positioning, gzseek_fast_forward_reset,
         gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
         gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
         GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
@@ -1015,6 +1019,62 @@ mod tests {
         let mut past = 1;
         gz_clear_read_flags(&mut eof, &mut past);
         assert_eq!((eof, past), (0, 0));
+    }
+
+    #[test]
+    fn gzseek_fast_forward_reset_clears_only_fast_forward_reset_fields() {
+        let mut state = crate::gzguts_h::gz_state {
+            x: crate::zlib_h::gzFile_s {
+                have: 7,
+                next: ::core::ptr::null_mut(),
+                pos: 101,
+            },
+            mode: crate::gzguts_h::GZ_READ,
+            fd: 0,
+            path: ::core::ptr::null_mut(),
+            size: 0,
+            want: 0,
+            in_0: ::core::ptr::null_mut(),
+            out: ::core::ptr::null_mut(),
+            direct: 0,
+            junk: 0,
+            how: crate::gzguts_h::COPY,
+            again: 23,
+            start: 0,
+            eof: 1,
+            past: 1,
+            level: 0,
+            strategy: 0,
+            reset: 0,
+            skip: 29,
+            err: crate::zlib_h::Z_BUF_ERROR,
+            msg: ::core::ptr::null_mut(),
+            strm: crate::zlib_h::z_stream_s {
+                next_in: ::core::ptr::null_mut(),
+                avail_in: 31,
+                total_in: 0,
+                next_out: ::core::ptr::null_mut(),
+                avail_out: 0,
+                total_out: 0,
+                msg: ::core::ptr::null_mut(),
+                state: ::core::ptr::null_mut(),
+                zalloc: None,
+                zfree: None,
+                opaque: ::core::ptr::null_mut(),
+                data_type: 0,
+                adler: 0,
+                reserved: 0,
+            },
+        };
+
+        gzseek_fast_forward_reset(&mut state);
+
+        assert_eq!(state.x.have, 0);
+        assert_eq!((state.eof, state.past, state.skip), (0, 0, 0));
+        assert_eq!(state.x.pos, 101);
+        assert_eq!(state.strm.avail_in, 31);
+        assert_eq!(state.err, crate::zlib_h::Z_BUF_ERROR);
+        assert_eq!(state.again, 23);
     }
 
     #[test]
