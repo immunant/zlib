@@ -571,6 +571,7 @@ enum GzFreadOutcome {
 // an ABI-shaped state.
 enum GzReadAbiRequest {
     Bytes,
+    Direct,
     Gets,
     Unget(::core::ffi::c_int),
     Items {
@@ -581,6 +582,7 @@ enum GzReadAbiRequest {
 
 enum GzReadAbiResult {
     Bytes(::core::ffi::c_int),
+    Direct(::core::ffi::c_int),
     Gets(bool),
     Unget(::core::ffi::c_int),
     Items(crate::stdlib::z_size_t),
@@ -590,14 +592,21 @@ impl GzReadAbiResult {
     fn bytes(self) -> ::core::ffi::c_int {
         match self {
             Self::Bytes(result) => result,
-            Self::Gets(_) | Self::Unget(_) | Self::Items(_) => unreachable!(),
+            Self::Direct(_) | Self::Gets(_) | Self::Unget(_) | Self::Items(_) => unreachable!(),
+        }
+    }
+
+    fn direct(self) -> ::core::ffi::c_int {
+        match self {
+            Self::Direct(result) => result,
+            Self::Bytes(_) | Self::Gets(_) | Self::Unget(_) | Self::Items(_) => unreachable!(),
         }
     }
 
     fn items(self) -> crate::stdlib::z_size_t {
         match self {
             Self::Items(result) => result,
-            Self::Bytes(_) | Self::Gets(_) | Self::Unget(_) => unreachable!(),
+            Self::Bytes(_) | Self::Direct(_) | Self::Gets(_) | Self::Unget(_) => unreachable!(),
         }
     }
 
@@ -608,21 +617,21 @@ impl GzReadAbiResult {
         match self {
             Self::Items(1) => byte as ::core::ffi::c_int,
             Self::Items(_) => -1,
-            Self::Bytes(_) | Self::Gets(_) | Self::Unget(_) => unreachable!(),
+            Self::Bytes(_) | Self::Direct(_) | Self::Gets(_) | Self::Unget(_) => unreachable!(),
         }
     }
 
     fn unget(self) -> ::core::ffi::c_int {
         match self {
             Self::Unget(result) => result,
-            Self::Bytes(_) | Self::Gets(_) | Self::Items(_) => unreachable!(),
+            Self::Bytes(_) | Self::Direct(_) | Self::Gets(_) | Self::Items(_) => unreachable!(),
         }
     }
 
     fn gets(self) -> bool {
         match self {
             Self::Gets(result) => result,
-            Self::Bytes(_) | Self::Unget(_) | Self::Items(_) => unreachable!(),
+            Self::Bytes(_) | Self::Direct(_) | Self::Unget(_) | Self::Items(_) => unreachable!(),
         }
     }
 }
@@ -1599,6 +1608,7 @@ enum GzReadOwnerResult {
         len: ::core::ffi::c_uint,
         publish: bool,
     },
+    Direct(::core::ffi::c_int),
     Gets {
         result: bool,
         publish: bool,
@@ -1657,6 +1667,37 @@ impl GzReadOwner {
             total_out: &mut self.total_out,
         }
     }
+
+    // A direct query may force the initial LOOK classification, but it uses
+    // the same complete read owner as byte requests.  The ABI cursor remains
+    // untouched here, matching `gzdirect()`'s query-only contract.
+    fn direct(&mut self) -> ::core::ffi::c_int {
+        gzdirect(GzDirectOwner {
+            state: GzDirectState {
+                mode: self.mode,
+                how: self.how,
+                have: self.have,
+            },
+            fetch: GzFetchOwner::new(
+                &mut self.buffers,
+                self.want,
+                &mut self.direct,
+                &mut self.junk,
+                &mut self.how,
+                &mut self.again,
+                &mut self.eof,
+                &mut self.err,
+                &mut self.message,
+                &mut self.have,
+                &self.fd,
+                self.path.as_deref(),
+                &mut self.avail_in,
+                &mut self.avail_out,
+                &mut self.total_in,
+                &mut self.total_out,
+            ),
+        })
+    }
 }
 
 fn gzgets_owner(owner: &mut GzReadOwner, output: &mut [u8]) -> bool {
@@ -1704,6 +1745,7 @@ fn gzread_owner_request(
     request: GzReadAbiRequest,
 ) -> GzReadOwnerResult {
     match request {
+        GzReadAbiRequest::Direct => GzReadOwnerResult::Direct(owner.direct()),
         GzReadAbiRequest::Items { size, nitems } => {
             GzReadOwnerResult::Items(gzfread(owner, output, size, nitems))
         }
@@ -1752,12 +1794,14 @@ impl GzReadOwnerResult {
         match self {
             Self::Bytes { publish, .. } | Self::Gets { publish, .. } => *publish,
             Self::Unget(_) | Self::Items(GzFreadOutcome::PublishThenFinish { .. }) => true,
+            Self::Direct(_) => false,
             Self::Items(GzFreadOutcome::Complete(_)) => false,
         }
     }
 
     fn finish(self, owner: &mut GzReadOwner, published: bool) -> GzReadAbiResult {
         match self {
+            Self::Direct(result) => GzReadAbiResult::Direct(result),
             Self::Items(GzFreadOutcome::Complete(result)) => GzReadAbiResult::Items(result),
             Self::Items(GzFreadOutcome::PublishThenFinish { read_len, size }) => {
                 GzReadAbiResult::Items(if published {
@@ -2336,64 +2380,13 @@ pub unsafe extern "C" fn gzgets_ffi(
         ::core::ptr::null_mut()
     }
 }
-fn gzdirect_from_state(owner: GzDirectOwner<'_>) -> ::core::ffi::c_int {
-    gzdirect(owner)
-}
-
-// Keep the ABI-shaped gzip handle at this projection boundary.  Once its
-// disjoint scalar and owned-buffer fields have been borrowed, the direct
-// query itself receives only the pointer-free owner above.
-unsafe fn gzdirect_from_abi_state(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let crate::gzguts_h::gz_state {
-        x,
-        mode,
-        fd,
-        path,
-        want,
-        buffers,
-        direct,
-        junk,
-        how,
-        again,
-        eof,
-        err,
-        msg,
-        strm,
-        ..
-    } = state;
-    gzdirect_from_state(GzDirectOwner {
-        state: GzDirectState {
-            mode: *mode,
-            how: *how,
-            have: x.have,
-        },
-        fetch: GzFetchOwner::new(
-            buffers,
-            *want,
-            direct,
-            junk,
-            how,
-            again,
-            eof,
-            err,
-            msg,
-            &mut x.have,
-            fd.as_ref().expect("gzip state has an open file"),
-            path.as_deref(),
-            &mut strm.avail_in,
-            &mut strm.avail_out,
-            &mut strm.total_in,
-            &mut strm.total_out,
-        ),
-    })
-}
 #[export_name = "gzdirect"]
 
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let Some(mut state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
         return 0 as ::core::ffi::c_int;
     };
-    gzdirect_from_abi_state(state.as_mut())
+    gzread_from_state(state.as_mut(), &mut [], GzReadAbiRequest::Direct).direct()
 }
 // The read close path has no need for the ABI cursor prefix or embedded
 // stream.  Keep its complete resource transaction over owned buffers,
