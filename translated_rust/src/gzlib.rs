@@ -1332,43 +1332,47 @@ fn gz_open(
     fd: ::core::ffi::c_int,
     mode: &::core::ffi::CStr,
 ) -> crate::zlib_h::gzFile {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut len: crate::stdlib::z_size_t = 0;
+    // `malloc` accepts every `size_t` request. Keep allocation and its null
+    // result outside the narrower boundary that binds the returned state.
+    let state = crate::stdlib::malloc(::core::mem::size_of::<crate::gzguts_h::gz_state>())
+        as crate::gzguts_h::gz_statep;
+    if state.is_null() {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    let len = path.to_bytes().len() as crate::stdlib::z_size_t;
     let mut options = GzOpenMode {
         oflag: 0,
         exclusive: 0,
     };
-    // SAFETY: allocation, descriptor operations, and the allocated gzip
-    // state are the only remaining raw boundary. `path` and `mode` are
-    // already valid, NUL-terminated C strings supplied by the ABI adapters.
+    // SAFETY: `state` is the non-null allocation above. It is bound once and
+    // released on each failure path before the reference can be observed
+    // again.
+    let state_ref = unsafe { &mut *state };
+    gz_open_init(state_ref);
+    for &mode in mode.to_bytes() {
+        if !gz_open_mode_byte(state_ref, &mut options, mode) {
+            // SAFETY: this is the still-owned state allocation.
+            unsafe { crate::stdlib::free(state as *mut ::core::ffi::c_void) };
+            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+        }
+    }
+    if !gz_open_finish_mode(state_ref) {
+        // SAFETY: this is the still-owned state allocation.
+        unsafe { crate::stdlib::free(state as *mut ::core::ffi::c_void) };
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    state_ref.path = crate::stdlib::malloc(
+        (len as crate::__stddef_size_t_h::size_t)
+            .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
+    ) as *mut ::core::ffi::c_char;
+    if state_ref.path.is_null() {
+        // SAFETY: this is the still-owned state allocation.
+        unsafe { crate::stdlib::free(state as *mut ::core::ffi::c_void) };
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    // SAFETY: the owned path allocation has room for the path and terminator,
+    // and both the format string and source path are valid C strings.
     unsafe {
-        state = crate::stdlib::malloc(::core::mem::size_of::<crate::gzguts_h::gz_state>())
-            as crate::gzguts_h::gz_statep;
-        if state.is_null() {
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
-        let state_ref = &mut *state;
-        gz_open_init(state_ref);
-        for &mode in mode.to_bytes() {
-            if !gz_open_mode_byte(state_ref, &mut options, mode) {
-                crate::stdlib::free(state as *mut ::core::ffi::c_void);
-                return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-            }
-        }
-        if !gz_open_finish_mode(state_ref) {
-            crate::stdlib::free(state as *mut ::core::ffi::c_void);
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
-        len = path.to_bytes().len() as crate::stdlib::z_size_t;
-        state_ref.path = crate::stdlib::malloc(
-            (len as crate::__stddef_size_t_h::size_t)
-                .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-        ) as *mut ::core::ffi::c_char;
-        if state_ref.path.is_null() {
-            crate::stdlib::free(state as *mut ::core::ffi::c_void);
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
         crate::stdlib::snprintf(
             state_ref.path,
             (len as crate::__stddef_size_t_h::size_t)
@@ -1376,7 +1380,11 @@ fn gz_open(
             b"%s\0".as_ptr() as *const ::core::ffi::c_char,
             path.as_ptr(),
         );
-        let oflag = gz_open_flags(state_ref, &options);
+    }
+    let oflag = gz_open_flags(state_ref, &options);
+    // SAFETY: the descriptor plans use only their documented integer
+    // arguments; the open path remains a valid C string for this call.
+    unsafe {
         match gz_open_fd_plan(fd, oflag) {
             GzOpenFdPlan::Open => {
                 state_ref.fd =
@@ -1404,34 +1412,37 @@ fn gz_open(
                 state_ref.fd = fd;
             }
         }
-        if state_ref.fd == -1 as ::core::ffi::c_int {
+    }
+    if state_ref.fd == -1 as ::core::ffi::c_int {
+        // SAFETY: both allocations are still owned by this failed open.
+        unsafe {
             crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
-        match gz_open_position_plan(state_ref) {
-            GzOpenPositionPlan::None => {}
-            GzOpenPositionPlan::Append => {
-                crate::stdlib::lseek64(
-                    state_ref.fd,
-                    0 as crate::stdlib::__off64_t,
-                    crate::stdlib::SEEK_END,
-                );
-                gz_open_finish_append(state_ref);
-            }
-            GzOpenPositionPlan::Read => {
-                let start = crate::stdlib::lseek64(
-                    state_ref.fd,
-                    0 as crate::stdlib::__off64_t,
-                    crate::stdlib::SEEK_CUR,
-                ) as crate::stdlib::off64_t;
-                gz_open_set_read_start(state_ref, start);
-            }
-        }
-        gz_reset(state_ref);
-        gz_error(state_ref, crate::zlib_h::Z_OK, None);
-        state as crate::zlib_h::gzFile
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
+    match gz_open_position_plan(state_ref) {
+        GzOpenPositionPlan::None => {}
+        GzOpenPositionPlan::Append => {
+            crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_END,
+            );
+            gz_open_finish_append(state_ref);
+        }
+        GzOpenPositionPlan::Read => {
+            let start = crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_CUR,
+            ) as crate::stdlib::off64_t;
+            gz_open_set_read_start(state_ref, start);
+        }
+    }
+    gz_reset(state_ref);
+    gz_error(state_ref, crate::zlib_h::Z_OK, None);
+    state as crate::zlib_h::gzFile
 }
 #[export_name = "gzopen"]
 
