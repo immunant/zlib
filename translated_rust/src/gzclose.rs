@@ -99,7 +99,8 @@ macro_rules! gzclose_write_at_boundary {
                 let state_ref = &mut *state;
                 let mut ret = crate::zlib_h::Z_OK;
                 if state_ref.skip != 0
-                    && crate::src::gzwrite::gz_zero(state_ref) == -1 as ::core::ffi::c_int
+                    && crate::src::gzwrite::gz_zero_at_boundary!(state_ref)
+                        == -1 as ::core::ffi::c_int
                 {
                     ret = state_ref.err;
                 }

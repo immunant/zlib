@@ -243,7 +243,7 @@ pub(crate) unsafe fn gz_comp(
 /// Choose one zero-fill chunk without converting the gzip handle or its
 /// buffers.  The narrowing cast deliberately matches zlib's `unsigned`
 /// chunk size when a malformed negative skip reaches this private adapter.
-fn gz_zero_chunk_plan(
+pub(crate) fn gz_zero_chunk_plan(
     size: ::core::ffi::c_uint,
     skip: crate::stdlib::off64_t,
 ) -> ::core::ffi::c_uint {
@@ -261,7 +261,10 @@ fn gz_zero_chunk_plan(
 /// Record the number of zero bytes consumed by a completed compression step.
 /// The raw adapter owns the input cursor and compressor call; this only keeps
 /// the C-style logical-position and pending-seek arithmetic together.
-fn gz_zero_commit_state(state: &mut crate::gzguts_h::gz_state, consumed: ::core::ffi::c_uint) {
+pub(crate) fn gz_zero_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    consumed: ::core::ffi::c_uint,
+) {
     state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
     state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
 }
@@ -276,7 +279,7 @@ fn gz_zero_commit_direct(state: &mut crate::gzguts_h::gz_state, consumed: ::core
 /// Write a pending sparse gap for a transparent stream.  This branch never
 /// enters the compressor: it receives only the owned zero buffer, descriptor,
 /// and scalar state, leaving opaque gzip-state traversal at its boundary.
-enum GzZeroDirect {
+pub(crate) enum GzZeroDirect {
     Complete(usize),
     IoError {
         consumed: usize,
@@ -303,7 +306,7 @@ fn gz_zero_direct_progress(
     ))
 }
 
-fn gz_zero_direct(
+pub(crate) fn gz_zero_direct(
     file: &mut ::std::fs::File,
     input: &mut [u8],
     size: ::core::ffi::c_uint,
@@ -629,72 +632,90 @@ fn gzputc_buffered_insert(
     Some((next_index, avail_in.wrapping_add(1), pos.wrapping_add(1)))
 }
 
-pub(crate) unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut n: ::core::ffi::c_uint = 0;
-    if state.strm.avail_in != 0
-        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.direct != 0 {
-        let result = {
-            let (Some(file), Some(buffers)) = (state.file.as_mut(), state.buffers.as_mut()) else {
-                return -1;
-            };
-            gz_zero_direct(file, &mut buffers.input, state.size, state.skip)
-        };
-        return match result {
-            GzZeroDirect::Complete(consumed) => {
-                state.again = 0;
-                state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
-                state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
-                0
+// This expansion is deliberately limited to exported writer boundaries.  It
+// retains the compressor call and ABI stream cursor updates there while the
+// zero-fill and descriptor work continues to use the safe helpers above.
+macro_rules! gz_zero_at_boundary {
+    ($state:expr) => {{
+        'gz_zero_result: {
+            let state = &mut *$state;
+            let mut ret: ::core::ffi::c_int = 0;
+            let mut n: ::core::ffi::c_uint = 0;
+            if state.strm.avail_in != 0
+                && crate::src::gzwrite::gz_comp(state, crate::zlib_h::Z_NO_FLUSH)
+                    == -1 as ::core::ffi::c_int
+            {
+                break 'gz_zero_result -1 as ::core::ffi::c_int;
             }
-            GzZeroDirect::IoError { consumed, code } => {
-                state.again = (code == crate::stdlib::EAGAIN || code == crate::stdlib::EWOULDBLOCK)
-                    as ::core::ffi::c_int;
-                state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
-                state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
-                crate::src::gzlib::gz_error_io(state, code);
-                -1
+            if state.direct != 0 {
+                let result = {
+                    let (Some(file), Some(buffers)) = (state.file.as_mut(), state.buffers.as_mut())
+                    else {
+                        break 'gz_zero_result -1;
+                    };
+                    crate::src::gzwrite::gz_zero_direct(
+                        file,
+                        &mut buffers.input,
+                        state.size,
+                        state.skip,
+                    )
+                };
+                break 'gz_zero_result match result {
+                    crate::src::gzwrite::GzZeroDirect::Complete(consumed) => {
+                        state.again = 0;
+                        state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
+                        state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
+                        0
+                    }
+                    crate::src::gzwrite::GzZeroDirect::IoError { consumed, code } => {
+                        state.again = (code == crate::stdlib::EAGAIN
+                            || code == crate::stdlib::EWOULDBLOCK)
+                            as ::core::ffi::c_int;
+                        state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
+                        state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
+                        crate::src::gzlib::gz_error_io(state, code);
+                        -1
+                    }
+                    crate::src::gzwrite::GzZeroDirect::Invalid => -1,
+                };
             }
-            GzZeroDirect::Invalid => -1,
-        };
-    }
-    let mut first = true;
-    loop {
-        n = gz_zero_chunk_plan(state.size, state.skip);
-        if first {
-            // The compressor still receives the old compatibility cursor,
-            // but the sparse gap is initialized through its owned allocation
-            // rather than libc `memset`.
-            let Some(buffers) = state.buffers.as_mut() else {
-                return -1 as ::core::ffi::c_int;
-            };
-            let Some(bytes) = buffers.input.get_mut(..n as usize) else {
-                return -1 as ::core::ffi::c_int;
-            };
-            bytes.fill(0);
-            first = false;
+            let mut first = true;
+            loop {
+                n = crate::src::gzwrite::gz_zero_chunk_plan(state.size, state.skip);
+                if first {
+                    // The compressor still receives the old compatibility cursor,
+                    // but the sparse gap is initialized through its owned allocation
+                    // rather than libc `memset`.
+                    let Some(buffers) = state.buffers.as_mut() else {
+                        break 'gz_zero_result -1 as ::core::ffi::c_int;
+                    };
+                    let Some(bytes) = buffers.input.get_mut(..n as usize) else {
+                        break 'gz_zero_result -1 as ::core::ffi::c_int;
+                    };
+                    bytes.fill(0);
+                    first = false;
+                }
+                state.strm.avail_in = n as crate::stdlib::uInt;
+                let Some(input) = state.buffers.as_mut().map(|buffers| buffers.input.as_mut())
+                else {
+                    break 'gz_zero_result -1;
+                };
+                state.strm.next_in = input.as_mut_ptr() as *mut crate::stdlib::Bytef;
+                ret = crate::src::gzwrite::gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+                n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
+                crate::src::gzwrite::gz_zero_commit_state(state, n);
+                if ret == -1 as ::core::ffi::c_int {
+                    break 'gz_zero_result -1 as ::core::ffi::c_int;
+                }
+                if state.skip == 0 {
+                    break;
+                }
+            }
+            break 'gz_zero_result 0 as ::core::ffi::c_int;
         }
-        state.strm.avail_in = n as crate::stdlib::uInt;
-        let Some(input) = state.buffers.as_mut().map(|buffers| buffers.input.as_mut()) else {
-            return -1;
-        };
-        state.strm.next_in = input.as_mut_ptr() as *mut crate::stdlib::Bytef;
-        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
-        gz_zero_commit_state(state, n);
-        if ret == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if state.skip == 0 {
-            break;
-        }
-    }
-    return 0 as ::core::ffi::c_int;
+    }};
 }
+pub(crate) use gz_zero_at_boundary;
 
 // The compressor and ABI stream cursors are deliberately kept in exported
 // writer boundaries. This macro is not an implementation function: every
@@ -715,7 +736,7 @@ macro_rules! gz_write_at_boundary {
             {
                 break 'gz_write_result 0 as crate::stdlib::z_size_t;
             }
-            if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+            if state.skip != 0 && gz_zero_at_boundary!(state) == -1 as ::core::ffi::c_int {
                 break 'gz_write_result 0 as crate::stdlib::z_size_t;
             }
             if state.direct != 0 {
@@ -886,7 +907,7 @@ pub unsafe extern "C" fn gzputc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error_clear(state);
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero_at_boundary!(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if state.size != 0 {
@@ -984,7 +1005,7 @@ pub unsafe extern "C" fn gzflush_ffi(
     if !gzflush_is_valid(flush) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero_at_boundary!(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
     gz_comp(state, flush);
@@ -1007,7 +1028,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     if !gzsetparams_needs_update(state.level, state.strategy, level, strategy) {
         return crate::zlib_h::Z_OK;
     }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero_at_boundary!(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
     if state.size != 0 {
