@@ -2828,6 +2828,28 @@ fn flush_pending_core(
     })
 }
 
+/// Drain one pending-output segment through checked slice ranges.
+///
+/// The callback-backed allocation is still established at the FFI boundary,
+/// but the temporal pending-output view itself has no reason to use pointer
+/// arithmetic or `memcpy`.  Keeping the copy here also makes an invalid
+/// pending cursor a no-op instead of deriving an out-of-bounds raw pointer.
+fn drain_pending(
+    pending_storage: &[crate::stdlib::Bytef],
+    drain: PendingDrainState,
+    output: &mut [crate::stdlib::Bytef],
+    avail_out: crate::stdlib::uInt,
+    total_out: crate::stdlib::uLong,
+) -> Option<FlushPendingResult> {
+    let result = flush_pending_core(drain, avail_out, total_out)?;
+    let copied = result.copied as usize;
+    let end = drain.pending_out_offset.checked_add(copied)?;
+    let source = pending_storage.get(drain.pending_out_offset..end)?;
+    let destination = output.get_mut(..copied)?;
+    destination.copy_from_slice(source);
+    Some(result)
+}
+
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     crate::src::trees::_tr_flush_bits_ffi(state as *mut crate::src::deflate::internal_state);
@@ -5062,7 +5084,7 @@ mod tests {
         fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
-        fill_window_state_after_slide, fill_window_zero_range, flush_pending_core,
+        fill_window_state_after_slide, fill_window_zero_range, drain_pending, flush_pending_core,
         gzip_default_header_bytes, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_bytes, gzip_header_crc_pending_range, gzip_custom_header_bytes,
         gzip_trailer_bytes,
@@ -6203,6 +6225,92 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn drain_pending_copies_the_selected_pending_segment() {
+        let pending = *b"0123456789";
+        let mut output = [0xaa; 5];
+
+        assert_eq!(
+            drain_pending(
+                &pending,
+                PendingDrainState {
+                    pending: 4,
+                    pending_out_offset: 3,
+                },
+                &mut output,
+                5,
+                11,
+            ),
+            Some(FlushPendingResult {
+                copied: 4,
+                next: PendingDrainState {
+                    pending: 0,
+                    pending_out_offset: 0,
+                },
+                avail_out: 1,
+                total_out: 15,
+                reset_pending_out: true,
+            })
+        );
+        assert_eq!(output, [b'3', b'4', b'5', b'6', 0xaa]);
+    }
+
+    #[test]
+    fn drain_pending_rejects_invalid_storage_or_output_without_writing() {
+        let pending = *b"012345";
+        let mut short_output = [0xaa; 2];
+        assert_eq!(
+            drain_pending(
+                &pending,
+                PendingDrainState {
+                    pending: 3,
+                    pending_out_offset: 2,
+                },
+                &mut short_output,
+                3,
+                0,
+            ),
+            None
+        );
+        assert_eq!(short_output, [0xaa; 2]);
+
+        let mut output = [0xaa; 3];
+        assert_eq!(
+            drain_pending(
+                &pending,
+                PendingDrainState {
+                    pending: 3,
+                    pending_out_offset: 5,
+                },
+                &mut output,
+                3,
+                0,
+            ),
+            None
+        );
+        assert_eq!(output, [0xaa; 3]);
+    }
+
+    #[test]
+    fn drain_pending_leaves_output_untouched_when_no_bytes_can_be_drained() {
+        let pending = *b"012345";
+        let mut output = [0xaa; 2];
+        assert_eq!(
+            drain_pending(
+                &pending,
+                PendingDrainState {
+                    pending: 2,
+                    pending_out_offset: 1,
+                },
+                &mut output,
+                0,
+                9,
+            ),
+            None
+        );
+        assert_eq!(output, [0xaa; 2]);
     }
 
     #[test]
