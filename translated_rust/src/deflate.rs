@@ -238,6 +238,27 @@ impl DeflateCopyLayout {
 }
 
 impl DeflateStorageLayout {
+    /// Derive the complete allocation geometry from validated initializer
+    /// parameters.  Keeping this independent of raw state storage means the
+    /// allocator boundary can consume one checked, pointer-free plan today,
+    /// and an owned workspace can use the same plan later.
+    fn from_init(
+        window_bits: ::core::ffi::c_int,
+        mem_level: ::core::ffi::c_int,
+    ) -> Option<Self> {
+        let window_bits = u32::try_from(window_bits).ok()?;
+        let hash_bits = u32::try_from(mem_level.checked_add(7)?).ok()?;
+        let pending_bits = u32::try_from(mem_level.checked_add(6)?).ok()?;
+        let window_items = (1 as crate::stdlib::uInt).checked_shl(window_bits)?;
+        let hash_items = (1 as crate::stdlib::uInt).checked_shl(hash_bits)?;
+        let pending_items = (1 as crate::stdlib::uInt).checked_shl(pending_bits)?;
+        Some(Self {
+            window_items,
+            hash_items,
+            pending_items,
+        })
+    }
+
     fn from_state(state: &crate::src::deflate::deflate_state) -> Self {
         Self {
             window_items: state.w_size,
@@ -856,6 +877,9 @@ fn initialize_allocated_deflate_state(
     mem_level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(storage) = DeflateStorageLayout::from_init(config.window_bits, mem_level) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let state = unsafe {
         Some(strm.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
             strm.opaque,
@@ -871,7 +895,6 @@ fn initialize_allocated_deflate_state(
         let state = &mut *state;
         *state = empty_deflate_state();
         initialize_deflate_state_base(state, strm, config.wrap, config.window_bits, mem_level);
-        let storage = DeflateStorageLayout::from_state(state);
         state.window = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
@@ -892,9 +915,7 @@ fn initialize_allocated_deflate_state(
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
         state.high_water = 0 as crate::zutil_h::ulg;
-        state.lit_bufsize = ((1 as ::core::ffi::c_int) << mem_level + 6 as ::core::ffi::c_int)
-            as crate::stdlib::uInt;
-        let storage = DeflateStorageLayout::from_state(state);
+        state.lit_bufsize = storage.pending_items;
         state.pending_buf = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
