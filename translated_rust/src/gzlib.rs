@@ -111,6 +111,21 @@ impl crate::gzguts_h::GzBuffers {
         self.output_cursor = None;
         self.size = 0;
     }
+
+    // The completed read cursor belongs to the output allocation.  Keep the
+    // owner as the source of truth between buffered-read operations; `x` is
+    // only the ABI projection published for the public gzgetc macro.
+    pub(crate) fn output_cursor(&self) -> Option<&GzCodecOutputCursor> {
+        self.output_cursor.as_ref()
+    }
+
+    pub(crate) fn set_output_cursor(&mut self, cursor: GzCodecOutputCursor) {
+        self.output_cursor = Some(cursor);
+    }
+
+    pub(crate) fn clear_output_cursor(&mut self) {
+        self.output_cursor = None;
+    }
 }
 
 // This is the scalar portion of a gzip handle that position queries need.
@@ -167,6 +182,17 @@ pub(crate) struct GzCodecOutputView<'a> {
 }
 
 impl<'a> GzBufferedCursor<'a> {
+    pub(crate) fn from_index(buffer: &'a [u8], start: usize, have: u32) -> Option<Self> {
+        let have = have as usize;
+        let end = start.checked_add(have)?;
+        buffer.get(start..end)?;
+        Some(Self {
+            buffer,
+            start,
+            have,
+        })
+    }
+
     pub(crate) fn from_owned_buffer(
         buffer: &'a [u8],
         cursor_address: usize,
@@ -763,12 +789,53 @@ impl GzCodecOutput {
 }
 
 impl GzCodecOutputCursor {
+    pub(crate) fn from_owned_buffer(buffer: &[u8], start: usize, have: u32) -> Option<Self> {
+        GzBufferedCursor::from_index(buffer, start, have)?;
+        Some(Self { start, have })
+    }
+
     pub(crate) fn start(&self) -> usize {
         self.start
     }
 
     pub(crate) fn have(&self) -> crate::stdlib::uInt {
         self.have
+    }
+
+    pub(crate) fn buffered<'a>(&self, buffer: &'a [u8]) -> Option<GzBufferedCursor<'a>> {
+        GzBufferedCursor::from_index(buffer, self.start, self.have)
+    }
+
+    pub(crate) fn advance(&self, len: usize) -> Option<Self> {
+        let start = self.start.checked_add(len)?;
+        let have = (self.have as usize).checked_sub(len)?;
+        Some(Self {
+            start,
+            have: u32::try_from(have).ok()?,
+        })
+    }
+
+    pub(crate) fn prepend(&mut self, buffer: &mut [u8], byte: u8) -> Option<()> {
+        if self.have == 0 {
+            self.start = buffer.len().checked_sub(1)?;
+            buffer[self.start] = byte;
+            self.have = 1;
+            return Some(());
+        }
+        GzBufferedCursor::from_index(buffer, self.start, self.have)?;
+        let have = self.have as usize;
+        if have >= buffer.len() {
+            return None;
+        }
+        if self.start == 0 {
+            let shifted = buffer.len().checked_sub(have)?;
+            buffer.copy_within(0..have, shifted);
+            self.start = shifted;
+        }
+        self.start = self.start.checked_sub(1)?;
+        buffer[self.start] = byte;
+        self.have = self.have.checked_add(1)?;
+        Some(())
     }
 }
 

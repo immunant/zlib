@@ -800,8 +800,16 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             let Some(output) = state.buffers.output.as_deref_mut() else {
                 return -1;
             };
+            let Some(cursor) = crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(
+                output,
+                0,
+                have as ::core::ffi::c_uint,
+            ) else {
+                return -1;
+            };
             state.x.next = output.as_mut_ptr();
             state.x.have = have as ::core::ffi::c_uint;
+            state.buffers.set_output_cursor(cursor);
             state.strm.avail_in = 0;
             state.buffers.input_cursor = Some(GzCodecInput::empty());
             0
@@ -914,7 +922,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     // `x.next` is still the ABI publication for current callers; later read
     // transitions can consume this owned cursor instead of revalidating it
     // from that raw pointer.
-    state.buffers.output_cursor = Some(finish.output);
+    state.buffers.set_output_cursor(finish.output);
     state.x.have = output_have;
     state.x.next = output_start;
     state.buffers.input_cursor = Some(finish.input);
@@ -963,7 +971,16 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                     if ret == -1 as ::core::ffi::c_int {
                         return Err(());
                     }
-                    state.x.next = state.buffers.output.as_deref_mut().unwrap().as_mut_ptr();
+                    let Some(output) = state.buffers.output.as_deref_mut() else {
+                        return Err(());
+                    };
+                    let Some(cursor) =
+                        crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(output, 0, have)
+                    else {
+                        return Err(());
+                    };
+                    state.x.next = output.as_mut_ptr();
+                    state.buffers.set_output_cursor(cursor);
                 }
                 GzFetchAction::Gzip => {
                     if gz_decomp(state) == -1 as ::core::ffi::c_int {
@@ -1014,15 +1031,8 @@ unsafe fn gz_read(
             let cursor = if state.x.have == 0 {
                 0
             } else {
-                let Some(cursor) = state.buffers.output.as_deref().and_then(|buffer| {
-                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                        buffer,
-                        state.x.next.addr(),
-                        state.x.have,
-                    )
-                    .and_then(|cursor| cursor.advance(0))
-                    .map(|(next, _)| next)
-                }) else {
+                let Some(cursor) = state.buffers.output_cursor().map(|cursor| cursor.start())
+                else {
                     return 0;
                 };
                 cursor
@@ -1043,15 +1053,32 @@ unsafe fn gz_read(
                     }
                 }
                 Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
-                    if skip.have != 0 {
+                    let have = skip.have;
+                    let cursor_index = skip.cursor;
+                    let pos = skip.pos;
+                    let skip_remaining = skip.skip;
+                    drop(skip);
+                    if have != 0 {
                         let Some(buffer) = state.buffers.output.as_deref() else {
                             return 0;
                         };
-                        state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
+                        let Some(cursor) =
+                            crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(
+                                buffer,
+                                cursor_index,
+                                have,
+                            )
+                        else {
+                            return 0;
+                        };
+                        state.x.next = buffer.as_ptr().wrapping_add(cursor_index).cast_mut();
+                        state.buffers.set_output_cursor(cursor);
+                    } else {
+                        state.buffers.clear_output_cursor();
                     }
-                    state.x.have = skip.have;
-                    state.x.pos = skip.pos;
-                    state.skip = skip.skip;
+                    state.x.have = have;
+                    state.x.pos = pos;
+                    state.skip = skip_remaining;
                     if matches!(step, GzSkipStep::Done) {
                         break;
                     }
@@ -1072,31 +1099,28 @@ unsafe fn gz_read(
                 if state.x.have < n {
                     n = state.x.have;
                 }
-                // `x.next` is a cursor in the owned output buffer whenever
-                // `x.have` is nonzero here. Rebuild the buffered input with
-                // a checked range so a corrupt cursor cannot extend a raw
-                // slice beyond that allocation.
-                let Some(buffered) = state.buffers.output.as_deref().and_then(|buffer| {
-                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                        buffer,
-                        state.x.next.addr(),
-                        state.x.have,
-                    )
-                }) else {
-                    return got;
-                };
                 let Some(destination) = output.get_mut(got as usize..got as usize + n as usize)
                 else {
                     return got;
                 };
-                let Some((next, have)) = buffered.copy_into(destination) else {
+                // The output allocation retains the checked cursor created
+                // by LOOK/COPY/inflate. Consume that owner cursor rather
+                // than rebuilding a range from the ABI publication.
+                let Some(next_cursor) = (|| {
+                    let buffer = state.buffers.output.as_deref()?;
+                    let cursor = state.buffers.output_cursor()?;
+                    let buffered = cursor.buffered(buffer)?;
+                    buffered.copy_into(destination)?;
+                    cursor.advance(n as usize)
+                })() else {
                     return got;
                 };
                 let Some(buffer) = state.buffers.output.as_deref() else {
                     return got;
                 };
-                state.x.next = buffer.as_ptr().wrapping_add(next).cast_mut();
-                state.x.have = have;
+                state.x.next = buffer.as_ptr().wrapping_add(next_cursor.start()).cast_mut();
+                state.x.have = next_cursor.have();
+                state.buffers.set_output_cursor(next_cursor);
                 if state.err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
                 }
@@ -1146,6 +1170,7 @@ unsafe fn gz_read(
                     err = gz_decomp(state);
                     n = state.x.have;
                     state.x.have = 0 as ::core::ffi::c_uint;
+                    state.buffers.clear_output_cursor();
                 }
             }
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
@@ -1285,25 +1310,21 @@ unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     drop(error);
     if state.x.have != 0 {
-        // Convert the ABI cursor once at this boundary.  The cursor view
-        // checks the complete advertised unread range before the safe read
-        // policy consumes its first byte.
-        let Some((byte, next)) = state.buffers.output.as_deref().and_then(|buffer| {
-            crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                buffer,
-                state.x.next.addr(),
-                state.x.have,
-            )
-            .and_then(|cursor| cursor.consume_one())
-        }) else {
+        let Some((byte, next_cursor)) = (|| {
+            let buffer = state.buffers.output.as_deref()?;
+            let cursor = state.buffers.output_cursor()?;
+            let (byte, _) = cursor.buffered(buffer)?.consume_one()?;
+            Some((byte, cursor.advance(1)?))
+        })() else {
             return -1 as ::core::ffi::c_int;
         };
         let Some(buffer) = state.buffers.output.as_deref() else {
             return -1 as ::core::ffi::c_int;
         };
-        state.x.have = state.x.have.wrapping_sub(1);
+        state.x.have = next_cursor.have();
         state.x.pos += 1;
-        state.x.next = buffer.as_ptr().wrapping_add(next).cast_mut();
+        state.x.next = buffer.as_ptr().wrapping_add(next_cursor.start()).cast_mut();
+        state.buffers.set_output_cursor(next_cursor);
         return byte as ::core::ffi::c_int;
     }
     return if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
@@ -1355,15 +1376,8 @@ unsafe fn gzungetc(
             let cursor = if state.x.have == 0 {
                 0
             } else {
-                let Some(cursor) = state.buffers.output.as_deref().and_then(|buffer| {
-                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                        buffer,
-                        state.x.next.addr(),
-                        state.x.have,
-                    )
-                    .and_then(|cursor| cursor.advance(0))
-                    .map(|(next, _)| next)
-                }) else {
+                let Some(cursor) = state.buffers.output_cursor().map(|cursor| cursor.start())
+                else {
                     return -1;
                 };
                 cursor
@@ -1384,15 +1398,32 @@ unsafe fn gzungetc(
                     }
                 }
                 Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
-                    if skip.have != 0 {
+                    let have = skip.have;
+                    let cursor_index = skip.cursor;
+                    let pos = skip.pos;
+                    let skip_remaining = skip.skip;
+                    drop(skip);
+                    if have != 0 {
                         let Some(buffer) = state.buffers.output.as_deref() else {
                             return -1;
                         };
-                        state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
+                        let Some(cursor) =
+                            crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(
+                                buffer,
+                                cursor_index,
+                                have,
+                            )
+                        else {
+                            return -1;
+                        };
+                        state.x.next = buffer.as_ptr().wrapping_add(cursor_index).cast_mut();
+                        state.buffers.set_output_cursor(cursor);
+                    } else {
+                        state.buffers.clear_output_cursor();
                     }
-                    state.x.have = skip.have;
-                    state.x.pos = skip.pos;
-                    state.skip = skip.skip;
+                    state.x.have = have;
+                    state.x.pos = pos;
+                    state.skip = skip_remaining;
                     if matches!(step, GzSkipStep::Done) {
                         break;
                     }
@@ -1420,17 +1451,30 @@ unsafe fn gzungetc(
     let Some(capacity) = size.checked_mul(2) else {
         return -1 as ::core::ffi::c_int;
     };
-    let buffer = &mut state.buffers.output.as_deref_mut().unwrap()[..capacity];
-    let Some((next, have)) = crate::src::gzlib::GzBufferedCursor::prepend(
-        buffer,
-        state.x.next.addr(),
-        state.x.have,
-        c as ::core::ffi::c_uchar,
-    ) else {
-        return -1 as ::core::ffi::c_int;
+    let existing_cursor = state
+        .buffers
+        .output_cursor()
+        .map(|cursor| (cursor.start(), cursor.have()));
+    let Some(buffer) = state.buffers.output.as_deref_mut() else {
+        return -1;
     };
-    state.x.have = have;
-    state.x.next = buffer.as_mut_ptr().wrapping_add(next);
+    let Some(buffer) = buffer.get_mut(..capacity) else {
+        return -1;
+    };
+    let Some(mut cursor) = existing_cursor
+        .map(|(start, have)| {
+            crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(buffer, start, have)
+        })
+        .unwrap_or_else(|| crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(buffer, 0, 0))
+    else {
+        return -1;
+    };
+    if cursor.prepend(buffer, c as ::core::ffi::c_uchar).is_none() {
+        return -1 as ::core::ffi::c_int;
+    }
+    state.x.have = cursor.have();
+    state.x.next = buffer.as_mut_ptr().wrapping_add(cursor.start());
+    state.buffers.set_output_cursor(cursor);
     state.x.pos -= 1;
     state.past = 0 as ::core::ffi::c_int;
     return c;
@@ -1478,15 +1522,8 @@ unsafe fn gzgets(
             let cursor = if state.x.have == 0 {
                 0
             } else {
-                let Some(cursor) = state.buffers.output.as_deref().and_then(|buffer| {
-                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                        buffer,
-                        state.x.next.addr(),
-                        state.x.have,
-                    )
-                    .and_then(|cursor| cursor.advance(0))
-                    .map(|(next, _)| next)
-                }) else {
+                let Some(cursor) = state.buffers.output_cursor().map(|cursor| cursor.start())
+                else {
                     return ::core::ptr::null_mut();
                 };
                 cursor
@@ -1507,15 +1544,32 @@ unsafe fn gzgets(
                     }
                 }
                 Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
-                    if skip.have != 0 {
+                    let have = skip.have;
+                    let cursor_index = skip.cursor;
+                    let pos = skip.pos;
+                    let skip_remaining = skip.skip;
+                    drop(skip);
+                    if have != 0 {
                         let Some(buffer) = state.buffers.output.as_deref() else {
                             return ::core::ptr::null_mut();
                         };
-                        state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
+                        let Some(cursor) =
+                            crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(
+                                buffer,
+                                cursor_index,
+                                have,
+                            )
+                        else {
+                            return ::core::ptr::null_mut();
+                        };
+                        state.x.next = buffer.as_ptr().wrapping_add(cursor_index).cast_mut();
+                        state.buffers.set_output_cursor(cursor);
+                    } else {
+                        state.buffers.clear_output_cursor();
                     }
-                    state.x.have = skip.have;
-                    state.x.pos = skip.pos;
-                    state.skip = skip.skip;
+                    state.x.have = have;
+                    state.x.pos = pos;
+                    state.skip = skip_remaining;
                     if matches!(step, GzSkipStep::Done) {
                         break;
                     }
@@ -1540,26 +1594,23 @@ unsafe fn gzgets(
                 } else {
                     state.x.have as usize
                 };
-                // `x.next` is a cursor in the owned output buffer whenever
-                // `x.have` is nonzero. Validate the complete advertised
-                // unread range before borrowing its requested prefix, so a
-                // corrupt cursor or `x.have` cannot extend a raw slice past
-                // the allocation's remaining capacity.
-                let Some((input, _)) = state.buffers.output.as_deref().and_then(|buffer| {
-                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                        buffer,
-                        state.x.next.addr(),
-                        state.x.have,
-                    )
-                    .and_then(|cursor| cursor.consume(n))
-                }) else {
+                let Some((copied, found_newline, next_cursor)) = (|| {
+                    let buffer = state.buffers.output.as_deref()?;
+                    let cursor = state.buffers.output_cursor()?;
+                    let (input, _) = cursor.buffered(buffer)?.consume(n)?;
+                    let (copied, found_newline) =
+                        copy_through_newline(input, &mut output[written..written + n]);
+                    Some((copied, found_newline, cursor.advance(copied)?))
+                })() else {
                     return ::core::ptr::null_mut::<::core::ffi::c_char>();
                 };
-                let (copied, found_newline) =
-                    copy_through_newline(input, &mut output[written..written + n]);
                 n = copied;
-                state.x.have = state.x.have.wrapping_sub(n as ::core::ffi::c_uint);
-                state.x.next = state.x.next.wrapping_add(n);
+                let Some(buffer) = state.buffers.output.as_deref() else {
+                    return ::core::ptr::null_mut::<::core::ffi::c_char>();
+                };
+                state.x.have = next_cursor.have();
+                state.x.next = buffer.as_ptr().wrapping_add(next_cursor.start()).cast_mut();
+                state.buffers.set_output_cursor(next_cursor);
                 state.x.pos += n as crate::stdlib::off64_t;
                 left -= n;
                 written += n;
