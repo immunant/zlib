@@ -2985,6 +2985,22 @@ fn copy_stored_history(
     true
 }
 
+fn copy_stored_input(
+    strm: &mut crate::zlib_h::z_stream,
+    wrap: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+) -> bool {
+    let copied = read_buf(strm, wrap, input, output) as usize;
+    if copied != output.len() {
+        return false;
+    }
+    strm.next_out = output.as_mut_ptr().wrapping_add(copied);
+    strm.avail_out = strm.avail_out.wrapping_sub(copied as crate::stdlib::uInt);
+    strm.total_out = strm.total_out.wrapping_add(copied as crate::stdlib::uLong);
+    true
+}
+
 fn update_stored_history(
     state: &mut crate::src::deflate::deflate_state,
     window: &mut [crate::stdlib::Bytef],
@@ -3167,12 +3183,9 @@ unsafe extern "C" fn deflate_stored(
             let strm = &mut *(*s).strm;
             let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
             let output = ::core::slice::from_raw_parts_mut(strm.next_out, len as usize);
-            read_buf(strm, (*s).wrap, input, output);
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(len as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
-            (*(*s).strm).total_out = (*(*s).strm)
-                .total_out
-                .wrapping_add(len as crate::stdlib::uLong);
+            if !copy_stored_input(strm, (*s).wrap, input, output) {
+                return need_more;
+            }
         }
         if last != 0 as ::core::ffi::c_int {
             break;
