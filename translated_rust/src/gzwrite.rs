@@ -14,7 +14,7 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateParams;
+pub use crate::src::deflate::deflate_params_from_stream as deflateParams;
 use crate::src::deflate::deflate_reset_keep_from_stream;
 pub use crate::src::deflate::internal_state;
 use crate::src::deflate::DeflateResetKind;
@@ -1032,7 +1032,7 @@ unsafe fn gzsetparams(
         {
             return state.err;
         }
-        crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
+        crate::src::deflate::deflate_params_from_stream(&mut state.strm, level, strategy);
     }
     state.level = level;
     state.strategy = strategy;

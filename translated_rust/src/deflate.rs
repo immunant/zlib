@@ -2376,6 +2376,62 @@ struct DeflateParameterOwner<'state> {
     )>,
 }
 
+// Keep the callback-owned hash allocations together while their bounded
+// views are live.  This is deliberately pointer-free: the stream adapter
+// proves the callback allocation geometry once, then parameter policy can
+// neither reopen the ABI state nor recover a callback handle.
+struct DeflateCallbackHashStorage<'storage> {
+    head: &'storage mut [crate::src::deflate::Posf],
+    prev: Option<&'storage mut [crate::src::deflate::Posf]>,
+}
+
+// These are precisely the scalar state slots a level/strategy transition may
+// alter.  Separating them from `internal_state` lets the policy remain safe
+// even while the callback-backed storage itself is still projected at the
+// stream boundary.
+struct DeflateParameterScalars<'state> {
+    current_level: &'state mut ::core::ffi::c_int,
+    current_strategy: &'state mut ::core::ffi::c_int,
+    matches: &'state mut crate::stdlib::uInt,
+    slid: &'state mut ::core::ffi::c_int,
+    max_lazy_match: &'state mut crate::stdlib::uInt,
+    good_match: &'state mut crate::stdlib::uInt,
+    nice_match: &'state mut ::core::ffi::c_int,
+    max_chain_length: &'state mut crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+}
+
+impl<'state> DeflateParameterOwner<'state> {
+    fn from_callback_storage(
+        scalars: DeflateParameterScalars<'state>,
+        storage: Option<DeflateCallbackHashStorage<'state>>,
+    ) -> Self {
+        let DeflateParameterScalars {
+            current_level,
+            current_strategy,
+            matches,
+            slid,
+            max_lazy_match,
+            good_match,
+            nice_match,
+            max_chain_length,
+            w_size,
+        } = scalars;
+        Self {
+            current_level,
+            current_strategy,
+            matches,
+            slid,
+            max_lazy_match,
+            good_match,
+            nice_match,
+            max_chain_length,
+            w_size,
+            tables: storage.map(|storage| (storage.head, storage.prev)),
+        }
+    }
+}
+
 impl DeflateParameterOwner<'_> {
     fn update(self, level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) {
         let Self {
@@ -2417,7 +2473,19 @@ impl DeflateParameterOwner<'_> {
     }
 }
 
-pub unsafe extern "C" fn deflateParams(
+fn deflateParams(
+    owner: DeflateParameterOwner<'_>,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    owner.update(level, strategy);
+    crate::zlib_h::Z_OK
+}
+
+// The stream-facing adapter keeps the callback-owned table projection at the
+// same boundary as opaque-state validation.  `deflateParams()` itself only
+// receives the completed pointer-free owner above.
+pub unsafe fn deflate_params_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
@@ -2465,7 +2533,8 @@ pub unsafe extern "C" fn deflateParams(
     let Some((_stream, state)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let tables = if state.level != level && state.level == 0 && state.matches != 0 {
+    let needs_table_cleanup = state.level != level && state.level == 0 && state.matches != 0;
+    let tables = if needs_table_cleanup {
         // `head` and (for the single-match case) `prev` have their exact
         // allocation geometry from `deflateInit2_()` or `deflateCopy()`.
         let head = ::core::slice::from_raw_parts_mut(
@@ -2480,11 +2549,11 @@ pub unsafe extern "C" fn deflateParams(
         } else {
             None
         };
-        Some((head, prev))
+        Some(DeflateCallbackHashStorage { head, prev })
     } else {
         None
     };
-    DeflateParameterOwner {
+    let scalars = DeflateParameterScalars {
         current_level: &mut state.level,
         current_strategy: &mut state.strategy,
         matches: &mut state.matches,
@@ -2494,10 +2563,12 @@ pub unsafe extern "C" fn deflateParams(
         nice_match: &mut state.nice_match,
         max_chain_length: &mut state.max_chain_length,
         w_size: state.w_size,
-        tables,
-    }
-    .update(level, strategy);
-    return crate::zlib_h::Z_OK;
+    };
+    deflateParams(
+        DeflateParameterOwner::from_callback_storage(scalars, tables),
+        level,
+        strategy,
+    )
 }
 #[export_name = "deflateParams"]
 
@@ -2509,7 +2580,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateParams(strm, level, strategy)
+    deflate_params_from_stream(strm, level, strategy)
 }
 fn deflate_tune_values(
     good_length: ::core::ffi::c_int,
