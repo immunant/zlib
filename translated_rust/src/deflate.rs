@@ -2300,6 +2300,37 @@ struct GzipFixedHeader {
     extra_len: crate::stdlib::uInt,
 }
 
+/// Scalar gzip-header metadata retained for one `deflate()` dispatch.  The
+/// caller-owned payload cursors remain in the existing ABI snapshot and are
+/// lent only at the EXTRA, NAME, and COMMENT copy boundaries.
+#[derive(Copy, Clone)]
+struct GzipHeaderFields {
+    text: bool,
+    hcrc: bool,
+    has_extra: bool,
+    has_name: bool,
+    has_comment: bool,
+    time: crate::stdlib::uLong,
+    os: ::core::ffi::c_int,
+    extra_len: crate::stdlib::uInt,
+}
+
+/// Reduce the copied caller-owned ABI header to fields used by the fixed
+/// header and HCRC transitions.  Payload pointer handling stays at its
+/// individual copy boundary.
+fn gzip_header_fields(header: &crate::zlib_h::gz_header) -> GzipHeaderFields {
+    GzipHeaderFields {
+        text: header.text != 0,
+        hcrc: header.hcrc != 0,
+        has_extra: !header.extra.is_null(),
+        has_name: !header.name.is_null(),
+        has_comment: !header.comment.is_null(),
+        time: header.time,
+        os: header.os,
+        extra_len: header.extra_len,
+    }
+}
+
 /// Decide the state transition immediately after emitting gzip's fixed header.
 ///
 /// A caller-supplied header defers draining until the optional fields have
@@ -2820,7 +2851,7 @@ pub fn deflate(
         // This transitional dispatcher still uses raw cursors in its legacy
         // compression loop. Validate the safe stream and adopt its raw state
         // once at entry rather than routing through the private state checker.
-        let (s, pending, avail_in, gzip_header) = {
+        let (s, pending, avail_in, gzip_header, gzip_header_fields) = {
             let stream = deflate_reborrow_mut(strm_ref);
             let state_ptr = stream.state as *mut crate::src::deflate::deflate_state;
             if state_ptr.is_null() {
@@ -2876,7 +2907,8 @@ pub fn deflate(
                 Some(header) => Some(*header.as_ptr()),
                 None => None,
             };
-            (state, pending, stream.avail_in, gzip_header)
+            let gzip_header_fields = gzip_header.map(|header| gzip_header_fields(&header));
+            (state, pending, stream.avail_in, gzip_header, gzip_header_fields)
         };
         if pending {
             if flush_pending(
@@ -2999,12 +3031,12 @@ pub fn deflate(
                 let stream = deflate_reborrow_mut(strm_ref);
                 let state = deflate_reborrow_mut(s);
                 stream.adler = crate::src::crc32::crc32_slice(0, &[]);
-                let header = gzip_header.map(|header| GzipFixedHeader {
-                        text: header.text != 0,
-                        hcrc: header.hcrc != 0,
-                        has_extra: !header.extra.is_null(),
-                        has_name: !header.name.is_null(),
-                        has_comment: !header.comment.is_null(),
+                let header = gzip_header_fields.map(|header| GzipFixedHeader {
+                    text: header.text,
+                    hcrc: header.hcrc,
+                    has_extra: header.has_extra,
+                    has_name: header.has_name,
+                    has_comment: header.has_comment,
                         time: header.time,
                         os: header.os,
                         extra_len: header.extra_len,
@@ -3233,13 +3265,12 @@ pub fn deflate(
             // together.  The scalar planner then owns the two-byte admission
             // check, avoiding a second raw state adoption before a possible
             // flush.
-            let hcrc_plan = match gzip_header {
+            let hcrc_plan = match gzip_header_fields {
                 None => GzipHcrcPlan {
                     emit: false,
                     flush_before_emit: false,
                 },
-                Some(header) =>
-                    gzip_hcrc_plan(header.hcrc != 0, hcrc_pending, hcrc_pending_buf_size),
+                Some(header) => gzip_hcrc_plan(header.hcrc, hcrc_pending, hcrc_pending_buf_size),
             };
             if hcrc_plan.emit {
                 if hcrc_plan.flush_before_emit {
