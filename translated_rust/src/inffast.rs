@@ -49,33 +49,42 @@ pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
 #[derive(Copy, Clone)]
-struct InflateFastProgress {
-    input_used: usize,
-    output_used: usize,
-    hold: u64,
-    bits: u32,
-    mode: Option<crate::src::inflate::inflate_mode>,
-    error: Option<usize>,
+pub(crate) struct InflateFastProgress {
+    pub(crate) input_used: usize,
+    pub(crate) output_used: usize,
+    pub(crate) hold: u64,
+    pub(crate) bits: u32,
+    pub(crate) mode: Option<crate::src::inflate::inflate_mode>,
+    pub(crate) error: Option<usize>,
+}
+
+/// The normal inflate API keeps history in a separate circular window, while
+/// inflateBack uses its output window as that history.  Keeping the latter as
+/// an explicit selector avoids creating aliased immutable and mutable slices.
+pub(crate) enum InflateFastHistory<'a> {
+    Separate(&'a [u8]),
+    Output,
 }
 
 /// All bounded state the fast decoder needs for one invocation.  A future C3
 /// stream boundary can construct this view after validating the ABI cursors;
 /// the decoder itself only sees ordinary slices and scalar cursors.
-struct InflateFastViews<'a> {
-    input: &'a [u8],
-    output: &'a mut [u8],
-    window: &'a [u8],
-    lcode: &'a [crate::src::inftrees::code],
-    dcode: &'a [crate::src::inftrees::code],
-    wsize: usize,
-    whave: usize,
-    wnext: usize,
-    sane: bool,
-    hold: u64,
-    bits: u32,
-    lenbits: u32,
-    distbits: u32,
-    start: u32,
+pub(crate) struct InflateFastViews<'a> {
+    pub(crate) input: &'a [u8],
+    pub(crate) output: &'a mut [u8],
+    pub(crate) output_start: usize,
+    pub(crate) history: InflateFastHistory<'a>,
+    pub(crate) lcode: &'a [crate::src::inftrees::code],
+    pub(crate) dcode: &'a [crate::src::inftrees::code],
+    pub(crate) wsize: usize,
+    pub(crate) whave: usize,
+    pub(crate) wnext: usize,
+    pub(crate) sane: bool,
+    pub(crate) hold: u64,
+    pub(crate) bits: u32,
+    pub(crate) lenbits: u32,
+    pub(crate) distbits: u32,
+    pub(crate) start: u32,
 }
 
 impl InflateFastViews<'_> {
@@ -83,7 +92,10 @@ impl InflateFastViews<'_> {
     /// when either of its documented six-input-byte or 258-output-byte
     /// reserves is unavailable.
     fn validate(&self) -> Result<(), InflateFastProgress> {
-        if self.input.len() < 6 || self.output.len() < 258 {
+        if self.input.len() < 6
+            || self.output_start > self.output.len()
+            || self.output.len().saturating_sub(self.output_start) < 258
+        {
             return Err(InflateFastProgress::no_progress(self.hold, self.bits));
         }
         if self.bits >= u64::BITS {
@@ -101,7 +113,11 @@ impl InflateFastViews<'_> {
         if self.dcode.len() < droot {
             return Err(InflateFastProgress::invalid(self.hold, self.bits, 15));
         }
-        if self.wsize > self.window.len()
+        let history_len = match self.history {
+            InflateFastHistory::Separate(window) => window.len(),
+            InflateFastHistory::Output => self.output.len(),
+        };
+        if self.wsize > history_len
             || self.whave > self.wsize
             || (self.wsize == 0 && self.wnext != 0)
             || (self.wsize != 0 && self.wnext >= self.wsize)
@@ -248,14 +264,15 @@ fn inflate_fast_copy_output_match(
 /// buffers.  The ABI adapter owns construction of these views and commits the
 /// resulting cursors, so this core cannot retain or dereference foreign
 /// pointers.
-fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
+pub(crate) fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
     if let Err(progress) = views.validate() {
         return progress;
     }
     let InflateFastViews {
         input,
         output,
-        window,
+        output_start,
+        history,
         lcode,
         dcode,
         wsize,
@@ -269,7 +286,7 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
         ..
     } = views;
     let mut input_at = 0usize;
-    let mut output_at = 0usize;
+    let mut output_at = output_start;
     // `validate()` established both shifts and the corresponding root table
     // spans. Keeping the masks checked here makes that relationship explicit
     // if this core is later reused independently.
@@ -463,7 +480,11 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
                     };
                     let take = back.min(len);
                     for _ in 0..take {
-                        let Some(&byte) = window.get(from) else {
+                        let byte = match &history {
+                            InflateFastHistory::Separate(window) => window.get(from).copied(),
+                            InflateFastHistory::Output => output.get(from).copied(),
+                        };
+                        let Some(byte) = byte else {
                             mode = Some(crate::src::inflate::BAD);
                             error = Some(17);
                             break 'fast;
@@ -533,7 +554,7 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
     }
     InflateFastProgress {
         input_used: input_at,
-        output_used: output_at,
+        output_used: output_at.wrapping_sub(output_start),
         hold,
         bits,
         mode,
@@ -852,38 +873,30 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
                             break 's_92;
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                        here = dcode
-                            .wrapping_add(here_code.val as usize)
-                            .wrapping_add(
-                                (hold
-                                    & ((1 as ::core::ffi::c_uint) << op)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint)
-                                        as ::core::ffi::c_ulong)
-                                    as usize,
-                            );
+                        here = dcode.wrapping_add(here_code.val as usize).wrapping_add(
+                            (hold
+                                & ((1 as ::core::ffi::c_uint) << op)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint)
+                                    as ::core::ffi::c_ulong) as usize,
+                        );
                     } else {
-                        strm.msg = b"invalid distance code\0".as_ptr()
-                            as *const ::core::ffi::c_char
+                        strm.msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
                         state.mode = BAD;
                         break 's_627;
                     }
                 }
             } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                here = lcode
-                    .wrapping_add(here_code.val as usize)
-                    .wrapping_add(
-                        (hold
-                            & ((1 as ::core::ffi::c_uint) << op)
-                                .wrapping_sub(1 as ::core::ffi::c_uint)
-                                as ::core::ffi::c_ulong) as usize,
-                    );
+                here = lcode.wrapping_add(here_code.val as usize).wrapping_add(
+                    (hold
+                        & ((1 as ::core::ffi::c_uint) << op).wrapping_sub(1 as ::core::ffi::c_uint)
+                            as ::core::ffi::c_ulong) as usize,
+                );
             } else if op & 32 as ::core::ffi::c_uint != 0 {
                 state.mode = TYPE;
                 break 's_627;
             } else {
-                strm.msg = b"invalid literal/length code\0".as_ptr()
-                    as *const ::core::ffi::c_char
+                strm.msg = b"invalid literal/length code\0".as_ptr() as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
                 state.mode = BAD;
                 break 's_627;

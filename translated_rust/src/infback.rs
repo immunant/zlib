@@ -735,22 +735,129 @@ pub unsafe extern "C" fn inflateBack_ffi(
             }
         }
         if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
-            (*strm).next_out = put as *mut crate::stdlib::Bytef;
-            (*strm).avail_out = left as crate::stdlib::uInt;
-            (*strm).next_in = next as *mut crate::stdlib::Bytef;
-            (*strm).avail_in = have as crate::stdlib::uInt;
-            (*state).hold = hold;
-            (*state).bits = bits;
-            crate::src::inffast::inflate_fast(
-                strm as *mut crate::zlib_h::z_stream_s,
-                (*state).wsize,
-            );
-            put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-            left = (*strm).avail_out as ::core::ffi::c_uint;
-            next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-            have = (*strm).avail_in as ::core::ffi::c_uint;
-            hold = (*state).hold;
-            bits = (*state).bits;
+            // inflateBack's caller-provided output window is also its
+            // history.  Build that bounded view at this export boundary and
+            // tell the safe core to read history from the output slice itself
+            // rather than creating aliased immutable/mutable window slices.
+            let fast = {
+                let state_ref = &mut *state;
+                if let Ok(wsize) = usize::try_from(state_ref.wsize) {
+                    let output_start = (put as usize)
+                        .checked_sub(state_ref.window as usize)
+                        .filter(|offset| *offset <= wsize);
+                    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+                    let code_start = state_ref.codes.as_ptr() as usize;
+                    let code_end =
+                        code_start.checked_add(::core::mem::size_of_val(&state_ref.codes));
+                    let lcode =
+                        if state_ref.lencode == crate::src::inftrees::inffixed_h::lenfix.as_ptr() {
+                            Some(&crate::src::inftrees::inffixed_h::lenfix[..])
+                        } else {
+                            let offset = (state_ref.lencode as usize)
+                                .checked_sub(code_start)
+                                .filter(|offset| {
+                                    code_size != 0
+                                        && *offset % code_size == 0
+                                        && code_end
+                                            .is_some_and(|end| (state_ref.lencode as usize) <= end)
+                                })
+                                .and_then(|offset| state_ref.codes.get(offset / code_size..));
+                            offset
+                        };
+                    let dcode = if state_ref.distcode
+                        == crate::src::inftrees::inffixed_h::distfix.as_ptr()
+                    {
+                        Some(&crate::src::inftrees::inffixed_h::distfix[..])
+                    } else {
+                        let offset = (state_ref.distcode as usize)
+                            .checked_sub(code_start)
+                            .filter(|offset| {
+                                code_size != 0
+                                    && *offset % code_size == 0
+                                    && code_end
+                                        .is_some_and(|end| (state_ref.distcode as usize) <= end)
+                            })
+                            .and_then(|offset| state_ref.codes.get(offset / code_size..));
+                        offset
+                    };
+                    match (output_start, lcode, dcode) {
+                        (Some(output_start), Some(lcode), Some(dcode))
+                            if !next.is_null() && !state_ref.window.is_null() =>
+                        {
+                            let input = ::core::slice::from_raw_parts(next, have as usize);
+                            let output = ::core::slice::from_raw_parts_mut(state_ref.window, wsize);
+                            Some(crate::src::inffast::inflate_fast_core(
+                                crate::src::inffast::InflateFastViews {
+                                    input,
+                                    output,
+                                    output_start,
+                                    history: crate::src::inffast::InflateFastHistory::Output,
+                                    lcode,
+                                    dcode,
+                                    wsize,
+                                    whave: state_ref.whave as usize,
+                                    wnext: state_ref.wnext as usize,
+                                    sane: state_ref.sane != 0,
+                                    hold,
+                                    bits,
+                                    lenbits: state_ref.lenbits,
+                                    distbits: state_ref.distbits,
+                                    start: state_ref.wsize,
+                                },
+                            ))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(fast) = fast {
+                let Ok(input_used) = ::core::ffi::c_uint::try_from(fast.input_used) else {
+                    ret = crate::zlib_h::Z_DATA_ERROR;
+                    break;
+                };
+                let Ok(output_used) = ::core::ffi::c_uint::try_from(fast.output_used) else {
+                    ret = crate::zlib_h::Z_DATA_ERROR;
+                    break;
+                };
+                if input_used > have || output_used > left {
+                    ret = crate::zlib_h::Z_DATA_ERROR;
+                    break;
+                }
+                next = next.wrapping_add(fast.input_used);
+                have = have.wrapping_sub(input_used);
+                put = put.wrapping_add(fast.output_used);
+                left = left.wrapping_sub(output_used);
+                hold = fast.hold;
+                bits = fast.bits;
+                if let Some(mode) = fast.mode {
+                    (*state).mode = mode;
+                    (*strm).msg = match fast.error {
+                        Some(14) => b"invalid literal/length code\0".as_ptr(),
+                        Some(15) => b"invalid distance code\0".as_ptr(),
+                        Some(17) => b"invalid distance too far back\0".as_ptr(),
+                        _ => ::core::ptr::null(),
+                    } as *mut ::core::ffi::c_char;
+                }
+            } else {
+                (*strm).next_out = put as *mut crate::stdlib::Bytef;
+                (*strm).avail_out = left as crate::stdlib::uInt;
+                (*strm).next_in = next as *mut crate::stdlib::Bytef;
+                (*strm).avail_in = have as crate::stdlib::uInt;
+                (*state).hold = hold;
+                (*state).bits = bits;
+                crate::src::inffast::inflate_fast(
+                    strm as *mut crate::zlib_h::z_stream_s,
+                    (*state).wsize,
+                );
+                put = (*strm).next_out as *mut ::core::ffi::c_uchar;
+                left = (*strm).avail_out as ::core::ffi::c_uint;
+                next = (*strm).next_in as *mut ::core::ffi::c_uchar;
+                have = (*strm).avail_in as ::core::ffi::c_uint;
+                hold = (*state).hold;
+                bits = (*state).bits;
+            }
         } else {
             loop {
                 here = *(*state).lencode.wrapping_add(
