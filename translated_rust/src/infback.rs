@@ -88,6 +88,15 @@ fn inflate_back_init_metadata_is_valid(
         && stream_size == ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
 }
 
+fn inflate_back_stored_block_length(hold: ::core::ffi::c_ulong) -> Option<::core::ffi::c_uint> {
+    let length = hold & 0xffff as ::core::ffi::c_ulong;
+    if length == hold >> 16 as ::core::ffi::c_int ^ 0xffff as ::core::ffi::c_ulong {
+        Some(length as ::core::ffi::c_uint)
+    } else {
+        None
+    }
+}
+
 pub unsafe fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -292,57 +301,57 @@ pub unsafe extern "C" fn inflateBack(
                     hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if hold & 0xffff as ::core::ffi::c_ulong
-                    != hold >> 16 as ::core::ffi::c_int ^ 0xffff as ::core::ffi::c_ulong
-                {
-                    (*strm).msg = b"invalid stored block lengths\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
-                    continue;
-                } else {
-                    (*state).length = hold as ::core::ffi::c_uint & 0xffff as ::core::ffi::c_uint;
-                    hold = 0 as ::core::ffi::c_ulong;
-                    bits = 0 as ::core::ffi::c_uint;
-                    while (*state).length != 0 as ::core::ffi::c_uint {
-                        copy = (*state).length;
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break 's_69;
-                            }
-                        }
-                        if left == 0 as ::core::ffi::c_uint {
-                            put = (*state).window;
-                            left = (*state).wsize;
-                            (*state).whave = left;
-                            if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break 's_69;
-                            }
-                        }
-                        if copy > have {
-                            copy = have;
-                        }
-                        if copy > left {
-                            copy = left;
-                        }
-                        crate::stdlib::memcpy(
-                            put as *mut ::core::ffi::c_void,
-                            next as *const ::core::ffi::c_void,
-                            copy as crate::__stddef_size_t_h::size_t,
-                        );
-                        have = have.wrapping_sub(copy);
-                        next = next.offset(copy as isize);
-                        left = left.wrapping_sub(copy);
-                        put = put.offset(copy as isize);
-                        (*state).length = (*state).length.wrapping_sub(copy);
+                let length = match inflate_back_stored_block_length(hold) {
+                    Some(length) => length,
+                    None => {
+                        (*strm).msg = b"invalid stored block lengths\0".as_ptr()
+                            as *const ::core::ffi::c_char
+                            as *mut ::core::ffi::c_char;
+                        (*state).mode = crate::src::inflate::BAD;
+                        continue;
                     }
-                    (*state).mode = crate::src::inflate::TYPE;
-                    continue;
+                };
+                (*state).length = length;
+                hold = 0 as ::core::ffi::c_ulong;
+                bits = 0 as ::core::ffi::c_uint;
+                while (*state).length != 0 as ::core::ffi::c_uint {
+                    copy = (*state).length;
+                    if have == 0 as ::core::ffi::c_uint {
+                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                        if have == 0 as ::core::ffi::c_uint {
+                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                            ret = crate::zlib_h::Z_BUF_ERROR;
+                            break 's_69;
+                        }
+                    }
+                    if left == 0 as ::core::ffi::c_uint {
+                        put = (*state).window;
+                        left = (*state).wsize;
+                        (*state).whave = left;
+                        if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
+                            ret = crate::zlib_h::Z_BUF_ERROR;
+                            break 's_69;
+                        }
+                    }
+                    if copy > have {
+                        copy = have;
+                    }
+                    if copy > left {
+                        copy = left;
+                    }
+                    crate::stdlib::memcpy(
+                        put as *mut ::core::ffi::c_void,
+                        next as *const ::core::ffi::c_void,
+                        copy as crate::__stddef_size_t_h::size_t,
+                    );
+                    have = have.wrapping_sub(copy);
+                    next = next.offset(copy as isize);
+                    left = left.wrapping_sub(copy);
+                    put = put.offset(copy as isize);
+                    (*state).length = (*state).length.wrapping_sub(copy);
                 }
+                (*state).mode = crate::src::inflate::TYPE;
+                continue;
             }
             16196 => {
                 while bits < 14 as ::core::ffi::c_int as ::core::ffi::c_uint {
@@ -1041,8 +1050,8 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        inflate_back_init_metadata_is_valid, inflate_back_window_bits_are_valid,
-        inflate_back_window_size,
+        inflate_back_init_metadata_is_valid, inflate_back_stored_block_length,
+        inflate_back_window_bits_are_valid, inflate_back_window_size,
     };
 
     #[test]
@@ -1089,5 +1098,12 @@ mod tests {
             stream_size.wrapping_sub(1),
         ));
         assert!(!inflate_back_init_metadata_is_valid(None, stream_size));
+    }
+
+    #[test]
+    fn inflate_back_stored_block_length_requires_complementary_words() {
+        assert_eq!(inflate_back_stored_block_length(0xedcb1234), Some(0x1234));
+        assert_eq!(inflate_back_stored_block_length(0xffff0000), Some(0));
+        assert_eq!(inflate_back_stored_block_length(0xedca1234), None);
     }
 }

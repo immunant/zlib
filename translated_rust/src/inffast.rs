@@ -53,6 +53,10 @@ fn bit_mask(bit_count: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     ((1 as ::core::ffi::c_uint) << bit_count).wrapping_sub(1 as ::core::ffi::c_uint)
 }
 
+fn low_bits(hold: ::core::ffi::c_ulong, bit_count: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    hold as ::core::ffi::c_uint & bit_mask(bit_count)
+}
+
 fn consume_bits(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -156,7 +160,7 @@ pub unsafe extern "C" fn inflate_fast(
                         hold = hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    len = len.wrapping_add(hold as ::core::ffi::c_uint & bit_mask(op));
+                    len = len.wrapping_add(low_bits(hold, op));
                     (hold, bits) = consume_bits(hold, bits, op);
                 }
                 if bits < 15 as ::core::ffi::c_uint {
@@ -207,7 +211,7 @@ pub unsafe extern "C" fn inflate_fast(
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             }
                         }
-                        dist = dist.wrapping_add(hold as ::core::ffi::c_uint & bit_mask(op));
+                        dist = dist.wrapping_add(low_bits(hold, op));
                         (hold, bits) = consume_bits(hold, bits, op);
                         op = out.offset_from(beg) as ::core::ffi::c_long as ::core::ffi::c_uint;
                         if dist > op {
@@ -429,7 +433,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{bit_mask, consume_bits, unread_bit_state};
+    use super::{bit_mask, consume_bits, low_bits, unread_bit_state};
 
     #[test]
     fn bit_mask_selects_requested_low_bits() {
@@ -437,6 +441,13 @@ mod tests {
         assert_eq!(bit_mask(1), 1);
         assert_eq!(bit_mask(5), 0b1_1111);
         assert_eq!(bit_mask(15), 0x7fff);
+    }
+
+    #[test]
+    fn low_bits_masks_the_low_word_of_the_bit_buffer() {
+        assert_eq!(low_bits(0xffff_ffff_0000_001b, 5), 0x1b);
+        assert_eq!(low_bits(0xfeed, 0), 0);
+        assert_eq!(low_bits(0xfeed, 15), 0x7eed);
     }
 
     #[test]
