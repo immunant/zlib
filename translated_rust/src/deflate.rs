@@ -527,7 +527,10 @@ enum DeflateStateOwner {
     Default(Box<internal_state>),
     Callback {
         state: Box<internal_state>,
-        allocation_address: usize,
+        // Reserve the Rust owner before invoking the caller's allocator.
+        // This makes allocator failure a pure owner release: no opaque
+        // allocation exists yet, so no callback cleanup is needed.
+        allocation_address: Option<usize>,
     },
 }
 
@@ -553,15 +556,34 @@ fn retain_default_deflate_state(state: Box<internal_state>) -> bool {
     retain_deflate_state_owner(address, DeflateStateOwner::Default(state))
 }
 
-fn retain_callback_deflate_state(state: Box<internal_state>, allocation_address: usize) -> bool {
+fn retain_callback_deflate_state(state: Box<internal_state>) -> Option<usize> {
     let address = core::ptr::from_ref(state.as_ref()).addr();
     retain_deflate_state_owner(
         address,
         DeflateStateOwner::Callback {
             state,
-            allocation_address,
+            allocation_address: None,
         },
     )
+    .then_some(address)
+}
+
+/// Record the opaque callback allocation after both the callback and Rust
+/// owner reservation have succeeded.
+fn set_callback_deflate_state_allocation(address: usize, allocation_address: usize) {
+    let mut states = deflate_state_owners()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(DeflateStateOwner::Callback {
+        allocation_address: slot,
+        ..
+    }) = states.get_mut(&address)
+    else {
+        debug_assert!(false, "callback state owner must be retained first");
+        return;
+    };
+    debug_assert!(slot.is_none(), "callback allocation token recorded twice");
+    *slot = Some(allocation_address);
 }
 
 /// Drop the Rust state owner and return the optional opaque callback token.
@@ -580,7 +602,7 @@ fn release_deflate_state_owner(address: usize) -> Option<usize> {
             allocation_address,
         } => {
             drop(state);
-            Some(allocation_address)
+            allocation_address
         }
     }
 }
@@ -3666,8 +3688,19 @@ unsafe fn deflate_install_state(
         dest.state = state_memory.cast_mut();
         return crate::zlib_h::Z_OK;
     }
-    let (Some(zalloc), Some(zfree)) = (dest.zalloc, dest.zfree) else {
+    let (Some(zalloc), Some(_)) = (dest.zalloc, dest.zfree) else {
         return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // Reserve the Rust owner before the one-way callback allocation.  If the
+    // callback fails, dropping that reservation is sufficient because no
+    // opaque allocation token has been produced.
+    let state = Box::new(copied_state);
+    let state_memory = core::ptr::from_ref(state.as_ref());
+    let Some(state_address) = retain_callback_deflate_state(state) else {
+        if source.is_none() {
+            dest.state = core::ptr::null_mut();
+        }
+        return crate::zlib_h::Z_MEM_ERROR;
     };
     let allocation = unsafe {
         zalloc(
@@ -3677,17 +3710,14 @@ unsafe fn deflate_install_state(
         )
     };
     if allocation.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    let state = Box::new(copied_state);
-    let state_memory = core::ptr::from_ref(state.as_ref());
-    if !retain_callback_deflate_state(state, allocation.addr()) {
-        unsafe { zfree(dest.opaque, allocation) };
+        let released_allocation = release_deflate_state_owner(state_address);
+        debug_assert!(released_allocation.is_none());
         if source.is_none() {
             dest.state = core::ptr::null_mut();
         }
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    set_callback_deflate_state_allocation(state_address, allocation.addr());
     dest.state = state_memory.cast_mut();
     crate::zlib_h::Z_OK
 }
