@@ -650,6 +650,14 @@ fn updatewindow(
     let window = unsafe { ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize) };
     update_window(state, window, input).is_err() as ::core::ffi::c_int
 }
+
+fn copy_literal_block(input: &[crate::stdlib::Bytef], output: &mut [crate::stdlib::Bytef]) {
+    // The translated caller has already limited both views to the same
+    // non-zero `copy` length.  As with the original `memcpy`, input and
+    // output must not overlap.
+    output.copy_from_slice(input);
+}
+
 pub fn inflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
@@ -1621,20 +1629,27 @@ pub fn inflate(
                                                                         {
                                                                             break '_inf_leave;
                                                                         }
-                                                                            crate::stdlib::memcpy(
-                                                                            put as *mut ::core::ffi::c_void,
-                                                                            next as *const ::core::ffi::c_void,
-                                                                            copy as crate::__stddef_size_t_h::size_t,
-                                                                        );
+                                                                            let input = ::core::slice::from_raw_parts(
+                                                                                next,
+                                                                                copy as usize,
+                                                                            );
+                                                                            let output = ::core::slice::from_raw_parts_mut(
+                                                                                put,
+                                                                                copy as usize,
+                                                                            );
+                                                                            copy_literal_block(
+                                                                                input, output,
+                                                                            );
                                                                             have = have
                                                                                 .wrapping_sub(copy);
-                                                                            next = next.offset(
-                                                                                copy as isize,
-                                                                            );
+                                                                            next = next
+                                                                                .wrapping_add(
+                                                                                    copy as usize,
+                                                                                );
                                                                             left = left
                                                                                 .wrapping_sub(copy);
-                                                                            put = put.offset(
-                                                                                copy as isize,
+                                                                            put = put.wrapping_add(
+                                                                                copy as usize,
                                                                             );
                                                                             (*state).length =
                                                                                 (*state)

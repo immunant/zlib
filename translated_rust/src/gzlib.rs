@@ -59,9 +59,9 @@ pub use crate::zlib_h::Z_HUFFMAN_ONLY;
 pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
+use rustix::fd::AsFd;
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::ptr::NonNull;
-use rustix::fd::AsFd;
 
 fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
     state.x.have = 0 as ::core::ffi::c_uint;
@@ -236,11 +236,16 @@ fn gz_open(
         owned_fd = Some(opened);
     }
     {
-        let fd = owned_fd.as_ref().expect("opened or supplied descriptor").as_fd();
+        let fd = owned_fd
+            .as_ref()
+            .expect("opened or supplied descriptor")
+            .as_fd();
         if oflag & crate::stdlib::O_NONBLOCK != 0 {
             match rustix::fs::fcntl_getfl(fd) {
                 Ok(flags) => {
-                    if let Err(error) = rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK) {
+                    if let Err(error) =
+                        rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)
+                    {
                         errno::set_errno(errno::Errno(error.raw_os_error()));
                     }
                 }
@@ -250,7 +255,9 @@ fn gz_open(
         if oflag & crate::stdlib::O_CLOEXEC != 0 {
             match rustix::io::fcntl_getfd(fd) {
                 Ok(flags) => {
-                    if let Err(error) = rustix::io::fcntl_setfd(fd, flags | rustix::io::FdFlags::CLOEXEC) {
+                    if let Err(error) =
+                        rustix::io::fcntl_setfd(fd, flags | rustix::io::FdFlags::CLOEXEC)
+                    {
                         errno::set_errno(errno::Errno(error.raw_os_error()));
                     }
                 }
@@ -293,7 +300,9 @@ pub unsafe extern "C" fn gzopen_ffi(
         ::std::ffi::CStr::from_ptr(mode),
     )
     .ok()
-    .map_or(::core::ptr::null_mut(), |state| state.as_ptr() as crate::zlib_h::gzFile)
+    .map_or(::core::ptr::null_mut(), |state| {
+        state.as_ptr() as crate::zlib_h::gzFile
+    })
 }
 #[export_name = "gzopen64"]
 
@@ -310,14 +319,15 @@ pub unsafe extern "C" fn gzopen64_ffi(
         ::std::ffi::CStr::from_ptr(mode),
     )
     .ok()
-    .map_or(::core::ptr::null_mut(), |state| state.as_ptr() as crate::zlib_h::gzFile)
+    .map_or(::core::ptr::null_mut(), |state| {
+        state.as_ptr() as crate::zlib_h::gzFile
+    })
 }
 
 fn gz_fd_path(fd: ::core::ffi::c_int) -> Option<::std::ffi::CString> {
     let mut bytes = Vec::new();
-    let capacity = (7 as usize).checked_add((3 as usize).checked_mul(::core::mem::size_of::<
-        ::core::ffi::c_int,
-    >())?)?;
+    let capacity = (7 as usize)
+        .checked_add((3 as usize).checked_mul(::core::mem::size_of::<::core::ffi::c_int>())?)?;
     bytes.try_reserve_exact(capacity).ok()?;
     bytes.extend_from_slice(b"<fd:");
 
@@ -360,10 +370,7 @@ pub unsafe extern "C" fn gzdopen_ffi(
     if mode.is_null() || fd < 0 {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    match gzdopen(
-        OwnedFd::from_raw_fd(fd),
-        ::std::ffi::CStr::from_ptr(mode),
-    ) {
+    match gzdopen(OwnedFd::from_raw_fd(fd), ::std::ffi::CStr::from_ptr(mode)) {
         Ok(state) => state.as_ptr() as crate::zlib_h::gzFile,
         Err(fd) => {
             let _ = fd.into_raw_fd();
@@ -404,9 +411,7 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     }
     gzbuffer(Some(&mut *(file as crate::gzguts_h::gz_statep)), size)
 }
-pub fn gzrewind(
-    state: Option<&mut crate::gzguts_h::gz_state>,
-) -> ::core::ffi::c_int {
+pub fn gzrewind(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     let Some(state) = state else {
         return -1 as ::core::ffi::c_int;
     };
@@ -609,9 +614,7 @@ pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::s
     }
     gztell(Some(&*(file as crate::gzguts_h::gz_statep)))
 }
-fn gzoffset64(
-    state: Option<&crate::gzguts_h::gz_state>,
-) -> crate::stdlib::off64_t {
+fn gzoffset64(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off64_t {
     let Some(state) = state else {
         return -1 as crate::stdlib::off64_t;
     };
@@ -636,9 +639,7 @@ pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crat
     let state = (file as crate::gzguts_h::gz_statep).as_ref();
     gzoffset64(state)
 }
-fn gzoffset(
-    state: Option<&crate::gzguts_h::gz_state>,
-) -> crate::stdlib::off_t {
+fn gzoffset(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off_t {
     let ret = gzoffset64(state);
     return if ret == ret {
         ret
@@ -711,9 +712,7 @@ pub unsafe extern "C" fn gzerror_ffi(
         *errnum = err;
     }
     match message {
-        GzErrorMessage::OutOfMemory => {
-            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char
-        }
+        GzErrorMessage::OutOfMemory => b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
         GzErrorMessage::Empty => b"\0".as_ptr() as *const ::core::ffi::c_char,
         GzErrorMessage::StateMessage => state
             .msg
@@ -785,7 +784,11 @@ pub fn gz_static_error(
     err: ::core::ffi::c_int,
     message: &'static [u8],
 ) {
-    gz_error_state(state, err, ::std::ffi::CStr::from_bytes_with_nul(message).ok());
+    gz_error_state(
+        state,
+        err,
+        ::std::ffi::CStr::from_bytes_with_nul(message).ok(),
+    );
 }
 
 #[export_name = "gz_error"]
