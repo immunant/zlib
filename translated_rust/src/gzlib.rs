@@ -103,304 +103,117 @@ fn gz_reset_safe(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0;
 }
 
-unsafe extern "C" fn gz_reset(state: crate::gzguts_h::gz_statep) {
-    gz_reset_safe(&mut *state);
+/// Open a named gzip stream without exposing C pointers to implementation code.
+pub fn gzopen(path: &std::ffi::CStr, mode: &std::ffi::CStr) -> Option<Box<crate::gzguts_h::gz_state>> {
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let mode = parse_gz_mode(mode)?;
+    let mut options = std::fs::OpenOptions::new();
+    if mode.mode == crate::gzguts_h::GZ_READ {
+        options.read(true);
+    } else {
+        options.write(true).create(true);
+        if mode.exclusive {
+            options.create_new(true);
+        } else if mode.mode == crate::gzguts_h::GZ_WRITE {
+            options.truncate(true);
+        } else {
+            options.append(true);
+        }
+    }
+    let flags = (if mode.close_on_exec { crate::stdlib::O_CLOEXEC } else { 0 })
+        | (if mode.nonblocking { crate::stdlib::O_NONBLOCK } else { 0 });
+    options.mode(0o666).custom_flags(flags);
+    let file = options
+        .open(std::path::Path::new(std::ffi::OsStr::from_bytes(path.to_bytes())))
+        .ok()?;
+    Some(gzopen_with_file(path.to_owned(), mode, file))
 }
 
-unsafe extern "C" fn gz_open(
-    mut path: *const ::core::ffi::c_void,
-    mut fd: ::core::ffi::c_int,
-    mut mode: *const ::core::ffi::c_char,
+/// `gzopen64` has the same safe implementation as `gzopen` on this target.
+pub fn gzopen64(path: &std::ffi::CStr, mode: &std::ffi::CStr) -> Option<Box<crate::gzguts_h::gz_state>> {
+    gzopen(path, mode)
+}
+#[export_name = "gzopen"]
+
+pub unsafe extern "C" fn gzopen_ffi(
+    path: *const ::core::ffi::c_char,
+    mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut oflag: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut exclusive: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     if path.is_null() || mode.is_null() {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+        return ::core::ptr::null_mut();
     }
-    state = Box::into_raw(Box::new(crate::gzguts_h::gz_state {
-        x: crate::zlib_h::gzFile_s {
-            have: 0,
-            next: 0,
-            pos: 0,
-        },
-        mode: crate::gzguts_h::GZ_NONE,
-        fd: -1,
-        write_file: None,
-        read_file: None,
-        gzip_inflater: None,
-        path: std::ffi::CString::default(),
-        size: 0,
-        want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
-        in_buf: Vec::new(),
-        out_buf: Vec::new(),
-        in_end: 0,
-        out_start: 0,
-        direct: 0,
-        junk: 0,
-        how: 0,
-        again: 0,
-        start: 0,
-        eof: 0,
-        past: 0,
-        level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
-        strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
-        reset: 0,
-        skip: 0,
-        err: crate::zlib_h::Z_OK,
-        msg: None,
-        strm: crate::zlib_h::z_stream_s {
-            next_in: crate::zlib_h::InputBuffer::default(),
-            avail_in: 0,
-            total_in: 0,
-            next_out: crate::zlib_h::OutputBuffer::default(),
-            avail_out: 0,
-            total_out: 0,
-            msg: None,
-            state: None,
-            zalloc: None,
-            zfree: None,
-            opaque: crate::zlib_h::Opaque::default(),
-            data_type: 0,
-            adler: 0,
-            reserved: 0,
-        },
-    }));
-    while *mode != 0 {
-        if *mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
-            && *mode as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
-        {
-            (*state).level = *mode as ::core::ffi::c_int - '0' as ::core::ffi::c_int;
-        } else {
-            match *mode as ::core::ffi::c_int {
-                114 => {
-                    (*state).mode = crate::gzguts_h::GZ_READ;
-                }
-                119 => {
-                    (*state).mode = crate::gzguts_h::GZ_WRITE;
-                }
-                97 => {
-                    (*state).mode = crate::gzguts_h::GZ_APPEND;
-                }
-                43 => {
-                    drop(Box::from_raw(state));
-                    return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-                }
-                101 => {
-                    oflag |= crate::stdlib::O_CLOEXEC;
-                }
-                120 => {
-                    exclusive = 1 as ::core::ffi::c_int;
-                }
-                102 => {
-                    (*state).strategy = crate::zlib_h::Z_FILTERED;
-                }
-                104 => {
-                    (*state).strategy = crate::zlib_h::Z_HUFFMAN_ONLY;
-                }
-                82 => {
-                    (*state).strategy = crate::zlib_h::Z_RLE;
-                }
-                70 => {
-                    (*state).strategy = crate::zlib_h::Z_FIXED;
-                }
-                71 => {
-                    (*state).direct = -1 as ::core::ffi::c_int;
-                }
-                78 => {
-                    oflag |= crate::stdlib::O_NONBLOCK;
-                }
-                84 => {
-                    (*state).direct = 1 as ::core::ffi::c_int;
-                }
-                98 | _ => {}
-            }
-        }
-        mode = mode.offset(1);
+    let path = unsafe { std::ffi::CStr::from_ptr(path) };
+    let mode = unsafe { std::ffi::CStr::from_ptr(mode) };
+    let Some(state) = gzopen(path, mode) else {
+        return ::core::ptr::null_mut();
+    };
+    Box::into_raw(state) as crate::zlib_h::gzFile
+}
+#[export_name = "gzopen64"]
+
+pub unsafe extern "C" fn gzopen64_ffi(
+    path: *const ::core::ffi::c_char,
+    mode: *const ::core::ffi::c_char,
+) -> crate::zlib_h::gzFile {
+    if path.is_null() || mode.is_null() {
+        return ::core::ptr::null_mut();
     }
-    if (*state).mode == crate::gzguts_h::GZ_NONE {
-        drop(Box::from_raw(state));
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    let path = unsafe { std::ffi::CStr::from_ptr(path) };
+    let mode = unsafe { std::ffi::CStr::from_ptr(mode) };
+    let Some(state) = gzopen64(path, mode) else {
+        return ::core::ptr::null_mut();
+    };
+    Box::into_raw(state) as crate::zlib_h::gzFile
+}
+/// Adopt an already-open file for gzip I/O using only Rust-owned state.
+pub fn gzdopen(
+    file: std::fs::File,
+    mode: &std::ffi::CStr,
+) -> Option<Box<crate::gzguts_h::gz_state>> {
+    use std::os::fd::AsRawFd as _;
+
+    let mode = parse_gz_mode(mode)?;
+    let path = std::ffi::CString::new(format!("<fd:{}>", file.as_raw_fd())).ok()?;
+    Some(gzopen_with_file(path, mode, file))
+}
+#[export_name = "gzdopen"]
+
+pub unsafe extern "C" fn gzdopen_ffi(
+    fd: ::core::ffi::c_int,
+    mode: *const ::core::ffi::c_char,
+) -> crate::zlib_h::gzFile {
+    use std::os::fd::FromRawFd as _;
+
+    if fd < 0 || mode.is_null() {
+        return ::core::ptr::null_mut();
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        if (*state).direct == 1 as ::core::ffi::c_int {
-            drop(Box::from_raw(state));
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
-        if (*state).direct == 0 as ::core::ffi::c_int {
-            (*state).direct = 1 as ::core::ffi::c_int;
-        }
-    } else if (*state).direct == -1 as ::core::ffi::c_int {
-        drop(Box::from_raw(state));
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    (*state).path = std::ffi::CStr::from_ptr(path as *const ::core::ffi::c_char).to_owned();
-    oflag |= crate::stdlib::O_LARGEFILE
-        | (if (*state).mode == crate::gzguts_h::GZ_READ {
-            crate::stdlib::O_RDONLY
-        } else {
-            crate::stdlib::O_WRONLY
-                | crate::stdlib::O_CREAT
-                | (if exclusive != 0 {
-                    crate::stdlib::O_EXCL
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-                | (if (*state).mode == crate::gzguts_h::GZ_WRITE {
-                    crate::stdlib::O_TRUNC
-                } else {
-                    crate::stdlib::O_APPEND
-                })
-        });
-    if fd == -1 as ::core::ffi::c_int {
-        (*state).fd = crate::stdlib::open(
-            path as *const ::core::ffi::c_char,
-            oflag,
-            0o666 as ::core::ffi::c_int,
-        );
-    } else {
-        if oflag & crate::stdlib::O_NONBLOCK != 0 {
+    let mode = unsafe { std::ffi::CStr::from_ptr(mode) };
+    let Some(settings) = parse_gz_mode(mode) else {
+        return ::core::ptr::null_mut();
+    };
+    if settings.nonblocking {
+        unsafe {
             crate::stdlib::fcntl(
                 fd,
                 crate::stdlib::F_SETFL,
                 crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
             );
         }
-        if oflag & crate::stdlib::O_CLOEXEC != 0 {
+    }
+    if settings.close_on_exec {
+        unsafe {
             crate::stdlib::fcntl(
                 fd,
                 crate::stdlib::F_SETFD,
                 crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
             );
         }
-        (*state).fd = fd;
     }
-    if (*state).fd == -1 as ::core::ffi::c_int {
-        drop(Box::from_raw(state));
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    if (*state).mode == crate::gzguts_h::GZ_APPEND {
-        crate::stdlib::lseek64(
-            (*state).fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_END,
-        );
-        (*state).mode = crate::gzguts_h::GZ_WRITE;
-    }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).start = crate::stdlib::lseek64(
-            (*state).fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if (*state).start == -1 as crate::stdlib::off64_t {
-            (*state).start = 0 as crate::stdlib::off64_t;
-        }
-    }
-    gz_reset(state);
-    return state as crate::zlib_h::gzFile;
-}
-pub unsafe extern "C" fn gzopen(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    return gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    );
-}
-#[export_name = "gzopen"]
-
-pub unsafe extern "C" fn gzopen_ffi(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    let file = gzopen(path, mode);
-    if !file.is_null() {
-        let state = &mut *(file as crate::gzguts_h::gz_statep);
-        if state.mode == crate::gzguts_h::GZ_WRITE {
-            state.write_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
-        } else if state.mode == crate::gzguts_h::GZ_READ {
-            state.read_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
-        }
-    }
-    file
-}
-pub unsafe extern "C" fn gzopen64(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    return gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    );
-}
-#[export_name = "gzopen64"]
-
-pub unsafe extern "C" fn gzopen64_ffi(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    let file = gzopen64(path, mode);
-    if !file.is_null() {
-        let state = &mut *(file as crate::gzguts_h::gz_statep);
-        if state.mode == crate::gzguts_h::GZ_WRITE {
-            state.write_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
-        } else if state.mode == crate::gzguts_h::GZ_READ {
-            state.read_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
-        }
-    }
-    file
-}
-pub unsafe extern "C" fn gzdopen(
-    mut fd: ::core::ffi::c_int,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    let mut path: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut gz: crate::zlib_h::gzFile = ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    if fd == -1 as ::core::ffi::c_int || {
-        path = crate::stdlib::malloc(
-            (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-                (3 as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()),
-            ),
-        ) as *mut ::core::ffi::c_char;
-        path.is_null()
-    } {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    crate::stdlib::snprintf(
-        path,
-        (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-            (3 as crate::__stddef_size_t_h::size_t)
-                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()),
-        ),
-        b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
-        fd,
-    );
-    gz = gz_open(path as *const ::core::ffi::c_void, fd, mode);
-    crate::stdlib::free(path as *mut ::core::ffi::c_void);
-    return gz;
-}
-#[export_name = "gzdopen"]
-
-pub unsafe extern "C" fn gzdopen_ffi(
-    mut fd: ::core::ffi::c_int,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    let file = gzdopen(fd, mode);
-    if !file.is_null() {
-        let state = &mut *(file as crate::gzguts_h::gz_statep);
-        if state.mode == crate::gzguts_h::GZ_WRITE {
-            state.write_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
-        } else if state.mode == crate::gzguts_h::GZ_READ {
-            state.read_file = Some(std::os::fd::FromRawFd::from_raw_fd(state.fd));
-        }
-    }
-    file
+    let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let path = std::ffi::CString::new(format!("<fd:{fd}>")).unwrap();
+    Box::into_raw(gzopen_with_file(path, settings, file)) as crate::zlib_h::gzFile
 }
 pub unsafe extern "C" fn gzbuffer(
     mut file: crate::zlib_h::gzFile,
@@ -783,4 +596,132 @@ pub fn gz_intmax() -> ::core::ffi::c_uint {
 
 pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
     gz_intmax()
+}
+
+struct GzOpenMode {
+    mode: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    direct: ::core::ffi::c_int,
+    close_on_exec: bool,
+    nonblocking: bool,
+    exclusive: bool,
+}
+
+fn parse_gz_mode(mode: &std::ffi::CStr) -> Option<GzOpenMode> {
+    let mut result = GzOpenMode {
+        mode: crate::gzguts_h::GZ_NONE,
+        level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
+        strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
+        direct: 0,
+        close_on_exec: false,
+        nonblocking: false,
+        exclusive: false,
+    };
+    for byte in mode.to_bytes() {
+        match *byte {
+            b'0'..=b'9' => result.level = (byte - b'0') as ::core::ffi::c_int,
+            b'r' => result.mode = crate::gzguts_h::GZ_READ,
+            b'w' => result.mode = crate::gzguts_h::GZ_WRITE,
+            b'a' => result.mode = crate::gzguts_h::GZ_APPEND,
+            b'+' => return None,
+            b'e' => result.close_on_exec = true,
+            b'x' => result.exclusive = true,
+            b'f' => result.strategy = crate::zlib_h::Z_FILTERED,
+            b'h' => result.strategy = crate::zlib_h::Z_HUFFMAN_ONLY,
+            b'R' => result.strategy = crate::zlib_h::Z_RLE,
+            b'F' => result.strategy = crate::zlib_h::Z_FIXED,
+            b'G' => result.direct = -1,
+            b'N' => result.nonblocking = true,
+            b'T' => result.direct = 1,
+            _ => {},
+        }
+    }
+    if result.mode == crate::gzguts_h::GZ_NONE
+        || (result.mode == crate::gzguts_h::GZ_READ && result.direct == 1)
+        || (result.mode != crate::gzguts_h::GZ_READ && result.direct == -1)
+    {
+        return None;
+    }
+    if result.mode == crate::gzguts_h::GZ_READ && result.direct == 0 {
+        result.direct = 1;
+    }
+    Some(result)
+}
+
+fn new_gz_state(path: std::ffi::CString) -> crate::gzguts_h::gz_state {
+    crate::gzguts_h::gz_state {
+        x: crate::zlib_h::gzFile_s { have: 0, next: 0, pos: 0 },
+        mode: crate::gzguts_h::GZ_NONE,
+        fd: -1,
+        write_file: None,
+        read_file: None,
+        gzip_inflater: None,
+        path,
+        size: 0,
+        want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
+        in_buf: Vec::new(),
+        out_buf: Vec::new(),
+        in_end: 0,
+        out_start: 0,
+        direct: 0,
+        junk: 0,
+        how: 0,
+        again: 0,
+        start: 0,
+        eof: 0,
+        past: 0,
+        level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
+        strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
+        reset: 0,
+        skip: 0,
+        err: crate::zlib_h::Z_OK,
+        msg: None,
+        strm: crate::zlib_h::z_stream_s {
+            next_in: crate::zlib_h::InputBuffer::default(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: crate::zlib_h::OutputBuffer::default(),
+            avail_out: 0,
+            total_out: 0,
+            msg: None,
+            state: None,
+            zalloc: None,
+            zfree: None,
+            opaque: crate::zlib_h::Opaque::default(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        },
+    }
+}
+
+fn gzopen_with_file(
+    path: std::ffi::CString,
+    mode: GzOpenMode,
+    mut file: std::fs::File,
+) -> Box<crate::gzguts_h::gz_state> {
+    use std::io::{Seek as _, SeekFrom};
+    use std::os::fd::AsRawFd as _;
+
+    let mut state = new_gz_state(path);
+    state.mode = mode.mode;
+    state.level = mode.level;
+    state.strategy = mode.strategy;
+    state.direct = mode.direct;
+    if state.mode == crate::gzguts_h::GZ_APPEND {
+        let _ = file.seek(SeekFrom::End(0));
+        state.mode = crate::gzguts_h::GZ_WRITE;
+    }
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.start = file.stream_position().unwrap_or(0) as crate::stdlib::off64_t;
+    }
+    state.fd = file.as_raw_fd();
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.read_file = Some(file);
+    } else {
+        state.write_file = Some(file);
+    }
+    gz_reset_safe(&mut state);
+    Box::new(state)
 }
