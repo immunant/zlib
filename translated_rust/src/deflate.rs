@@ -447,7 +447,10 @@ unsafe extern "C" fn read_buf(
             Some(::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t)),
         );
     } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::crc32::crc32((*strm).adler, buf, len as crate::stdlib::uInt);
+        (*strm).adler = crate::src::crc32::crc32(
+            (*strm).adler,
+            Some(::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t)),
+        );
     }
     (*strm).next_in = (*strm).next_in.offset(len as isize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
@@ -976,11 +979,7 @@ pub unsafe extern "C" fn deflateResetKeep(
         crate::src::deflate::INIT_STATE
     };
     (*strm).adler = if (*s).wrap == 2 as ::core::ffi::c_int {
-        crate::src::crc32::crc32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        )
+        crate::src::crc32::crc32(0 as crate::stdlib::uLong, None)
     } else {
         crate::src::adler32::adler32(0 as crate::stdlib::uLong, None)
     };
@@ -1587,11 +1586,7 @@ pub unsafe extern "C" fn deflate(
         }
     }
     if (*s).status == crate::src::deflate::GZIP_STATE {
-        (*strm).adler = crate::src::crc32::crc32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        );
+        (*strm).adler = crate::src::crc32::crc32(0 as crate::stdlib::uLong, None);
         let c2rust_fresh0 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
         *(*s).pending_buf.offset(c2rust_fresh0 as isize) =
@@ -1722,8 +1717,10 @@ pub unsafe extern "C" fn deflate(
             if (*(*s).gzhead).hcrc != 0 {
                 (*strm).adler = crate::src::crc32::crc32_z(
                     (*strm).adler,
-                    (*s).pending_buf,
-                    (*s).pending as crate::stdlib::z_size_t,
+                    Some(::core::slice::from_raw_parts(
+                        (*s).pending_buf,
+                        (*s).pending as crate::stdlib::z_size_t,
+                    )),
                 );
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
@@ -1749,9 +1746,11 @@ pub unsafe extern "C" fn deflate(
                 if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
                     (*strm).adler = crate::src::crc32::crc32_z(
                         (*strm).adler,
-                        (*s).pending_buf.offset(beg as isize),
-                        ((*s).pending as crate::stdlib::z_size_t)
-                            .wrapping_sub(beg as crate::stdlib::z_size_t),
+                        Some(::core::slice::from_raw_parts(
+                            (*s).pending_buf.offset(beg as isize),
+                            ((*s).pending as crate::stdlib::z_size_t)
+                                .wrapping_sub(beg as crate::stdlib::z_size_t),
+                        )),
                     );
                 }
                 (*s).gzindex = (*s).gzindex.wrapping_add(copy);
@@ -1772,9 +1771,11 @@ pub unsafe extern "C" fn deflate(
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
                 (*strm).adler = crate::src::crc32::crc32_z(
                     (*strm).adler,
-                    (*s).pending_buf.offset(beg as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg as crate::stdlib::z_size_t),
+                    Some(::core::slice::from_raw_parts(
+                        (*s).pending_buf.offset(beg as isize),
+                        ((*s).pending as crate::stdlib::z_size_t)
+                            .wrapping_sub(beg as crate::stdlib::z_size_t),
+                    )),
                 );
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
@@ -1790,9 +1791,11 @@ pub unsafe extern "C" fn deflate(
                     if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
                         (*strm).adler = crate::src::crc32::crc32_z(
                             (*strm).adler,
-                            (*s).pending_buf.offset(beg_0 as isize),
-                            ((*s).pending as crate::stdlib::z_size_t)
-                                .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
+                            Some(::core::slice::from_raw_parts(
+                                (*s).pending_buf.offset(beg_0 as isize),
+                                ((*s).pending as crate::stdlib::z_size_t)
+                                    .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
+                            )),
                         );
                     }
                     flush_pending(strm);
@@ -1815,9 +1818,11 @@ pub unsafe extern "C" fn deflate(
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
                 (*strm).adler = crate::src::crc32::crc32_z(
                     (*strm).adler,
-                    (*s).pending_buf.offset(beg_0 as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
+                    Some(::core::slice::from_raw_parts(
+                        (*s).pending_buf.offset(beg_0 as isize),
+                        ((*s).pending as crate::stdlib::z_size_t)
+                            .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
+                    )),
                 );
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
@@ -1833,9 +1838,11 @@ pub unsafe extern "C" fn deflate(
                     if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
                         (*strm).adler = crate::src::crc32::crc32_z(
                             (*strm).adler,
-                            (*s).pending_buf.offset(beg_1 as isize),
-                            ((*s).pending as crate::stdlib::z_size_t)
-                                .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
+                            Some(::core::slice::from_raw_parts(
+                                (*s).pending_buf.offset(beg_1 as isize),
+                                ((*s).pending as crate::stdlib::z_size_t)
+                                    .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
+                            )),
                         );
                     }
                     flush_pending(strm);
@@ -1859,9 +1866,11 @@ pub unsafe extern "C" fn deflate(
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
                 (*strm).adler = crate::src::crc32::crc32_z(
                     (*strm).adler,
-                    (*s).pending_buf.offset(beg_1 as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
+                    Some(::core::slice::from_raw_parts(
+                        (*s).pending_buf.offset(beg_1 as isize),
+                        ((*s).pending as crate::stdlib::z_size_t)
+                            .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
+                    )),
                 );
             }
         }
@@ -1885,11 +1894,7 @@ pub unsafe extern "C" fn deflate(
             *(*s).pending_buf.offset(c2rust_fresh24 as isize) =
                 ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                     as crate::stdlib::Byte;
-            (*strm).adler = crate::src::crc32::crc32(
-                0 as crate::stdlib::uLong,
-                ::core::ptr::null::<crate::stdlib::Bytef>(),
-                0 as crate::stdlib::uInt,
-            );
+            (*strm).adler = crate::src::crc32::crc32(0 as crate::stdlib::uLong, None);
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);
