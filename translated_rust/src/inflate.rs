@@ -304,8 +304,38 @@ pub use crate::zutil_h::DEF_WBITS;
 // ABI pointer.  Their validation rules differ, but the reference binding is
 // identical.  Keeping the layout-specific rule on this trait lets the
 // deflater reuse the inflater's established raw binding boundary.
-pub(crate) trait StreamStateBinding: Clone {
+pub(crate) trait StreamStateBinding: Clone + Sized {
     fn stream_state_is_valid(strm: &crate::zlib_h::z_stream, state: &Self) -> bool;
+    fn take_owned_state(key: usize) -> Option<Box<Self>>;
+    fn put_owned_state(key: usize, state: Box<Self>);
+}
+
+struct InflateOwnedState(send_wrapper::SendWrapper<Box<inflate_state>>);
+
+static INFLATE_OWNED_STATES: ::std::sync::OnceLock<
+    ::std::sync::Mutex<Vec<(usize, InflateOwnedState)>>,
+> = ::std::sync::OnceLock::new();
+
+fn inflate_owned_states() -> &'static ::std::sync::Mutex<Vec<(usize, InflateOwnedState)>> {
+    INFLATE_OWNED_STATES.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+fn inflate_take_owned_state(key: usize) -> Option<Box<inflate_state>> {
+    let mut states = inflate_owned_states()
+        .lock()
+        .expect("inflate state registry poisoned");
+    let index = states.iter().position(|(candidate, _)| *candidate == key)?;
+    Some(states.swap_remove(index).1 .0.take())
+}
+
+fn inflate_put_owned_state(key: usize, state: Box<inflate_state>) {
+    inflate_owned_states()
+        .lock()
+        .expect("inflate state registry poisoned")
+        .push((
+            key,
+            InflateOwnedState(send_wrapper::SendWrapper::new(state)),
+        ));
 }
 
 impl StreamStateBinding for crate::src::inflate::inflate_state {
@@ -315,6 +345,14 @@ impl StreamStateBinding for crate::src::inflate::inflate_state {
             state,
             state.strm == ::core::ptr::from_ref(strm).cast_mut(),
         )
+    }
+
+    fn take_owned_state(key: usize) -> Option<Box<Self>> {
+        inflate_take_owned_state(key)
+    }
+
+    fn put_owned_state(key: usize, state: Box<Self>) {
+        inflate_put_owned_state(key, state)
     }
 }
 
@@ -326,35 +364,72 @@ impl StreamStateBinding for crate::src::deflate::deflate_state {
             state.strm == ::core::ptr::from_ref(strm).cast_mut(),
         )
     }
+
+    fn take_owned_state(key: usize) -> Option<Box<Self>> {
+        crate::src::deflate::deflate_take_owned_state(key)
+    }
+
+    fn put_owned_state(key: usize, state: Box<Self>) {
+        crate::src::deflate::deflate_put_owned_state(key, state)
+    }
 }
 
-// This state adapter is used only by translated Rust implementations.  Its
-// callers have already bound the stream at their ABI boundary; it validates
-// the associated state allocation before returning both references.
+// Keep the allocator-returned address as zlib's observable state token, while
+// the Rust value itself remains owned. Taking the box out for an operation
+// avoids holding the registry lock across allocator callbacks. On return, a
+// callback change to `strm.state` is respected instead of being overwritten.
+pub(crate) struct BoundStreamState<'a, State: StreamStateBinding> {
+    strm: &'a mut crate::zlib_h::z_stream,
+    state: Option<Box<State>>,
+    key: usize,
+}
+
+impl<'a, State: StreamStateBinding> BoundStreamState<'a, State> {
+    pub(crate) fn parts(&mut self) -> (&mut crate::zlib_h::z_stream, &mut State) {
+        (
+            self.strm,
+            self.state.as_deref_mut().expect("bound state present"),
+        )
+    }
+}
+
+impl<State: StreamStateBinding> Drop for BoundStreamState<'_, State> {
+    fn drop(&mut self) {
+        let Some(state) = self.state.take() else {
+            return;
+        };
+        if self.strm.state as usize == self.key {
+            State::put_owned_state(self.key, state);
+        }
+    }
+}
+
+// This state adapter is used only by translated Rust implementations. Its
+// callers have already bound the stream at their ABI boundary. The foreign
+// allocation is an opaque key; no implementation function reconstructs a
+// Rust reference from it.
 pub(crate) fn inflateStateCheck<'a, State: StreamStateBinding>(
     strm: &'a mut crate::zlib_h::z_stream,
     initial: Option<&State>,
-) -> Option<(&'a mut crate::zlib_h::z_stream, &'a mut State)> {
-    // Fresh allocations use the same state binding as live streams, but install
-    // their complete value before the normal reciprocal-link validation.  This
-    // keeps raw allocation binding in one existing boundary instead of requiring
-    // each initializer to manufacture a second raw state reference.
-    let state_ptr = strm.state as *mut State;
-    if state_ptr.is_null() {
+) -> Option<BoundStreamState<'a, State>> {
+    let key = strm.state as usize;
+    if key == 0 {
         return None;
     }
-    // SAFETY: the stream reference is already bound by the caller. Its
-    // non-null state pointer is checked for the reciprocal stream link and
-    // layout-specific state invariants before the reference is exposed.
-    let state = unsafe { &mut *state_ptr };
-    if let Some(initial) = initial {
-        state.clone_from(initial);
-        return Some((strm, state));
-    }
-    if !State::stream_state_is_valid(strm, state) {
+    let state = if let Some(initial) = initial {
+        Box::new(initial.clone())
+    } else {
+        State::take_owned_state(key)?
+    };
+    if initial.is_none() && !State::stream_state_is_valid(strm, state.as_ref()) {
+        State::put_owned_state(key, state);
         return None;
     }
-    Some((strm, state))
+    Some(BoundStreamState {
+        strm,
+        state: Some(state),
+        key,
+    })
 }
 
 fn inflate_state_is_valid(
@@ -427,18 +502,20 @@ pub(crate) fn inflate_reset_bound(
 // pointer themselves. This keeps the reset transition reference-bound at
 // those call sites while preserving inflateStateCheck as the one raw adapter.
 pub(crate) fn inflate_reset_stream_bound(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck::<inflate_state>(strm, None) else {
+    let Some(mut bound_state_1) = inflateStateCheck::<inflate_state>(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state_1.parts();
     inflate_reset_bound(strm, state)
 }
 
 // Keep reset validation in named implementations so the exported ABI
 // forwarders below only bind the caller's stream pointer and dispatch.
 pub fn inflateResetKeep(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck::<inflate_state>(strm, None) else {
+    let Some(mut bound_state_2) = inflateStateCheck::<inflate_state>(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state_2.parts();
     inflate_reset_keep(strm, state)
 }
 
@@ -477,9 +554,10 @@ pub fn inflateReset2(
     strm: &mut crate::zlib_h::z_stream,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_3) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state_3.parts();
     let (wrap, window_bits) = match inflate_window_bits(windowBits) {
         Ok(window_bits) => window_bits,
         Err(error) => return error,
@@ -638,9 +716,10 @@ pub(crate) fn inflateInit2_(
     // the sole raw state conversion for both initialized and fresh states.
     strm.state = state_storage.cast::<crate::src::deflate::internal_state>();
     let initial_state = inflate_state_zero_value();
-    let Some((strm, state)) = inflateStateCheck(strm, Some(&initial_state)) else {
+    let Some(mut bound_state_4) = inflateStateCheck(strm, Some(&initial_state)) else {
         unreachable!("a just-published non-null inflate state always binds");
     };
+    let (strm, state) = bound_state_4.parts();
     // The allocator returned a non-null `inflate_state` above. It is owned by
     // this stream until the matching release below.
     state.strm = strm;
@@ -707,9 +786,10 @@ pub fn inflatePrime(
     bits: ::core::ffi::c_int,
     value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_5) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (_strm, state) = bound_state_5.parts();
     inflate_prime(state, bits, value)
 }
 
@@ -1115,8 +1195,9 @@ fn inflate_cursor_storage_matches(
 // The checked stream/state binding below, followed by the null cursor guard,
 // keeps the implementation's Rust-facing contract reference-bound. Its raw
 // decoder operations stay internal to this implementation.
-pub fn inflate(
+pub(crate) fn inflate(
     strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
     mut flush: ::core::ffi::c_int,
     input_storage: Option<&[crate::stdlib::Bytef]>,
     mut output_storage: &mut [crate::stdlib::Bytef],
@@ -1176,9 +1257,6 @@ pub fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    let Some((strm, state)) = inflateStateCheck::<inflate_state>(strm, None) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     if !inflate_cursor_storage_matches(strm, input_storage, output_storage) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2892,6 +2970,20 @@ pub fn inflate(
     }
     return ret;
 }
+
+pub fn inflate_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    flush: ::core::ffi::c_int,
+    input_storage: Option<&[crate::stdlib::Bytef]>,
+    output_storage: &mut [crate::stdlib::Bytef],
+    head: Option<InflateHeaderBindings<'_>>,
+) -> ::core::ffi::c_int {
+    let Some(mut bound_state) = inflateStateCheck::<inflate_state>(strm, None) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let (strm, state) = bound_state.parts();
+    inflate(strm, state, flush, input_storage, output_storage, head)
+}
 #[export_name = "inflate"]
 
 pub unsafe extern "C" fn inflate_ffi(
@@ -2920,9 +3012,10 @@ pub unsafe extern "C" fn inflate_ffi(
     // allowed field aliasing; parsing and ordered publication stay in the
     // safe decoder.
     let head = {
-        let Some((_strm, state)) = inflateStateCheck::<inflate_state>(strm, None) else {
+        let Some(mut bound_state_7) = inflateStateCheck::<inflate_state>(strm, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
+        let (_strm, state) = bound_state_7.parts();
         if let Some(header) = unsafe { state.head.as_mut() } {
             let extra = if header.extra.is_null() {
                 None
@@ -2970,12 +3063,13 @@ pub unsafe extern "C" fn inflate_ffi(
             None
         }
     };
-    inflate(strm, flush, Some(input), output, head)
+    inflate_stream(strm, flush, Some(input), output, head)
 }
 pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck::<inflate_state>(strm, None) else {
+    let Some(mut bound_state_8) = inflateStateCheck::<inflate_state>(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state_8.parts();
     // Snapshot the release plan before invoking a user-supplied deallocator,
     // since it is allowed to invalidate allocations reachable from the stream.
     let (zfree, opaque, window, state_ptr, window_storage) = (
@@ -3000,9 +3094,10 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
 // needed before either allocation is released.
 pub(crate) fn inflate_end_default_bound(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     let (window, state_ptr, window_storage) = {
-        let Some((bound_strm, state)) = inflateStateCheck::<inflate_state>(strm, None) else {
+        let Some(mut bound_state_9) = inflateStateCheck::<inflate_state>(strm, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
+        let (bound_strm, state) = bound_state_9.parts();
         (
             state.window,
             bound_strm.state,
@@ -3082,9 +3177,10 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state)) = inflateStateCheck::<inflate_state>(strm, None) else {
+    let Some(mut bound_state_10) = inflateStateCheck::<inflate_state>(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state_10.parts();
     let dictionary = if !dictionary.is_null() && state.whave != 0 {
         Some(::core::slice::from_raw_parts_mut(
             dictionary,
@@ -3104,9 +3200,10 @@ pub fn inflateSetDictionary(
     strm: &mut crate::zlib_h::z_stream,
     dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_11) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state_11.parts();
     inflate_set_dictionary(strm, state, dictionary)
 }
 
@@ -3214,9 +3311,10 @@ fn inflateGetHeader(
     let Some(head) = head else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((_strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_12) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (_strm, state) = bound_state_12.parts();
     inflate_get_header(state, head)
 }
 
@@ -3371,9 +3469,10 @@ pub fn inflateSync(
     if input.len() != strm.avail_in as usize {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some((strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_13) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state_13.parts();
     inflate_sync(strm, state, input)
 }
 #[export_name = "inflateSyncPoint"]
@@ -3390,9 +3489,10 @@ pub fn inflateSyncPoint(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::f
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((_strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_14) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (_strm, state) = bound_state_14.parts();
     inflate_sync_point(state)
 }
 // The exported adapter below owns the foreign-call boundary. Keep this
@@ -3406,9 +3506,10 @@ pub fn inflateCopy(
     // calling the source allocator. This value snapshot prevents a Rust
     // reference to source state from spanning that user callback.
     let (plan, mut source_state, source_stream) = {
-        let Some((source, state)) = inflateStateCheck(source, None) else {
+        let Some(mut bound_state_15) = inflateStateCheck(source, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
+        let (source, state) = bound_state_15.parts();
         let Some(plan) = inflate_copy_plan(state) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -3439,10 +3540,10 @@ pub fn inflateCopy(
         // callbacks or opaque value. Rebind it after that callback, then
         // snapshot the next allocation request before invoking it.
         let (zalloc, opaque) = {
-            let Some((source, _source_state)) = inflateStateCheck::<inflate_state>(source, None)
-            else {
+            let Some(mut bound_state_16) = inflateStateCheck::<inflate_state>(source, None) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
+            let (source, _source_state) = bound_state_16.parts();
             (
                 source.zalloc.expect("non-null function pointer"),
                 source.opaque,
@@ -3457,10 +3558,10 @@ pub fn inflateCopy(
             // Match zlib's post-callback free lookup: the failed allocation
             // itself may have replaced the source release callback or opaque
             // value.
-            let Some((source, _source_state)) = inflateStateCheck::<inflate_state>(source, None)
-            else {
+            let Some(mut bound_state_17) = inflateStateCheck::<inflate_state>(source, None) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
+            let (source, _source_state) = bound_state_17.parts();
             Some(source.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 source.opaque,
@@ -3475,17 +3576,19 @@ pub fn inflateCopy(
     // The allocator callbacks have completed. Reuse the checked stream/state
     // bindings for both the live source and the newly initialized local copy,
     // rather than reopening either allocation through a raw dereference.
-    let Some((source, _live_state)) = inflateStateCheck::<inflate_state>(source, None) else {
+    let Some(mut bound_state_18) = inflateStateCheck::<inflate_state>(source, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (source, _live_state) = bound_state_18.parts();
     // `updatewindow()` only inspects this source-state snapshot, so it cannot
     // allocate or otherwise invoke a callback. Reusing that established
     // owner-window binder keeps the source history as a checked slice instead
     // of reopening the saved raw cursor here.
     let source_stream = *source;
-    let Some((_copy_stream, copy)) = inflateStateCheck(&mut copy_stream, None) else {
+    let Some(mut bound_state_19) = inflateStateCheck(&mut copy_stream, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (_copy_stream, copy) = bound_state_19.parts();
     if let Some(window) = window {
         updatewindow(
             source,
@@ -3786,9 +3889,10 @@ pub fn inflateUndermine(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((_strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_20) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (_strm, state) = bound_state_20.parts();
     inflate_undermine(state)
 }
 #[export_name = "inflateValidate"]
@@ -3809,9 +3913,10 @@ pub fn inflateValidate(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((_strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_21) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (_strm, state) = bound_state_21.parts();
     inflate_validate(state, check)
 }
 
@@ -3869,9 +3974,10 @@ pub fn inflateMark(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::ffi::c
     let Some(strm) = strm else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
-    let Some((_strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_22) = inflateStateCheck(strm, None) else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
+    let (_strm, state) = bound_state_22.parts();
     inflate_mark(state)
 }
 #[export_name = "inflateCodesUsed"]
@@ -3888,9 +3994,10 @@ pub fn inflateCodesUsed(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::f
     let Some(strm) = strm else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
-    let Some((_strm, state)) = inflateStateCheck(strm, None) else {
+    let Some(mut bound_state_23) = inflateStateCheck(strm, None) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
+    let (_strm, state) = bound_state_23.parts();
     inflate_codes_used(state)
 }
 

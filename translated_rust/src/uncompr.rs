@@ -2,9 +2,9 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd;
 pub use crate::src::inflate::inflateInit_;
+pub use crate::src::inflate::inflate_stream as inflate;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::uLongf;
@@ -144,7 +144,7 @@ fn uncompress2_z_bound(
         let output_end = dest_offset + stream.avail_out as usize;
         let before_in = stream.avail_in;
         let before_out = stream.avail_out;
-        err = crate::src::inflate::inflate(
+        err = crate::src::inflate::inflate_stream(
             &mut stream,
             crate::zlib_h::Z_NO_FLUSH,
             Some(&source[source_offset..input_end]),

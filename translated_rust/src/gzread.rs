@@ -16,8 +16,8 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd;
+pub use crate::src::inflate::inflate_stream as inflate;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidp;
@@ -360,7 +360,7 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                         state.strm.avail_out,
                         output.len(),
                     )?;
-                    Some(crate::src::inflate::inflate(
+                    Some(crate::src::inflate::inflate_stream(
                         &mut state.strm,
                         crate::zlib_h::Z_NO_FLUSH,
                         Some(&input[input_range]),

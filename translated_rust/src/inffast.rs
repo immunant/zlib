@@ -480,8 +480,13 @@ pub fn inflate_fast(
         return;
     };
     let _ = start;
-    let _ =
-        crate::src::inflate::inflate(strm, crate::zlib_h::Z_NO_FLUSH, Some(input), output, None);
+    let _ = crate::src::inflate::inflate_stream(
+        strm,
+        crate::zlib_h::Z_NO_FLUSH,
+        Some(input),
+        output,
+        None,
+    );
 }
 
 #[export_name = "inflate_fast"]

@@ -244,11 +244,12 @@ fn inflateBackInit_(
     if ret != crate::zlib_h::Z_OK {
         return ret;
     }
-    let Some((strm, state)) =
+    let Some(mut bound_state) =
         crate::src::inflate::inflateStateCheck::<crate::src::inflate::inflate_state>(strm, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state.parts();
     (strm.total_in, strm.total_out, strm.data_type, strm.adler) = public_fields;
     inflate_back_init_state(strm, state, window, config);
     crate::zlib_h::Z_OK
@@ -286,11 +287,12 @@ pub(crate) fn inflateBack(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state)) =
+    let Some(mut bound_state) =
         crate::src::inflate::inflateStateCheck::<crate::src::inflate::inflate_state>(strm, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let (strm, state) = bound_state.parts();
     let Some(callback_window) = callback_window else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -316,6 +318,7 @@ pub(crate) fn inflateBack(
         strm.avail_out = (window_size - written) as crate::stdlib::uInt;
         let status = crate::src::inflate::inflate(
             strm,
+            state,
             crate::zlib_h::Z_NO_FLUSH,
             None,
             &mut callback_window[written..],
@@ -398,11 +401,12 @@ pub unsafe extern "C" fn inflateBack_ffi(
     // callback window before binding its caller-owned storage.  This keeps
     // the raw `strm.state` conversion in the established inflater boundary.
     let (window, wbits, wsize) = {
-        let Some((_bound_strm, state)) = crate::src::inflate::inflateStateCheck::<
+        let Some(mut bound_state) = crate::src::inflate::inflateStateCheck::<
             crate::src::inflate::inflate_state,
         >(strm, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
+        let (_bound_strm, state) = bound_state.parts();
         (state.window, state.wbits, state.wsize)
     };
     let callback_window = match inflate_back_callback_window_len(wbits, wsize) {
