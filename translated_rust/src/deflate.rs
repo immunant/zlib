@@ -1501,6 +1501,29 @@ fn gzip_header_crc(
     crate::src::crc32::crc32_z(crc, &header[..header_len])
 }
 
+fn gzip_header_crc_pending(
+    crc: crate::stdlib::uLong,
+    hcrc: ::core::ffi::c_int,
+    pending_buffer: &[crate::stdlib::Bytef],
+    begin: crate::zutil_h::ulg,
+    end: crate::zutil_h::ulg,
+) -> crate::stdlib::uLong {
+    if hcrc == 0 || end <= begin {
+        return crc;
+    }
+
+    let Ok(begin) = usize::try_from(begin) else {
+        return crc;
+    };
+    let Ok(end) = usize::try_from(end) else {
+        return crc;
+    };
+    let Some(bytes) = pending_buffer.get(begin..end) else {
+        return crc;
+    };
+    crate::src::crc32::crc32_z(crc, bytes)
+}
+
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -1515,6 +1538,11 @@ pub unsafe extern "C" fn deflate(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let pending_buffer = if (*s).pending_buf.is_null() {
+        &[]
+    } else {
+        core::slice::from_raw_parts((*s).pending_buf, (*s).pending_buf_size as usize)
+    };
     if (*strm).next_out.is_null()
         || (*strm).avail_in != 0 as crate::stdlib::uInt && (*strm).next_in.is_null()
         || (*s).status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
@@ -1795,14 +1823,13 @@ pub unsafe extern "C" fn deflate(
                     copy as crate::__stddef_size_t_h::size_t,
                 );
                 (*s).pending = (*s).pending_buf_size;
-                if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                    (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                        (*strm).adler,
-                        (*s).pending_buf.offset(beg as isize),
-                        ((*s).pending as crate::stdlib::z_size_t)
-                            .wrapping_sub(beg as crate::stdlib::z_size_t),
-                    );
-                }
+                (*strm).adler = gzip_header_crc_pending(
+                    (*strm).adler,
+                    (*(*s).gzhead).hcrc,
+                    pending_buffer,
+                    beg,
+                    (*s).pending,
+                );
                 (*s).gzindex = (*s).gzindex.wrapping_add(copy);
                 flush_pending(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -1818,14 +1845,13 @@ pub unsafe extern "C" fn deflate(
                 left as crate::__stddef_size_t_h::size_t,
             );
             (*s).pending = (*s).pending.wrapping_add(left);
-            if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                    (*strm).adler,
-                    (*s).pending_buf.offset(beg as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg as crate::stdlib::z_size_t),
-                );
-            }
+            (*strm).adler = gzip_header_crc_pending(
+                (*strm).adler,
+                (*(*s).gzhead).hcrc,
+                pending_buffer,
+                beg,
+                (*s).pending,
+            );
             (*s).gzindex = 0 as crate::zutil_h::ulg;
         }
         (*s).status = crate::src::deflate::NAME_STATE;
@@ -1836,14 +1862,13 @@ pub unsafe extern "C" fn deflate(
             let mut val: ::core::ffi::c_int = 0;
             loop {
                 if (*s).pending == (*s).pending_buf_size {
-                    if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
-                        (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                            (*strm).adler,
-                            (*s).pending_buf.offset(beg_0 as isize),
-                            ((*s).pending as crate::stdlib::z_size_t)
-                                .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
-                        );
-                    }
+                    (*strm).adler = gzip_header_crc_pending(
+                        (*strm).adler,
+                        (*(*s).gzhead).hcrc,
+                        pending_buffer,
+                        beg_0,
+                        (*s).pending,
+                    );
                     flush_pending(strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
                         (*s).last_flush = -1 as ::core::ffi::c_int;
@@ -1861,14 +1886,13 @@ pub unsafe extern "C" fn deflate(
                     break;
                 }
             }
-            if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
-                (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                    (*strm).adler,
-                    (*s).pending_buf.offset(beg_0 as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
-                );
-            }
+            (*strm).adler = gzip_header_crc_pending(
+                (*strm).adler,
+                (*(*s).gzhead).hcrc,
+                pending_buffer,
+                beg_0,
+                (*s).pending,
+            );
             (*s).gzindex = 0 as crate::zutil_h::ulg;
         }
         (*s).status = crate::src::deflate::COMMENT_STATE;
@@ -1879,14 +1903,13 @@ pub unsafe extern "C" fn deflate(
             let mut val_0: ::core::ffi::c_int = 0;
             loop {
                 if (*s).pending == (*s).pending_buf_size {
-                    if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
-                        (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                            (*strm).adler,
-                            (*s).pending_buf.offset(beg_1 as isize),
-                            ((*s).pending as crate::stdlib::z_size_t)
-                                .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
-                        );
-                    }
+                    (*strm).adler = gzip_header_crc_pending(
+                        (*strm).adler,
+                        (*(*s).gzhead).hcrc,
+                        pending_buffer,
+                        beg_1,
+                        (*s).pending,
+                    );
                     flush_pending(strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
                         (*s).last_flush = -1 as ::core::ffi::c_int;
@@ -1905,14 +1928,13 @@ pub unsafe extern "C" fn deflate(
                     break;
                 }
             }
-            if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
-                (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                    (*strm).adler,
-                    (*s).pending_buf.offset(beg_1 as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
-                );
-            }
+            (*strm).adler = gzip_header_crc_pending(
+                (*strm).adler,
+                (*(*s).gzhead).hcrc,
+                pending_buffer,
+                beg_1,
+                (*s).pending,
+            );
         }
         (*s).status = crate::src::deflate::HCRC_STATE;
     }
@@ -3522,7 +3544,7 @@ unsafe extern "C" fn deflate_huff(
 
 #[cfg(test)]
 mod tests {
-    use super::gzip_header_crc;
+    use super::{gzip_header_crc, gzip_header_crc_pending};
 
     #[test]
     fn gzip_header_crc_matches_fixed_header() {
@@ -3538,5 +3560,17 @@ mod tests {
             gzip_header_crc(0, 1, 1, true, true, true, 0x1234_5678, 9, 0, 255, 0x1234),
             0xd74e_6245,
         );
+    }
+
+    #[test]
+    fn gzip_header_crc_pending_preserves_partial_header_ranges() {
+        let pending = *b"extra-name-comment";
+        let crc = gzip_header_crc_pending(0, 1, &pending, 0, 5);
+        let crc = gzip_header_crc_pending(crc, 1, &pending, 5, 10);
+        let crc = gzip_header_crc_pending(crc, 1, &pending, 10, pending.len() as _);
+
+        assert_eq!(crc, crate::src::crc32::crc32_z(0, &pending));
+        assert_eq!(gzip_header_crc_pending(crc, 0, &pending, 0, 5), crc);
+        assert_eq!(gzip_header_crc_pending(crc, 1, &pending, 5, 5), crc);
     }
 }
