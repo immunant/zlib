@@ -2629,9 +2629,12 @@ pub unsafe extern "C" fn deflateCopy(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     ss = (*source).state as *mut crate::src::deflate::deflate_state;
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
+    // zlib's `deflateCopy()` requires distinct source and destination stream
+    // objects.  Preserve the translated byte-for-byte copy, but do not route
+    // it through the C `memcpy` import.
+    ::core::ptr::copy_nonoverlapping(
+        source.cast::<u8>(),
+        dest.cast::<u8>(),
         ::core::mem::size_of::<crate::zlib_h::z_stream>(),
     );
     ds = Some((*dest).zalloc.expect("non-null function pointer"))
@@ -2647,9 +2650,9 @@ pub unsafe extern "C" fn deflateCopy(
     // The allocation is immediately overwritten with the source state before
     // any field is observed.  Do not clear it first: that C-style write is
     // dead and the copied state supplies every byte.
-    crate::stdlib::memcpy(
-        ds as *mut ::core::ffi::c_void,
-        ss as *const ::core::ffi::c_void,
+    ::core::ptr::copy_nonoverlapping(
+        ss.cast::<u8>(),
+        ds.cast::<u8>(),
         ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
     );
     // The bytewise state copy above is needed for the C allocator-backed
@@ -2702,20 +2705,20 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).sym_buf_start,
         (*ss).sym_next as usize,
     );
-    crate::stdlib::memcpy(
-        (*ds).window.expect("initialized window").as_ptr() as *mut ::core::ffi::c_void,
-        (*ss).window.expect("initialized window").as_ptr() as *const ::core::ffi::c_void,
+    ::core::ptr::copy_nonoverlapping(
+        (*ss).window.expect("initialized window").as_ptr(),
+        (*ds).window.expect("initialized window").as_ptr(),
         copy_layout.window_bytes,
     );
-    crate::stdlib::memcpy(
-        (*ds).prev.expect("initialized prev table").as_ptr() as *mut ::core::ffi::c_void,
-        (*ss).prev.expect("initialized prev table").as_ptr() as *const ::core::ffi::c_void,
-        copy_layout.prev_bytes,
+    ::core::ptr::copy_nonoverlapping(
+        (*ss).prev.expect("initialized prev table").as_ptr(),
+        (*ds).prev.expect("initialized prev table").as_ptr(),
+        copy_layout.prev_bytes / ::core::mem::size_of::<crate::src::deflate::Posf>(),
     );
-    crate::stdlib::memcpy(
-        (*ds).head.expect("initialized head table").as_ptr() as *mut ::core::ffi::c_void,
-        (*ss).head.expect("initialized head table").as_ptr() as *const ::core::ffi::c_void,
-        copy_layout.head_bytes,
+    ::core::ptr::copy_nonoverlapping(
+        (*ss).head.expect("initialized head table").as_ptr(),
+        (*ds).head.expect("initialized head table").as_ptr(),
+        copy_layout.head_bytes / ::core::mem::size_of::<crate::src::deflate::Posf>(),
     );
     (*ds).pending_out = (*ss).pending_out;
     // Both allocations have the copied `pending_buf_size` capacity.  Form
