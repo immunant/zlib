@@ -103,6 +103,56 @@ fn copy_window_history(
     true
 }
 
+/// Copy a match whose history and destination are different positions in the
+/// same inflateBack window.
+///
+/// This deliberately uses indexed, byte-at-a-time reads and writes.  A match
+/// may wrap around the window or overlap its destination, and the C loop's
+/// forward order is part of DEFLATE's repeat semantics.  Keeping both roles
+/// in one slice avoids aliasing a mutable output slice with a history slice.
+fn copy_aliasing_window_history(
+    output: &mut [u8],
+    output_index: &mut usize,
+    wsize: usize,
+    wnext: usize,
+    distance: usize,
+    length: usize,
+) -> bool {
+    if wsize == 0 || output.len() != wsize || wnext > wsize || *output_index > output.len() {
+        return false;
+    }
+    let Some(history_distance) = distance.checked_sub(*output_index) else {
+        return false;
+    };
+    if history_distance > wsize {
+        return false;
+    }
+    let Some(output_end) = output_index.checked_add(length) else {
+        return false;
+    };
+    if output_end > output.len() {
+        return false;
+    }
+
+    let history_length = length.min(history_distance);
+    let history_start = if wnext == 0 {
+        wsize - history_distance
+    } else if wnext < history_distance {
+        wsize - (history_distance - wnext)
+    } else {
+        wnext - history_distance
+    };
+    for offset in 0..history_length {
+        let source_index = (history_start + offset) % wsize;
+        let byte = output[source_index];
+        output[*output_index + offset] = byte;
+    }
+    *output_index += history_length;
+
+    let remaining = length - history_length;
+    remaining == 0 || copy_output_match(output, output_index, distance, remaining)
+}
+
 pub unsafe fn inflate_fast(
     strm: &mut crate::zlib_h::z_stream,
     mut start: ::core::ffi::c_uint,
@@ -130,7 +180,6 @@ pub unsafe fn inflate_fast(
     let mut op: ::core::ffi::c_uint = 0;
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     // The existing engine boundary validates this initialized stream before
     // entering the fast path. Keep the one raw handle conversion here, then
     // use the resulting borrow for all state access below.
@@ -262,203 +311,95 @@ pub unsafe fn inflate_fast(
                                 }
                             }
                             if history_may_alias_output {
-                                // inflateBack uses its caller window as output. Keep the
-                                // legacy raw copy here so a history view never aliases the
-                                // mutable output view used by the safe fast-path helpers.
-                                let mut copy_from_output = false;
-                                from = window;
-                                if wnext == 0 as ::core::ffi::c_uint {
-                                    from = from.wrapping_add(wsize.wrapping_sub(op) as usize);
-                                    if op < len {
-                                        len = len.wrapping_sub(op);
-                                        loop {
-                                            let source = from;
-                                            from = from.wrapping_add(1);
-                                            let destination = out;
-                                            out = out.wrapping_add(1);
-                                            *destination = *source;
-                                            op = op.wrapping_sub(1);
-                                            if op == 0 {
-                                                break;
-                                            }
-                                        }
-                                        from = out.wrapping_offset(-(dist as isize));
-                                        copy_from_output = true;
-                                    }
-                                } else if wnext < op {
-                                    from = from.wrapping_add(
-                                        wsize.wrapping_add(wnext).wrapping_sub(op) as usize,
-                                    );
-                                    op = op.wrapping_sub(wnext);
-                                    if op < len {
-                                        len = len.wrapping_sub(op);
-                                        loop {
-                                            let source = from;
-                                            from = from.wrapping_add(1);
-                                            let destination = out;
-                                            out = out.wrapping_add(1);
-                                            *destination = *source;
-                                            op = op.wrapping_sub(1);
-                                            if op == 0 {
-                                                break;
-                                            }
-                                        }
-                                        from = window;
-                                        if wnext < len {
-                                            op = wnext;
-                                            len = len.wrapping_sub(op);
-                                            loop {
-                                                let source = from;
-                                                from = from.wrapping_add(1);
-                                                let destination = out;
-                                                out = out.wrapping_add(1);
-                                                *destination = *source;
-                                                op = op.wrapping_sub(1);
-                                                if op == 0 {
-                                                    break;
-                                                }
-                                            }
-                                            from = out.wrapping_offset(-(dist as isize));
-                                            copy_from_output = true;
-                                        }
-                                    }
-                                } else {
-                                    from = from.wrapping_add(wnext.wrapping_sub(op) as usize);
-                                    if op < len {
-                                        len = len.wrapping_sub(op);
-                                        loop {
-                                            let source = from;
-                                            from = from.wrapping_add(1);
-                                            let destination = out;
-                                            out = out.wrapping_add(1);
-                                            *destination = *source;
-                                            op = op.wrapping_sub(1);
-                                            if op == 0 {
-                                                break;
-                                            }
-                                        }
-                                        from = out.wrapping_offset(-(dist as isize));
-                                        copy_from_output = true;
-                                    }
+                                // inflateBack uses its caller window as output.  Copy from
+                                // that one mutable window view with indexes, rather than
+                                // creating an aliasing history slice alongside `output`.
+                                let mut output_index = out.addr().wrapping_sub(beg.addr());
+                                if !copy_aliasing_window_history(
+                                    output,
+                                    &mut output_index,
+                                    wsize as usize,
+                                    wnext as usize,
+                                    dist as usize,
+                                    len as usize,
+                                ) {
+                                    state.mode = crate::src::inflate::BAD;
+                                    break 's_627;
                                 }
-                                if copy_from_output {
-                                    let mut output_index = out.addr().wrapping_sub(beg.addr());
-                                    if !copy_output_match(
+                                out = output.as_mut_ptr().wrapping_add(output_index);
+                            } else {
+                                let history = if window.is_null() || wsize == 0 {
+                                    &[]
+                                } else {
+                                    ::core::slice::from_raw_parts(window, wsize as usize)
+                                };
+                                let mut output_index = out.addr().wrapping_sub(beg.addr());
+                                let mut remaining = len as usize;
+                                if wnext == 0 as ::core::ffi::c_uint {
+                                    let count = remaining.min(op as usize);
+                                    if !copy_window_history(
                                         output,
                                         &mut output_index,
-                                        dist as usize,
-                                        len as usize,
+                                        history,
+                                        wsize.wrapping_sub(op) as usize,
+                                        count,
                                     ) {
                                         state.mode = crate::src::inflate::BAD;
                                         break 's_627;
                                     }
-                                    out = output.as_mut_ptr().wrapping_add(output_index);
+                                    remaining = remaining.wrapping_sub(count);
+                                } else if wnext < op {
+                                    let first = op.wrapping_sub(wnext) as usize;
+                                    let count = remaining.min(first);
+                                    if !copy_window_history(
+                                        output,
+                                        &mut output_index,
+                                        history,
+                                        wsize.wrapping_add(wnext).wrapping_sub(op) as usize,
+                                        count,
+                                    ) {
+                                        state.mode = crate::src::inflate::BAD;
+                                        break 's_627;
+                                    }
+                                    remaining = remaining.wrapping_sub(count);
+                                    let count = remaining.min(wnext as usize);
+                                    if !copy_window_history(
+                                        output,
+                                        &mut output_index,
+                                        history,
+                                        0,
+                                        count,
+                                    ) {
+                                        state.mode = crate::src::inflate::BAD;
+                                        break 's_627;
+                                    }
+                                    remaining = remaining.wrapping_sub(count);
                                 } else {
-                                    while len > 2 as ::core::ffi::c_uint {
-                                        let source = from;
-                                        from = from.wrapping_add(1);
-                                        let destination = out;
-                                        out = out.wrapping_add(1);
-                                        *destination = *source;
-                                        let source = from;
-                                        from = from.wrapping_add(1);
-                                        let destination = out;
-                                        out = out.wrapping_add(1);
-                                        *destination = *source;
-                                        let source = from;
-                                        from = from.wrapping_add(1);
-                                        let destination = out;
-                                        out = out.wrapping_add(1);
-                                        *destination = *source;
-                                        len = len.wrapping_sub(3 as ::core::ffi::c_uint);
+                                    let count = remaining.min(op as usize);
+                                    if !copy_window_history(
+                                        output,
+                                        &mut output_index,
+                                        history,
+                                        wnext.wrapping_sub(op) as usize,
+                                        count,
+                                    ) {
+                                        state.mode = crate::src::inflate::BAD;
+                                        break 's_627;
                                     }
-                                    if len != 0 {
-                                        let source = from;
-                                        from = from.wrapping_add(1);
-                                        let destination = out;
-                                        out = out.wrapping_add(1);
-                                        *destination = *source;
-                                        if len > 1 as ::core::ffi::c_uint {
-                                            let source = from;
-                                            let destination = out;
-                                            out = out.wrapping_add(1);
-                                            *destination = *source;
-                                        }
-                                    }
+                                    remaining = remaining.wrapping_sub(count);
                                 }
-                            } else {
-                            let history = if window.is_null() || wsize == 0 {
-                                &[]
-                            } else {
-                                ::core::slice::from_raw_parts(window, wsize as usize)
-                            };
-                            let mut output_index = out.addr().wrapping_sub(beg.addr());
-                            let mut remaining = len as usize;
-                            if wnext == 0 as ::core::ffi::c_uint {
-                                let count = remaining.min(op as usize);
-                                if !copy_window_history(
-                                    output,
-                                    &mut output_index,
-                                    history,
-                                    wsize.wrapping_sub(op) as usize,
-                                    count,
-                                ) {
+                                if remaining != 0
+                                    && !copy_output_match(
+                                        output,
+                                        &mut output_index,
+                                        dist as usize,
+                                        remaining,
+                                    )
+                                {
                                     state.mode = crate::src::inflate::BAD;
                                     break 's_627;
                                 }
-                                remaining = remaining.wrapping_sub(count);
-                            } else if wnext < op {
-                                let first = op.wrapping_sub(wnext) as usize;
-                                let count = remaining.min(first);
-                                if !copy_window_history(
-                                    output,
-                                    &mut output_index,
-                                    history,
-                                    wsize.wrapping_add(wnext).wrapping_sub(op) as usize,
-                                    count,
-                                ) {
-                                    state.mode = crate::src::inflate::BAD;
-                                    break 's_627;
-                                }
-                                remaining = remaining.wrapping_sub(count);
-                                let count = remaining.min(wnext as usize);
-                                if !copy_window_history(
-                                    output,
-                                    &mut output_index,
-                                    history,
-                                    0,
-                                    count,
-                                ) {
-                                    state.mode = crate::src::inflate::BAD;
-                                    break 's_627;
-                                }
-                                remaining = remaining.wrapping_sub(count);
-                            } else {
-                                let count = remaining.min(op as usize);
-                                if !copy_window_history(
-                                    output,
-                                    &mut output_index,
-                                    history,
-                                    wnext.wrapping_sub(op) as usize,
-                                    count,
-                                ) {
-                                    state.mode = crate::src::inflate::BAD;
-                                    break 's_627;
-                                }
-                                remaining = remaining.wrapping_sub(count);
-                            }
-                            if remaining != 0
-                                && !copy_output_match(
-                                    output,
-                                    &mut output_index,
-                                    dist as usize,
-                                    remaining,
-                                )
-                            {
-                                state.mode = crate::src::inflate::BAD;
-                                break 's_627;
-                            }
-                            out = output.as_mut_ptr().wrapping_add(output_index);
+                                out = output.as_mut_ptr().wrapping_add(output_index);
                             }
                             break 's_92;
                         } else {
