@@ -157,7 +157,6 @@ pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits;
-pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
@@ -2335,6 +2334,32 @@ unsafe extern "C" fn longest_match(
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
+// All callers are existing unsafe strategy implementations.  Keep their raw
+// state/window views at those call sites and dispatch the block logic to the
+// safe tree core.
+macro_rules! flush_block_from_raw {
+    ($state_ptr:expr, $source_ptr:expr, $stored_len:expr, $last:expr $(,)?) => {{
+        let state_ptr = $state_ptr;
+        let source_ptr = $source_ptr;
+        let stored_len = $stored_len;
+        let last = $last;
+        let strm = &mut *(*state_ptr).strm;
+        let state = &mut *state_ptr;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        let source = if source_ptr.is_null() {
+            None
+        } else if stored_len == 0 {
+            Some(&[][..])
+        } else {
+            Some(::core::slice::from_raw_parts(source_ptr, stored_len as usize))
+        };
+        crate::src::trees::tr_flush_block(state, strm, pending_buf, source, stored_len, last)
+    }};
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -2756,7 +2781,7 @@ unsafe extern "C" fn deflate_fast(
             (*s).strstart = (*s).strstart.wrapping_add(1);
         }
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
+            flush_block_from_raw!(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
@@ -2787,7 +2812,7 @@ unsafe extern "C" fn deflate_fast(
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
+        flush_block_from_raw!(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -2811,7 +2836,7 @@ unsafe extern "C" fn deflate_fast(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
+        flush_block_from_raw!(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -2986,7 +3011,7 @@ unsafe extern "C" fn deflate_slow(
                 (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
             (*s).strstart = (*s).strstart.wrapping_add(1);
             if bflush != 0 {
-                crate::src::trees::_tr_flush_block(
+                flush_block_from_raw!(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
                         (*s).window
@@ -3027,7 +3052,7 @@ unsafe extern "C" fn deflate_slow(
                 (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
-                crate::src::trees::_tr_flush_block(
+                flush_block_from_raw!(
                     s as *mut crate::src::deflate::internal_state,
                     if (*s).block_start >= 0 as ::core::ffi::c_long {
                         (*s).window
@@ -3081,7 +3106,7 @@ unsafe extern "C" fn deflate_slow(
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
+        flush_block_from_raw!(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3105,7 +3130,7 @@ unsafe extern "C" fn deflate_slow(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
+        flush_block_from_raw!(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3296,7 +3321,7 @@ unsafe extern "C" fn deflate_rle(
             (*s).strstart = (*s).strstart.wrapping_add(1);
         }
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
+            flush_block_from_raw!(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
@@ -3321,7 +3346,7 @@ unsafe extern "C" fn deflate_rle(
     }
     (*s).insert = 0 as crate::stdlib::uInt;
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
+        flush_block_from_raw!(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3345,7 +3370,7 @@ unsafe extern "C" fn deflate_rle(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
+        flush_block_from_raw!(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3402,7 +3427,7 @@ unsafe extern "C" fn deflate_huff(
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);
         (*s).strstart = (*s).strstart.wrapping_add(1);
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
+            flush_block_from_raw!(
                 s as *mut crate::src::deflate::internal_state,
                 if (*s).block_start >= 0 as ::core::ffi::c_long {
                     (*s).window
@@ -3427,7 +3452,7 @@ unsafe extern "C" fn deflate_huff(
     }
     (*s).insert = 0 as crate::stdlib::uInt;
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
+        flush_block_from_raw!(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
@@ -3451,7 +3476,7 @@ unsafe extern "C" fn deflate_huff(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
+        flush_block_from_raw!(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
                 (*s).window
