@@ -2478,7 +2478,10 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     }
     ret = updatewindow(
         strm,
-        dictionary.offset(dictLength as isize),
+        // `dictLength` has already bounded the dictionary view above.  The
+        // legacy window adapter needs its end cursor, but forming that cursor
+        // does not itself need unsafe pointer arithmetic.
+        dictionary.wrapping_add(dictLength as usize),
         dictLength as ::core::ffi::c_uint,
     );
     if ret != 0 {
@@ -2627,7 +2630,10 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     }
     len = syncsearch(&mut (*state).have, input);
     (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
+    // `len` was consumed from the validated input view.  Keep the ABI cursor
+    // update pointer-safe; later boundary code remains responsible for any
+    // dereference.
+    (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
     if (*state).have != 4 {
         return crate::zlib_h::Z_DATA_ERROR;

@@ -3304,7 +3304,9 @@ unsafe extern "C" fn deflate_stored(
             else {
                 return need_more;
             };
-            strm.next_out = strm.next_out.offset(copy.copied as isize);
+            // `copy.copied` is bounded by the output view above.  Preserve
+            // the ABI cursor advance without unsafe pointer arithmetic.
+            strm.next_out = strm.next_out.wrapping_add(copy.copied as usize);
             strm.avail_out = strm.avail_out.wrapping_sub(copy.copied);
             strm.total_out = strm
                 .total_out
@@ -3314,7 +3316,9 @@ unsafe extern "C" fn deflate_stored(
         }
         if len != 0 {
             read_buf((*s).strm, (*(*s).strm).next_out, len);
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(len as isize);
+            // `read_buf()` consumed at most the requested `len` bytes, so
+            // this is a cursor update only; no pointer dereference is needed.
+            (*(*s).strm).next_out = (*(*s).strm).next_out.wrapping_add(len as usize);
             (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
             (*(*s).strm).total_out = (*(*s).strm)
                 .total_out
