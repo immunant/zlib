@@ -620,7 +620,7 @@ pub unsafe extern "C" fn deflateInit2_(
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
     static my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
-        || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
+        || *version as ::core::ffi::c_int
             != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
         || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>()
     {
