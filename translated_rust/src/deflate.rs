@@ -193,18 +193,26 @@ impl<'a> PendingStorageView<'a> {
         &mut self.bytes[self.layout.symbol_offset..self.layout.total_len]
     }
 
+    pub(crate) fn pending_range(
+        &mut self,
+        offset: crate::zutil_h::ulg,
+        len: crate::zutil_h::ulg,
+    ) -> Option<&mut [crate::stdlib::Bytef]> {
+        let start = usize::try_from(offset).ok()?;
+        let len = usize::try_from(len).ok()?;
+        let end = start.checked_add(len)?;
+        self.pending_bytes().get_mut(start..end)
+    }
+
     pub(crate) fn append_pending(
         &mut self,
         pending: &mut crate::zutil_h::ulg,
         bytes: &[crate::stdlib::Bytef],
     ) -> bool {
-        let Ok(start) = usize::try_from(*pending) else {
+        let Ok(len) = crate::zutil_h::ulg::try_from(bytes.len()) else {
             return false;
         };
-        let Some(end) = start.checked_add(bytes.len()) else {
-            return false;
-        };
-        let Some(output) = self.pending_bytes().get_mut(start..end) else {
+        let Some(output) = self.pending_range(*pending, len) else {
             return false;
         };
         output.copy_from_slice(bytes);
@@ -6270,6 +6278,41 @@ mod tests {
             crate::src::deflate::with_pending_storage(&mut bytes, layout, |_| ()),
             None
         );
+    }
+
+    #[test]
+    fn pending_storage_range_checks_offset_and_length_before_borrowing() {
+        let layout = pending_storage_layout(2);
+        let mut bytes = [0; 8];
+
+        let result = crate::src::deflate::with_pending_storage(&mut bytes, layout, |storage| {
+            storage
+                .pending_range(1, 2)
+                .unwrap()
+                .copy_from_slice(&[0x12, 0x34]);
+            (
+                storage.pending_range(7, 2).is_none(),
+                storage.pending_range(crate::zutil_h::ulg::MAX, 1).is_none(),
+            )
+        });
+
+        assert_eq!(result, Some((true, true)));
+        assert_eq!(bytes, [0, 0x12, 0x34, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn pending_storage_append_does_not_advance_cursor_when_range_is_invalid() {
+        let layout = pending_storage_layout(2);
+        let mut bytes = [0x55; 8];
+        let mut pending = 7;
+
+        let result = crate::src::deflate::with_pending_storage(&mut bytes, layout, |storage| {
+            storage.append_pending(&mut pending, &[0x12, 0x34])
+        });
+
+        assert_eq!(result, Some(false));
+        assert_eq!(pending, 7);
+        assert_eq!(bytes, [0x55; 8]);
     }
 
     #[test]
