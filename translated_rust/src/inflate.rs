@@ -1531,6 +1531,29 @@ fn inflate_window_update(
     })
 }
 
+/// Retain a decoder call's output in its circular history window and publish
+/// the new history cursors as one safe commit.  The caller still owns the ABI
+/// allocation and the temporary slice lend, but cannot publish a partially
+/// updated history state if the checked copy rejects malformed cursors.
+fn inflate_window_update_state(
+    state: &mut crate::src::inflate::inflate_state,
+    window: &mut [u8],
+    produced: &[u8],
+) -> Option<()> {
+    let update = inflate_window_update(
+        window,
+        produced,
+        state.wbits,
+        state.wsize,
+        state.wnext,
+        state.whave,
+    )?;
+    state.wsize = update.wsize;
+    state.wnext = update.wnext;
+    state.whave = update.whave;
+    Some(())
+}
+
 /// Resolve a table source to a bounded view. Dynamic tables live in `codes`;
 /// fixed tables are immutable static data.
 pub(crate) fn inflate_table_view(
@@ -3688,13 +3711,7 @@ pub fn inflate(
                 // Invoke a possible allocator callback before lending the caller's
                 // completed-output span. History retention and final checksum then
                 // consume that one exact bounded view.
-                let (wbits, wsize, wnext, whave, wrap) = (
-                    state_ref.wbits,
-                    state_ref.wsize,
-                    state_ref.wnext,
-                    state_ref.whave,
-                    state_ref.wrap,
-                );
+                let wrap = state_ref.wrap;
                 let window = if exit.update_window {
                     // The decoder boundary owns callback invocation and the one
                     // temporary ABI-window lend.  The plan and the subsequent
@@ -3749,14 +3766,9 @@ pub fn inflate(
                     &[]
                 };
                 if let Some(window) = window {
-                    let Some(update) =
-                        inflate_window_update(window, produced, wbits, wsize, wnext, whave)
-                    else {
+                    if inflate_window_update_state(state_ref, window, produced).is_none() {
                         break 'window (true, &[]);
-                    };
-                    state_ref.wsize = update.wsize;
-                    state_ref.wnext = update.wnext;
-                    state_ref.whave = update.whave;
+                    }
                 }
                 (false, produced)
             };
