@@ -102,9 +102,7 @@ pub fn uncompress2_z(
     let written = dest.as_ref().map_or(0, |dest| dest.len()) as crate::stdlib::z_size_t;
     let used = used.wrapping_sub(len);
     let written = written.wrapping_sub(left);
-    unsafe {
-        crate::src::inflate::inflateEnd(&mut stream);
-    }
+    crate::src::inflate::inflateEnd(&mut stream);
     return (
         if err == crate::zlib_h::Z_STREAM_END {
             crate::zlib_h::Z_OK

@@ -2368,26 +2368,32 @@ pub unsafe extern "C" fn inflate_ffi(
     };
     inflate(strm, flush)
 }
-pub unsafe fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+    // The state handle is an ABI field.  Keep its one conversion at the
+    // teardown boundary after validating the allocator pair above.
+    let Some(state) = (unsafe { (strm.state as *mut crate::src::inflate::inflate_state).as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if !inflate_state_valid(strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if !state.window.is_null() {
+        unsafe {
+            Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+                strm.opaque,
+                state.window as crate::stdlib::voidpf,
+            );
+        }
+    }
+    unsafe {
         Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             strm.opaque,
-            state.window as crate::stdlib::voidpf,
+            strm.state as crate::stdlib::voidpf,
         );
     }
-    Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        strm.opaque,
-        strm.state as crate::stdlib::voidpf,
-    );
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
 }
