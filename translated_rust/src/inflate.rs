@@ -1511,12 +1511,24 @@ fn inflate_distance_extra_update(
 macro_rules! inflate_state_check_at_ffi_boundary {
     ($strm:expr) => {{
         let strm = $strm;
-        if strm.is_null() {
+        // Do not form a Rust reference until both foreign records have the
+        // alignment required by their ABI types.  This macro expands at each
+        // exported inflate boundary, keeping the raw-to-reference crossing
+        // out of the safe implementation core.
+        if strm.is_null()
+            || strm.align_offset(::core::mem::align_of::<crate::zlib_h::z_stream>()) != 0
+        {
             true
         } else {
             let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-            state.is_null()
-                || inflate_state_check_impl(Some(&*strm), Some(&*state), (*state).strm == strm) != 0
+            if state.is_null()
+                || state.align_offset(::core::mem::align_of::<crate::src::inflate::inflate_state>())
+                    != 0
+            {
+                true
+            } else {
+                inflate_state_check_impl(Some(&*strm), Some(&*state), (*state).strm == strm) != 0
+            }
         }
     }};
 }
@@ -1635,7 +1647,9 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() {
+    if strm.is_null()
+        || strm.align_offset(::core::mem::align_of::<crate::zlib_h::z_stream>()) != 0
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -4028,7 +4042,10 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if inflate_state_check_at_ffi_boundary!(source) || dest.is_null() {
+    if inflate_state_check_at_ffi_boundary!(source)
+        || dest.is_null()
+        || dest.align_offset(::core::mem::align_of::<crate::zlib_h::z_stream>()) != 0
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // `z_stream` is an ABI mirror with `Copy` fields.  Use the established
