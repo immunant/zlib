@@ -998,7 +998,7 @@ fn gz_load(
     }
 }
 
-unsafe fn gz_avail(
+fn gz_avail(
     state: &mut crate::gzguts_h::gz_state,
     header: Option<&mut Option<[crate::stdlib::Byte; 4]>>,
 ) -> ::core::ffi::c_int {
@@ -1009,7 +1009,10 @@ unsafe fn gz_avail(
         _ => {}
     }
 
-    let input = core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
+    // The gzip handle owns this allocation for the duration of the read
+    // operation.  Keep the raw-to-slice conversion at this one storage
+    // boundary; the cursor and refill logic below only sees GzInputStorage.
+    let input = unsafe { core::slice::from_raw_parts_mut(state.in_0, state.size as usize) };
     let input_start = input.as_mut_ptr();
     let q = state.strm.next_in;
     let Some(input_offset) =
