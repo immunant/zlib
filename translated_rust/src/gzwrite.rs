@@ -375,7 +375,7 @@ pub unsafe extern "C" fn gzwrite(
     // This is a validated write state, so clearing the shared error record
     // cannot affect read-side EOF bookkeeping.
     crate::src::gzlib::gzclearerr(state);
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
+    if !crate::src::gzlib::gz_uint_request_fits_int(len) {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_DATA_ERROR,
@@ -403,25 +403,24 @@ pub unsafe extern "C" fn gzfwrite(
     mut nitems: crate::stdlib::z_size_t,
     state: &mut crate::gzguts_h::gz_state,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gzclearerr(state);
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return 0 as crate::stdlib::z_size_t;
+    match crate::src::gzlib::gz_item_request(size, nitems) {
+        crate::src::gzlib::GzItemRequest::Empty => 0 as crate::stdlib::z_size_t,
+        crate::src::gzlib::GzItemRequest::TooLarge => {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            0 as crate::stdlib::z_size_t
+        }
+        crate::src::gzlib::GzItemRequest::Bytes(len) => {
+            gz_write(state, buf, len).wrapping_div(size)
+        }
     }
-    return if len != 0 {
-        gz_write(state, buf, len).wrapping_div(size)
-    } else {
-        0 as crate::stdlib::z_size_t
-    };
 }
 #[export_name = "gzfwrite"]
 

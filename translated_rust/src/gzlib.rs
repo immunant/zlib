@@ -100,6 +100,34 @@ pub fn gz_syscall_chunk(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if len > max { max } else { len }
 }
 
+// Keep the public single-request limit independent of the caller buffer.
+// The cast deliberately matches zlib's C `int` range check.
+pub(crate) fn gz_uint_request_fits_int(len: ::core::ffi::c_uint) -> bool {
+    (len as ::core::ffi::c_int) >= 0
+}
+
+// `gzfread()` and `gzfwrite()` share C's wrapping item-count multiplication.
+// Classify it before either path reaches its raw caller-buffer adapter.
+pub(crate) enum GzItemRequest {
+    Empty,
+    TooLarge,
+    Bytes(crate::stdlib::z_size_t),
+}
+
+pub(crate) fn gz_item_request(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> GzItemRequest {
+    let bytes = nitems.wrapping_mul(size);
+    if size != 0 && bytes.wrapping_div(size) != nitems {
+        GzItemRequest::TooLarge
+    } else if bytes == 0 {
+        GzItemRequest::Empty
+    } else {
+        GzItemRequest::Bytes(bytes)
+    }
+}
+
 // Keep byte-count arithmetic out of the raw read/write adapters.  These use
 // wrapping operations to retain the translated C behavior for corrupt state.
 pub(crate) fn gz_load_request(

@@ -525,7 +525,7 @@ pub unsafe extern "C" fn gzread(
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_clear_read_error(state);
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
+    if !crate::src::gzlib::gz_uint_request_fits_int(len) {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -567,25 +567,24 @@ pub unsafe extern "C" fn gzfread(
     mut nitems: crate::stdlib::z_size_t,
     state: &mut crate::gzguts_h::gz_state,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_clear_read_error(state);
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return 0 as crate::stdlib::z_size_t;
+    match crate::src::gzlib::gz_item_request(size, nitems) {
+        crate::src::gzlib::GzItemRequest::Empty => 0 as crate::stdlib::z_size_t,
+        crate::src::gzlib::GzItemRequest::TooLarge => {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            0 as crate::stdlib::z_size_t
+        }
+        crate::src::gzlib::GzItemRequest::Bytes(len) => {
+            gz_read(state, buf, len).wrapping_div(size)
+        }
     }
-    return if len != 0 {
-        gz_read(state, buf, len).wrapping_div(size)
-    } else {
-        0 as crate::stdlib::z_size_t
-    };
 }
 #[export_name = "gzfread"]
 
