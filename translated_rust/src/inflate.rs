@@ -445,16 +445,6 @@ fn inflate_reset2_impl(
     inflate_reset_keep_impl(strm, state)
 }
 
-pub unsafe fn inflateReset2(
-    strm: crate::zlib_h::z_streamp,
-    window_bits: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflate_reset2_impl(&mut *strm, window_bits)
-}
-
 #[export_name = "inflateReset2"]
 
 pub unsafe extern "C" fn inflateReset2_ffi(
@@ -515,7 +505,7 @@ pub unsafe extern "C" fn inflateInit2_(
     state.write(new_inflate_state());
     (*strm).state = state as *mut crate::src::deflate::internal_state;
     (*state).mode = crate::src::inflate::HEAD;
-    ret = inflateReset2(strm, windowBits);
+    ret = inflate_reset2_impl(&mut *strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
         ::core::ptr::drop_in_place(state);
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
