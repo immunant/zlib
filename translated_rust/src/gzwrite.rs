@@ -273,76 +273,97 @@ unsafe extern "C" fn gz_write(
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if (*state).size == 0 as ::core::ffi::c_uint
-        && gz_init(&mut *state) == -1 as ::core::ffi::c_int
+    if state.is_null() || buf.is_null() {
+        return 0 as crate::stdlib::z_size_t;
+    }
+    let input_len = len as usize;
+    if input_len as crate::stdlib::z_size_t != len {
+        return 0 as crate::stdlib::z_size_t;
+    }
+    // The caller supplies `len` readable bytes at `buf`.  Convert that pair
+    // once, before any cursor arithmetic, so the rest of this routine can
+    // track progress as a checked slice offset.
+    let input = ::core::slice::from_raw_parts(buf as *const u8, input_len);
+    let state = &mut *state;
+    if state.size == 0 as ::core::ffi::c_uint
+        && gz_init(state) == -1 as ::core::ffi::c_int
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0
+        && gz_zero(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
+    {
         return 0 as crate::stdlib::z_size_t;
     }
-    if len < (*state).size as crate::stdlib::z_size_t {
+    let Ok(capacity) = usize::try_from(state.size) else {
+        return 0 as crate::stdlib::z_size_t;
+    };
+    if capacity == 0 || state.in_0.is_null() {
+        return 0 as crate::stdlib::z_size_t;
+    }
+    let mut consumed = 0usize;
+    if input.len() < capacity {
         loop {
-            let mut have: ::core::ffi::c_uint = 0;
-            let mut copy: ::core::ffi::c_uint = 0;
-            if (*state).strm.avail_in == 0 as crate::stdlib::uInt {
-                (*state).strm.next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+            if state.strm.avail_in == 0 as crate::stdlib::uInt {
+                state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
             }
-            have = (*state)
+            let Some(have) = state
                 .strm
                 .next_in
-                .offset((*state).strm.avail_in as isize)
-                .offset_from((*state).in_0) as ::core::ffi::c_uint;
-            copy = (*state).size.wrapping_sub(have);
-            if copy as crate::stdlib::z_size_t > len {
-                copy = len as ::core::ffi::c_uint;
+                .addr()
+                .checked_sub(state.in_0.addr())
+                .and_then(|offset| offset.checked_add(state.strm.avail_in as usize))
+            else {
+                return 0 as crate::stdlib::z_size_t;
+            };
+            if have > capacity {
+                return 0 as crate::stdlib::z_size_t;
             }
-            crate::stdlib::memcpy(
-                (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
-                buf as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
-            );
-            (*state).strm.avail_in = (*state).strm.avail_in.wrapping_add(copy);
-            (*state).x.pos += copy as crate::stdlib::off64_t;
-            buf =
-                (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
-            len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
-            if len == 0 as crate::stdlib::z_size_t {
+            let copy = (capacity - have).min(input.len() - consumed);
+            // `have` and `copy` are bounded by `capacity`, which is the
+            // initialized input allocation's usable prefix.
+            ::core::slice::from_raw_parts_mut(state.in_0, capacity)[have..have + copy]
+                .copy_from_slice(&input[consumed..consumed + copy]);
+            state.strm.avail_in = state.strm.avail_in.wrapping_add(copy as crate::stdlib::uInt);
+            state.x.pos += copy as crate::stdlib::off64_t;
+            consumed += copy;
+            if consumed == input.len() {
                 break;
             }
-            if gz_comp(&mut *state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
+            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+                return if state.again != 0 {
+                    put.wrapping_sub((input.len() - consumed) as crate::stdlib::z_size_t)
                 } else {
                     0 as crate::stdlib::z_size_t
                 };
             }
         }
     } else {
-        if (*state).strm.avail_in != 0
-            && gz_comp(&mut *state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+        if state.strm.avail_in != 0
+            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
-        (*state).strm.next_in = buf as *mut crate::stdlib::Bytef;
         loop {
             let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            if n as crate::stdlib::z_size_t > len {
-                n = len as ::core::ffi::c_uint;
+            let remaining = input.len() - consumed;
+            if n as usize > remaining {
+                n = remaining as ::core::ffi::c_uint;
             }
-            (*state).strm.avail_in = n as crate::stdlib::uInt;
-            ret = gz_comp(&mut *state, crate::zlib_h::Z_NO_FLUSH);
-            n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
-            (*state).x.pos += n as crate::stdlib::off64_t;
-            len = len.wrapping_sub(n as crate::stdlib::z_size_t);
+            state.strm.next_in = input[consumed..].as_ptr() as *mut crate::stdlib::Bytef;
+            state.strm.avail_in = n as crate::stdlib::uInt;
+            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+            n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
+            state.x.pos += n as crate::stdlib::off64_t;
+            consumed += n as usize;
             if ret == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
+                return if state.again != 0 {
+                    put.wrapping_sub((input.len() - consumed) as crate::stdlib::z_size_t)
                 } else {
                     0 as crate::stdlib::z_size_t
                 };
             }
-            if len == 0 {
+            if consumed == input.len() {
                 break;
             }
         }
