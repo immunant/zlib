@@ -2021,7 +2021,7 @@ pub unsafe extern "C" fn inflate(
                 c2rust_current_block = 14619999244790055076;
             }
             18304778756172692371 => {
-                if (*state).flags & 0x800 as ::core::ffi::c_int != 0 {
+                if inflate_gzip_header_has_name((*state).flags) {
                     if have == 0 as ::core::ffi::c_uint {
                         break;
                     }
@@ -2493,6 +2493,10 @@ fn inflate_gzip_header_has_extra(flags: ::core::ffi::c_int) -> bool {
     flags & 0x400 != 0
 }
 
+fn inflate_gzip_header_has_name(flags: ::core::ffi::c_int) -> bool {
+    flags & 0x800 != 0
+}
+
 fn gzip_extra_copy_bounds(
     extra_len: ::core::ffi::c_uint,
     remaining: ::core::ffi::c_uint,
@@ -2955,7 +2959,7 @@ mod tests {
         inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
         inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
         inflate_dictionary_is_allowed, inflate_get_dictionary_result,
-        inflate_gzip_header_has_extra, inflate_header_crc_enabled,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
         inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
@@ -3174,6 +3178,15 @@ mod tests {
         assert!(inflate_gzip_header_has_extra(0x600));
         assert!(!inflate_gzip_header_has_extra(0));
         assert!(!inflate_gzip_header_has_extra(0x200));
+    }
+
+    #[test]
+    fn inflate_gzip_header_name_flag_requires_the_name_bit() {
+        assert!(inflate_gzip_header_has_name(0x800));
+        assert!(inflate_gzip_header_has_name(0x1800));
+        assert!(!inflate_gzip_header_has_name(0));
+        assert!(!inflate_gzip_header_has_name(0x400));
+        assert!(!inflate_gzip_header_has_name(0x1000));
     }
 
     #[test]

@@ -2619,6 +2619,18 @@ fn longest_match_next_chain_length(
     (next_chain_length != 0).then_some(next_chain_length)
 }
 
+fn longest_match_clamp_length(
+    best_len: ::core::ffi::c_int,
+    lookahead: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    let best_len = best_len as crate::stdlib::uInt;
+    if best_len <= lookahead {
+        best_len
+    } else {
+        lookahead
+    }
+}
+
 unsafe fn longest_match(
     mut s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
@@ -2726,10 +2738,7 @@ unsafe fn longest_match(
         };
         chain_length = next_chain_length;
     }
-    if best_len as crate::stdlib::uInt <= (*s).lookahead {
-        return best_len as crate::stdlib::uInt;
-    }
-    return (*s).lookahead;
+    longest_match_clamp_length(best_len, (*s).lookahead)
 }
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
@@ -3916,12 +3925,13 @@ mod tests {
         fill_window_cursor, fill_window_insert_after_slide, fill_window_should_refill,
         fill_window_should_slide, fill_window_zero_range, flush_pending_accounting,
         gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        lm_match_parameters, longest_match_limit, longest_match_next_chain_length,
-        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
-        stored_block_is_last, stored_block_min_size, stored_block_should_wait,
-        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
+        lm_match_parameters, longest_match_clamp_length, longest_match_limit,
+        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_len,
+        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
+        stored_block_available_output, stored_block_can_emit, stored_block_is_last,
+        stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
+        symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
 
     #[test]
@@ -4288,6 +4298,14 @@ mod tests {
             longest_match_next_chain_length(6, 5, 0),
             Some(::core::ffi::c_uint::MAX),
         );
+    }
+
+    #[test]
+    fn longest_match_clamp_length_preserves_unsigned_cast_and_lookahead_limit() {
+        assert_eq!(longest_match_clamp_length(3, 8), 3);
+        assert_eq!(longest_match_clamp_length(8, 8), 8);
+        assert_eq!(longest_match_clamp_length(9, 8), 8);
+        assert_eq!(longest_match_clamp_length(-1, 8), 8);
     }
 
     #[test]

@@ -65,6 +65,20 @@ fn gz_init_stream_defaults(strm: &mut crate::zlib_h::z_stream) {
     strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum GzInitMode {
+    Direct,
+    Compressed,
+}
+
+fn gz_init_mode(direct: ::core::ffi::c_int) -> GzInitMode {
+    if direct == 0 {
+        GzInitMode::Compressed
+    } else {
+        GzInitMode::Direct
+    }
+}
+
 fn gz_zero_chunk_len(
     size: ::core::ffi::c_uint,
     skip: crate::stdlib::off64_t,
@@ -687,7 +701,7 @@ unsafe fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         );
         return -1 as ::core::ffi::c_int;
     }
-    if state.direct == 0 {
+    if gz_init_mode(state.direct) == GzInitMode::Compressed {
         state.out = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar;
         if state.out.is_null() {
@@ -1331,10 +1345,10 @@ mod tests {
         gz_comp_output_write_progress, gz_comp_pending_after_write, gz_comp_reset_action,
         gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result,
-        gz_has_pending_input, gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
-        gz_write_apply_chunk_progress, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
-        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
-        gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
+        gz_has_pending_input, gz_has_pending_skip, gz_init_mode, gz_init_stream_defaults,
+        gz_write_advanced_pos, gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
+        gz_write_buffered_copy_len, gz_write_buffered_input_action, gz_write_buffered_progress,
+        gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
         gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
@@ -1344,7 +1358,7 @@ mod tests {
         gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action,
         gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
         GzCloseBufferAction, GzCompOutputBufferAction, GzCompResetAction, GzCompWriteFailure,
-        GzCompWriteResult, GzFlushAction, GzPutcWriteAction, GzSetParamsBufferAction,
+        GzCompWriteResult, GzFlushAction, GzInitMode, GzPutcWriteAction, GzSetParamsBufferAction,
         GzWriteBufferedInputAction, GzWriteDirectAction, GzZeroAction, GzZeroStep,
     };
 
@@ -1557,6 +1571,15 @@ mod tests {
         assert!(strm.zfree.is_none());
         assert!(strm.opaque.is_null());
         assert!(strm.next_in.is_null());
+    }
+
+    #[test]
+    fn gz_init_mode_treats_only_zero_as_compressed() {
+        assert_eq!(gz_init_mode(0), GzInitMode::Compressed);
+        assert_eq!(gz_init_mode(1), GzInitMode::Direct);
+        assert_eq!(gz_init_mode(-1), GzInitMode::Direct);
+        assert_eq!(gz_init_mode(::core::ffi::c_int::MIN), GzInitMode::Direct);
+        assert_eq!(gz_init_mode(::core::ffi::c_int::MAX), GzInitMode::Direct);
     }
 
     #[test]
