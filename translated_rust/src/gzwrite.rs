@@ -88,6 +88,12 @@ enum GzZeroAction {
     Continue,
 }
 
+struct GzZeroProgress {
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+    action: GzZeroAction,
+}
+
 fn gz_zero_action(ret: ::core::ffi::c_int, has_skip: bool) -> GzZeroAction {
     if ret == -1 as ::core::ffi::c_int {
         GzZeroAction::Error
@@ -289,6 +295,21 @@ fn gz_zero_apply_progress(
     let consumed = gz_write_apply_chunk_progress(pos, chunk_len, remaining_avail_in);
     *skip -= consumed as crate::stdlib::off64_t;
     *skip != 0
+}
+
+fn gz_zero_progress(
+    mut pos: crate::stdlib::off64_t,
+    mut skip: crate::stdlib::off64_t,
+    chunk_len: ::core::ffi::c_uint,
+    remaining_avail_in: crate::stdlib::uInt,
+    ret: ::core::ffi::c_int,
+) -> GzZeroProgress {
+    let has_skip = gz_zero_apply_progress(&mut pos, &mut skip, chunk_len, remaining_avail_in);
+    GzZeroProgress {
+        pos,
+        skip,
+        action: gz_zero_action(ret, has_skip),
+    }
 }
 
 fn gzputs_result(
@@ -738,13 +759,11 @@ unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         (*strm).next_in = (*state).in_0;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         let remaining_avail_in = (*strm).avail_in;
-        let has_skip = gz_zero_apply_progress(
-            &mut (*state).x.pos,
-            &mut (*state).skip,
-            n,
-            remaining_avail_in,
-        );
-        match gz_zero_action(ret, has_skip) {
+        let state = &mut *state;
+        let progress = gz_zero_progress(state.x.pos, state.skip, n, remaining_avail_in, ret);
+        state.x.pos = progress.pos;
+        state.skip = progress.skip;
+        match progress.action {
             GzZeroAction::Error => return -1 as ::core::ffi::c_int,
             GzZeroAction::Done => break,
             GzZeroAction::Continue => {}
@@ -1156,7 +1175,7 @@ mod tests {
         gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
+        gz_zero_needs_initialization, gz_zero_progress, gzclose_mode_is_writable, gzclose_w_result,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
         gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
         gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure,
@@ -1975,6 +1994,24 @@ mod tests {
         assert!(!gz_zero_apply_progress(&mut pos, &mut skip, 0, 1));
         assert_eq!(pos, ::core::ffi::c_uint::MAX as crate::stdlib::off64_t);
         assert_eq!(skip, 0);
+    }
+
+    #[test]
+    fn gz_zero_progress_applies_state_before_selecting_the_next_action() {
+        let partial = gz_zero_progress(10, 100, 80, 20, 0);
+        assert_eq!(partial.pos, 70);
+        assert_eq!(partial.skip, 40);
+        assert!(matches!(partial.action, GzZeroAction::Continue));
+
+        let exhausted = gz_zero_progress(10, 80, 80, 0, 0);
+        assert_eq!(exhausted.pos, 90);
+        assert_eq!(exhausted.skip, 0);
+        assert!(matches!(exhausted.action, GzZeroAction::Done));
+
+        let failed = gz_zero_progress(10, 80, 80, 0, -1);
+        assert_eq!(failed.pos, 90);
+        assert_eq!(failed.skip, 0);
+        assert!(matches!(failed.action, GzZeroAction::Error));
     }
 
     #[test]
