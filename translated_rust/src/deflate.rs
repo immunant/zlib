@@ -2329,20 +2329,6 @@ fn deflate_used_impl(
     crate::zlib_h::Z_OK
 }
 
-// The C boundary validates both optional handles before dispatching here.
-// This keeps the implementation's output publication as an ordinary mutable
-// borrow; only the opaque deflate-state association remains unsafe.
-pub unsafe fn deflateUsed(
-    strm: &mut crate::zlib_h::z_stream_s,
-    bits: Option<&mut ::core::ffi::c_int>,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    deflate_used_impl(state.bi_used, bits)
-}
 #[export_name = "deflateUsed"]
 
 pub unsafe extern "C" fn deflateUsed_ffi(
@@ -2352,7 +2338,12 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateUsed(strm, bits.as_mut())
+    deflateTune(
+        strm,
+        DeflateScalarAction::Used {
+            bits: bits.as_mut(),
+        },
+    )
 }
 
 fn deflate_prime_bits(
@@ -2688,28 +2679,52 @@ fn deflate_tune_values(
     )
 }
 
+// The established tuning projection also covers scalar queries over the same
+// validated opaque state. Each action carries only scalar inputs or an
+// optional scalar output borrow, so it cannot retain the ABI stream or any
+// callback-backed storage.
+enum DeflateScalarAction<'a> {
+    Used {
+        bits: Option<&'a mut ::core::ffi::c_int>,
+    },
+    Tune {
+        good_length: ::core::ffi::c_int,
+        max_lazy: ::core::ffi::c_int,
+        nice_length: ::core::ffi::c_int,
+        max_chain: ::core::ffi::c_int,
+    },
+}
+
 // The export wrapper owns the nullable ABI-stream conversion.  Retuning only
-// mutates scalar state, so the implementation retains the one opaque-state
-// projection and keeps the tuning policy over ordinary values.
-pub unsafe fn deflateTune(
+// mutates scalar state, so this shared implementation retains the one
+// opaque-state projection and keeps each action's policy over ordinary
+// values.
+unsafe fn deflateTune(
     strm: &mut crate::zlib_h::z_stream_s,
-    good_length: ::core::ffi::c_int,
-    max_lazy: ::core::ffi::c_int,
-    nice_length: ::core::ffi::c_int,
-    max_chain: ::core::ffi::c_int,
+    action: DeflateScalarAction<'_>,
 ) -> ::core::ffi::c_int {
     let Some((_strm, s, _storage)) =
         deflate_stream_and_state(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let (good_match, max_lazy_match, nice_match, max_chain_length) =
-        deflate_tune_values(good_length, max_lazy, nice_length, max_chain);
-    s.good_match = good_match;
-    s.max_lazy_match = max_lazy_match;
-    s.nice_match = nice_match;
-    s.max_chain_length = max_chain_length;
-    return crate::zlib_h::Z_OK;
+    match action {
+        DeflateScalarAction::Used { bits } => deflate_used_impl(s.bi_used, bits),
+        DeflateScalarAction::Tune {
+            good_length,
+            max_lazy,
+            nice_length,
+            max_chain,
+        } => {
+            let (good_match, max_lazy_match, nice_match, max_chain_length) =
+                deflate_tune_values(good_length, max_lazy, nice_length, max_chain);
+            s.good_match = good_match;
+            s.max_lazy_match = max_lazy_match;
+            s.nice_match = nice_match;
+            s.max_chain_length = max_chain_length;
+            crate::zlib_h::Z_OK
+        }
+    }
 }
 #[export_name = "deflateTune"]
 
@@ -2723,7 +2738,15 @@ pub unsafe extern "C" fn deflateTune_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
+    deflateTune(
+        strm,
+        DeflateScalarAction::Tune {
+            good_length,
+            max_lazy,
+            nice_length,
+            max_chain,
+        },
+    )
 }
 struct DeflateBoundState {
     wrap: ::core::ffi::c_int,
