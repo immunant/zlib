@@ -842,6 +842,44 @@ fn inflate_fast_normal(
     ))
 }
 
+/// The scalar shape of ordinary inflate's fast-decoder lends.  The legacy
+/// decoder still owns the ABI cursor conversion, but it must establish all
+/// of these bounds before making its temporary input, output, and history
+/// views.
+#[derive(Copy, Clone)]
+struct InflateFastSpan {
+    input_len: usize,
+    output_start: usize,
+    output_len: usize,
+    window_len: usize,
+}
+
+/// Validate the spans used by normal inflate's bounded fast path without
+/// looking through compatibility pointers.  `out` is the output capacity at
+/// entry and `left` is the remaining capacity at the fast-path boundary, so
+/// their checked difference is the output already produced by the slow path.
+fn inflate_fast_span(
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    out: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+) -> Option<InflateFastSpan> {
+    if have < 6 || left < 258 {
+        return None;
+    }
+    let output_start = usize::try_from(out.checked_sub(left)?).ok()?;
+    let output_len = usize::try_from(out).ok()?;
+    if output_start > output_len {
+        return None;
+    }
+    Some(InflateFastSpan {
+        input_len: usize::try_from(have).ok()?,
+        output_start,
+        output_len,
+        window_len: usize::try_from(wsize).ok()?,
+    })
+}
+
 /// A checked, pointer-free commit plan for one bounded fast-decode call.
 /// The transitional decoder keeps compatibility cursors at its boundary, but
 /// it can validate all scalar progress before publishing any of them.
@@ -2234,69 +2272,60 @@ pub unsafe fn inflate(
                                                 as usize,
                                             &crate::src::inftrees::inffixed_h::lenfix,
                                         );
-                                        let fast = if have >= 6 as ::core::ffi::c_uint
-                                            && left >= 258 as ::core::ffi::c_uint
+                                        let fast = if let Some(span) =
+                                            inflate_fast_span(have, left, out, state_ref.wsize)
                                         {
                                             // `out` is the output capacity at the beginning of
                                             // this inflate call, while `put` has already advanced
                                             // over any bytes decoded by the slow path. Lend the
                                             // complete original span so the fast decoder keeps
                                             // zlib's distance accounting relative to `out`.
-                                            let fast = if let Some(output_start) =
-                                                out.checked_sub(left)
-                                            {
-                                                let output_start = output_start as usize;
-                                                let wsize = state_ref.wsize as usize;
-                                                let window = if wsize == 0 {
-                                                    Some(&[][..])
-                                                } else if state_ref.window.is_null() {
-                                                    None
-                                                } else {
-                                                    Some(::core::slice::from_raw_parts(
-                                                        state_ref.window,
-                                                        wsize,
-                                                    ))
-                                                };
-                                                if let Some(window) = window {
-                                                    let input = ::core::slice::from_raw_parts(
-                                                        next,
-                                                        have as usize,
-                                                    );
-                                                    let output = ::core::slice::from_raw_parts_mut(
-                                                        put.wrapping_sub(output_start),
-                                                        out as usize,
-                                                    );
-                                                    inflate_fast_tables(
-                                                        &state_ref.codes,
-                                                        state_ref.lencode as usize,
-                                                        state_ref.distcode as usize,
+                                            let window = if span.window_len == 0 {
+                                                Some(&[][..])
+                                            } else if state_ref.window.is_null() {
+                                                None
+                                            } else {
+                                                Some(::core::slice::from_raw_parts(
+                                                    state_ref.window,
+                                                    span.window_len,
+                                                ))
+                                            };
+                                            if let Some(window) = window {
+                                                let input = ::core::slice::from_raw_parts(
+                                                    next,
+                                                    span.input_len,
+                                                );
+                                                let output = ::core::slice::from_raw_parts_mut(
+                                                    put.wrapping_sub(span.output_start),
+                                                    span.output_len,
+                                                );
+                                                inflate_fast_tables(
+                                                    &state_ref.codes,
+                                                    state_ref.lencode as usize,
+                                                    state_ref.distcode as usize,
+                                                )
+                                                .and_then(|(lcode, dcode)| {
+                                                    inflate_fast_normal(
+                                                        input,
+                                                        output,
+                                                        span.output_start,
+                                                        window,
+                                                        lcode,
+                                                        dcode,
+                                                        span.window_len,
+                                                        state_ref.whave as usize,
+                                                        state_ref.wnext as usize,
+                                                        state_ref.sane != 0,
+                                                        hold,
+                                                        bits,
+                                                        state_ref.lenbits,
+                                                        state_ref.distbits,
+                                                        out,
                                                     )
-                                                    .and_then(|(lcode, dcode)| {
-                                                        inflate_fast_normal(
-                                                            input,
-                                                            output,
-                                                            output_start,
-                                                            window,
-                                                            lcode,
-                                                            dcode,
-                                                            wsize,
-                                                            state_ref.whave as usize,
-                                                            state_ref.wnext as usize,
-                                                            state_ref.sane != 0,
-                                                            hold,
-                                                            bits,
-                                                            state_ref.lenbits,
-                                                            state_ref.distbits,
-                                                            out,
-                                                        )
-                                                    })
-                                                } else {
-                                                    None
-                                                }
+                                                })
                                             } else {
                                                 None
-                                            };
-                                            fast
+                                            }
                                         } else {
                                             None
                                         };
