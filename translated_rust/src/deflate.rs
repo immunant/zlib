@@ -1566,45 +1566,69 @@ pub unsafe extern "C" fn deflateBound_ffi(
 ) -> crate::stdlib::uLong {
     deflateBound(strm, sourceLen)
 }
+fn put_short_msb_bytes(output: &mut [crate::stdlib::Bytef], b: crate::stdlib::uInt) {
+    output[0] = (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
+    output[1] = (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+}
+
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,
     mut b: crate::stdlib::uInt,
 ) {
-    let c2rust_fresh33 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh33 as isize) =
-        (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
-    let c2rust_fresh34 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh34 as isize) =
-        (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+    let state = &mut *s;
+    let pending = state.pending as usize;
+    let output = ::core::slice::from_raw_parts_mut(state.pending_buf.offset(pending as isize), 2);
+    put_short_msb_bytes(output, b);
+    state.pending = state.pending.wrapping_add(2);
+}
+
+fn pending_copy_len(
+    pending: crate::zutil_h::ulg,
+    avail_out: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    if pending > avail_out as crate::zutil_h::ulg {
+        avail_out as ::core::ffi::c_uint
+    } else {
+        pending as ::core::ffi::c_uint
+    }
+}
+
+fn flush_pending_progress(
+    avail_out: &mut crate::stdlib::uInt,
+    total_out: &mut crate::stdlib::uLong,
+    pending: &mut crate::zutil_h::ulg,
+    len: ::core::ffi::c_uint,
+) {
+    *total_out = total_out.wrapping_add(len as crate::stdlib::uLong);
+    *avail_out = avail_out.wrapping_sub(len);
+    *pending = pending.wrapping_sub(len as crate::zutil_h::ulg);
 }
 
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
     crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
-    len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
-        (*strm).avail_out as ::core::ffi::c_uint
-    } else {
-        (*s).pending as ::core::ffi::c_uint
-    };
+    let stream = &mut *strm;
+    let state = &mut *s;
+    let len = pending_copy_len(state.pending, stream.avail_out);
     if len == 0 as ::core::ffi::c_uint {
         return;
     }
     crate::stdlib::memcpy(
-        (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_out as *const ::core::ffi::c_void,
+        stream.next_out as *mut ::core::ffi::c_void,
+        state.pending_out as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
-    (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*s).pending_out = (*s).pending_out.offset(len as isize);
-    (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
-    (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
-    (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if (*s).pending == 0 as crate::zutil_h::ulg {
-        (*s).pending_out = (*s).pending_buf;
+    stream.next_out = stream.next_out.offset(len as isize);
+    state.pending_out = state.pending_out.offset(len as isize);
+    flush_pending_progress(
+        &mut stream.avail_out,
+        &mut stream.total_out,
+        &mut state.pending,
+        len,
+    );
+    if state.pending == 0 as crate::zutil_h::ulg {
+        state.pending_out = state.pending_buf;
     }
 }
 
