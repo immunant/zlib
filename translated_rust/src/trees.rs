@@ -3437,11 +3437,16 @@ unsafe fn tr_flush_block_impl(
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     if s.level > 0 as ::core::ffi::c_int {
-        let unknown_data_type = unsafe { s.strm.as_ref() }
+        // `strm` is validated once before we use it.  Keeping the resulting
+        // borrow avoids a second raw-pointer dereference when publishing the
+        // detected type below.
+        let mut strm = unsafe { s.strm.as_mut() };
+        let unknown_data_type = strm
+            .as_ref()
             .is_some_and(|strm| strm.data_type == crate::zlib_h::Z_UNKNOWN);
         if unknown_data_type {
             let data_type = detect_data_type_impl(s);
-            if let Some(strm) = unsafe { s.strm.as_mut() } {
+            if let Some(strm) = strm {
                 strm.data_type = data_type;
             }
         }
