@@ -169,6 +169,74 @@ struct DeflateStorageLayout {
     pending_items: crate::stdlib::uInt,
 }
 
+/// All of the byte and item spans that `deflateCopy` must duplicate.  This is
+/// deliberately pointer-free: the legacy allocation and copy boundary uses
+/// these validated lengths, while a later owned-storage conversion can use
+/// the same layout to create ordinary slices.
+struct DeflateCopyLayout {
+    window_bytes: usize,
+    prev_items: usize,
+    head_items: usize,
+    pending_offset: usize,
+    pending_bytes: usize,
+    sym_offset: usize,
+    sym_bytes: usize,
+}
+
+impl DeflateCopyLayout {
+    fn from_state(state: &crate::src::deflate::deflate_state) -> Option<Self> {
+        let storage = DeflateStorageLayout::from_state(state);
+        let window_capacity = usize::try_from(storage.window_items).ok()?.checked_mul(2)?;
+        let pending_capacity = usize::try_from(storage.pending_bytes()).ok()?;
+        if state.window.is_null()
+            || state.prev.is_null()
+            || state.head.is_null()
+            || state.pending_buf.is_null()
+            || usize::try_from(state.window_size).ok()? != window_capacity
+            || usize::try_from(state.pending_buf_size).ok()? != pending_capacity
+        {
+            return None;
+        }
+
+        let window_bytes = usize::try_from(state.high_water).ok()?;
+        if window_bytes > window_capacity {
+            return None;
+        }
+        let prior = state.strstart.wrapping_sub(state.insert);
+        let prev_items = if state.slid != 0 || prior > state.w_size {
+            state.w_size
+        } else {
+            prior
+        } as usize;
+        if prev_items > storage.window_items as usize {
+            return None;
+        }
+
+        let pending_offset = pending_buffer_offset(
+            state.pending_out,
+            state.pending_buf_size,
+            state.pending,
+        )?;
+        let pending_bytes = usize::try_from(state.pending).ok()?;
+        let sym_offset = state.sym_buf;
+        let sym_bytes = usize::try_from(state.sym_next).ok()?;
+        if sym_offset != state.lit_bufsize as usize {
+            return None;
+        }
+        pending_buffer_range(state.sym_buf, state.sym_next, state.pending_buf_size)?;
+
+        Some(Self {
+            window_bytes,
+            prev_items,
+            head_items: storage.hash_items as usize,
+            pending_offset,
+            pending_bytes,
+            sym_offset,
+            sym_bytes,
+        })
+    }
+}
+
 impl DeflateStorageLayout {
     fn from_state(state: &crate::src::deflate::deflate_state) -> Self {
         Self {
@@ -2996,25 +3064,9 @@ pub fn deflateCopy(
     if !deflate_stream_state_valid(Some(source_stream), Some(source_state)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if source_state.pending_buf.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(pending_offset) = pending_buffer_offset(
-        source_state.pending_out,
-        source_state.pending_buf_size,
-        source_state.pending,
-    ) else {
+    let Some(copy_layout) = DeflateCopyLayout::from_state(source_state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if pending_buffer_range(
-        source_state.sym_buf,
-        source_state.sym_next,
-        source_state.pending_buf_size,
-    )
-    .is_none()
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     crate::zlib_h::copy_z_stream(dest_stream, source_stream);
     ds = unsafe {
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -3077,20 +3129,14 @@ pub fn deflateCopy(
         crate::stdlib::memcpy(
             dest_state.window as *mut ::core::ffi::c_void,
             source_state.window as *const ::core::ffi::c_void,
-            source_state.high_water as crate::__stddef_size_t_h::size_t,
+            copy_layout.window_bytes as crate::__stddef_size_t_h::size_t,
         )
     };
     unsafe {
         crate::stdlib::memcpy(
             dest_state.prev as *mut ::core::ffi::c_void,
             source_state.prev as *const ::core::ffi::c_void,
-            ((if source_state.slid != 0
-                || source_state.strstart.wrapping_sub(source_state.insert) > dest_state.w_size
-            {
-                dest_state.w_size
-            } else {
-                source_state.strstart.wrapping_sub(source_state.insert)
-            }) as crate::__stddef_size_t_h::size_t)
+            (copy_layout.prev_items as crate::__stddef_size_t_h::size_t)
                 .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
         )
     };
@@ -3098,27 +3144,27 @@ pub fn deflateCopy(
         crate::stdlib::memcpy(
             dest_state.head as *mut ::core::ffi::c_void,
             source_state.head as *const ::core::ffi::c_void,
-            (dest_state.hash_size as crate::__stddef_size_t_h::size_t)
+            (copy_layout.head_items as crate::__stddef_size_t_h::size_t)
                 .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
         )
     };
-    dest_state.pending_out = pending_offset;
+    dest_state.pending_out = copy_layout.pending_offset;
     unsafe {
         crate::stdlib::memcpy(
             dest_state.pending_buf.wrapping_add(dest_state.pending_out) as *mut ::core::ffi::c_void,
             source_state
                 .pending_buf
                 .wrapping_add(source_state.pending_out) as *const ::core::ffi::c_void,
-            source_state.pending as crate::__stddef_size_t_h::size_t,
+            copy_layout.pending_bytes as crate::__stddef_size_t_h::size_t,
         )
     };
     dest_state.sym_buf = dest_state.lit_bufsize as usize;
     unsafe {
         crate::stdlib::memcpy(
             dest_state.pending_buf.wrapping_add(dest_state.sym_buf) as *mut ::core::ffi::c_void,
-            source_state.pending_buf.wrapping_add(source_state.sym_buf)
+            source_state.pending_buf.wrapping_add(copy_layout.sym_offset)
                 as *const ::core::ffi::c_void,
-            source_state.sym_next as crate::__stddef_size_t_h::size_t,
+            copy_layout.sym_bytes as crate::__stddef_size_t_h::size_t,
         )
     };
     return crate::zlib_h::Z_OK;
