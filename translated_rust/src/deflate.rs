@@ -3012,15 +3012,28 @@ fn deflate_stored(
         } else {
             ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
         };
-        fill_window(
-            state,
-            stream,
-            true,
-            |state, stream, window, _head, _prev, input| {
-                deflate_stored_impl(state, stream, window, pending, input, output, flush)
-            },
-        )
+        deflate_stored_bound(state, stream, pending, output, flush)
     }
+}
+
+// The stored-block algorithm only needs the bounded buffers supplied by its
+// binding adapter. Keeping its window/input dispatch reference-based leaves
+// `deflate_stored()` responsible solely for binding its three raw ranges.
+fn deflate_stored_bound(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    pending: &mut [crate::zutil_h::uch],
+    output: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
+) -> block_state {
+    fill_window(
+        state,
+        stream,
+        true,
+        |state, stream, window, _head, _prev, input| {
+            deflate_stored_impl(state, stream, window, pending, input, output, flush)
+        },
+    )
 }
 
 // Stored and symbol-block compression share this reference-only drain path;
@@ -3288,31 +3301,45 @@ fn deflate_fast(
         } else {
             ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
         };
-        fill_window(
-            state,
-            stream,
-            true,
-            |state, stream, window, head, prev, input| {
-                if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-                    deflate_huff_impl(
-                        state, stream, window, head, prev, pending, symbols, input, output, flush,
-                    )
-                } else if state.strategy == crate::zlib_h::Z_RLE {
-                    deflate_rle_impl(
-                        state, stream, window, head, prev, pending, symbols, input, output, flush,
-                    )
-                } else if state.level <= 3 {
-                    deflate_fast_impl(
-                        state, stream, window, head, prev, pending, symbols, input, output, flush,
-                    )
-                } else {
-                    deflate_slow_impl(
-                        state, stream, window, head, prev, pending, symbols, input, output, flush,
-                    )
-                }
-            },
-        )
+        deflate_fast_bound(state, stream, pending, symbols, output, flush)
     }
+}
+
+// Strategy selection and compression operate only on the views already bound
+// by `deflate_fast()`. Separating that dispatch keeps the raw binding scope
+// from growing with each strategy implementation.
+fn deflate_fast_bound(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    pending: &mut [crate::zutil_h::uch],
+    symbols: &mut [crate::zutil_h::uchf],
+    output: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
+) -> block_state {
+    fill_window(
+        state,
+        stream,
+        true,
+        |state, stream, window, head, prev, input| {
+            if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
+                deflate_huff_impl(
+                    state, stream, window, head, prev, pending, symbols, input, output, flush,
+                )
+            } else if state.strategy == crate::zlib_h::Z_RLE {
+                deflate_rle_impl(
+                    state, stream, window, head, prev, pending, symbols, input, output, flush,
+                )
+            } else if state.level <= 3 {
+                deflate_fast_impl(
+                    state, stream, window, head, prev, pending, symbols, input, output, flush,
+                )
+            } else {
+                deflate_slow_impl(
+                    state, stream, window, head, prev, pending, symbols, input, output, flush,
+                )
+            }
+        },
+    )
 }
 
 // The fast deflater has a fixed view of all state allocations and caller
