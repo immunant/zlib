@@ -328,6 +328,26 @@ fn gzgets_remaining_capacity(len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     (len as ::core::ffi::c_uint).wrapping_sub(1)
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum GzgetsPostFetchDecision {
+    Stop,
+    MarkPastAndStop,
+    Copy,
+}
+
+fn gzgets_post_fetch_decision(
+    have: ::core::ffi::c_uint,
+    fetch: ::core::ffi::c_int,
+) -> GzgetsPostFetchDecision {
+    if have != 0 {
+        GzgetsPostFetchDecision::Copy
+    } else if fetch == -1 {
+        GzgetsPostFetchDecision::Stop
+    } else {
+        GzgetsPostFetchDecision::MarkPastAndStop
+    }
+}
+
 enum GzUngetcBufferState {
     Empty,
     Full,
@@ -1771,6 +1791,46 @@ mod tests {
     }
 
     #[test]
+    fn gzgets_post_fetch_decision_stops_after_an_empty_failed_fetch() {
+        assert_eq!(
+            gzgets_post_fetch_decision(0, -1),
+            GzgetsPostFetchDecision::Stop
+        );
+    }
+
+    #[test]
+    fn gzgets_post_fetch_decision_marks_past_after_other_empty_fetches() {
+        assert_eq!(
+            gzgets_post_fetch_decision(0, -2),
+            GzgetsPostFetchDecision::MarkPastAndStop
+        );
+        assert_eq!(
+            gzgets_post_fetch_decision(0, 0),
+            GzgetsPostFetchDecision::MarkPastAndStop
+        );
+        assert_eq!(
+            gzgets_post_fetch_decision(0, ::core::ffi::c_int::MAX),
+            GzgetsPostFetchDecision::MarkPastAndStop
+        );
+    }
+
+    #[test]
+    fn gzgets_post_fetch_decision_copies_buffered_data_regardless_of_fetch() {
+        assert_eq!(
+            gzgets_post_fetch_decision(1, -1),
+            GzgetsPostFetchDecision::Copy
+        );
+        assert_eq!(
+            gzgets_post_fetch_decision(1, 0),
+            GzgetsPostFetchDecision::Copy
+        );
+        assert_eq!(
+            gzgets_post_fetch_decision(1, ::core::ffi::c_int::MAX),
+            GzgetsPostFetchDecision::Copy
+        );
+    }
+
+    #[test]
     fn gzgets_request_has_capacity_requires_space_for_a_terminator() {
         assert!(!gzgets_request_has_capacity(-1));
         assert!(!gzgets_request_has_capacity(0));
@@ -1975,7 +2035,7 @@ pub unsafe extern "C" fn gzfread(
         return 0 as crate::stdlib::z_size_t;
     };
     len = request_len;
-    return if len != 0 {
+    return if !gz_read_request_is_empty(len) {
         gz_fread_items_read(size, gz_read(state, buf, len))
     } else {
         0 as crate::stdlib::z_size_t
@@ -2145,38 +2205,44 @@ pub unsafe extern "C" fn gzgets(
     str = buf;
     left = gzgets_remaining_capacity(len);
     if left != 0 {
-        while !((*state).x.have == 0 as ::core::ffi::c_uint
-            && gz_fetch(state) == -1 as ::core::ffi::c_int)
-        {
-            if (*state).x.have == 0 as ::core::ffi::c_uint {
-                (*state).past = 1 as ::core::ffi::c_int;
-                break;
+        loop {
+            let fetch = if (*state).x.have == 0 {
+                gz_fetch(state)
             } else {
-                n = gzgets_copy_len((*state).x.have, left, None);
-                eol = crate::stdlib::memchr(
-                    (*state).x.next as *const ::core::ffi::c_void,
-                    '\n' as i32,
-                    n as crate::__stddef_size_t_h::size_t,
-                ) as *mut ::core::ffi::c_uchar;
-                if !eol.is_null() {
-                    n = gzgets_copy_len(
-                        (*state).x.have,
-                        left,
-                        Some(eol.offset_from((*state).x.next) as usize),
-                    );
-                }
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    (*state).x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
-                ((*state).x.have, left, (*state).x.pos) =
-                    gzgets_progress((*state).x.have, left, (*state).x.pos, n);
-                (*state).x.next = (*state).x.next.wrapping_add(n as usize);
-                buf = buf.wrapping_add(n as usize);
-                if !gzgets_should_continue(left, !eol.is_null()) {
+                0
+            };
+            match gzgets_post_fetch_decision((*state).x.have, fetch) {
+                GzgetsPostFetchDecision::Stop => break,
+                GzgetsPostFetchDecision::MarkPastAndStop => {
+                    (*state).past = 1 as ::core::ffi::c_int;
                     break;
                 }
+                GzgetsPostFetchDecision::Copy => {}
+            }
+            n = gzgets_copy_len((*state).x.have, left, None);
+            eol = crate::stdlib::memchr(
+                (*state).x.next as *const ::core::ffi::c_void,
+                '\n' as i32,
+                n as crate::__stddef_size_t_h::size_t,
+            ) as *mut ::core::ffi::c_uchar;
+            if !eol.is_null() {
+                n = gzgets_copy_len(
+                    (*state).x.have,
+                    left,
+                    Some(eol.offset_from((*state).x.next) as usize),
+                );
+            }
+            crate::stdlib::memcpy(
+                buf as *mut ::core::ffi::c_void,
+                (*state).x.next as *const ::core::ffi::c_void,
+                n as crate::__stddef_size_t_h::size_t,
+            );
+            ((*state).x.have, left, (*state).x.pos) =
+                gzgets_progress((*state).x.have, left, (*state).x.pos, n);
+            (*state).x.next = (*state).x.next.wrapping_add(n as usize);
+            buf = buf.wrapping_add(n as usize);
+            if !gzgets_should_continue(left, !eol.is_null()) {
+                break;
             }
         }
     }

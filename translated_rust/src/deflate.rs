@@ -1644,6 +1644,17 @@ fn zlib_header(
     )
 }
 
+fn deflate_should_return_buf_error(
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+    old_flush: ::core::ffi::c_int,
+) -> bool {
+    avail_in == 0
+        && flush * 2 - if flush > 4 { 9 } else { 0 }
+            <= old_flush * 2 - if old_flush > 4 { 9 } else { 0 }
+        && flush != crate::zlib_h::Z_FINISH
+}
+
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -1696,21 +1707,7 @@ pub unsafe extern "C" fn deflate(
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
         }
-    } else if (*strm).avail_in == 0 as crate::stdlib::uInt
-        && flush * 2 as ::core::ffi::c_int
-            - (if flush > 4 as ::core::ffi::c_int {
-                9 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            })
-            <= old_flush * 2 as ::core::ffi::c_int
-                - (if old_flush > 4 as ::core::ffi::c_int {
-                    9 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-        && flush != crate::zlib_h::Z_FINISH
-    {
+    } else if deflate_should_return_buf_error((*strm).avail_in, flush, old_flush) {
         (*strm).msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
             || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -2523,6 +2520,18 @@ fn stored_block_min_size(
     }) as ::core::ffi::c_uint
 }
 
+fn stored_insert_after_input(
+    insert: crate::stdlib::uInt,
+    window_size: crate::stdlib::uInt,
+    input_len: ::core::ffi::c_uint,
+) -> crate::stdlib::uInt {
+    insert.wrapping_add(if input_len > window_size.wrapping_sub(insert) {
+        (window_size as ::core::ffi::c_uint).wrapping_sub(insert as ::core::ffi::c_uint)
+    } else {
+        input_len
+    })
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -2655,14 +2664,7 @@ unsafe extern "C" fn deflate_stored(
                 used as crate::__stddef_size_t_h::size_t,
             );
             (*s).strstart = (*s).strstart.wrapping_add(used);
-            (*s).insert =
-                (*s).insert
-                    .wrapping_add(if used > (*s).w_size.wrapping_sub((*s).insert) {
-                        ((*s).w_size as ::core::ffi::c_uint)
-                            .wrapping_sub((*s).insert as ::core::ffi::c_uint)
-                    } else {
-                        used
-                    });
+            (*s).insert = stored_insert_after_input((*s).insert, (*s).w_size, used);
         }
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
     }
@@ -2705,14 +2707,7 @@ unsafe extern "C" fn deflate_stored(
     if have != 0 {
         read_buf((*s).strm, (*s).window.offset((*s).strstart as isize), have);
         (*s).strstart = (*s).strstart.wrapping_add(have);
-        (*s).insert = (*s)
-            .insert
-            .wrapping_add(if have > (*s).w_size.wrapping_sub((*s).insert) {
-                ((*s).w_size as ::core::ffi::c_uint)
-                    .wrapping_sub((*s).insert as ::core::ffi::c_uint)
-            } else {
-                have
-            });
+        (*s).insert = stored_insert_after_input((*s).insert, (*s).w_size, have);
     }
     if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
         (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
@@ -3657,11 +3652,12 @@ unsafe extern "C" fn deflate_huff(
 mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
-        deflate_pending_value, deflate_prime_bits_valid, deflate_state_status_valid,
-        deflate_version_matches, fill_window_available_space, fill_window_insert_after_slide,
-        gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        normalize_deflate_params, pending_output_len, read_buf_len, short_msb_bytes,
-        slide_hash_entry, stored_block_min_size, zlib_header,
+        deflate_pending_value, deflate_prime_bits_valid, deflate_should_return_buf_error,
+        deflate_state_status_valid, deflate_version_matches, fill_window_available_space,
+        fill_window_insert_after_slide, gzip_header_crc, gzip_header_crc_pending,
+        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len, read_buf_len,
+        short_msb_bytes, slide_hash_entry, stored_block_min_size, stored_insert_after_input,
+        zlib_header,
     };
 
     #[test]
@@ -3887,6 +3883,48 @@ mod tests {
     fn stored_block_min_size_preserves_wrapping_underflow_behavior() {
         assert_eq!(stored_block_min_size(4, 32), 32);
         assert_eq!(stored_block_min_size(0, 32), 32);
+    }
+
+    #[test]
+    fn deflate_should_return_buf_error_preserves_flush_rank_semantics() {
+        assert!(!deflate_should_return_buf_error(
+            1,
+            crate::zlib_h::Z_NO_FLUSH,
+            crate::zlib_h::Z_BLOCK,
+        ));
+        assert!(deflate_should_return_buf_error(
+            0,
+            crate::zlib_h::Z_NO_FLUSH,
+            crate::zlib_h::Z_NO_FLUSH,
+        ));
+        assert!(deflate_should_return_buf_error(
+            0,
+            crate::zlib_h::Z_BLOCK,
+            crate::zlib_h::Z_FULL_FLUSH,
+        ));
+        assert!(!deflate_should_return_buf_error(
+            0,
+            crate::zlib_h::Z_FULL_FLUSH,
+            crate::zlib_h::Z_BLOCK,
+        ));
+        assert!(!deflate_should_return_buf_error(
+            0,
+            crate::zlib_h::Z_FINISH,
+            crate::zlib_h::Z_FINISH,
+        ));
+    }
+
+    #[test]
+    fn stored_insert_after_input_preserves_clamping_and_wrapping() {
+        assert_eq!(stored_insert_after_input(3, 10, 4), 7);
+        assert_eq!(stored_insert_after_input(3, 10, 7), 10);
+        assert_eq!(stored_insert_after_input(3, 10, 8), 10);
+        assert_eq!(stored_insert_after_input(12, 10, 1), 13);
+        assert_eq!(
+            stored_insert_after_input(12, 10, ::core::ffi::c_uint::MAX),
+            10,
+        );
+        assert_eq!(stored_insert_after_input(crate::stdlib::uInt::MAX, 8, 1), 0,);
     }
 
     #[test]

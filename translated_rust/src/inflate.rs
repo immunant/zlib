@@ -197,17 +197,37 @@ fn dynamic_code_length_repeat_fits(
     have.wrapping_add(repeat) <= nlen.wrapping_add(ndist)
 }
 
-fn inflate_copy_limit(
-    requested: ::core::ffi::c_uint,
-    available_input: ::core::ffi::c_uint,
-    available_output: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
-    requested.min(available_input).min(available_output)
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) struct InflateCopyProgress {
+    pub copied: ::core::ffi::c_uint,
+    pub remaining_input: ::core::ffi::c_uint,
+    pub remaining_output: ::core::ffi::c_uint,
+    pub remaining_length: ::core::ffi::c_uint,
 }
 
-fn stored_block_lengths_are_valid(hold: crate::stdlib::uLong) -> bool {
-    hold & 0xffff as crate::stdlib::uLong
+pub(crate) fn inflate_copy_progress(
+    length: ::core::ffi::c_uint,
+    available_input: ::core::ffi::c_uint,
+    available_output: ::core::ffi::c_uint,
+) -> InflateCopyProgress {
+    let copied = length.min(available_input).min(available_output);
+
+    InflateCopyProgress {
+        copied,
+        remaining_input: available_input.wrapping_sub(copied),
+        remaining_output: available_output.wrapping_sub(copied),
+        remaining_length: length.wrapping_sub(copied),
+    }
+}
+
+fn stored_block_length(hold: crate::stdlib::uLong) -> Option<::core::ffi::c_uint> {
+    if hold & 0xffff as crate::stdlib::uLong
         == hold >> 16 as ::core::ffi::c_int ^ 0xffff as crate::stdlib::uLong
+    {
+        Some(hold as ::core::ffi::c_uint & 0xffff as ::core::ffi::c_uint)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -956,20 +976,19 @@ pub unsafe extern "C" fn inflate(
                     hold = hold.wrapping_add((*c2rust_fresh12 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if !stored_block_lengths_are_valid(hold) {
+                let Some(length) = stored_block_length(hold) else {
                     (*strm).msg = b"invalid stored block lengths\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     (*state).mode = crate::src::inflate::BAD;
                     continue;
-                } else {
-                    (*state).length = hold as ::core::ffi::c_uint & 0xffff as ::core::ffi::c_uint;
-                    hold = 0 as ::core::ffi::c_ulong;
-                    bits = 0 as ::core::ffi::c_uint;
-                    (*state).mode = crate::src::inflate::COPY_;
-                    if flush == crate::zlib_h::Z_TREES {
-                        break;
-                    }
+                };
+                (*state).length = length;
+                hold = 0 as ::core::ffi::c_ulong;
+                bits = 0 as ::core::ffi::c_uint;
+                (*state).mode = crate::src::inflate::COPY_;
+                if flush == crate::zlib_h::Z_TREES {
+                    break;
                 }
                 c2rust_current_block = 17610290921369817802;
             }
@@ -1483,7 +1502,8 @@ pub unsafe extern "C" fn inflate(
             16745500758254703311 => {
                 copy = (*state).length;
                 if copy != 0 {
-                    copy = inflate_copy_limit(copy, have, left);
+                    let progress = inflate_copy_progress(copy, have, left);
+                    copy = progress.copied;
                     if copy == 0 as ::core::ffi::c_uint {
                         break;
                     }
@@ -1492,11 +1512,11 @@ pub unsafe extern "C" fn inflate(
                         next as *const ::core::ffi::c_void,
                         copy as crate::__stddef_size_t_h::size_t,
                     );
-                    have = have.wrapping_sub(copy);
+                    have = progress.remaining_input;
                     next = next.offset(copy as isize);
-                    left = left.wrapping_sub(copy);
+                    left = progress.remaining_output;
                     put = put.offset(copy as isize);
-                    (*state).length = (*state).length.wrapping_sub(copy);
+                    (*state).length = progress.remaining_length;
                     continue;
                 } else {
                     (*state).mode = crate::src::inflate::TYPE;
@@ -2653,16 +2673,16 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
-        dynamic_header_counts, inflateSyncPoint_ffi, inflate_copy_limit, inflate_data_type_value,
+        dynamic_header_counts, inflateSyncPoint_ffi, inflate_copy_progress, inflate_data_type_value,
         inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
         inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
         inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
         inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
         inflate_sync_point_value, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_wrap, initial_window_metadata, stored_block_lengths_are_valid,
+        inflate_validate_wrap, initial_window_metadata, stored_block_length,
         syncsearch_safe, window_needs_allocation, window_update_plan, InflatePrimeUpdate,
-        InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED,
-        SYNC, TYPE,
+        InflateCopyProgress, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1,
+        HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2731,11 +2751,11 @@ mod tests {
     }
 
     #[test]
-    fn stored_block_lengths_require_complementary_nlen() {
-        assert!(stored_block_lengths_are_valid(0xedcb_1234));
-        assert!(stored_block_lengths_are_valid(0xffff_0000));
-        assert!(!stored_block_lengths_are_valid(0x1234_1234));
-        assert!(!stored_block_lengths_are_valid(0x0000_0001));
+    fn stored_block_length_requires_complementary_nlen() {
+        assert_eq!(stored_block_length(0xedcb_1234), Some(0x1234));
+        assert_eq!(stored_block_length(0xffff_0000), Some(0));
+        assert_eq!(stored_block_length(0x1234_1234), None);
+        assert_eq!(stored_block_length(0x0000_0001), None);
     }
 
     #[test]
@@ -2875,12 +2895,43 @@ mod tests {
     }
 
     #[test]
-    fn inflate_copy_limit_respects_input_and_output_boundaries() {
-        assert_eq!(inflate_copy_limit(8, 8, 8), 8);
-        assert_eq!(inflate_copy_limit(8, 7, 8), 7);
-        assert_eq!(inflate_copy_limit(8, 8, 7), 7);
-        assert_eq!(inflate_copy_limit(8, 0, 8), 0);
-        assert_eq!(inflate_copy_limit(0, 8, 8), 0);
+    fn inflate_copy_progress_tracks_all_post_copy_counters() {
+        assert_eq!(
+            inflate_copy_progress(8, 7, 6),
+            InflateCopyProgress {
+                copied: 6,
+                remaining_input: 1,
+                remaining_output: 0,
+                remaining_length: 2,
+            }
+        );
+        assert_eq!(
+            inflate_copy_progress(0, 8, 8),
+            InflateCopyProgress {
+                copied: 0,
+                remaining_input: 8,
+                remaining_output: 8,
+                remaining_length: 0,
+            }
+        );
+        assert_eq!(
+            inflate_copy_progress(8, 0, 8),
+            InflateCopyProgress {
+                copied: 0,
+                remaining_input: 0,
+                remaining_output: 8,
+                remaining_length: 8,
+            }
+        );
+        assert_eq!(
+            inflate_copy_progress(8, 8, 0),
+            InflateCopyProgress {
+                copied: 0,
+                remaining_input: 8,
+                remaining_output: 0,
+                remaining_length: 8,
+            }
+        );
     }
 
     #[test]
