@@ -424,13 +424,22 @@ fn gz_finish_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 }
 
 // Read-side entry points that operate on an already-bound state share this
-// state-only setup. Caller-buffer access and buffer-pointer movement remain
-// in their respective adapters.
-fn gz_prepare_read_operation(state: &mut crate::gzguts_h::gz_state) -> bool {
+// state-only validation and ordinary-error reset. Caller-buffer access and
+// buffer-pointer movement remain in their respective adapters.
+fn gz_begin_read_operation(state: &mut crate::gzguts_h::gz_state) -> bool {
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return false;
     }
     crate::src::gzlib::gz_clear_read_error(state);
+    true
+}
+
+// Operations that must complete a deferred seek use the common entry setup
+// above before advancing the read state machine.
+fn gz_prepare_read_operation(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if !gz_begin_read_operation(state) {
+        return false;
+    }
     gz_finish_skip(state) != -1 as ::core::ffi::c_int
 }
 
@@ -532,10 +541,9 @@ pub unsafe extern "C" fn gzread(
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    if !crate::src::gzlib::gz_read_state_is_usable(state) {
+    if !gz_begin_read_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_clear_read_error(state);
     if !crate::src::gzlib::gz_uint_request_fits_int(len) {
         crate::src::gzlib::gz_error(
             state,
@@ -578,10 +586,9 @@ pub unsafe extern "C" fn gzfread(
     mut nitems: crate::stdlib::z_size_t,
     state: &mut crate::gzguts_h::gz_state,
 ) -> crate::stdlib::z_size_t {
-    if !crate::src::gzlib::gz_read_state_is_usable(state) {
+    if !gz_begin_read_operation(state) {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_clear_read_error(state);
     match crate::src::gzlib::gz_item_request(size, nitems) {
         crate::src::gzlib::GzItemRequest::Empty => 0 as crate::stdlib::z_size_t,
         crate::src::gzlib::GzItemRequest::TooLarge => {
@@ -615,10 +622,9 @@ pub unsafe extern "C" fn gzfread_ffi(
 // in that reader's existing raw-copy boundary.
 pub fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    if !crate::src::gzlib::gz_read_state_is_usable(state) {
+    if !gz_begin_read_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_clear_read_error(state);
     return if gz_read(
         state,
         &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
