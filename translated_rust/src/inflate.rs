@@ -160,7 +160,7 @@ fn inflate_update_header_crc(
         as ::core::ffi::c_ulong;
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 
 pub struct inflate_state {
@@ -199,6 +199,11 @@ pub struct inflate_state {
     pub sane: ::core::ffi::c_int,
     pub back: ::core::ffi::c_int,
     pub was: ::core::ffi::c_uint,
+    // The callback allocation remains published in `window` and is released
+    // through the configured `zfree` callback.  Keep the bytes that Rust
+    // indexes in owned storage, appended after the translated C-layout
+    // fields so their existing offsets remain unchanged.
+    window_storage: ::std::vec::Vec<crate::stdlib::Bytef>,
 }
 
 // State allocations come from zlib's configurable allocator and are therefore
@@ -247,6 +252,7 @@ pub(crate) fn inflate_state_zero_value() -> inflate_state {
         sane: 0,
         back: 0,
         was: 0,
+        window_storage: ::std::vec::Vec::new(),
     }
 }
 pub use crate::__stddef_size_t_h::size_t;
@@ -318,7 +324,7 @@ pub(crate) fn inflateStateCheck<'a>(
     // state invariants before the reference is exposed.
     let state = unsafe { &mut *state_ptr };
     if let Some(initial) = initial {
-        *state = *initial;
+        state.clone_from(initial);
         return Some((strm, state));
     }
     if !inflate_state_is_valid(strm, state, state.strm == strm_ptr) {
@@ -459,11 +465,13 @@ pub fn inflateReset2(
         // old window.  The stream and state are already bound above, so use
         // those same bindings after the callback instead of revisiting the
         // raw stream pointer.
-        let (zfree, opaque, window) = (
+        let (zfree, opaque, window, window_storage) = (
             strm.zfree.expect("non-null function pointer"),
             strm.opaque,
             state.window,
+            ::core::mem::take(&mut state.window_storage),
         );
+        drop(window_storage);
         Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
         state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
@@ -765,6 +773,7 @@ fn inflate_window_metadata_is_valid(
     // missing window to match-copy or fast-decode code. A zero-sized cursor
     // state remains valid while the inflater is waiting to learn wbits.
     !state.window.is_null()
+        && state.window_storage.len() == layout.len
         && state.wsize as usize == layout.len
         && state.wnext < state.wsize
         && state.whave <= state.wsize
@@ -994,17 +1003,28 @@ pub(crate) fn updatewindow<T>(
         if state.window.is_null() {
             return Err(());
         }
+        let mut window_storage = ::std::vec::Vec::new();
+        if window_storage.try_reserve_exact(layout.len).is_err() {
+            let window = state.window;
+            state.window = ::core::ptr::null_mut();
+            Some(stream.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(stream.opaque, window.cast());
+            return Err(());
+        }
+        window_storage.resize(layout.len, 0);
+        state.window_storage = window_storage;
     }
     let needs_window = !matches!(access, InflateWindowAccess::Ensure) && !state.window.is_null();
-    // SAFETY: a successful allocation above (or the initialized existing
-    // window) has exactly the configured window length. `Ensure` does not
-    // need to expose that allocation at all.
+    // Move the Rust-owned bytes out while state and the slice are borrowed
+    // together. `window` remains the observable custom-allocator pointer,
+    // but implementation indexing never needs to reopen it as a raw slice.
+    let mut window_storage = ::core::mem::take(&mut state.window_storage);
     let window = if needs_window {
-        Some(unsafe { ::core::slice::from_raw_parts_mut(state.window, layout.len) })
+        Some(window_storage.as_mut_slice())
     } else {
         None
     };
-    match access {
+    let result = match access {
         InflateWindowAccess::Ensure => Ok(operation(stream, state, None)),
         InflateWindowAccess::Update(output) => {
             update_window(
@@ -1033,7 +1053,9 @@ pub(crate) fn updatewindow<T>(
         }
         InflateWindowAccess::Inspect => Ok(operation(stream, state, window)),
         InflateWindowAccess::Existing => Ok(operation(stream, state, window)),
-    }
+    };
+    state.window_storage = window_storage;
+    result
 }
 // The checked stream/state binding below, followed by the null cursor guard,
 // keeps the implementation's Rust-facing contract reference-bound. Its raw
@@ -2905,12 +2927,14 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     };
     // Snapshot the release plan before invoking a user-supplied deallocator,
     // since it is allowed to invalidate allocations reachable from the stream.
-    let (zfree, opaque, window, state_ptr) = (
+    let (zfree, opaque, window, state_ptr, window_storage) = (
         strm.zfree.expect("non-null function pointer"),
         strm.opaque,
         state.window,
         strm.state,
+        ::core::mem::take(&mut state.window_storage),
     );
+    drop(window_storage);
     if !window.is_null() {
         zfree(opaque, window as crate::stdlib::voidpf);
     }
@@ -2924,12 +2948,17 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
 // validation in the existing raw-state adapter, then snapshot everything
 // needed before either allocation is released.
 pub(crate) fn inflate_end_default_bound(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    let (window, state_ptr) = {
+    let (window, state_ptr, window_storage) = {
         let Some((bound_strm, state)) = inflateStateCheck(strm, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        (state.window, bound_strm.state)
+        (
+            state.window,
+            bound_strm.state,
+            ::core::mem::take(&mut state.window_storage),
+        )
     };
+    drop(window_storage);
     if !window.is_null() {
         crate::src::zutil::zcfree(::core::ptr::null_mut(), window as crate::stdlib::voidpf);
     }
@@ -3336,7 +3365,7 @@ pub fn inflateCopy(
         // callbacks. Keep the pre-callback state snapshot for the history
         // transfer, but use a separate local stream for the first allocation
         // so the existing initializer can safely expose its new state.
-        (plan, *state, *source)
+        (plan, state.clone(), *source)
     };
     // Initialize a local stream with the source callbacks. This performs the
     // same first state allocation as `inflateCopy()` while reusing the
@@ -3643,7 +3672,7 @@ fn inflate_copy_state(
     plan: &InflateCopyPlan,
 ) {
     *dest = *source;
-    *copy = *state;
+    *copy = state.clone();
     copy.strm = dest;
 
     // `plan` captured these cursor identities before allocator callbacks.
