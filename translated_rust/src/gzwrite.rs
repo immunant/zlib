@@ -619,12 +619,12 @@ unsafe extern "C" fn gz_write(
                 len,
             );
             crate::stdlib::memcpy(
-                (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
+                (*state).in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
-            buf =
-                (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
+            buf = (buf as *const ::core::ffi::c_char).wrapping_add(copy as usize)
+                as crate::stdlib::voidpc;
             if gz_write_is_empty(len) {
                 break;
             }
