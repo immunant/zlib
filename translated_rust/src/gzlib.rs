@@ -410,15 +410,32 @@ pub(crate) fn gz_write_needs_init(state: &crate::gzguts_h::gz_state) -> bool {
     state.size == 0
 }
 
-pub(crate) fn gz_write_needs_zero(state: &crate::gzguts_h::gz_state) -> bool {
-    state.skip != 0
+// Choose the next state-only step for gz_write().  Initialization and sparse
+// seek handling can change the state, so the raw buffer adapter asks again
+// after each succeeds before it selects a copy or stream operation.
+pub(crate) enum GzWritePlan {
+    Empty,
+    Initialize,
+    Zero,
+    Buffered,
+    Stream,
 }
 
-pub(crate) fn gz_write_uses_buffer(
+pub(crate) fn gz_write_plan(
     state: &crate::gzguts_h::gz_state,
     remaining: crate::stdlib::z_size_t,
-) -> bool {
-    remaining < state.size as crate::stdlib::z_size_t
+) -> GzWritePlan {
+    if remaining == 0 {
+        GzWritePlan::Empty
+    } else if gz_write_needs_init(state) {
+        GzWritePlan::Initialize
+    } else if state.skip != 0 {
+        GzWritePlan::Zero
+    } else if remaining < state.size as crate::stdlib::z_size_t {
+        GzWritePlan::Buffered
+    } else {
+        GzWritePlan::Stream
+    }
 }
 
 pub(crate) struct GzBufferedCopyPlan {

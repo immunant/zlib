@@ -244,20 +244,24 @@ unsafe extern "C" fn gz_write(
     let state = &mut *state;
     let mut put: crate::stdlib::z_size_t = len;
     let mut ret: ::core::ffi::c_int = 0;
-    if len == 0 as crate::stdlib::z_size_t {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if crate::src::gzlib::gz_write_needs_init(state)
-        && gz_init(state) == -1 as ::core::ffi::c_int
-    {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if crate::src::gzlib::gz_write_needs_zero(state)
-        && gz_zero(state) == -1 as ::core::ffi::c_int
-    {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if crate::src::gzlib::gz_write_uses_buffer(state, len) {
+    let buffered = loop {
+        match crate::src::gzlib::gz_write_plan(state, len) {
+            crate::src::gzlib::GzWritePlan::Empty => return 0 as crate::stdlib::z_size_t,
+            crate::src::gzlib::GzWritePlan::Initialize => {
+                if gz_init(state) == -1 as ::core::ffi::c_int {
+                    return 0 as crate::stdlib::z_size_t;
+                }
+            }
+            crate::src::gzlib::GzWritePlan::Zero => {
+                if gz_zero(state) == -1 as ::core::ffi::c_int {
+                    return 0 as crate::stdlib::z_size_t;
+                }
+            }
+            crate::src::gzlib::GzWritePlan::Buffered => break true,
+            crate::src::gzlib::GzWritePlan::Stream => break false,
+        }
+    };
+    if buffered {
         loop {
             let plan = crate::src::gzlib::gz_buffered_copy_plan(state, len);
             crate::stdlib::memcpy(
