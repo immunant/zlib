@@ -222,6 +222,46 @@ impl DeflateOwnedStorage {
         self.matches_state(state)
             .then(|| DeflateWorkspace::from_owned(self, input, output))
     }
+
+    /// Deep-copy the portions of a resumable deflate workspace that
+    /// `deflateCopy` preserves.  This deliberately follows the legacy copy
+    /// layout instead of cloning whole capacities: a later owned-storage
+    /// facade can use it without recreating allocator-derived raw slices.
+    fn try_copy_for_state(
+        &self,
+        state: &crate::src::deflate::deflate_state,
+    ) -> Option<Self> {
+        if !self.matches_state(state) {
+            return None;
+        }
+        let copy = DeflateCopyLayout::from_state(state)?;
+        let mut duplicate = DeflateStorageLayout::from_state(state).try_owned()?;
+
+        duplicate
+            .window
+            .get_mut(..copy.window_bytes)?
+            .copy_from_slice(self.window.get(..copy.window_bytes)?);
+        duplicate
+            .prev
+            .get_mut(..copy.prev_items)?
+            .copy_from_slice(self.prev.get(..copy.prev_items)?);
+        duplicate
+            .head
+            .get_mut(..copy.head_items)?
+            .copy_from_slice(self.head.get(..copy.head_items)?);
+
+        let pending_end = copy.pending_offset.checked_add(copy.pending_bytes)?;
+        duplicate
+            .pending_buf
+            .get_mut(copy.pending_offset..pending_end)?
+            .copy_from_slice(self.pending_buf.get(copy.pending_offset..pending_end)?);
+        let sym_end = copy.sym_offset.checked_add(copy.sym_bytes)?;
+        duplicate
+            .pending_buf
+            .get_mut(copy.sym_offset..sym_end)?
+            .copy_from_slice(self.pending_buf.get(copy.sym_offset..sym_end)?);
+        Some(duplicate)
+    }
 }
 
 /// All of the byte and item spans that `deflateCopy` must duplicate.  This is
