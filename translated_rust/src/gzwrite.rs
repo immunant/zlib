@@ -151,6 +151,19 @@ fn gzflush_mode_is_valid(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 && flush <= crate::zlib_h::Z_FINISH
 }
 
+enum GzFlushAction {
+    Compress,
+    ReturnStateError,
+}
+
+fn gzflush_action(zero_result: Option<::core::ffi::c_int>) -> GzFlushAction {
+    if zero_result == Some(-1) {
+        GzFlushAction::ReturnStateError
+    } else {
+        GzFlushAction::Compress
+    }
+}
+
 fn gzfwrite_result(
     size: crate::stdlib::z_size_t,
     len: crate::stdlib::z_size_t,
@@ -1069,7 +1082,12 @@ pub unsafe extern "C" fn gzflush(
     if !gzflush_mode_is_valid(flush) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
+    let zero_result = if gz_has_pending_skip((*state).skip) {
+        Some(gz_zero(state))
+    } else {
+        None
+    };
+    if matches!(gzflush_action(zero_result), GzFlushAction::ReturnStateError) {
         return (*state).err;
     }
     gz_comp(state, flush);
@@ -1198,13 +1216,27 @@ mod tests {
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_needs_initialization, gz_zero_progress, gzclose_buffer_action,
-        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_result,
-        gzputc_result, gzputc_write_action, gzputs_len_fits_int, gzputs_result,
+        gzclose_mode_is_writable, gzclose_w_result, gzflush_action, gzflush_mode_is_valid,
+        gzfwrite_result, gzputc_result, gzputc_write_action, gzputs_len_fits_int, gzputs_result,
         gzsetparams_buffer_action, gzsetparams_settings_match, gzsetparams_state_is_usable,
         gzwrite_request, GzCloseBufferAction, GzCompResetAction, GzCompWriteFailure,
-        GzCompWriteResult, GzPutcWriteAction, GzSetParamsBufferAction, GzWriteDirectAction,
-        GzZeroAction,
+        GzCompWriteResult, GzFlushAction, GzPutcWriteAction, GzSetParamsBufferAction,
+        GzWriteDirectAction, GzZeroAction,
     };
+
+    #[test]
+    fn gzflush_action_returns_state_error_only_for_zero_fill_failure() {
+        assert!(matches!(gzflush_action(None), GzFlushAction::Compress));
+        assert!(matches!(
+            gzflush_action(Some(-1)),
+            GzFlushAction::ReturnStateError
+        ));
+        assert!(matches!(gzflush_action(Some(0)), GzFlushAction::Compress));
+        assert!(matches!(
+            gzflush_action(Some(::core::ffi::c_int::MIN)),
+            GzFlushAction::Compress
+        ));
+    }
 
     #[test]
     fn gzclose_w_result_returns_success_without_errors() {

@@ -1739,6 +1739,13 @@ fn deflate_should_return_buf_error(
         && flush != crate::zlib_h::Z_FINISH
 }
 
+fn deflate_block_state_actions(bstate: block_state) -> (bool, bool) {
+    (
+        bstate == finish_started || bstate == finish_done,
+        bstate == need_more || bstate == finish_started,
+    )
+}
+
 fn deflate_request_is_invalid(
     next_out_is_null: bool,
     avail_in: crate::stdlib::uInt,
@@ -2203,17 +2210,11 @@ pub unsafe extern "C" fn deflate(
             )
             .expect("non-null function pointer")(s, flush) as ::core::ffi::c_uint
         }) as block_state;
-        if bstate as ::core::ffi::c_uint
-            == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
-            || bstate as ::core::ffi::c_uint
-                == finish_done as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
+        let (set_finish_state, return_ok) = deflate_block_state_actions(bstate);
+        if set_finish_state {
             (*s).status = crate::src::deflate::FINISH_STATE;
         }
-        if bstate as ::core::ffi::c_uint == need_more as ::core::ffi::c_int as ::core::ffi::c_uint
-            || bstate as ::core::ffi::c_uint
-                == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
+        if return_ok {
             if (*strm).avail_out == 0 as crate::stdlib::uInt {
                 (*s).last_flush = -1 as ::core::ffi::c_int;
             }
@@ -3823,9 +3824,10 @@ unsafe fn deflate_huff(
 #[cfg(test)]
 mod tests {
     use super::{
-        can_search_hash_match, clamped_copy_len, deflate_bound_lengths, deflate_copyright,
-        deflate_dictionary_len, deflate_flush_rank, deflate_pending_value, deflate_preflight,
-        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
+        can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
+        deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_flush_rank,
+        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
+        deflate_request_is_invalid, deflate_reset_status_and_adler,
         deflate_should_return_buf_error, deflate_state_status_valid, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
         fill_window_insert_after_slide, fill_window_should_refill, fill_window_zero_range,
@@ -3837,6 +3839,27 @@ mod tests {
         stored_block_is_last, stored_block_min_size, stored_block_should_wait,
         stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
+
+    #[test]
+    fn deflate_block_state_actions_preserve_finish_and_return_semantics() {
+        assert_eq!(
+            deflate_block_state_actions(crate::src::deflate::need_more),
+            (false, true)
+        );
+        assert_eq!(
+            deflate_block_state_actions(crate::src::deflate::block_done),
+            (false, false)
+        );
+        assert_eq!(
+            deflate_block_state_actions(crate::src::deflate::finish_started),
+            (true, true)
+        );
+        assert_eq!(
+            deflate_block_state_actions(crate::src::deflate::finish_done),
+            (true, false)
+        );
+        assert_eq!(deflate_block_state_actions(4), (false, false));
+    }
 
     #[test]
     fn symbol_triplet_cursors_preserve_record_order_and_wrapping() {
