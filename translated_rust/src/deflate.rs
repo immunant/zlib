@@ -2754,6 +2754,20 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     deflateEnd(strm)
 }
+fn deflate_copy_prev_len(
+    slid: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    insert: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    let used = strstart.wrapping_sub(insert);
+    if slid != 0 || used > w_size {
+        w_size
+    } else {
+        used
+    }
+}
+
 pub unsafe extern "C" fn deflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
@@ -2835,11 +2849,8 @@ pub unsafe extern "C" fn deflateCopy(
     crate::stdlib::memcpy(
         (*ds).prev as *mut ::core::ffi::c_void,
         (*ss).prev as *const ::core::ffi::c_void,
-        ((if (*ss).slid != 0 || (*ss).strstart.wrapping_sub((*ss).insert) > (*ds).w_size {
-            (*ds).w_size
-        } else {
-            (*ss).strstart.wrapping_sub((*ss).insert)
-        }) as crate::__stddef_size_t_h::size_t)
+        (deflate_copy_prev_len((*ss).slid, (*ss).strstart, (*ss).insert, (*ds).w_size)
+            as crate::__stddef_size_t_h::size_t)
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()
                 as crate::__stddef_size_t_h::size_t),
     );
@@ -4200,7 +4211,7 @@ unsafe fn deflate_huff(
 mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
-        deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
+        deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
         deflate_dictionary_state_after_load, deflate_fast_literal_state_after_emit,
         deflate_fast_should_insert_match, deflate_flush_rank, deflate_huff_literal_progress,
         deflate_insert_after_block, deflate_match_refill_action, deflate_pending_value,
@@ -5374,6 +5385,14 @@ mod tests {
             dictionary_tail_offset(crate::stdlib::uInt::MAX, 32),
             crate::stdlib::uInt::MAX.wrapping_sub(32) as usize,
         );
+    }
+
+    #[test]
+    fn deflate_copy_prev_len_preserves_slide_clamp_and_wrapping() {
+        assert_eq!(deflate_copy_prev_len(0, 10, 3, 16), 7);
+        assert_eq!(deflate_copy_prev_len(0, 20, 3, 16), 16);
+        assert_eq!(deflate_copy_prev_len(1, 10, 3, 16), 16);
+        assert_eq!(deflate_copy_prev_len(0, 0, 1, 16), 16);
     }
 
     #[test]

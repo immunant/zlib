@@ -4318,6 +4318,23 @@ unsafe fn gen_bitlen(
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TreeInitialLeafPlan {
+    HeapLeaf { max_code: ::core::ffi::c_int },
+    ZeroLength,
+}
+
+fn tree_initial_leaf_plan(
+    index: ::core::ffi::c_int,
+    frequency: crate::zutil_h::ush,
+) -> TreeInitialLeafPlan {
+    if frequency != 0 {
+        TreeInitialLeafPlan::HeapLeaf { max_code: index }
+    } else {
+        TreeInitialLeafPlan::ZeroLength
+    }
+}
+
 unsafe fn build_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut desc: *mut crate::src::deflate::tree_desc,
@@ -4336,15 +4353,18 @@ unsafe fn build_tree(
     (*s).heap_max = crate::src::deflate::HEAP_SIZE;
     n = 0 as ::core::ffi::c_int;
     while n < elems {
-        if (*tree.wrapping_add(n as usize)).fc.value as ::core::ffi::c_int
-            != 0 as ::core::ffi::c_int
-        {
-            max_code = n;
-            (*s).heap_len += 1;
-            (*s).heap[(*s).heap_len as usize] = max_code;
-            (*s).depth[n as usize] = 0 as crate::zutil_h::uch;
-        } else {
-            (*tree.wrapping_add(n as usize)).dl.len = 0 as crate::zutil_h::ush;
+        match tree_initial_leaf_plan(n, (*tree.wrapping_add(n as usize)).fc.value) {
+            TreeInitialLeafPlan::HeapLeaf {
+                max_code: leaf_max_code,
+            } => {
+                max_code = leaf_max_code;
+                (*s).heap_len += 1;
+                (*s).heap[(*s).heap_len as usize] = max_code;
+                (*s).depth[n as usize] = 0 as crate::zutil_h::uch;
+            }
+            TreeInitialLeafPlan::ZeroLength => {
+                (*tree.wrapping_add(n as usize)).dl.len = 0 as crate::zutil_h::ush;
+            }
         }
         n += 1;
     }
@@ -5633,10 +5653,11 @@ mod tests {
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
         tree_bit_length_cost, tree_bit_length_totals_after_node, tree_heap_has_pair,
-        tree_next_cursor, tree_parent_depth, tree_run_continues, tree_run_extra_bits,
-        tree_run_limits, tree_run_step, BlockEncoding, GenBitlenOverflowNode,
-        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate, TreeRunStep,
-        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
+        tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth, tree_run_continues,
+        tree_run_extra_bits, tree_run_limits, tree_run_step, BlockEncoding, GenBitlenOverflowNode,
+        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
+        TreeInitialLeafPlan, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138,
+        REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -5649,6 +5670,22 @@ mod tests {
         let mut ltree = [empty; crate::src::deflate::HEAP_SIZE as usize];
         ltree[index].fc.value = 1;
         ltree
+    }
+
+    #[test]
+    fn tree_initial_leaf_plan_preserves_index_and_zero_frequency_behavior() {
+        assert_eq!(
+            tree_initial_leaf_plan(7, 1),
+            TreeInitialLeafPlan::HeapLeaf { max_code: 7 }
+        );
+        assert_eq!(
+            tree_initial_leaf_plan(-1, crate::zutil_h::ush::MAX),
+            TreeInitialLeafPlan::HeapLeaf { max_code: -1 }
+        );
+        assert_eq!(
+            tree_initial_leaf_plan(7, 0),
+            TreeInitialLeafPlan::ZeroLength
+        );
     }
 
     #[test]
