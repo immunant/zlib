@@ -83,7 +83,7 @@ macro_rules! compress2_z_at_boundary {
         stream.zfree = None;
         stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         err = crate::src::deflate::deflateInit2_(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+            &mut stream,
             level,
             crate::zlib_h::Z_DEFLATED,
             crate::stdlib::MAX_WBITS,

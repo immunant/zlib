@@ -79,7 +79,7 @@ macro_rules! gz_init_at_boundary {
                 state_ref.strm.zfree = None;
                 state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
                 if crate::src::deflate::deflateInit2_(
-                    &raw mut state_ref.strm as *mut crate::zlib_h::z_stream_s,
+                    &mut state_ref.strm,
                     state_ref.level,
                     8 as ::core::ffi::c_int,
                     15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,

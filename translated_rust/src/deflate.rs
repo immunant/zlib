@@ -949,8 +949,11 @@ pub unsafe extern "C" fn deflateInit__ffi(
     if version.is_null() || !deflate_init_version_matches(*version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     deflateInit2_(
-        strm,
+        &mut *strm,
         level,
         crate::zlib_h::Z_DEFLATED,
         crate::stdlib::MAX_WBITS,
@@ -973,7 +976,7 @@ fn deflate_init_version_matches(
 }
 
 pub fn deflateInit2_(
-    mut strm: crate::zlib_h::z_streamp,
+    strm_ref: &mut crate::zlib_h::z_stream,
     mut level: ::core::ffi::c_int,
     mut method: ::core::ffi::c_int,
     mut windowBits: ::core::ffi::c_int,
@@ -987,10 +990,6 @@ pub fn deflateInit2_(
         let mut s: *mut crate::src::deflate::deflate_state =
             ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
         let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-        if strm.is_null() {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        let strm_ref = &mut *strm;
         strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
         if strm_ref.zalloc.is_none() {
             strm_ref.zalloc = Some(
@@ -1051,7 +1050,7 @@ pub fn deflateInit2_(
             let state = &mut *s;
             *state = deflate_initial_state();
             strm_ref.state = s as *mut crate::src::deflate::internal_state;
-            state.strm = strm;
+            state.strm = strm_ref;
             state.status = crate::src::deflate::INIT_STATE;
             state.wrap = wrap;
             state.gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
@@ -1117,7 +1116,7 @@ pub fn deflateInit2_(
                 2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
             }) as usize] as *const ::core::ffi::c_char
                 as *mut ::core::ffi::c_char;
-            deflateEnd(strm);
+            deflateEnd(strm_ref);
             return crate::zlib_h::Z_MEM_ERROR;
         }
         let state = &mut *s;
@@ -1160,7 +1159,10 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     if version.is_null() || !deflate_init_version_matches(*version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    deflateInit2_(strm, level, method, windowBits, memLevel, strategy)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflateInit2_(&mut *strm, level, method, windowBits, memLevel, strategy)
 }
 pub(crate) fn deflate_state_values_are_valid(
     has_zalloc: bool,
