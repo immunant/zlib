@@ -2379,6 +2379,10 @@ unsafe fn bi_flush(s: *mut crate::src::deflate::deflate_state) {
 /// operation.  Its caller, however, need not discard an existing exclusive
 /// borrow merely to recreate it from a raw pointer.
 unsafe fn bi_windup(s: &mut crate::src::deflate::deflate_state) {
+    bi_windup_impl(s);
+}
+
+fn bi_windup_impl(s: &mut crate::src::deflate::deflate_state) {
     if s.bi_valid > 8 as ::core::ffi::c_int {
         s.put_pending_byte(
             (s.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch,
@@ -2428,6 +2432,10 @@ fn gen_codes(
 fn tr_static_init() {}
 
 unsafe fn init_block(s: &mut crate::src::deflate::deflate_state) {
+    init_block_impl(s);
+}
+
+fn init_block_impl(s: &mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::L_CODES {
@@ -2956,6 +2964,15 @@ unsafe fn tr_stored_block(
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
+    tr_stored_block_impl(s, buf, stored_len, last);
+}
+
+fn tr_stored_block_impl(
+    s: &mut crate::src::deflate::deflate_state,
+    buf: &[u8],
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
+) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
     if s.bi_valid > crate::src::deflate::Buf_size - len {
         let mut val: ::core::ffi::c_int =
@@ -2980,7 +2997,7 @@ unsafe fn tr_stored_block(
                 << s.bi_valid) as crate::zutil_h::ush;
         s.bi_valid += len;
     }
-    bi_windup(s);
+    bi_windup_impl(s);
     s.put_pending_byte(
         (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
             as crate::zutil_h::uch,
@@ -3341,6 +3358,10 @@ unsafe extern "C" fn compress_block(
 }
 
 unsafe fn detect_data_type(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
+    detect_data_type_impl(s)
+}
+
+fn detect_data_type_impl(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     let mut block_mask: ::core::ffi::c_ulong = 0xf3ffc07f as ::core::ffi::c_ulong;
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
@@ -3411,7 +3432,7 @@ unsafe fn tr_flush_block_impl(
         let unknown_data_type = unsafe { s.strm.as_ref() }
             .is_some_and(|strm| strm.data_type == crate::zlib_h::Z_UNKNOWN);
         if unknown_data_type {
-            let data_type = unsafe { detect_data_type(s) };
+            let data_type = detect_data_type_impl(s);
             if let Some(strm) = unsafe { s.strm.as_mut() } {
                 strm.data_type = data_type;
             }
@@ -3437,7 +3458,7 @@ unsafe fn tr_flush_block_impl(
         opt_lenb = static_lenb;
     }
     if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && buf.is_some() {
-        unsafe { tr_stored_block(s, buf.unwrap(), stored_len, last) };
+        tr_stored_block_impl(s, buf.unwrap(), stored_len, last);
     } else if static_lenb == opt_lenb {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if s.bi_valid > crate::src::deflate::Buf_size - len {
@@ -3505,9 +3526,9 @@ unsafe fn tr_flush_block_impl(
             s.dyn_dtree.as_ptr().cast::<crate::src::deflate::ct_data>(),
         ) };
     }
-    init_block(s);
+    init_block_impl(s);
     if last != 0 {
-        unsafe { bi_windup(s) };
+        bi_windup_impl(s);
     }
 }
 
