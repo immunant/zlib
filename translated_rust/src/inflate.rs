@@ -109,7 +109,6 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inftrees::code;
 pub use crate::src::inftrees::codetype;
-pub use crate::src::inftrees::inflate_fixed;
 pub use crate::src::inftrees::inflate_table;
 pub use crate::src::inftrees::CODES;
 pub use crate::src::inftrees::DISTS;
@@ -1706,9 +1705,9 @@ pub unsafe extern "C" fn inflate(
                                                                     crate::src::inflate::STORED;
                                                             }
                                                             1 => {
-                                                                crate::src::inftrees::inflate_fixed(state as *mut crate::src::inflate::inflate_state);
-                                                                (*state).mode =
-                                                                    crate::src::inflate::LEN_;
+                                                                let state = &mut *state;
+                                                                crate::src::inftrees::inflate_fixed_state(state);
+                                                                state.mode = crate::src::inflate::LEN_;
                                                                 if flush == crate::zlib_h::Z_TREES {
                                                                     hold >>=
                                                                         2 as ::core::ffi::c_int;

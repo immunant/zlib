@@ -3354,19 +3354,15 @@ pub unsafe extern "C" fn inflate_table_ffi(
         usize::MAX,
     )
 }
-fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
+pub(crate) fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
     state.lencode = &raw const lenfix as *const crate::src::inftrees::code;
     state.lenbits = 9 as ::core::ffi::c_uint;
     state.distcode = &raw const distfix as *const crate::src::inftrees::code;
     state.distbits = 5 as ::core::ffi::c_uint;
 }
 
-pub unsafe extern "C" fn inflate_fixed(mut state: *mut crate::src::inflate::inflate_state) {
-    inflate_fixed_state(&mut *state);
-}
-
 #[export_name = "inflate_fixed"]
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
-    inflate_fixed(state)
+    inflate_fixed_state(&mut *state)
 }
