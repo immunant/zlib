@@ -839,7 +839,7 @@ fn update_window_state(
     state.whave = plan.whave;
 }
 
-unsafe extern "C" fn updatewindow(
+unsafe fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut produced_start: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
