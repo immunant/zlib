@@ -5412,20 +5412,17 @@ fn deflate_rle(
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
-            let needs_input = {
-                let state = &mut *s;
-                state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
-            };
+            let needs_input =
+                s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt;
             if needs_input {
                 fill_window(s, strm);
-                let state = &mut *s;
-                if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+                if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
                     return need_more;
                 }
             }
-            let state = &mut *s;
+            let state: &mut crate::src::deflate::deflate_state = s;
             if state.lookahead == 0 as crate::stdlib::uInt
                 && !matches!(
                     deflate_tail_action_state(state, flush),
@@ -5531,20 +5528,16 @@ fn deflate_huff(
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
-            let needs_input = {
-                let state = &mut *s;
-                state.lookahead == 0 as crate::stdlib::uInt
-            };
+            let needs_input = s.lookahead == 0 as crate::stdlib::uInt;
             if needs_input {
                 fill_window(s, strm);
-                let state = &mut *s;
-                if state.lookahead == 0 as crate::stdlib::uInt
+                if s.lookahead == 0 as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
                     return need_more;
                 }
             }
-            let state = &mut *s;
+            let state: &mut crate::src::deflate::deflate_state = s;
             let Ok(window_len) = usize::try_from(state.window_size) else {
                 return need_more;
             };
@@ -5597,7 +5590,7 @@ fn deflate_huff(
                 }
                 return block_done;
             }
-            let Some(literal) = huff_literal_plan_state(&*state, window) else {
+            let Some(literal) = huff_literal_plan_state(state, window) else {
                 return need_more;
             };
             {
