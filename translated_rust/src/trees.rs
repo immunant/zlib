@@ -2527,6 +2527,17 @@ fn push_tr_align_bytes(
     }
 }
 
+fn append_pending_bytes(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bytes: &[crate::stdlib::Byte],
+) {
+    let start = *pending as usize;
+    let end = start + bytes.len();
+    pending_buf[start..end].copy_from_slice(bytes);
+    *pending = pending.wrapping_add(bytes.len() as crate::zutil_h::ulg);
+}
+
 fn tr_align_bits(mut bi_buf: crate::zutil_h::ush, mut bi_valid: ::core::ffi::c_int) -> TrAlignBits {
     let mut bytes = [0; 6];
     let mut len = 0;
@@ -3476,73 +3487,52 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
+    let state = &mut *s;
     let bits = send_bits_state(
-        (*s).bi_buf,
-        (*s).bi_valid,
+        state.bi_buf,
+        state.bi_valid,
         ((0 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
         3 as ::core::ffi::c_int,
     );
-    for byte in bits.bytes[..bits.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_buf = bits.bi_buf;
-    (*s).bi_valid = bits.bi_valid;
-    let windup = bi_windup_state((*s).bi_buf, (*s).bi_valid);
-    for byte in windup.bytes[..windup.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_used = windup.bi_used;
-    (*s).bi_buf = 0 as crate::zutil_h::ush;
-    (*s).bi_valid = 0 as ::core::ffi::c_int;
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    append_pending_bytes(pending_buf, &mut state.pending, &bits.bytes[..bits.len]);
+    state.bi_buf = bits.bi_buf;
+    state.bi_valid = bits.bi_valid;
+    let windup = bi_windup_state(state.bi_buf, state.bi_valid);
+    append_pending_bytes(pending_buf, &mut state.pending, &windup.bytes[..windup.len]);
+    state.bi_used = windup.bi_used;
+    state.bi_buf = 0 as crate::zutil_h::ush;
+    state.bi_valid = 0 as ::core::ffi::c_int;
     let len_bytes = stored_block_len_bytes(stored_len);
-    let c2rust_fresh51 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh51 as isize) = len_bytes[0];
-    let c2rust_fresh52 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh52 as isize) = len_bytes[1];
-    let c2rust_fresh53 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh53 as isize) = len_bytes[2];
-    let c2rust_fresh54 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh54 as isize) = len_bytes[3];
+    append_pending_bytes(pending_buf, &mut state.pending, &len_bytes);
     if stored_len != 0 {
-        crate::stdlib::memcpy(
-            (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-            buf as *mut crate::stdlib::Bytef as *const ::core::ffi::c_void,
-            stored_len as crate::__stddef_size_t_h::size_t,
-        );
+        let stored =
+            ::core::slice::from_raw_parts(buf as *const crate::stdlib::Byte, stored_len as usize);
+        append_pending_bytes(pending_buf, &mut state.pending, stored);
     }
-    (*s).pending = (*s).pending.wrapping_add(stored_len);
 }
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    let flush = bi_flush_state((*s).bi_buf, (*s).bi_valid);
-    for byte in flush.bytes[..flush.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_buf = flush.bi_buf;
-    (*s).bi_valid = flush.bi_valid;
+    let state = &mut *s;
+    let flush = bi_flush_state(state.bi_buf, state.bi_valid);
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    append_pending_bytes(pending_buf, &mut state.pending, &flush.bytes[..flush.len]);
+    state.bi_buf = flush.bi_buf;
+    state.bi_valid = flush.bi_valid;
 }
 #[export_name = "_tr_align"]
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    let bits = tr_align_bits((*s).bi_buf, (*s).bi_valid);
-    for byte in bits.bytes[..bits.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_buf = bits.bi_buf;
-    (*s).bi_valid = bits.bi_valid;
+    let state = &mut *s;
+    let bits = tr_align_bits(state.bi_buf, state.bi_valid);
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    append_pending_bytes(pending_buf, &mut state.pending, &bits.bytes[..bits.len]);
+    state.bi_buf = bits.bi_buf;
+    state.bi_valid = bits.bi_valid;
 }
 unsafe fn compress_block(
     mut s: *mut crate::src::deflate::deflate_state,
@@ -3903,19 +3893,22 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
             _tr_stored_block_ffi(s, buf, stored_len, last);
         }
         FlushBlockChoice::Static => {
-            let bits = send_bits_state(
-                (*s).bi_buf,
-                (*s).bi_valid,
-                ((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
-                3 as ::core::ffi::c_int,
-            );
-            for byte in bits.bytes[..bits.len].iter().copied() {
-                let pending = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(pending as isize) = byte;
+            {
+                let state = &mut *s;
+                let bits = send_bits_state(
+                    state.bi_buf,
+                    state.bi_valid,
+                    ((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
+                    3 as ::core::ffi::c_int,
+                );
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    state.pending_buf,
+                    state.pending_buf_size as usize,
+                );
+                append_pending_bytes(pending_buf, &mut state.pending, &bits.bytes[..bits.len]);
+                state.bi_buf = bits.bi_buf;
+                state.bi_valid = bits.bi_valid;
             }
-            (*s).bi_buf = bits.bi_buf;
-            (*s).bi_valid = bits.bi_valid;
             compress_block(
                 s,
                 &raw const static_ltree as *const crate::src::deflate::ct_data,
@@ -3923,19 +3916,22 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
             );
         }
         FlushBlockChoice::Dynamic => {
-            let bits = send_bits_state(
-                (*s).bi_buf,
-                (*s).bi_valid,
-                ((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
-                3 as ::core::ffi::c_int,
-            );
-            for byte in bits.bytes[..bits.len].iter().copied() {
-                let pending = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(pending as isize) = byte;
+            {
+                let state = &mut *s;
+                let bits = send_bits_state(
+                    state.bi_buf,
+                    state.bi_valid,
+                    ((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
+                    3 as ::core::ffi::c_int,
+                );
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    state.pending_buf,
+                    state.pending_buf_size as usize,
+                );
+                append_pending_bytes(pending_buf, &mut state.pending, &bits.bytes[..bits.len]);
+                state.bi_buf = bits.bi_buf;
+                state.bi_valid = bits.bi_valid;
             }
-            (*s).bi_buf = bits.bi_buf;
-            (*s).bi_valid = bits.bi_valid;
             send_all_trees(
                 s,
                 (*s).l_desc.max_code + 1 as ::core::ffi::c_int,
@@ -3953,15 +3949,14 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     }
     init_block(&mut *s);
     if last != 0 {
-        let windup = bi_windup_state((*s).bi_buf, (*s).bi_valid);
-        for byte in windup.bytes[..windup.len].iter().copied() {
-            let pending = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(pending as isize) = byte;
-        }
-        (*s).bi_used = windup.bi_used;
-        (*s).bi_buf = 0 as crate::zutil_h::ush;
-        (*s).bi_valid = 0 as ::core::ffi::c_int;
+        let state = &mut *s;
+        let windup = bi_windup_state(state.bi_buf, state.bi_valid);
+        let pending_buf =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        append_pending_bytes(pending_buf, &mut state.pending, &windup.bytes[..windup.len]);
+        state.bi_used = windup.bi_used;
+        state.bi_buf = 0 as crate::zutil_h::ush;
+        state.bi_valid = 0 as ::core::ffi::c_int;
     }
 }
 #[export_name = "_tr_tally"]

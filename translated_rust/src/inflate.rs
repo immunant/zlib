@@ -1963,10 +1963,10 @@ pub unsafe extern "C" fn inflate_ffi(
                             );
                         }
                         if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
-                            (*state).check = crate::src::crc32::crc32_ffi(
+                            let input = ::core::slice::from_raw_parts(next, copy as usize);
+                            (*state).check = crate::src::crc32::crc32_update(
                                 (*state).check as crate::stdlib::uLong,
-                                next,
-                                copy as crate::stdlib::uInt,
+                                input,
                             ) as ::core::ffi::c_ulong;
                         }
                         have = have.wrapping_sub(copy);
