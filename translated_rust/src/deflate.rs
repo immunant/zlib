@@ -1974,18 +1974,8 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
         if wrap == 0 as ::core::ffi::c_int {
-            *(*s)
-                .head
-                .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
-                NIL as crate::src::deflate::Posf;
-            crate::stdlib::memset(
-                (*s).head as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                    as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
-                        as crate::__stddef_size_t_h::size_t),
-            );
+            let head = core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+            clear_hash(head);
             (*s).slid = 0 as ::core::ffi::c_int;
             (*s).strstart = 0 as crate::stdlib::uInt;
             (*s).block_start = 0 as ::core::ffi::c_long;
@@ -2221,6 +2211,18 @@ fn lm_init(state: &mut crate::src::deflate::deflate_state, head: &mut [crate::sr
     let plan = lm_init_plan(state.hash_size, state.w_size, state.level);
     head[..state.hash_size as usize].fill(0);
     lm_apply_reset(state, plan.reset);
+}
+
+/// Forget every hash-chain entry while retaining the translated C macro's
+/// explicit final-slot initialization.  Callers establish the callback-owned
+/// hash storage at an exported boundary; the reset itself is ordinary safe
+/// slice work.
+fn clear_hash(head: &mut [crate::src::deflate::Posf]) {
+    let Some((last, entries)) = head.split_last_mut() else {
+        return;
+    };
+    *last = NIL as crate::src::deflate::Posf;
+    entries.fill(0);
 }
 #[export_name = "deflateReset"]
 
@@ -3743,17 +3745,8 @@ pub unsafe extern "C" fn deflate_ffi(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *(*s).head.wrapping_add(
-                        (*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
-                    ) = NIL as crate::src::deflate::Posf;
-                    crate::stdlib::memset(
-                        (*s).head as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                            as crate::__stddef_size_t_h::size_t)
-                            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
-                                as crate::__stddef_size_t_h::size_t),
-                    );
+                    let head = core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+                    clear_hash(head);
                     (*s).slid = 0 as ::core::ffi::c_int;
                     if (*s).lookahead == 0 as crate::stdlib::uInt {
                         (*s).strstart = 0 as crate::stdlib::uInt;
@@ -5363,17 +5356,18 @@ unsafe fn deflate_huff(
 #[cfg(test)]
 mod tests {
     use super::{
-        can_search_hash_match, clamped_copy_len, deflate_block_len, deflate_block_state_actions,
-        deflate_bound_lengths, deflate_bound_z_core, deflate_copy_prev_len, deflate_copyright,
-        deflate_dictionary_len, deflate_dictionary_state_after_load, deflate_distance_tree_code,
-        deflate_fast_match_codes, deflate_fast_match_progress, deflate_fast_should_insert_match,
-        deflate_final_flush_action, deflate_flush_block_state_after_output, deflate_flush_rank,
-        deflate_huff_literal_progress, deflate_insert_after_block,
-        deflate_literal_state_after_emit, deflate_literal_tally_plan, deflate_match_refill_action,
-        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_prime_has_pending_space, deflate_prime_insert_bits, deflate_request_is_invalid,
-        deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
-        deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
+        can_search_hash_match, clamped_copy_len, clear_hash, deflate_block_len,
+        deflate_block_state_actions, deflate_bound_lengths, deflate_bound_z_core,
+        deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
+        deflate_dictionary_state_after_load, deflate_distance_tree_code, deflate_fast_match_codes,
+        deflate_fast_match_progress, deflate_fast_should_insert_match, deflate_final_flush_action,
+        deflate_flush_block_state_after_output, deflate_flush_rank, deflate_huff_literal_progress,
+        deflate_insert_after_block, deflate_literal_state_after_emit, deflate_literal_tally_plan,
+        deflate_match_refill_action, deflate_pending_value, deflate_preflight,
+        deflate_prime_bits_valid, deflate_prime_has_pending_space, deflate_prime_insert_bits,
+        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
+        deflate_rle_clamp_match_length, deflate_rle_match_length,
+        deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_next_scan_indices, deflate_rle_refill_action, deflate_rle_scan_indices,
         deflate_rle_tally_plan, deflate_set_dictionary_allowed, deflate_should_return_buf_error,
         deflate_slow_can_search_match, deflate_state_is_usable, deflate_state_status_valid,
@@ -6040,6 +6034,27 @@ mod tests {
             lm_head_reset_plan(0),
             super::LmHeadResetPlan { clear_len: 0 },
         );
+    }
+
+    #[test]
+    fn clear_hash_matches_the_c_macro_layout() {
+        let mut head: [crate::src::deflate::Posf; 4] = [9, 8, 7, 6];
+
+        clear_hash(&mut head);
+
+        assert_eq!(
+            head,
+            [
+                0,
+                0,
+                0,
+                crate::src::deflate::NIL as crate::src::deflate::Posf
+            ]
+        );
+
+        let mut empty: [crate::src::deflate::Posf; 0] = [];
+        clear_hash(&mut empty);
+        assert_eq!(empty, []);
     }
 
     #[test]
