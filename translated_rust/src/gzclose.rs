@@ -7,7 +7,6 @@ pub use crate::stdlib::off64_t;
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::gzread::gzclose_r;
-pub use crate::src::gzwrite::gzclose_w;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
@@ -26,13 +25,11 @@ fn gz_mode(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 }
 
 pub unsafe fn gzclose(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
-    let close: unsafe fn(Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int =
-        if gz_mode(owned.as_ref()) == crate::gzguts_h::GZ_READ {
-            crate::src::gzread::gzclose_r
-        } else {
-            crate::src::gzwrite::gzclose_w
-        };
-    close(owned)
+    if gz_mode(owned.as_ref()) == crate::gzguts_h::GZ_READ {
+        crate::src::gzread::gzclose_r(owned)
+    } else {
+        crate::src::gzwrite::gzclose_w_impl(owned)
+    }
 }
 #[export_name = "gzclose"]
 

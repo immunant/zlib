@@ -982,8 +982,12 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     gzsetparams_impl(&mut GzCompressor { state }, level, strategy)
 }
 /// Finish the write stream before releasing the already-owned gzip state.
-/// The opaque-handle conversion is confined to the exported boundary.
-pub unsafe fn gzclose_w(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+///
+/// This consumes the owner only after the FFI boundary has established it.
+/// All gzip and deflate work is performed through the owned-state path.
+pub(crate) fn gzclose_w_impl(
+    mut owned: Box<crate::gzguts_h::gz_state>,
+) -> ::core::ffi::c_int {
     let ret = {
         let state: &mut crate::gzguts_h::gz_state = owned.as_mut();
         let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
@@ -1028,6 +1032,7 @@ pub unsafe fn gzclose_w(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ff
     };
     ret
 }
+
 #[export_name = "gzclose_w"]
 
 pub unsafe extern "C" fn gzclose_w_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -1035,5 +1040,5 @@ pub unsafe extern "C" fn gzclose_w_ffi(file: crate::zlib_h::gzFile) -> ::core::f
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let owned = Box::from_raw(file.cast::<crate::gzguts_h::gz_state>());
-    gzclose_w(owned)
+    gzclose_w_impl(owned)
 }
