@@ -44,6 +44,25 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+// Initial deflater fields are ordinary gzip state.  Keep their setup outside
+// the allocation and deflater-creation boundary in `gz_init()`.
+fn gz_init_prepare_deflater(state: &mut crate::gzguts_h::gz_state) {
+    state.strm.zalloc = None;
+    state.strm.zfree = None;
+    state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+}
+
+// The successful initialization tail only publishes buffers already created
+// by `gz_init()` to the bound gzip state.
+fn gz_init_finish(state: &mut crate::gzguts_h::gz_state) {
+    state.size = state.want;
+    if state.direct == 0 {
+        state.strm.avail_out = state.size as crate::stdlib::uInt;
+        state.strm.next_out = state.out;
+        state.x.next = state.strm.next_out;
+    }
+}
+
 // All callers have already validated and bound the gzip state. Keep this
 // coordinator reference-bound; its allocation, cleanup, deflater setup, and
 // error bridges are confined to the initialization boundary below.
@@ -77,9 +96,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 );
                 return -1 as ::core::ffi::c_int;
             }
-            state.strm.zalloc = None;
-            state.strm.zfree = None;
-            state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+            gz_init_prepare_deflater(state);
             ret = crate::src::deflate::deflateInit2_(
                 &mut state.strm,
                 state.level,
@@ -103,12 +120,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
         }
     }
-    state.size = state.want;
-    if state.direct == 0 {
-        state.strm.avail_out = state.size as crate::stdlib::uInt;
-        state.strm.next_out = state.out;
-        state.x.next = state.strm.next_out;
-    }
+    gz_init_finish(state);
     return 0 as ::core::ffi::c_int;
 }
 

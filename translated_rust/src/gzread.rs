@@ -46,6 +46,24 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+// Publishing newly allocated read buffers and clearing the inflater's input
+// fields is an ordinary state transition. Keep it separate from allocation
+// and inflater construction in `gz_look()`.
+fn gz_look_prepare_stream(state: &mut crate::gzguts_h::gz_state) {
+    state.size = state.want;
+    state.strm.zalloc = None;
+    state.strm.zfree = None;
+    state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    state.strm.avail_in = 0;
+    state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+}
+
+// A failed inflater construction leaves the allocated buffers released and
+// returns the state to its uninitialized buffer size.
+fn gz_look_init_failed(state: &mut crate::gzguts_h::gz_state) {
+    state.size = 0;
+}
+
 struct GzLoadResult {
     received: ::core::ffi::c_uint,
     status: ::core::ffi::c_int,
@@ -174,12 +192,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 );
                 return -1 as ::core::ffi::c_int;
             }
-            state.size = state.want;
-            state.strm.zalloc = None;
-            state.strm.zfree = None;
-            state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-            state.strm.avail_in = 0 as crate::stdlib::uInt;
-            state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+            gz_look_prepare_stream(state);
             if crate::src::inflate::inflateInit2_(
                 &mut state.strm,
                 15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
@@ -189,7 +202,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             {
                 crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
                 crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-                state.size = 0 as ::core::ffi::c_uint;
+                gz_look_init_failed(state);
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_MEM_ERROR,
