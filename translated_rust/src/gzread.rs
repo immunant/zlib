@@ -152,6 +152,16 @@ where
     }
 }
 
+fn gz_load_apply_state(
+    eof: &mut ::core::ffi::c_int,
+    again: &mut ::core::ffi::c_int,
+    load: &GzLoadState,
+) -> Result<(), ::core::ffi::c_int> {
+    *eof = load.eof;
+    *again = load.again;
+    load.error.map_or(Ok(()), Err)
+}
+
 fn gz_load_read_result(
     ret: ::core::ffi::c_int,
     errno: ::core::ffi::c_int,
@@ -764,9 +774,7 @@ unsafe fn gz_load(
         let load = gz_load_with_reader(len, have, state.eof, state.again, || {
             gz_load_read_result(ret, errno)
         });
-        state.eof = load.eof;
-        state.again = load.again;
-        if let Some(errno) = load.error {
+        if let Err(errno) = gz_load_apply_state(&mut state.eof, &mut state.again, &load) {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_ERRNO,
@@ -2415,6 +2423,43 @@ mod tests {
             gzgetc_buffered_result(1, crate::stdlib::off64_t::MAX, 0),
             (0, crate::stdlib::off64_t::MIN, 0)
         );
+    }
+
+    #[test]
+    fn gz_load_apply_state_commits_state_without_error() {
+        let load = GzLoadState {
+            have: 3,
+            eof: 1,
+            again: 0,
+            more: false,
+            error: None,
+        };
+        let mut eof = 0;
+        let mut again = 1;
+
+        assert_eq!(gz_load_apply_state(&mut eof, &mut again, &load), Ok(()));
+        assert_eq!(eof, 1);
+        assert_eq!(again, 0);
+    }
+
+    #[test]
+    fn gz_load_apply_state_commits_state_before_returning_error() {
+        let load = GzLoadState {
+            have: 0,
+            eof: -1,
+            again: 1,
+            more: false,
+            error: Some(crate::stdlib::EAGAIN),
+        };
+        let mut eof = 0;
+        let mut again = 0;
+
+        assert_eq!(
+            gz_load_apply_state(&mut eof, &mut again, &load),
+            Err(crate::stdlib::EAGAIN)
+        );
+        assert_eq!(eof, -1);
+        assert_eq!(again, 1);
     }
 
     #[test]

@@ -2435,14 +2435,14 @@ pub unsafe extern "C" fn inflate(
                         bits = 0 as ::core::ffi::c_uint;
                     }
                 }
+                let completion = inflate_gzip_header_completion((*state).flags);
                 if !(*state).head.is_null() {
-                    (*(*state).head).hcrc =
-                        inflate_gzip_header_has_crc((*state).flags) as ::core::ffi::c_int;
+                    (*(*state).head).hcrc = completion.header_crc_present;
                     (*(*state).head).done = 1 as ::core::ffi::c_int;
                 }
-                (*state).check = crate::src::crc32::CRC32_INITIAL as ::core::ffi::c_ulong;
+                (*state).check = completion.check;
                 (*strm).adler = (*state).check as crate::stdlib::uLong;
-                (*state).mode = crate::src::inflate::TYPE;
+                (*state).mode = completion.next_mode;
                 continue;
             }
             _ => {}
@@ -2773,6 +2773,21 @@ fn inflate_gzip_header_has_extra(flags: ::core::ffi::c_int) -> bool {
 
 fn inflate_gzip_header_has_crc(flags: ::core::ffi::c_int) -> bool {
     flags & 0x200 != 0
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct InflateGzipHeaderCompletion {
+    header_crc_present: ::core::ffi::c_int,
+    check: crate::stdlib::uLong,
+    next_mode: inflate_mode,
+}
+
+fn inflate_gzip_header_completion(flags: ::core::ffi::c_int) -> InflateGzipHeaderCompletion {
+    InflateGzipHeaderCompletion {
+        header_crc_present: inflate_gzip_header_has_crc(flags) as ::core::ffi::c_int,
+        check: crate::src::crc32::CRC32_INITIAL as crate::stdlib::uLong,
+        next_mode: TYPE,
+    }
 }
 
 fn inflate_gzip_header_has_name(flags: ::core::ffi::c_int) -> bool {
@@ -3312,9 +3327,10 @@ mod tests {
         inflate_distance_extra_update, inflate_flush_stops_after_fixed_trees,
         inflate_flush_stops_at_block_boundary, inflate_get_dictionary_result,
         inflate_gzip_extra_progress, inflate_gzip_flags, inflate_gzip_flags_error,
-        inflate_gzip_flags_validation, inflate_gzip_header_crc_bytes,
-        inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
-        inflate_gzip_header_has_crc, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflate_gzip_flags_validation, inflate_gzip_header_completion,
+        inflate_gzip_header_crc_bytes, inflate_gzip_header_crc_is_valid,
+        inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_text_field_should_continue,
         inflate_gzip_window_bits, inflate_head_skip_mode, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
@@ -3336,10 +3352,11 @@ mod tests {
         window_allocation_request, window_allocation_request_for_plan, window_metadata_update_plan,
         window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
         InflateCallProgress, InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags,
-        InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
-        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        InflateGzipFlagsError, InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource,
+        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
+        InflateZlibHeaderTransition, InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        TYPEDO,
     };
 
     #[test]
@@ -3480,6 +3497,26 @@ mod tests {
         assert_eq!(inflate_gzip_window_bits(0), 15);
         assert_eq!(inflate_gzip_window_bits(8), 8);
         assert_eq!(inflate_gzip_window_bits(15), 15);
+    }
+
+    #[test]
+    fn inflate_gzip_header_completion_resets_checksum_and_records_crc_flag() {
+        assert_eq!(
+            inflate_gzip_header_completion(0),
+            InflateGzipHeaderCompletion {
+                header_crc_present: 0,
+                check: crate::src::crc32::CRC32_INITIAL as crate::stdlib::uLong,
+                next_mode: TYPE,
+            }
+        );
+        assert_eq!(
+            inflate_gzip_header_completion(0x200),
+            InflateGzipHeaderCompletion {
+                header_crc_present: 1,
+                check: crate::src::crc32::CRC32_INITIAL as crate::stdlib::uLong,
+                next_mode: TYPE,
+            }
+        );
     }
 
     #[test]

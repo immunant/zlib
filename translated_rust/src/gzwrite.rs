@@ -967,6 +967,50 @@ fn gz_write_apply_buffered_progress(
     progress.copy
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct GzWriteBufferedCopyPlan {
+    destination_offset: usize,
+    copy: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    remaining: crate::stdlib::z_size_t,
+    reset_input_cursor: bool,
+}
+
+fn gz_write_buffered_copy_plan(
+    size: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    remaining: crate::stdlib::z_size_t,
+) -> GzWriteBufferedCopyPlan {
+    let reset_input_cursor = matches!(
+        gz_write_buffered_input_action(avail_in),
+        GzWriteBufferedInputAction::ResetBuffer
+    );
+    let mut avail_in = avail_in;
+    let mut have = if reset_input_cursor { 0 } else { have };
+    let mut pos = pos;
+    let mut remaining = remaining;
+    let copy =
+        gz_write_apply_buffered_progress(size, &mut avail_in, &mut have, &mut pos, &mut remaining);
+
+    GzWriteBufferedCopyPlan {
+        destination_offset: if reset_input_cursor {
+            0
+        } else {
+            have.wrapping_sub(copy) as usize
+        },
+        copy,
+        avail_in,
+        have,
+        pos,
+        remaining,
+        reset_input_cursor,
+    }
+}
+
 fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let allocation = gz_init_allocation_plan(state.want, state.direct);
     state.in_0 = unsafe {
@@ -1260,27 +1304,26 @@ unsafe fn gz_write(
     }
     if gz_write_uses_buffered_path(len, state.size) {
         loop {
-            match gz_write_buffered_input_action(state.strm.avail_in) {
-                GzWriteBufferedInputAction::ResetBuffer => {
-                    state.strm.next_in = state.in_0;
-                    state.x.have = 0;
-                }
-                GzWriteBufferedInputAction::KeepPending => {}
-            }
-            let have = state.x.have;
-            let copy = gz_write_apply_buffered_progress(
+            let plan = gz_write_buffered_copy_plan(
                 state.size,
-                &mut state.strm.avail_in,
-                &mut state.x.have,
-                &mut state.x.pos,
-                &mut len,
+                state.strm.avail_in,
+                state.x.have,
+                state.x.pos,
+                len,
             );
+            if plan.reset_input_cursor {
+                state.strm.next_in = state.in_0;
+            }
+            state.strm.avail_in = plan.avail_in;
+            state.x.have = plan.have;
+            state.x.pos = plan.pos;
+            len = plan.remaining;
             crate::stdlib::memcpy(
-                state.in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
+                state.in_0.wrapping_add(plan.destination_offset) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
+                plan.copy as crate::__stddef_size_t_h::size_t,
             );
-            buf = (buf as *mut crate::stdlib::Bytef).wrapping_add(copy as usize)
+            buf = (buf as *mut crate::stdlib::Bytef).wrapping_add(plan.copy as usize)
                 as crate::stdlib::voidpc;
             if gz_write_is_empty(len) {
                 break;
@@ -1738,18 +1781,18 @@ mod tests {
         gz_init_allocation_plan, gz_init_deflate_failed, gz_init_failed, gz_init_mode,
         gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_buffered_progress,
         gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
-        gz_write_buffered_comp_result, gz_write_buffered_copy_len, gz_write_buffered_input_action,
-        gz_write_buffered_progress, gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed,
-        gz_write_direct_action, gz_write_errno_is_retryable, gz_write_error_result,
-        gz_write_is_empty, gz_write_preparation, gz_write_progress,
-        gz_write_remaining_after_consumption, gz_write_state_is_usable,
-        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_comp_progress,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_limits, gz_zero_chunk_plan,
-        gz_zero_chunk_step, gz_zero_initial_step, gz_zero_initialize_buffer,
-        gz_zero_initialize_chunk_buffer, gz_zero_needs_initialization, gz_zero_pending_step,
-        gz_zero_prepare_and_initialize_chunk, gz_zero_progress, gzclose_buffer_action,
-        gzclose_mode_is_writable, gzclose_operation_error, gzclose_w_result, gzflush_action,
-        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
+        gz_write_buffered_comp_result, gz_write_buffered_copy_len, gz_write_buffered_copy_plan,
+        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
+        gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
+        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
+        gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
+        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
+        gz_zero_apply_comp_progress, gz_zero_apply_progress, gz_zero_chunk_len,
+        gz_zero_chunk_limits, gz_zero_chunk_plan, gz_zero_chunk_step, gz_zero_initial_step,
+        gz_zero_initialize_buffer, gz_zero_initialize_chunk_buffer, gz_zero_needs_initialization,
+        gz_zero_pending_step, gz_zero_prepare_and_initialize_chunk, gz_zero_progress,
+        gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error, gzclose_w_result,
+        gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
         gzputs_len_fits_int, gzputs_result, gzsetparams_action, gzsetparams_buffer_action,
         gzsetparams_requires_deflate, gzsetparams_settings_match, gzsetparams_state_is_usable,
         gzsetparams_zero_action, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
@@ -1757,9 +1800,9 @@ mod tests {
         GzCompOutputBufferProgress, GzCompOutputWriteProgress, GzCompOutputWriteResult,
         GzCompResetAction, GzCompWriteFailure, GzCompWriteResult, GzFlushAction,
         GzInitAllocationPlan, GzInitMode, GzPutcWriteAction, GzSetParamsAction,
-        GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedInputAction,
-        GzWriteDirectAction, GzWritePreparation, GzZeroAction, GzZeroChunkLimits,
-        GzZeroPreparedChunk, GzZeroStep,
+        GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
+        GzWriteBufferedInputAction, GzWriteDirectAction, GzWritePreparation, GzZeroAction,
+        GzZeroChunkLimits, GzZeroPreparedChunk, GzZeroStep,
     };
 
     #[test]
@@ -3023,6 +3066,38 @@ mod tests {
         assert_eq!(have, 0);
         assert_eq!(pos, 1);
         assert_eq!(remaining, 4);
+    }
+
+    #[test]
+    fn gz_write_buffered_copy_plan_resets_empty_input_buffer() {
+        assert_eq!(
+            gz_write_buffered_copy_plan(1024, 0, 1000, 10, 99),
+            GzWriteBufferedCopyPlan {
+                destination_offset: 0,
+                copy: 99,
+                avail_in: 99,
+                have: 99,
+                pos: 109,
+                remaining: 0,
+                reset_input_cursor: true,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_write_buffered_copy_plan_preserves_pending_input() {
+        assert_eq!(
+            gz_write_buffered_copy_plan(1024, 17, 1000, 10, 99),
+            GzWriteBufferedCopyPlan {
+                destination_offset: 1000,
+                copy: 24,
+                avail_in: 41,
+                have: 1024,
+                pos: 34,
+                remaining: 75,
+                reset_input_cursor: false,
+            }
+        );
     }
 
     #[test]
