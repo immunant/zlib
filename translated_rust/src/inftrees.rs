@@ -2955,6 +2955,49 @@ fn subtable_is_needed(length: u32, root: u32, huff: u32, mask: u32, low: u32) ->
     length > root && (huff & mask) != low
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SubtableLayout {
+    drop_bits: u32,
+    curr: u32,
+    used: u32,
+    low: u32,
+}
+
+fn subtable_layout(
+    length: u32,
+    root: u32,
+    huff: u32,
+    mask: u32,
+    low: u32,
+    drop_bits: u32,
+    max: u32,
+    counts: &[u16; MAXBITS as usize + 1],
+    used: u32,
+) -> Option<SubtableLayout> {
+    if !subtable_is_needed(length, root, huff, mask, low) {
+        return None;
+    }
+
+    let drop_bits = if drop_bits == 0 { root } else { drop_bits };
+    let mut curr = length - drop_bits;
+    let mut left = 1i32 << curr;
+    while curr + drop_bits < max {
+        left -= counts[(curr + drop_bits) as usize] as i32;
+        if left <= 0 {
+            break;
+        }
+        curr += 1;
+        left <<= 1;
+    }
+
+    Some(SubtableLayout {
+        drop_bits,
+        curr,
+        used: used + (1u32 << curr),
+        low: huff & mask,
+    })
+}
+
 fn next_huffman_code(mut huff: u32, length: u32) -> u32 {
     if !(1..=MAXBITS as u32).contains(&length) {
         return huff;
@@ -3141,7 +3184,6 @@ pub fn inflate_table_safe(
     let mut next = 0usize;
     let mut curr = root;
     let mut drop_bits = 0u32;
-    let mut left = 0i32;
     let mut low = u32::MAX;
     let mut used = 1u32 << root;
     let mask = used - 1;
@@ -3191,29 +3233,20 @@ pub fn inflate_table_safe(
             length = next_length as u32;
         }
 
-        if subtable_is_needed(length, root, huff, mask, low) {
-            if drop_bits == 0 {
-                drop_bits = root;
-            }
+        if let Some(layout) =
+            subtable_layout(length, root, huff, mask, low, drop_bits, max, &count, used)
+        {
+            drop_bits = layout.drop_bits;
             let Some(next_cursor) = table_cursor.advance(next, next_table_size) else {
                 return 1;
             };
             next = next_cursor;
-            curr = length - drop_bits;
-            left = 1i32 << curr;
-            while curr + drop_bits < max {
-                left -= count[(curr + drop_bits) as usize] as i32;
-                if left <= 0 {
-                    break;
-                }
-                curr += 1;
-                left <<= 1;
-            }
-            used += 1u32 << curr;
+            curr = layout.curr;
+            used = layout.used;
             if !table_usage_fits(type_0, used, table_cursor) {
                 return 1;
             }
-            low = huff & mask;
+            low = layout.low;
             let Some(entry) = table_cursor.entry_mut(table, 0, low as usize) else {
                 return 1;
             };
@@ -3317,6 +3350,33 @@ mod tests {
         assert!(!subtable_is_needed(5, 5, 0b1101, 0b0111, 0b0101));
         assert!(!subtable_is_needed(6, 5, 0b1101, 0b0111, 0b0101));
         assert!(subtable_is_needed(6, 5, 0b1101, 0b0111, 0b0100));
+    }
+
+    #[test]
+    fn subtable_layout_keeps_existing_root_table_when_not_needed() {
+        let counts = [0u16; MAXBITS as usize + 1];
+
+        assert_eq!(
+            subtable_layout(8, 7, 0b101_0011, 0b111_1111, 0b101_0011, 7, 12, &counts, 128),
+            None
+        );
+    }
+
+    #[test]
+    fn subtable_layout_selects_width_and_tracks_table_usage() {
+        let mut counts = [0u16; MAXBITS as usize + 1];
+        counts[10] = 1;
+        counts[11] = 1;
+
+        assert_eq!(
+            subtable_layout(10, 7, 0b101_0011, 0b111_1111, 0, 0, 12, &counts, 128),
+            Some(SubtableLayout {
+                drop_bits: 7,
+                curr: 5,
+                used: 160,
+                low: 0b101_0011,
+            })
+        );
     }
 
     #[test]

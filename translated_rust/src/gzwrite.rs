@@ -564,6 +564,16 @@ fn gz_comp_deflate_progress(
     }
 }
 
+fn gz_comp_apply_deflate_progress(
+    pending: &mut crate::stdlib::uInt,
+    avail_out_before: ::core::ffi::c_uint,
+    avail_out_after: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let progress = gz_comp_deflate_progress(avail_out_before, avail_out_after, *pending);
+    *pending = progress.pending;
+    progress.produced
+}
+
 fn gz_comp_pending_after_write(
     pending: crate::stdlib::uInt,
     written: ::core::ffi::c_int,
@@ -761,10 +771,11 @@ unsafe fn gz_comp(
             );
             return -1 as ::core::ffi::c_int;
         }
-        let progress =
-            gz_comp_deflate_progress(have, (*strm).avail_out as ::core::ffi::c_uint, *out_pending);
-        have = progress.produced;
-        *out_pending = progress.pending;
+        have = gz_comp_apply_deflate_progress(
+            out_pending,
+            have,
+            (*strm).avail_out as ::core::ffi::c_uint,
+        );
         if !gz_comp_has_output(have) {
             break;
         }
@@ -1244,14 +1255,14 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffer_is_initialized, gz_comp_deflate_progress, gz_comp_deflate_stream_is_corrupt,
-        gz_comp_direct_write_progress, gz_comp_has_output, gz_comp_max_write_chunk,
-        gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write, gz_comp_needs_reset,
-        gz_comp_output_produced, gz_comp_output_write_chunk_len, gz_comp_output_write_progress,
-        gz_comp_pending_after_write, gz_comp_reset_action, gz_comp_reset_after_flush,
-        gz_comp_skips_empty_flush, gz_comp_write_again, gz_comp_write_chunk_len,
-        gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result, gz_has_pending_input,
-        gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
+        gz_buffer_is_initialized, gz_comp_apply_deflate_progress, gz_comp_deflate_progress,
+        gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress, gz_comp_has_output,
+        gz_comp_max_write_chunk, gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write,
+        gz_comp_needs_reset, gz_comp_output_produced, gz_comp_output_write_chunk_len,
+        gz_comp_output_write_progress, gz_comp_pending_after_write, gz_comp_reset_action,
+        gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
+        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result,
+        gz_has_pending_input, gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
         gz_write_apply_chunk_progress, gz_write_buffered_copy_len, gz_write_buffered_progress,
         gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
         gz_write_error_result, gz_write_is_empty, gz_write_progress,
@@ -1782,6 +1793,25 @@ mod tests {
         assert_eq!(progress.produced, 1000);
         assert_eq!(progress.pending, 1100);
         assert_eq!(gz_comp_pending_after_write(progress.pending, 20), 1080);
+    }
+
+    #[test]
+    fn gz_comp_apply_deflate_progress_updates_pending_and_returns_produced_bytes() {
+        let mut pending = 100;
+
+        assert_eq!(gz_comp_apply_deflate_progress(&mut pending, 1024, 24), 1000);
+        assert_eq!(pending, 1100);
+    }
+
+    #[test]
+    fn gz_comp_apply_deflate_progress_preserves_wrapping_accounting() {
+        let mut pending = crate::stdlib::uInt::MAX;
+
+        assert_eq!(
+            gz_comp_apply_deflate_progress(&mut pending, 0, 1),
+            ::core::ffi::c_uint::MAX
+        );
+        assert_eq!(pending, crate::stdlib::uInt::MAX.wrapping_sub(1));
     }
 
     #[test]

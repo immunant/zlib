@@ -558,6 +558,16 @@ fn fill_window_should_refill(
     lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt && avail_in != 0
 }
 
+fn fill_window_should_slide(
+    strstart: crate::stdlib::uInt,
+    wsize: crate::stdlib::uInt,
+) -> bool {
+    strstart
+        >= wsize.wrapping_add(
+            wsize.wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
+        )
+}
+
 unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
@@ -570,12 +580,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             wsize,
             ::core::mem::size_of::<::core::ffi::c_int>() <= 2,
         );
-        if (*s).strstart
-            >= wsize.wrapping_add(
-                (*s).w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
-            )
-        {
+        if fill_window_should_slide((*s).strstart, wsize) {
             crate::stdlib::memcpy(
                 (*s).window as *mut ::core::ffi::c_void,
                 (*s).window.wrapping_add(wsize as usize) as *const ::core::ffi::c_void,
@@ -3842,7 +3847,8 @@ mod tests {
         deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
         deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
-        fill_window_insert_after_slide, fill_window_should_refill, fill_window_zero_range,
+        fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
+        fill_window_zero_range,
         flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_pending_range, longest_match_limit, longest_match_search_parameters,
         normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
@@ -4235,6 +4241,28 @@ mod tests {
         assert!(fill_window_should_refill(min_lookahead - 1, 1));
         assert!(!fill_window_should_refill(min_lookahead, 1));
         assert!(!fill_window_should_refill(0, 0));
+    }
+
+    #[test]
+    fn fill_window_should_slide_preserves_threshold_and_wrapping() {
+        let min_lookahead = crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
+        let wsize: crate::stdlib::uInt = 32;
+        let threshold = wsize.wrapping_add(wsize.wrapping_sub(min_lookahead));
+
+        assert!(!fill_window_should_slide(threshold - 1, wsize));
+        assert!(fill_window_should_slide(threshold, wsize));
+        assert!(fill_window_should_slide(crate::stdlib::uInt::MAX, wsize));
+
+        let wrapped_threshold = crate::stdlib::uInt::MAX
+            .wrapping_add(crate::stdlib::uInt::MAX.wrapping_sub(min_lookahead));
+        assert!(!fill_window_should_slide(
+            wrapped_threshold.wrapping_sub(1),
+            crate::stdlib::uInt::MAX,
+        ));
+        assert!(fill_window_should_slide(
+            wrapped_threshold,
+            crate::stdlib::uInt::MAX,
+        ));
     }
 
     #[test]
