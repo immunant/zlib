@@ -3084,6 +3084,16 @@ fn deflate_fast_match_codes(
     )
 }
 
+fn deflate_distance_tree_code(distance_minus_one: crate::zutil_h::ush) -> crate::zutil_h::uch {
+    debug_assert!(distance_minus_one <= 32767 as crate::zutil_h::ush);
+    let table_index = if distance_minus_one < 256 as crate::zutil_h::ush {
+        distance_minus_one as usize
+    } else {
+        256usize + (distance_minus_one as usize >> 7)
+    };
+    crate::src::trees::_dist_code[table_index]
+}
+
 unsafe fn longest_match(
     mut s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
@@ -3577,32 +3587,9 @@ unsafe extern "C" fn deflate_fast(
                 .fc
                 .value
                 .wrapping_add(1);
-            (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc
-                .value =
-                (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                        .offset(dist as isize) as ::core::ffi::c_int
-                } else {
-                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                        .offset(
-                            (256 as ::core::ffi::c_int
-                                + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                                as isize,
-                        ) as ::core::ffi::c_int
-                }) as usize]
-                    .fc
-                    .value
-                    .wrapping_add(1);
+            let distance_code = deflate_distance_tree_code(dist) as usize;
+            (*s).dyn_dtree[distance_code].fc.value =
+                (*s).dyn_dtree[distance_code].fc.value.wrapping_add(1);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             let progress = deflate_fast_match_progress(
                 (*s).match_length,
@@ -3843,32 +3830,9 @@ unsafe extern "C" fn deflate_slow(
                 .fc
                 .value
                 .wrapping_add(1);
-            (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc
-                .value =
-                (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                        .offset(dist as isize) as ::core::ffi::c_int
-                } else {
-                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                        .offset(
-                            (256 as ::core::ffi::c_int
-                                + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                                as isize,
-                        ) as ::core::ffi::c_int
-                }) as usize]
-                    .fc
-                    .value
-                    .wrapping_add(1);
+            let distance_code = deflate_distance_tree_code(dist) as usize;
+            (*s).dyn_dtree[distance_code].fc.value =
+                (*s).dyn_dtree[distance_code].fc.value.wrapping_add(1);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s)
                 .lookahead
@@ -4357,8 +4321,8 @@ mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
-        deflate_dictionary_state_after_load, deflate_fast_match_codes, deflate_fast_match_progress,
-        deflate_fast_should_insert_match, deflate_final_flush_action,
+        deflate_dictionary_state_after_load, deflate_distance_tree_code, deflate_fast_match_codes,
+        deflate_fast_match_progress, deflate_fast_should_insert_match, deflate_final_flush_action,
         deflate_flush_block_state_after_output, deflate_flush_rank, deflate_huff_literal_progress,
         deflate_insert_after_block, deflate_literal_state_after_emit, deflate_literal_tally_plan,
         deflate_match_refill_action, deflate_pending_value, deflate_preflight,
@@ -5419,6 +5383,21 @@ mod tests {
         assert_eq!(fill_window_hash_update(0x12, 0xab, 5, 0xff), 0xeb);
         assert_eq!(fill_window_hash_update(0xff, 0x34, 8, 0x7fff), 0x7f34);
         assert_eq!(fill_window_hash_update(0x1234, 0xffff, 4, 0), 0);
+    }
+
+    #[test]
+    fn deflate_distance_tree_code_uses_the_checked_static_table_index() {
+        for distance_minus_one in [0, 255, 256, 32767] {
+            let table_index = if distance_minus_one < 256 {
+                distance_minus_one as usize
+            } else {
+                256usize + (distance_minus_one as usize >> 7)
+            };
+            assert_eq!(
+                deflate_distance_tree_code(distance_minus_one),
+                crate::src::trees::_dist_code[table_index]
+            );
+        }
     }
 
     #[test]
