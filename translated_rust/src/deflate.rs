@@ -1083,7 +1083,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
 /// The safe portion of configuring a freshly initialized deflate state.
 ///
 /// Custom and mixed allocator workspaces remain behind
-/// `deflate_reset_legacy_stream`, its single existing raw hash-table view.
+/// `deflate_reset_state`, its single existing raw hash-table view.
 /// Fully default-allocated workspaces can reset directly through their owned
 /// hash vector. Keeping that distinction here avoids rebuilding the same raw
 /// view during initialization.
@@ -1208,7 +1208,7 @@ fn initialize_allocated_deflate_state(
         );
         match outcome {
             Ok(DeflateInitializationOutcome::ReadyForLegacyReset) => {
-                deflate_reset_legacy_stream(strm)
+                deflate_reset_state(strm, Some(state))
             }
             Ok(DeflateInitializationOutcome::Complete(result)) => result,
             Err(error) => {
@@ -1716,24 +1716,20 @@ pub(crate) fn deflate_reset(
     ret
 }
 
-/// Reset a legacy ABI-backed deflate stream.
+/// Reset an already-borrowed deflate state.
 ///
-/// This is the one storage boundary for callers that own a stream but not its
-/// opaque state allocation.  Keep the raw state and hash-table conversions
-/// here until `deflate_state` owns those buffers; the reset logic itself stays
-/// in the slice-based `deflate_reset` core above.
-pub(crate) fn deflate_reset_legacy_stream(
+/// The FFI wrapper converts the opaque ABI state handle only after validating
+/// the callback pair.  This core keeps all reset policy and the one remaining
+/// callback-workspace borrowing boundary, while initialized Rust callers can
+/// dispatch here without recreating their state reference.
+pub(crate) fn deflate_reset_state(
     stream: &mut crate::zlib_h::z_stream,
+    state: Option<&mut crate::src::deflate::deflate_state>,
 ) -> ::core::ffi::c_int {
-    // Check callbacks before following the opaque state handle.  In
-    // particular, a stale non-null state with missing allocators must remain
-    // a stream error without a raw dereference.
     if !deflate_reset_keep_stream_valid(Some(stream)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) =
-        (unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() })
-    else {
+    let Some(state) = state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if !deflate_stream_state_valid(Some(stream), Some(state)) || state.head.is_null() {
@@ -1760,6 +1756,24 @@ pub(crate) fn deflate_reset_legacy_stream(
     let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
     deflate_reset(stream, state, head)
 }
+
+/// Reset a gzip-owned ABI stream that does not yet retain a typed state.
+///
+/// Gzip's public state still stores the deflate state as an opaque ABI handle,
+/// so this is its one conversion boundary.  All reset policy remains in the
+/// typed `deflate_reset_state` core shared with initialization and the FFI
+/// entry point.
+pub(crate) fn deflate_reset_legacy_stream(
+    stream: &mut crate::zlib_h::z_stream,
+) -> ::core::ffi::c_int {
+    if !deflate_reset_keep_stream_valid(Some(stream)) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state =
+        unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() };
+    deflate_reset_state(stream, state)
+}
+
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
@@ -1771,7 +1785,11 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let Some(stream) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_reset_legacy_stream(stream)
+    if !deflate_reset_keep_stream_valid(Some(stream)) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = (stream.state as *mut crate::src::deflate::deflate_state).as_mut();
+    deflate_reset_state(stream, state)
 }
 fn deflate_set_header(
     state: &mut crate::src::deflate::deflate_state,
