@@ -1137,43 +1137,70 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     }
     deflate_used(state, bits.as_mut())
 }
-pub unsafe extern "C" fn deflatePrime(
-    mut strm: crate::zlib_h::z_streamp,
+fn deflate_prime(
+    strm: Option<&crate::zlib_h::z_stream_s>,
+    state: Option<&mut crate::src::deflate::deflate_state>,
+    pending_buf: Option<&mut [crate::stdlib::Bytef]>,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut put: ::core::ffi::c_int = 0;
-    if deflateStateCheck(strm) != 0 {
+    let (Some(strm), Some(state), Some(pending_buf)) = (strm, state, pending_buf) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if strm.zalloc.is_none()
+        || strm.zfree.is_none()
+        || state.strm != strm as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp
+        || state.status != crate::src::deflate::INIT_STATE
+            && state.status != crate::src::deflate::GZIP_STATE
+            && state.status != crate::src::deflate::EXTRA_STATE
+            && state.status != crate::src::deflate::NAME_STATE
+            && state.status != crate::src::deflate::COMMENT_STATE
+            && state.status != crate::src::deflate::HCRC_STATE
+            && state.status != crate::src::deflate::BUSY_STATE
+            && state.status != crate::src::deflate::FINISH_STATE
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let Some(pending_out) = state
+        .pending_out
+        .addr()
+        .checked_sub(pending_buf.as_ptr().addr())
+    else {
+        return crate::zlib_h::Z_BUF_ERROR;
+    };
+    let Some(sym_buf) = state
+        .sym_buf
+        .addr()
+        .checked_sub(pending_buf.as_ptr().addr())
+    else {
+        return crate::zlib_h::Z_BUF_ERROR;
+    };
+    if pending_out > pending_buf.len() || sym_buf > pending_buf.len() {
+        return crate::zlib_h::Z_BUF_ERROR;
+    }
+    let Some(min_sym_buf) = pending_out.checked_add(
+        ((crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int)
+            >> 3 as ::core::ffi::c_int) as usize,
+    ) else {
+        return crate::zlib_h::Z_BUF_ERROR;
+    };
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || (*s).sym_buf
-            < (*s).pending_out.offset(
-                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as isize,
-            )
+        || sym_buf < min_sym_buf
     {
         return crate::zlib_h::Z_BUF_ERROR;
     }
     loop {
-        put = crate::src::deflate::Buf_size - (*s).bi_valid;
+        put = crate::src::deflate::Buf_size - state.bi_valid;
         if put > bits {
             put = bits;
         }
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
+        state.bi_buf = (state.bi_buf as ::core::ffi::c_int
             | ((value & ((1 as ::core::ffi::c_int) << put) - 1 as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
+                << state.bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
             as crate::zutil_h::ush;
-        (*s).bi_valid += put;
-        let state = &mut *s;
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
+        state.bi_valid += put;
         crate::src::trees::_tr_flush_bits(state, pending_buf);
         value >>= put;
         bits -= put;
@@ -1190,7 +1217,17 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflatePrime(strm, bits, value)
+    let Some(strm) = strm.as_ref() else {
+        return deflate_prime(None, None, None, bits, value);
+    };
+    let Some(state) = (strm.state as *mut crate::src::deflate::deflate_state).as_mut() else {
+        return deflate_prime(Some(strm), None, None, bits, value);
+    };
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state.pending_buf,
+        state.pending_buf_size as usize,
+    );
+    deflate_prime(Some(strm), Some(state), Some(pending_buf), bits, value)
 }
 pub unsafe extern "C" fn deflateParams(
     mut strm: crate::zlib_h::z_streamp,
