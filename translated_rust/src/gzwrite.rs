@@ -364,7 +364,7 @@ fn gz_write(
 // The exported wrapper owns handle validation and binding.  This coordinator
 // operates on that bound state; `gz_write` retains the caller-buffer copy
 // boundary used for buffered and streaming writes.
-pub unsafe extern "C" fn gzwrite(
+pub fn gzwrite(
     state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
@@ -376,11 +376,16 @@ pub unsafe extern "C" fn gzwrite(
     // cannot affect read-side EOF bookkeeping.
     crate::src::gzlib::gzclearerr(state);
     if !crate::src::gzlib::gz_uint_request_fits_int(len) {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_DATA_ERROR,
-            b"requested length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
-        );
+        // SAFETY: this only updates the bound gzip state's owned error
+        // record with a static message.
+        unsafe {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_DATA_ERROR,
+                b"requested length does not fit in int\0".as_ptr()
+                    as *const ::core::ffi::c_char,
+            );
+        }
         return 0 as ::core::ffi::c_int;
     }
     return gz_write(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_int;
@@ -397,7 +402,7 @@ pub unsafe extern "C" fn gzwrite_ffi(
     }
     gzwrite(&mut *(file as crate::gzguts_h::gz_statep), buf, len)
 }
-pub unsafe extern "C" fn gzfwrite(
+pub fn gzfwrite(
     mut buf: crate::stdlib::voidpc,
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
@@ -410,11 +415,16 @@ pub unsafe extern "C" fn gzfwrite(
     match crate::src::gzlib::gz_item_request(size, nitems) {
         crate::src::gzlib::GzItemRequest::Empty => 0 as crate::stdlib::z_size_t,
         crate::src::gzlib::GzItemRequest::TooLarge => {
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
-            );
+            // SAFETY: this only updates the bound gzip state's owned error
+            // record with a static message.
+            unsafe {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"request does not fit in a size_t\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                );
+            }
             0 as crate::stdlib::z_size_t
         }
         crate::src::gzlib::GzItemRequest::Bytes(len) => {
