@@ -289,14 +289,14 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-// Exported entry points validate their handle before calling this helper. Keep
-// the internal state reference-bound; only the caller-buffer copy remains a
-// scoped raw boundary.
+// Exported entry points bind their caller buffers before calling this helper.
+// Keep its input cursor as a Rust slice; only the initialized gzip input
+// buffer remains a scoped raw-copy boundary.
 fn gz_write(
     state: &mut crate::gzguts_h::gz_state,
-    mut buf: crate::stdlib::voidpc,
-    mut len: crate::stdlib::z_size_t,
+    mut source: &[::core::ffi::c_uchar],
 ) -> crate::stdlib::z_size_t {
+    let mut len = source.len() as crate::stdlib::z_size_t;
     let mut put: crate::stdlib::z_size_t = len;
     let mut ret: ::core::ffi::c_int = 0;
     let buffered = loop {
@@ -327,14 +327,12 @@ fn gz_write(
             unsafe {
                 crate::stdlib::memcpy(
                     state.in_0.wrapping_add(plan.offset as usize) as *mut ::core::ffi::c_void,
-                    buf as *const ::core::ffi::c_void,
+                    source.as_ptr() as *const ::core::ffi::c_void,
                     plan.len as crate::__stddef_size_t_h::size_t,
                 );
             }
             crate::src::gzlib::gz_buffered_copy_progress(state, &mut len, plan.len);
-            buf = (buf as *const crate::stdlib::Bytef)
-                .wrapping_add(plan.len as usize)
-                as crate::stdlib::voidpc;
+            source = &source[plan.len as usize..];
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
@@ -348,7 +346,7 @@ fn gz_write(
         {
             return 0 as crate::stdlib::z_size_t;
         }
-        state.strm.next_in = buf as *mut crate::stdlib::Bytef;
+        state.strm.next_in = source.as_ptr() as *mut crate::stdlib::Bytef;
         loop {
             let mut n: ::core::ffi::c_uint = crate::src::gzlib::gz_stream_chunk(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
@@ -369,13 +367,12 @@ fn gz_write(
 // boundary used for buffered and streaming writes.
 pub fn gzwrite(
     state: &mut crate::gzguts_h::gz_state,
-    mut buf: crate::stdlib::voidpc,
-    mut len: ::core::ffi::c_uint,
+    source: &[::core::ffi::c_uchar],
 ) -> ::core::ffi::c_int {
     if !crate::src::gzlib::gz_begin_write_operation(state) {
         return 0 as ::core::ffi::c_int;
     }
-    if !crate::src::gzlib::gz_uint_request_fits_int(len) {
+    if !crate::src::gzlib::gz_uint_request_fits_int(source.len() as ::core::ffi::c_uint) {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_DATA_ERROR,
@@ -383,7 +380,7 @@ pub fn gzwrite(
         );
         return 0 as ::core::ffi::c_int;
     }
-    return gz_write(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_int;
+    gz_write(state, source) as ::core::ffi::c_int
 }
 #[export_name = "gzwrite"]
 
@@ -395,10 +392,23 @@ pub unsafe extern "C" fn gzwrite_ffi(
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    gzwrite(&mut *(file as crate::gzguts_h::gz_statep), buf, len)
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    // Avoid binding an unused caller buffer when the state would make
+    // `gzwrite()` return before examining it.
+    if !crate::src::gzlib::gz_write_state_is_usable(state) {
+        return 0 as ::core::ffi::c_int;
+    }
+    // SAFETY: C's `gzwrite` contract supplies `len` readable bytes when
+    // `len` is nonzero. Bind that caller range once at this ABI boundary.
+    let source = if len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(buf as *const ::core::ffi::c_uchar, len as usize)
+    };
+    gzwrite(state, source)
 }
 pub fn gzfwrite(
-    mut buf: crate::stdlib::voidpc,
+    source: &[::core::ffi::c_uchar],
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
     state: &mut crate::gzguts_h::gz_state,
@@ -416,8 +426,8 @@ pub fn gzfwrite(
             );
             0 as crate::stdlib::z_size_t
         }
-        crate::src::gzlib::GzItemRequest::Bytes(len) => {
-            gz_write(state, buf, len).wrapping_div(size)
+        crate::src::gzlib::GzItemRequest::Bytes(_) => {
+            gz_write(state, source).wrapping_div(size)
         }
     }
 }
@@ -432,11 +442,26 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     if file.is_null() {
         return 0 as crate::stdlib::z_size_t;
     }
-    gzfwrite(buf, size, nitems, &mut *(file as crate::gzguts_h::gz_statep))
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    // As with `gzwrite_ffi`, preserve the early invalid-state return before
+    // binding a caller range that zlib would not inspect.
+    if !crate::src::gzlib::gz_write_state_is_usable(state) {
+        return 0 as crate::stdlib::z_size_t;
+    }
+    // SAFETY: a nonempty, representable item request requires C to provide
+    // that many readable bytes. Empty and rejected requests do not access
+    // `buf`, matching zlib's behavior for a null buffer and zero length.
+    let source = match crate::src::gzlib::gz_item_request(size, nitems) {
+        crate::src::gzlib::GzItemRequest::Bytes(len) => {
+            ::core::slice::from_raw_parts(buf as *const ::core::ffi::c_uchar, len as usize)
+        }
+        crate::src::gzlib::GzItemRequest::Empty | crate::src::gzlib::GzItemRequest::TooLarge => &[],
+    };
+    gzfwrite(source, size, nitems, state)
 }
 // The one-byte request can use the same buffered/streaming adapter as larger
-// writes.  Keeping the byte in a local array lets this coordinator remain
-// reference-bound; `gz_write()` retains the sole raw-copy boundary.
+// writes. Keeping the byte in a local array lets this coordinator remain
+// reference-bound and feed the safe source-slice interface directly.
 pub fn gzputc(
     state: &mut crate::gzguts_h::gz_state,
     mut c: ::core::ffi::c_int,
@@ -450,8 +475,7 @@ pub fn gzputc(
     }
     if gz_write(
         state,
-        buf.as_ptr() as crate::stdlib::voidpc,
-        1 as crate::stdlib::z_size_t,
+        &buf,
     ) != 1 as crate::stdlib::z_size_t
     {
         return -1 as ::core::ffi::c_int;
@@ -470,9 +494,9 @@ pub unsafe extern "C" fn gzputc_ffi(
     gzputc(&mut *(file as crate::gzguts_h::gz_statep), c)
 }
 // The ABI wrapper validates the caller's nul-terminated string before this
-// coordinator runs.  Keeping that conversion at the boundary means the write
-// operation itself only needs a safe C-string view and the existing caller
-// buffer forwarding performed by `gz_write()`.
+// coordinator runs. Keeping that conversion at the boundary means the write
+// operation itself only needs a safe C-string view and can pass its bytes to
+// `gz_write()` without a raw caller buffer.
 pub fn gzputs(
     state: &mut crate::gzguts_h::gz_state,
     s: &::core::ffi::CStr,
@@ -480,7 +504,8 @@ pub fn gzputs(
     if !crate::src::gzlib::gz_begin_write_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
-    let len = s.to_bytes().len() as crate::stdlib::z_size_t;
+    let source = s.to_bytes();
+    let len = source.len() as crate::stdlib::z_size_t;
     if !crate::src::gzlib::gz_string_len_fits_int(len) {
         crate::src::gzlib::gz_error(
             state,
@@ -489,7 +514,7 @@ pub fn gzputs(
         );
         return -1 as ::core::ffi::c_int;
     }
-    let put = gz_write(state, s.as_ptr() as crate::stdlib::voidpc, len);
+    let put = gz_write(state, source);
     crate::src::gzlib::gz_puts_result(len, put)
 }
 #[export_name = "gzputs"]
