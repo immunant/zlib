@@ -3324,6 +3324,21 @@ fn tally_literal(
     ))
 }
 
+fn tally_previous_literal(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+) -> Option<::core::ffi::c_int> {
+    let previous = state.strstart.checked_sub(1)? as usize;
+    let literal = *window.get(previous)? as ::core::ffi::c_uint;
+    Some(crate::src::trees::tr_tally(
+        state,
+        pending_buf,
+        0 as ::core::ffi::c_uint,
+        literal,
+    ))
+}
+
 fn rle_match_length(
     window: &[crate::stdlib::Bytef],
     strstart: crate::stdlib::uInt,
@@ -3667,21 +3682,16 @@ unsafe extern "C" fn deflate_slow(
                 }
             }
         } else if (*s).match_available != 0 {
-            let mut cc: crate::zutil_h::uch = *(*s)
-                .window
-                .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
-                as crate::zutil_h::uch;
             let state = &mut *s;
+            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
             );
-            bflush = crate::src::trees::tr_tally(
-                state,
-                pending_buf,
-                0 as ::core::ffi::c_uint,
-                cc as ::core::ffi::c_uint,
-            );
+            let Some(flush) = tally_previous_literal(state, window, pending_buf) else {
+                return need_more;
+            };
+            bflush = flush;
             if bflush != 0 {
                 flush_block_from_raw!(
                     s as *mut crate::src::deflate::internal_state,
@@ -3711,21 +3721,16 @@ unsafe extern "C" fn deflate_slow(
         }
     }
     if (*s).match_available != 0 {
-        let mut cc_0: crate::zutil_h::uch = *(*s)
-            .window
-            .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
-            as crate::zutil_h::uch;
         let state = &mut *s;
+        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
         let pending_buf = ::core::slice::from_raw_parts_mut(
             state.pending_buf,
             state.pending_buf_size as usize,
         );
-        bflush = crate::src::trees::tr_tally(
-            state,
-            pending_buf,
-            0 as ::core::ffi::c_uint,
-            cc_0 as ::core::ffi::c_uint,
-        );
+        let Some(flush) = tally_previous_literal(state, window, pending_buf) else {
+            return need_more;
+        };
+        bflush = flush;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
     (*s).insert = if (*s).strstart
