@@ -2380,7 +2380,7 @@ pub unsafe extern "C" fn inflate_ffi(
                 state.lencode = DecodeTableLocation::dynamic(0);
                 state.lenbits = 7 as ::core::ffi::c_uint;
                 ret = crate::src::inftrees::inflate_table_safe(
-                    crate::src::inftrees::CODES,
+                    crate::src::inftrees::CodeType::Codes,
                     &state.lens[..19],
                     &mut state.codes,
                     &mut table_cursor,
@@ -2563,7 +2563,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     state.lencode = DecodeTableLocation::dynamic(0);
                     state.lenbits = 9 as ::core::ffi::c_uint;
                     ret = crate::src::inftrees::inflate_table_safe(
-                        crate::src::inftrees::LENS,
+                        crate::src::inftrees::CodeType::Lens,
                         &state.lens[..state.nlen as usize],
                         &mut state.codes,
                         &mut table_cursor,
@@ -2583,7 +2583,7 @@ pub unsafe extern "C" fn inflate_ffi(
                         state.distcode = DecodeTableLocation::dynamic(state.next);
                         state.distbits = 6 as ::core::ffi::c_uint;
                         ret = crate::src::inftrees::inflate_table_safe(
-                            crate::src::inftrees::DISTS,
+                            crate::src::inftrees::CodeType::Dists,
                             &state.lens[state.nlen as usize
                                 ..state.nlen.wrapping_add(state.ndist) as usize],
                             &mut state.codes,

@@ -4,8 +4,8 @@
 #![allow(non_upper_case_globals)]
 #![allow(unused_assignments)]
 #![allow(unused_mut)]
-#![feature(raw_ref_op)]
 #![feature(register_tool)]
+#![feature(raw_ref_op)]
 #![register_tool(c2rust)]
 
 pub mod __stddef_size_t_h {

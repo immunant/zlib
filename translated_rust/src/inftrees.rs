@@ -2838,7 +2838,7 @@ const DEXT: [u16; 32] = [
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CodeType {
+pub(crate) enum CodeType {
     Codes,
     Lens,
     Dists,
@@ -2871,12 +2871,8 @@ impl CodeType {
     }
 }
 
-fn code_type(type_0: crate::src::inftrees::codetype) -> Option<CodeType> {
-    CodeType::from_raw(type_0)
-}
-
-fn table_capacity_for_type(type_0: crate::src::inftrees::codetype) -> Option<usize> {
-    code_type(type_0).map(CodeType::table_capacity)
+fn table_capacity_for_type(type_0: CodeType) -> usize {
+    type_0.table_capacity()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2944,7 +2940,7 @@ fn code_input_buffers_are_valid(
 }
 
 fn ffi_table_capacity(
-    type_0: crate::src::inftrees::codetype,
+    type_0: CodeType,
     codes: ::core::ffi::c_uint,
     table_out_present: bool,
     bits_present: bool,
@@ -2954,7 +2950,7 @@ fn ffi_table_capacity(
     (table_out_present
         && bits_present
         && code_input_buffers_are_valid(codes, lens_present, work_present))
-    .then(|| table_capacity_for_type(type_0))?
+    .then(|| table_capacity_for_type(type_0))
 }
 
 fn table_usage_fits(type_0: CodeType, used: u32, table_cursor: TableCursor) -> bool {
@@ -3207,7 +3203,7 @@ impl LengthState {
 }
 
 fn inflate_table_core(
-    type_0: crate::src::inftrees::codetype,
+    type_0: CodeType,
     lens: &[u16],
     table: &mut [crate::src::inftrees::code],
     bits: &mut u32,
@@ -3216,10 +3212,6 @@ fn inflate_table_core(
     let table_cursor = TableCursor {
         start: 0,
         table_len: table.len(),
-    };
-
-    let Some(type_0) = code_type(type_0) else {
-        return Err(-1);
     };
 
     let length_state = match LengthState::try_new(type_0, lens, *bits) {
@@ -3342,8 +3334,8 @@ fn inflate_table_core(
 /// the number of entries used on success. `work` must have at least
 /// `lens.len()` elements. As in zlib, `0` is success, `-1` reports an invalid
 /// code-length set, and `1` reports insufficient table or workspace capacity.
-pub fn inflate_table_safe(
-    type_0: crate::src::inftrees::codetype,
+pub(crate) fn inflate_table_safe(
+    type_0: CodeType,
     lens: &[u16],
     table: &mut [crate::src::inftrees::code],
     table_cursor_out: &mut usize,
@@ -3381,6 +3373,9 @@ pub unsafe extern "C" fn inflate_table_ffi(
     bits: *mut ::core::ffi::c_uint,
     work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
+    let Some(type_0) = CodeType::from_raw(type_0) else {
+        return -1;
+    };
     // Check alignment before dereferencing the caller's output pointers or
     // converting its buffers to Rust references.  A non-null, misaligned C
     // pointer is invalid for this API, but rejecting it here keeps the FFI
@@ -3668,14 +3663,15 @@ mod tests {
 
     #[test]
     fn table_capacity_for_type_accepts_known_table_kinds() {
-        assert_eq!(table_capacity_for_type(CODES), Some(128));
-        assert_eq!(table_capacity_for_type(LENS), Some(ENOUGH_LENS as usize));
-        assert_eq!(table_capacity_for_type(DISTS), Some(ENOUGH_DISTS as usize));
-    }
-
-    #[test]
-    fn table_capacity_for_type_rejects_unknown_table_kinds() {
-        assert_eq!(table_capacity_for_type(3), None);
+        assert_eq!(table_capacity_for_type(CodeType::Codes), 128);
+        assert_eq!(
+            table_capacity_for_type(CodeType::Lens),
+            ENOUGH_LENS as usize
+        );
+        assert_eq!(
+            table_capacity_for_type(CodeType::Dists),
+            ENOUGH_DISTS as usize
+        );
     }
 
     #[test]
@@ -3698,23 +3694,25 @@ mod tests {
     #[test]
     fn ffi_table_capacity_validates_scalar_ffi_inputs() {
         assert_eq!(
-            ffi_table_capacity(CODES, 0, true, true, false, false),
+            ffi_table_capacity(CodeType::Codes, 0, true, true, false, false),
             Some(128)
         );
         assert_eq!(
-            ffi_table_capacity(LENS, 1, true, true, true, true),
+            ffi_table_capacity(CodeType::Lens, 1, true, true, true, true),
             Some(ENOUGH_LENS as usize)
         );
         assert_eq!(
-            ffi_table_capacity(CODES, 0, false, true, false, false),
+            ffi_table_capacity(CodeType::Codes, 0, false, true, false, false),
             None
         );
         assert_eq!(
-            ffi_table_capacity(CODES, 0, true, false, false, false),
+            ffi_table_capacity(CodeType::Codes, 0, true, false, false, false),
             None
         );
-        assert_eq!(ffi_table_capacity(CODES, 1, true, true, false, true), None);
-        assert_eq!(ffi_table_capacity(3, 0, true, true, false, false), None);
+        assert_eq!(
+            ffi_table_capacity(CodeType::Codes, 1, true, true, false, true),
+            None
+        );
     }
 
     #[test]
@@ -3915,7 +3913,14 @@ mod tests {
         let mut work = [0u16; 2];
 
         assert_eq!(
-            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            inflate_table_safe(
+                CodeType::Codes,
+                &lens,
+                &mut table,
+                &mut cursor,
+                &mut bits,
+                &mut work
+            ),
             0
         );
         assert_eq!(cursor, 2);
@@ -3938,7 +3943,14 @@ mod tests {
         let mut work = [0u16; 2];
 
         assert_eq!(
-            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            inflate_table_safe(
+                CodeType::Codes,
+                &lens,
+                &mut table,
+                &mut cursor,
+                &mut bits,
+                &mut work
+            ),
             0
         );
         assert_eq!(cursor, 3);
@@ -3962,7 +3974,7 @@ mod tests {
         let mut work = [0u16; 2];
 
         assert_eq!(
-            inflate_table_core(CODES, &lens, &mut table, &mut bits, &mut work),
+            inflate_table_core(CodeType::Codes, &lens, &mut table, &mut bits, &mut work),
             Ok(2)
         );
         assert_eq!(bits, 1);
@@ -3983,7 +3995,14 @@ mod tests {
         let mut work = [0u16; 3];
 
         assert_eq!(
-            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            inflate_table_safe(
+                CodeType::Codes,
+                &lens,
+                &mut table,
+                &mut cursor,
+                &mut bits,
+                &mut work
+            ),
             0
         );
         assert_eq!(cursor, table.len());
@@ -4004,7 +4023,14 @@ mod tests {
         let mut work = [0u16; 2];
 
         assert_eq!(
-            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            inflate_table_safe(
+                CodeType::Codes,
+                &lens,
+                &mut table,
+                &mut cursor,
+                &mut bits,
+                &mut work
+            ),
             1
         );
     }
@@ -4023,7 +4049,14 @@ mod tests {
         let mut work = [0u16; 1];
 
         assert_eq!(
-            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            inflate_table_safe(
+                CodeType::Codes,
+                &lens,
+                &mut table,
+                &mut cursor,
+                &mut bits,
+                &mut work
+            ),
             1
         );
         for entry in table {
@@ -4050,7 +4083,14 @@ mod tests {
             let mut work = [0u16; 3];
 
             assert_eq!(
-                inflate_table_safe(CODES, lens, &mut table, &mut cursor, &mut bits, &mut work),
+                inflate_table_safe(
+                    CodeType::Codes,
+                    lens,
+                    &mut table,
+                    &mut cursor,
+                    &mut bits,
+                    &mut work
+                ),
                 -1,
                 "lens={lens:?}"
             );
@@ -4065,20 +4105,30 @@ mod tests {
     }
 
     #[test]
-    fn safe_table_rejects_invalid_type_before_writing_output() {
-        let lens = [1u16, 1];
+    fn ffi_table_rejects_invalid_type_before_writing_output() {
+        let mut lens = [1u16, 1];
         let original_entry = code {
             op: 7,
             bits: 8,
             val: 9,
         };
         let mut table = [original_entry; 2];
-        let mut cursor = 0;
-        let mut bits = 7;
+        let mut table_out = table.as_mut_ptr();
+        let original_table_out = table_out;
+        let mut bits = 7u32;
         let mut work = [0u16; 2];
 
         assert_eq!(
-            inflate_table_safe(3, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            unsafe {
+                inflate_table_ffi(
+                    3,
+                    lens.as_mut_ptr(),
+                    lens.len() as u32,
+                    &mut table_out,
+                    &mut bits,
+                    work.as_mut_ptr(),
+                )
+            },
             -1
         );
         for entry in table {
@@ -4086,7 +4136,7 @@ mod tests {
             assert_eq!(entry.bits, original_entry.bits);
             assert_eq!(entry.val, original_entry.val);
         }
-        assert_eq!(cursor, 0);
+        assert_eq!(table_out, original_table_out);
         assert_eq!(bits, 7);
     }
 
@@ -4104,7 +4154,14 @@ mod tests {
         let mut work = [0u16; 2];
 
         assert_eq!(
-            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            inflate_table_safe(
+                CodeType::Codes,
+                &lens,
+                &mut table,
+                &mut cursor,
+                &mut bits,
+                &mut work
+            ),
             1
         );
         for entry in table {
@@ -4131,7 +4188,14 @@ mod tests {
         let mut work = [0u16; 288];
 
         assert_eq!(
-            inflate_table_safe(LENS, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            inflate_table_safe(
+                CodeType::Lens,
+                &lens,
+                &mut table,
+                &mut cursor,
+                &mut bits,
+                &mut work
+            ),
             0
         );
         assert_eq!(cursor, lenfix.len());
@@ -4160,7 +4224,14 @@ mod tests {
         let mut work = [0u16; 32];
 
         assert_eq!(
-            inflate_table_safe(DISTS, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            inflate_table_safe(
+                CodeType::Dists,
+                &lens,
+                &mut table,
+                &mut cursor,
+                &mut bits,
+                &mut work
+            ),
             0
         );
         assert_eq!(cursor, distfix.len());
