@@ -686,17 +686,19 @@ fn update_window(
 // The inflater's window is an internal allocation.  Keep allocation, update,
 // and read-only inspection behind this existing implementation boundary so
 // ABI wrappers never need to bind that state-owned raw pointer themselves.
-enum InflateWindowAccess<'a> {
+pub(crate) enum InflateWindowAccess<'a> {
     Ensure,
     Update(&'a [crate::stdlib::Bytef]),
     Inspect,
+    Existing,
 }
 
 // A first `Ensure` call keeps the allocator callback separate from use of the
 // resulting slice. `Update` consumes produced output, while `Inspect` lends
 // the bound window to a reference-only implementation such as dictionary
-// retrieval.
-fn updatewindow<T>(
+// retrieval. `Existing` is the no-allocation counterpart for a decoder that
+// can use a prior window when one is already present.
+pub(crate) fn updatewindow<T>(
     stream: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
     access: InflateWindowAccess<'_>,
@@ -706,7 +708,7 @@ fn updatewindow<T>(
     ) -> T,
 ) -> Result<T, ()> {
     let layout = inflate_window_layout(state.wbits);
-    if state.window.is_null() {
+    if state.window.is_null() && !matches!(access, InflateWindowAccess::Existing) {
         // SAFETY: zlib's initialized allocator is invoked with the same
         // window size and element count as the C implementation.
         state.window = unsafe {
@@ -721,7 +723,7 @@ fn updatewindow<T>(
             return Err(());
         }
     }
-    let needs_window = !matches!(access, InflateWindowAccess::Ensure);
+    let needs_window = !matches!(access, InflateWindowAccess::Ensure) && !state.window.is_null();
     // SAFETY: a successful allocation above (or the initialized existing
     // window) has exactly the configured window length. `Ensure` does not
     // need to expose that allocation at all.
@@ -743,6 +745,7 @@ fn updatewindow<T>(
         InflateWindowAccess::Inspect => {
             Ok(operation(state, window))
         }
+        InflateWindowAccess::Existing => Ok(operation(state, window)),
     }
 }
 pub unsafe extern "C" fn inflate(

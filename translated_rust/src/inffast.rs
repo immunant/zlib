@@ -327,9 +327,10 @@ pub fn inflate_fast(
     // the scalar fast-loop state before binding the remaining raw cursors.
     let mut fast_state = InflateFastState::from(&*state);
     // SAFETY: `inflate()` invokes this adapter only after the checked
-    // stream/state pair above has been validated. Its input, output, window,
-    // and decode-table cursors are the bounded ranges maintained by that
-    // same inflate state machine for this call.
+    // stream/state pair above has been validated. Its input and output
+    // cursors are the bounded ranges maintained by that same state machine
+    // for this call. The optional prior window is instead bound by
+    // `updatewindow()` below, at its single state-owned allocation boundary.
     unsafe {
         let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
         let used = start.wrapping_sub(strm.avail_out) as usize;
@@ -337,46 +338,48 @@ pub fn inflate_fast(
             strm.next_out.wrapping_sub(used),
             used + strm.avail_out as usize,
         );
-        let window = if state.wsize == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(state.window, state.wsize as usize)
-        };
-        let lcode_fixed = ::core::ptr::eq(
-            state.lencode,
-            crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
-        );
-        let dcode_fixed = ::core::ptr::eq(
-            state.distcode,
-            crate::src::inftrees::inffixed_h::distfix.as_ptr(),
-        );
-        // Dynamic decode tables are subranges of the state-owned `codes`
-        // workspace. Fixed tables retain their static slices. Both cases now
-        // use checked slices, leaving raw cursor/window binding above as the
-        // only pointer-to-slice conversion in this adapter.
-        let code_base = state.codes.as_ptr().addr();
-        let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-        let lcode = if lcode_fixed {
-            &crate::src::inftrees::inffixed_h::lenfix[..]
-        } else {
-            let start = state.lencode.addr().wrapping_sub(code_base) / code_size;
-            &state.codes[start..start + crate::src::inftrees::ENOUGH_LENS as usize]
-        };
-        let dcode = if dcode_fixed {
-            &crate::src::inftrees::inffixed_h::distfix[..]
-        } else {
-            let start = state.distcode.addr().wrapping_sub(code_base) / code_size;
-            &state.codes[start..start + crate::src::inftrees::ENOUGH_DISTS as usize]
-        };
-        let result = inflate_fast_bound(
-            &mut fast_state,
-            input,
-            output,
-            window,
-            lcode,
-            dcode,
-            used,
-        );
+        let result = crate::src::inflate::updatewindow(
+            strm,
+            state,
+            crate::src::inflate::InflateWindowAccess::Existing,
+            |state, window| {
+                let window = window.as_deref().unwrap_or(&[]);
+                let lcode_fixed = ::core::ptr::eq(
+                    state.lencode,
+                    crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
+                );
+                let dcode_fixed = ::core::ptr::eq(
+                    state.distcode,
+                    crate::src::inftrees::inffixed_h::distfix.as_ptr(),
+                );
+                // Dynamic decode tables are subranges of the state-owned
+                // workspace. Fixed tables retain their static slices.
+                let code_base = state.codes.as_ptr().addr();
+                let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+                let lcode = if lcode_fixed {
+                    &crate::src::inftrees::inffixed_h::lenfix[..]
+                } else {
+                    let start = state.lencode.addr().wrapping_sub(code_base) / code_size;
+                    &state.codes[start..start + crate::src::inftrees::ENOUGH_LENS as usize]
+                };
+                let dcode = if dcode_fixed {
+                    &crate::src::inftrees::inffixed_h::distfix[..]
+                } else {
+                    let start = state.distcode.addr().wrapping_sub(code_base) / code_size;
+                    &state.codes[start..start + crate::src::inftrees::ENOUGH_DISTS as usize]
+                };
+                inflate_fast_bound(
+                    &mut fast_state,
+                    input,
+                    output,
+                    window,
+                    lcode,
+                    dcode,
+                    used,
+                )
+            },
+        )
+        .expect("existing-window access cannot allocate or fail");
         finish_inflate_fast(strm, state, fast_state, input, output, result);
     }
 }
