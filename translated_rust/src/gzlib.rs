@@ -657,30 +657,33 @@ pub unsafe extern "C" fn gzerror_ffi(
     }
     message.as_ptr()
 }
-pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return;
+/// Clear the read-side EOF markers after the boundary has validated the
+/// opaque gzip state.  The caller remains responsible for releasing any
+/// boundary-owned error message.
+fn gzclearerr(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
+        return false;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0;
+        state.past = 0;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
-    }
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    true
 }
 #[export_name = "gzclearerr"]
 
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
-    gzclearerr(file)
+    if file.is_null() {
+        return;
+    }
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if gzclearerr(state) {
+        gz_error(
+            state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+    }
 }
 pub unsafe extern "C" fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
