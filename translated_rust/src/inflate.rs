@@ -2244,7 +2244,8 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflateEnd(strm)
 }
-pub unsafe extern "C" fn inflateGetDictionary(
+#[export_name = "inflateGetDictionary"]
+pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
@@ -2274,16 +2275,8 @@ pub unsafe extern "C" fn inflateGetDictionary(
     }
     return crate::zlib_h::Z_OK;
 }
-#[export_name = "inflateGetDictionary"]
-
-pub unsafe extern "C" fn inflateGetDictionary_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    inflateGetDictionary(strm, dictionary, dictLength)
-}
-pub unsafe extern "C" fn inflateSetDictionary(
+#[export_name = "inflateSetDictionary"]
+pub unsafe extern "C" fn inflateSetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
@@ -2325,16 +2318,8 @@ pub unsafe extern "C" fn inflateSetDictionary(
     (*state).havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
-#[export_name = "inflateSetDictionary"]
-
-pub unsafe extern "C" fn inflateSetDictionary_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    inflateSetDictionary(strm, dictionary, dictLength)
-}
-pub unsafe extern "C" fn inflateGetHeader(
+#[export_name = "inflateGetHeader"]
+pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
@@ -2350,14 +2335,6 @@ pub unsafe extern "C" fn inflateGetHeader(
     (*state).head = head;
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateGetHeader"]
-
-pub unsafe extern "C" fn inflateGetHeader_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
-) -> ::core::ffi::c_int {
-    inflateGetHeader(strm, head)
 }
 /// Search a safe compressed-input view for zlib's sync marker.  The export
 /// boundary owns conversion of the ABI cursor into this call-scoped slice.
@@ -2458,7 +2435,8 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
         == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
         && (*state).bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
 }
-pub unsafe extern "C" fn inflateCopy(
+#[export_name = "inflateCopy"]
+pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -2551,14 +2529,6 @@ pub unsafe extern "C" fn inflateCopy(
     (*copy).window = window;
     (*dest).state = copy as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateCopy"]
-
-pub unsafe extern "C" fn inflateCopy_ffi(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    inflateCopy(dest, source)
 }
 #[export_name = "inflateUndermine"]
 pub unsafe extern "C" fn inflateUndermine_ffi(
