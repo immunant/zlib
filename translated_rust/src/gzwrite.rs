@@ -232,11 +232,8 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     loop {
         n = gz_clamped_uint((*state).size, (*state).skip);
         if first != 0 {
-            crate::stdlib::memset(
-                (*state).in_0 as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                n as crate::__stddef_size_t_h::size_t,
-            );
+            let zero_buf = ::core::slice::from_raw_parts_mut((*state).in_0, n as usize);
+            gz_fill_zero(zero_buf);
             first = 0 as ::core::ffi::c_int;
         }
         (*strm).avail_in = n as crate::stdlib::uInt;
@@ -362,6 +359,10 @@ fn gz_pending_output_chunk(
     } else {
         pending as ::core::ffi::c_uint
     })
+}
+
+fn gz_fill_zero(buf: &mut [crate::stdlib::Bytef]) {
+    buf.fill(0);
 }
 
 fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {

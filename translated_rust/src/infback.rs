@@ -36,7 +36,7 @@ pub use crate::src::inflate::TYPE;
 pub use crate::src::inflate::TYPEDO;
 pub use crate::src::inftrees::code;
 pub use crate::src::inftrees::codetype;
-pub use crate::src::inftrees::inflate_fixed;
+pub use crate::src::inftrees::inflate_fixed_ffi;
 pub use crate::src::inftrees::inflate_table;
 pub use crate::src::inftrees::CODES;
 pub use crate::src::inftrees::DISTS;
@@ -236,7 +236,7 @@ pub unsafe extern "C" fn inflateBack(
                             (*state).mode = crate::src::inflate::STORED;
                         }
                         1 => {
-                            crate::src::inftrees::inflate_fixed(
+                            crate::src::inftrees::inflate_fixed_ffi(
                                 state as *mut crate::src::inflate::inflate_state,
                             );
                             (*state).mode = crate::src::inflate::LEN;
