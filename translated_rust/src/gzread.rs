@@ -151,6 +151,16 @@ struct GzLoadTarget<'a> {
     path: Option<&'a [u8]>,
 }
 
+// Copy-mode reads share the same owned-buffer transaction whether the bytes
+// are staged for `gz_fetch()` or sent directly to the caller.  Keep that
+// transaction pointer-free so the eventual gzip owner can move both paths
+// out of the ABI-shaped state together.
+struct GzCopyLoadState<'a> {
+    output: &'a mut Option<Box<[u8]>>,
+    fd: &'a rustix::fd::OwnedFd,
+    target: GzLoadTarget<'a>,
+}
+
 // The refill transition needs only owned storage and scalar fields.  In
 // particular, the ABI stream cursor is deliberately not part of this view:
 // callers publish the buffer base as `next_in` only after this operation has
@@ -264,6 +274,25 @@ fn apply_gz_load(
             Err(have)
         }
     }
+}
+
+fn gz_copy_load_into(
+    fd: &rustix::fd::OwnedFd,
+    output: &mut [u8],
+    target: GzLoadTarget<'_>,
+) -> Result<::core::ffi::c_uint, ::core::ffi::c_uint> {
+    errno::set_errno(errno::Errno(0));
+    apply_gz_load(target, gz_load(fd, output))
+}
+
+fn gz_copy_load(state: GzCopyLoadState<'_>) -> Result<::core::ffi::c_uint, ::core::ffi::c_uint> {
+    let GzCopyLoadState { output, fd, target } = state;
+    let Some(mut buffer) = output.take() else {
+        return Err(0);
+    };
+    let result = gz_copy_load_into(fd, buffer.as_mut(), target);
+    *output = Some(buffer);
+    result
 }
 
 fn gz_avail(state: GzAvailState<'_>) -> Option<()> {
@@ -584,12 +613,10 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 }
             }
             crate::gzguts_h::COPY => {
-                let Some(mut output) = state.out.take() else {
-                    return -1 as ::core::ffi::c_int;
-                };
-                errno::set_errno(errno::Errno(0));
-                let (ret, have) = match apply_gz_load(
-                    GzLoadTarget {
+                let (ret, have) = match gz_copy_load(GzCopyLoadState {
+                    output: &mut state.out,
+                    fd: state.fd.as_ref().unwrap(),
+                    target: GzLoadTarget {
                         again: &mut state.again,
                         eof: &mut state.eof,
                         message: &mut state.msg,
@@ -597,13 +624,11 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                         buffered: &mut state.x.have,
                         path: state.path.as_deref(),
                     },
-                    gz_load(state.fd.as_ref().unwrap(), output.as_mut()),
-                ) {
+                }) {
                     Ok(have) => (0, have),
                     Err(have) => (-1, have),
                 };
                 state.x.have = have;
-                state.out = Some(output);
                 if ret == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
@@ -752,8 +777,9 @@ unsafe fn gz_read(
                     else {
                         return got;
                     };
-                    errno::set_errno(errno::Errno(0));
-                    match apply_gz_load(
+                    match gz_copy_load_into(
+                        state.fd.as_ref().unwrap(),
+                        destination,
                         GzLoadTarget {
                             again: &mut state.again,
                             eof: &mut state.eof,
@@ -762,7 +788,6 @@ unsafe fn gz_read(
                             buffered: &mut state.x.have,
                             path: state.path.as_deref(),
                         },
-                        gz_load(state.fd.as_ref().unwrap(), destination),
                     ) {
                         Ok(have) => n = have,
                         Err(have) => {
