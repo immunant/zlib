@@ -2700,8 +2700,13 @@ pub unsafe fn inflate(
                                     state_ref.mode = crate::src::inflate::NAME;
                                     break 'c_2322;
                                 }
-                                if (*state).extra != 0 {
-                                    while bits < (*state).extra {
+                                // Length extra bits only consume the decoder cursor and
+                                // update scalar match state. Keep the compatibility-state
+                                // access in one short-lived transition borrow, matching
+                                // the distance-extra transition below.
+                                let state_ref = &mut *state;
+                                if state_ref.extra != 0 {
+                                    while bits < state_ref.extra {
                                         if have == 0 as ::core::ffi::c_uint {
                                             break '_inf_leave;
                                         }
@@ -2713,19 +2718,19 @@ pub unsafe fn inflate(
                                         );
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
-                                    (*state).length = (*state).length.wrapping_add(
+                                    state_ref.length = state_ref.length.wrapping_add(
                                         hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
+                                            & ((1 as ::core::ffi::c_uint) << state_ref.extra)
                                                 .wrapping_sub(1 as ::core::ffi::c_uint),
                                     );
-                                    hold >>= (*state).extra;
-                                    bits = bits.wrapping_sub((*state).extra);
-                                    (*state).back = ((*state).back as ::core::ffi::c_uint)
-                                        .wrapping_add((*state).extra)
+                                    hold >>= state_ref.extra;
+                                    bits = bits.wrapping_sub(state_ref.extra);
+                                    state_ref.back = (state_ref.back as ::core::ffi::c_uint)
+                                        .wrapping_add(state_ref.extra)
                                         as ::core::ffi::c_int;
                                 }
-                                (*state).was = (*state).length;
-                                (*state).mode = crate::src::inflate::DIST;
+                                state_ref.was = state_ref.length;
+                                state_ref.mode = crate::src::inflate::DIST;
                                 break 's_2462;
                             }
                             // NAME consumes only the current input cursor and retained header
