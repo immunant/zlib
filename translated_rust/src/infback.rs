@@ -457,14 +457,18 @@ pub unsafe fn inflateBack(
                         state.have = 0 as ::core::ffi::c_uint;
                         while state.have < state.nlen.wrapping_add(state.ndist) {
                             loop {
-                                here = crate::src::inftrees::copy_code(
-                                    &*state.lencode.wrapping_offset(
-                                        (hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint) << state.lenbits)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                                            as isize,
-                                    ),
-                                );
+                                let Some(table_entry) = crate::src::inffast::decode_table_entry(
+                                    state,
+                                    crate::src::inffast::DecodeTable::LiteralLength,
+                                    (hold as ::core::ffi::c_uint
+                                        & ((1 as ::core::ffi::c_uint) << state.lenbits)
+                                            .wrapping_sub(1 as ::core::ffi::c_uint))
+                                        as usize,
+                                ) else {
+                                    ret = crate::zlib_h::Z_STREAM_ERROR;
+                                    break '_inf_leave;
+                                };
+                                here = table_entry;
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
@@ -753,14 +757,17 @@ pub unsafe fn inflateBack(
             bits = state.bits;
         } else {
             loop {
-                here = crate::src::inftrees::copy_code(
-                    &*state.lencode.wrapping_offset(
-                        (hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << state.lenbits)
-                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                            as isize,
-                    ),
-                );
+                let Some(table_entry) = crate::src::inffast::decode_table_entry(
+                    state,
+                    crate::src::inffast::DecodeTable::LiteralLength,
+                    (hold as ::core::ffi::c_uint
+                        & ((1 as ::core::ffi::c_uint) << state.lenbits)
+                            .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
+                ) else {
+                    ret = crate::zlib_h::Z_STREAM_ERROR;
+                    break '_inf_leave;
+                };
+                here = table_entry;
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
                 }
@@ -784,18 +791,22 @@ pub unsafe fn inflateBack(
             {
                 last = here;
                 loop {
-                    here = crate::src::inftrees::copy_code(
-                        &*state.lencode.wrapping_offset(
-                            (last.val as ::core::ffi::c_uint).wrapping_add(
-                                (hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint)
-                                        << last.bits as ::core::ffi::c_int
-                                            + last.op as ::core::ffi::c_int)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    >> last.bits as ::core::ffi::c_int,
-                            ) as isize,
-                        ),
-                    );
+                    let Some(table_entry) = crate::src::inffast::decode_table_entry(
+                        state,
+                        crate::src::inffast::DecodeTable::LiteralLength,
+                        (last.val as ::core::ffi::c_uint).wrapping_add(
+                            (hold as ::core::ffi::c_uint
+                                & ((1 as ::core::ffi::c_uint)
+                                    << last.bits as ::core::ffi::c_int
+                                        + last.op as ::core::ffi::c_int)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint))
+                                >> last.bits as ::core::ffi::c_int,
+                        ) as usize,
+                    ) else {
+                        ret = crate::zlib_h::Z_STREAM_ERROR;
+                        break '_inf_leave;
+                    };
+                    here = table_entry;
                     if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                         as ::core::ffi::c_uint
                         <= bits
@@ -870,14 +881,18 @@ pub unsafe fn inflateBack(
                     bits = bits.wrapping_sub(state.extra);
                 }
                 loop {
-                    here = crate::src::inftrees::copy_code(
-                        &*state.distcode.wrapping_offset(
-                            (hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << state.distbits)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint))
-                                as isize,
-                        ),
-                    );
+                    let Some(table_entry) = crate::src::inffast::decode_table_entry(
+                        state,
+                        crate::src::inffast::DecodeTable::Distance,
+                        (hold as ::core::ffi::c_uint
+                            & ((1 as ::core::ffi::c_uint) << state.distbits)
+                                .wrapping_sub(1 as ::core::ffi::c_uint))
+                            as usize,
+                    ) else {
+                        ret = crate::zlib_h::Z_STREAM_ERROR;
+                        break '_inf_leave;
+                    };
+                    here = table_entry;
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
                     }
@@ -900,18 +915,22 @@ pub unsafe fn inflateBack(
                 {
                     last = here;
                     loop {
-                        here = crate::src::inftrees::copy_code(
-                            &*state.distcode.wrapping_offset(
-                                (last.val as ::core::ffi::c_uint).wrapping_add(
-                                    (hold as ::core::ffi::c_uint
-                                        & ((1 as ::core::ffi::c_uint)
-                                            << last.bits as ::core::ffi::c_int
-                                                + last.op as ::core::ffi::c_int)
-                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                        >> last.bits as ::core::ffi::c_int,
-                                ) as isize,
-                            ),
-                        );
+                        let Some(table_entry) = crate::src::inffast::decode_table_entry(
+                            state,
+                            crate::src::inffast::DecodeTable::Distance,
+                            (last.val as ::core::ffi::c_uint).wrapping_add(
+                                (hold as ::core::ffi::c_uint
+                                    & ((1 as ::core::ffi::c_uint)
+                                        << last.bits as ::core::ffi::c_int
+                                            + last.op as ::core::ffi::c_int)
+                                        .wrapping_sub(1 as ::core::ffi::c_uint))
+                                    >> last.bits as ::core::ffi::c_int,
+                            ) as usize,
+                        ) else {
+                            ret = crate::zlib_h::Z_STREAM_ERROR;
+                            break '_inf_leave;
+                        };
+                        here = table_entry;
                         if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                             as ::core::ffi::c_uint
                             <= bits

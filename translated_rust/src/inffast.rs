@@ -153,7 +153,7 @@ fn copy_aliasing_window_history(
     remaining == 0 || copy_output_match(output, output_index, distance, remaining)
 }
 
-enum DecodeTable {
+pub(crate) enum DecodeTable {
     LiteralLength,
     Distance,
 }
@@ -163,7 +163,7 @@ enum DecodeTable {
 /// Fixed tables have their own immutable storage; dynamic tables always live
 /// in the state's code arena.  Keeping that distinction here avoids raw table
 /// entry dereferences in the fast decoder.
-fn decode_table(
+pub(crate) fn decode_table(
     state: &crate::src::inflate::inflate_state,
     kind: DecodeTable,
 ) -> Option<&[crate::src::inftrees::code]> {
@@ -182,6 +182,22 @@ fn decode_table(
         return None;
     }
     codes.get(byte_offset / code_size..)
+}
+
+/// Copy one validated decode-table entry.
+///
+/// Both ordinary inflate and inflateBack retain raw table selectors in their
+/// ABI-compatible state.  This is the shared checked access point: fixed
+/// tables use their immutable backing storage and dynamic tables are bounded
+/// by the state-owned code arena.
+pub(crate) fn decode_table_entry(
+    state: &crate::src::inflate::inflate_state,
+    kind: DecodeTable,
+    index: usize,
+) -> Option<crate::src::inftrees::code> {
+    decode_table(state, kind)
+        .and_then(|table| table.get(index))
+        .map(crate::src::inftrees::copy_code)
 }
 
 pub unsafe fn inflate_fast(
