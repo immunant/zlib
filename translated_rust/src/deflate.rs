@@ -383,29 +383,6 @@ fn read_buf_bytes(
     read_buf_checksum(checksum, wrap, output)
 }
 
-unsafe extern "C" fn read_buf(
-    mut strm: crate::zlib_h::z_streamp,
-    mut buf: *mut crate::stdlib::Bytef,
-    mut size: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
-    let stream = &mut *strm;
-    let mut len: ::core::ffi::c_uint = stream.avail_in as ::core::ffi::c_uint;
-    if len > size {
-        len = size;
-    }
-    if len == 0 as ::core::ffi::c_uint {
-        return 0 as ::core::ffi::c_uint;
-    }
-    stream.avail_in = stream.avail_in.wrapping_sub(len);
-    let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
-    let next_in = input.as_ptr_range().end.cast_mut();
-    let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
-    stream.adler = read_buf_bytes(input, output, stream.adler, (*stream.state).wrap);
-    stream.next_in = next_in;
-    stream.total_in = stream.total_in.wrapping_add(len as crate::stdlib::uLong);
-    return len;
-}
-
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
@@ -455,13 +432,24 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
             break;
         }
-        n = read_buf(
-            (*s).strm,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize),
-            more,
-        );
+        let state = &mut *s;
+        let stream = &mut *state.strm;
+        n = stream.avail_in.min(more);
+        if n != 0 {
+            stream.avail_in = stream.avail_in.wrapping_sub(n);
+            let input = ::core::slice::from_raw_parts(stream.next_in, n as usize);
+            let next_in = input.as_ptr_range().end.cast_mut();
+            // `window` is allocated with exactly `window_size` bytes in
+            // `deflateInit2_()` and `deflateCopy()`, and this write is bounded
+            // by the `more` capacity calculated above.
+            let window =
+                ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+            let start = state.strstart.wrapping_add(state.lookahead) as usize;
+            let output = &mut window[start..start + n as usize];
+            stream.adler = read_buf_bytes(input, output, stream.adler, state.wrap);
+            stream.next_in = next_in;
+            stream.total_in = stream.total_in.wrapping_add(n as crate::stdlib::uLong);
+        }
         (*s).lookahead = (*s).lookahead.wrapping_add(n);
         if (*s).lookahead.wrapping_add((*s).insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -2501,12 +2489,18 @@ unsafe extern "C" fn deflate_stored(
             len = len.wrapping_sub(left);
         }
         if len != 0 {
-            read_buf((*s).strm, (*(*s).strm).next_out, len);
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(len as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
-            (*(*s).strm).total_out = (*(*s).strm)
-                .total_out
-                .wrapping_add(len as crate::stdlib::uLong);
+            let wrap = (*s).wrap;
+            let stream = &mut *(*s).strm;
+            stream.avail_in = stream.avail_in.wrapping_sub(len);
+            let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
+            let next_in = input.as_ptr_range().end.cast_mut();
+            let output = ::core::slice::from_raw_parts_mut(stream.next_out, len as usize);
+            stream.adler = read_buf_bytes(input, output, stream.adler, wrap);
+            stream.next_in = next_in;
+            stream.total_in = stream.total_in.wrapping_add(len as crate::stdlib::uLong);
+            stream.next_out = stream.next_out.offset(len as isize);
+            stream.avail_out = stream.avail_out.wrapping_sub(len);
+            stream.total_out = stream.total_out.wrapping_add(len as crate::stdlib::uLong);
         }
         if last != 0 as ::core::ffi::c_int {
             break;
@@ -2596,7 +2590,21 @@ unsafe extern "C" fn deflate_stored(
         have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
-        read_buf((*s).strm, (*s).window.offset((*s).strstart as isize), have);
+        let state = &mut *s;
+        let wrap = state.wrap;
+        let start = state.strstart as usize;
+        let stream = &mut *state.strm;
+        stream.avail_in = stream.avail_in.wrapping_sub(have);
+        let input = ::core::slice::from_raw_parts(stream.next_in, have as usize);
+        let next_in = input.as_ptr_range().end.cast_mut();
+        // `window` is allocated with exactly `window_size` bytes in
+        // `deflateInit2_()` and `deflateCopy()`, and `have` is capped by the
+        // remaining capacity from `strstart` above.
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        let output = &mut window[start..start + have as usize];
+        stream.adler = read_buf_bytes(input, output, stream.adler, wrap);
+        stream.next_in = next_in;
+        stream.total_in = stream.total_in.wrapping_add(have as crate::stdlib::uLong);
         (*s).strstart = (*s).strstart.wrapping_add(have);
         (*s).insert = (*s)
             .insert
