@@ -1203,19 +1203,18 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     };
     deflate_used(state, bits)
 }
-pub unsafe extern "C" fn deflatePrime(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_int,
+// The checked operation is reference-based.  The exported ABI adapter below
+// binds the state-owned pending allocation once, leaving the reservation and
+// bit emission decisions here in ordinary implementation code.
+fn deflate_prime_checked(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::stdlib::Bytef],
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     if !deflate_prime_can_reserve(state, bits) {
         return crate::zlib_h::Z_BUF_ERROR;
     }
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     deflate_prime(state, pending, bits, value)
 }
 
@@ -1287,7 +1286,14 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflatePrime(strm, bits, value)
+    let Some((_strm, state)) = deflateStateCheck(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // SAFETY: `deflateStateCheck()` established this live deflater. Its
+    // pending allocation has exactly `pending_buf_size` bytes.
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    deflate_prime_checked(state, pending, bits, value)
 }
 pub unsafe extern "C" fn deflateParams(
     mut strm: crate::zlib_h::z_streamp,
