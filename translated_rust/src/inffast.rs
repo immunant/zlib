@@ -59,7 +59,6 @@ pub unsafe fn inflate_fast(
     let mut wsize: ::core::ffi::c_uint = 0;
     let mut whave: ::core::ffi::c_uint = 0;
     let mut wnext: ::core::ffi::c_uint = 0;
-    let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut lcode: *const crate::src::inftrees::code =
@@ -73,7 +72,6 @@ pub unsafe fn inflate_fast(
     let mut op: ::core::ffi::c_uint = 0;
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     in_0 = crate::input_pointer!((*strm).next_in) as *mut ::core::ffi::c_uchar;
     last = in_0.offset((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
     out = crate::output_pointer!((*strm).next_out) as *mut ::core::ffi::c_uchar;
@@ -82,7 +80,6 @@ pub unsafe fn inflate_fast(
     wsize = (*state).wsize;
     whave = (*state).whave;
     wnext = (*state).wnext;
-    window = (*state).window;
     hold = (*state).hold;
     bits = (*state).bits;
     lcode = (*state).lencode;
@@ -183,146 +180,30 @@ pub unsafe fn inflate_fast(
                                     break 's_627;
                                 }
                             }
-                            from = window;
-                            if wnext == 0 as ::core::ffi::c_uint {
-                                from = from.offset(wsize.wrapping_sub(op) as isize);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh8 = from;
-                                        from = from.offset(1);
-                                        let c2rust_fresh9 = out;
-                                        out = out.offset(1);
-                                        *c2rust_fresh9 = *c2rust_fresh8;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    from = out.offset(-(dist as isize));
-                                }
-                            } else if wnext < op {
-                                from = from
-                                    .offset(wsize.wrapping_add(wnext).wrapping_sub(op) as isize);
-                                op = op.wrapping_sub(wnext);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh10 = from;
-                                        from = from.offset(1);
-                                        let c2rust_fresh11 = out;
-                                        out = out.offset(1);
-                                        *c2rust_fresh11 = *c2rust_fresh10;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    from = window;
-                                    if wnext < len {
-                                        op = wnext;
-                                        len = len.wrapping_sub(op);
-                                        loop {
-                                            let c2rust_fresh12 = from;
-                                            from = from.offset(1);
-                                            let c2rust_fresh13 = out;
-                                            out = out.offset(1);
-                                            *c2rust_fresh13 = *c2rust_fresh12;
-                                            op = op.wrapping_sub(1);
-                                            if op == 0 {
-                                                break;
-                                            }
-                                        }
-                                        from = out.offset(-(dist as isize));
-                                    }
-                                }
-                            } else {
-                                from = from.offset(wnext.wrapping_sub(op) as isize);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh14 = from;
-                                        from = from.offset(1);
-                                        let c2rust_fresh15 = out;
-                                        out = out.offset(1);
-                                        *c2rust_fresh15 = *c2rust_fresh14;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    from = out.offset(-(dist as isize));
-                                }
-                            }
-                            while len > 2 as ::core::ffi::c_uint {
-                                let c2rust_fresh16 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh17 = out;
+                            let window = (*state)
+                                .window
+                                .as_ref()
+                                .expect("a referenced history has a window");
+                            let mut history = op;
+                            while len != 0 {
+                                let byte = if history != 0 {
+                                    let index = (wnext as usize + wsize as usize - history as usize)
+                                        % wsize as usize;
+                                    history = history.wrapping_sub(1);
+                                    window[index]
+                                } else {
+                                    *out.offset(-(dist as isize))
+                                };
+                                *out = byte;
                                 out = out.offset(1);
-                                *c2rust_fresh17 = *c2rust_fresh16;
-                                let c2rust_fresh18 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh19 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh19 = *c2rust_fresh18;
-                                let c2rust_fresh20 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh21 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh21 = *c2rust_fresh20;
-                                len = len.wrapping_sub(3 as ::core::ffi::c_uint);
-                            }
-                            if len != 0 {
-                                let c2rust_fresh22 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh23 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh23 = *c2rust_fresh22;
-                                if len > 1 as ::core::ffi::c_uint {
-                                    let c2rust_fresh24 = from;
-                                    from = from.offset(1);
-                                    let c2rust_fresh25 = out;
-                                    out = out.offset(1);
-                                    *c2rust_fresh25 = *c2rust_fresh24;
-                                }
+                                len = len.wrapping_sub(1);
                             }
                             break 's_92;
                         } else {
-                            from = out.offset(-(dist as isize));
-                            loop {
-                                let c2rust_fresh26 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh27 = out;
+                            while len != 0 {
+                                *out = *out.offset(-(dist as isize));
                                 out = out.offset(1);
-                                *c2rust_fresh27 = *c2rust_fresh26;
-                                let c2rust_fresh28 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh29 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh29 = *c2rust_fresh28;
-                                let c2rust_fresh30 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh31 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh31 = *c2rust_fresh30;
-                                len = len.wrapping_sub(3 as ::core::ffi::c_uint);
-                                if len <= 2 as ::core::ffi::c_uint {
-                                    break;
-                                }
-                            }
-                            if len != 0 {
-                                let c2rust_fresh32 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh33 = out;
-                                out = out.offset(1);
-                                *c2rust_fresh33 = *c2rust_fresh32;
-                                if len > 1 as ::core::ffi::c_uint {
-                                    let c2rust_fresh34 = from;
-                                    from = from.offset(1);
-                                    let c2rust_fresh35 = out;
-                                    out = out.offset(1);
-                                    *c2rust_fresh35 = *c2rust_fresh34;
-                                }
+                                len = len.wrapping_sub(1);
                             }
                             break 's_92;
                         }
