@@ -4467,21 +4467,6 @@ fn gen_codes_state(
     true
 }
 
-unsafe extern "C" fn gen_codes(
-    tree: *mut crate::src::deflate::ct_data,
-    tree_len: usize,
-    max_code: ::core::ffi::c_int,
-    bl_count: *const crate::zutil_h::ushf,
-) {
-    if tree.is_null() || bl_count.is_null() {
-        return;
-    }
-    let tree = ::core::slice::from_raw_parts_mut(tree, tree_len);
-    let bl_count =
-        &*(bl_count as *const [crate::zutil_h::ush; crate::src::deflate::MAX_BITS as usize + 1]);
-    let _ = gen_codes_state(tree, max_code, bl_count);
-}
-
 fn tr_static_init() {}
 
 fn reset_block(s: &mut crate::src::deflate::deflate_state) {
@@ -4612,20 +4597,6 @@ fn pqdownheap_state(
     };
     *slot = v;
     true
-}
-
-unsafe extern "C" fn pqdownheap(
-    s: *mut crate::src::deflate::deflate_state,
-    tree: *const crate::src::deflate::ct_data,
-    tree_len: usize,
-    k: ::core::ffi::c_int,
-) {
-    if s.is_null() || tree.is_null() {
-        return;
-    }
-    let tree = ::core::slice::from_raw_parts(tree, tree_len);
-    let heap_len = (*s).heap_len;
-    let _ = pqdownheap_state(&mut (*s).heap, heap_len, &(*s).depth, tree, k);
 }
 
 fn gen_bitlen_state(
@@ -4765,40 +4736,6 @@ fn gen_bitlen_state(
         bits -= 1;
     }
     true
-}
-
-unsafe extern "C" fn gen_bitlen(
-    s: *mut crate::src::deflate::deflate_state,
-    desc: *mut crate::src::deflate::tree_desc,
-) {
-    if s.is_null() || desc.is_null() {
-        return;
-    }
-    let tree = (*desc).dyn_tree;
-    let max_code = (*desc).max_code;
-    let Some(stat_desc) = (*desc).stat_desc else {
-        return;
-    };
-    let Ok(elems) = usize::try_from(stat_desc.elems) else {
-        return;
-    };
-    let Some(tree_len) = elems.checked_mul(2).and_then(|len| len.checked_add(1)) else {
-        return;
-    };
-    if tree.is_null() {
-        return;
-    }
-    let tree = ::core::slice::from_raw_parts_mut(tree, tree_len);
-    let _ = gen_bitlen_state(
-        tree,
-        max_code,
-        stat_desc,
-        &(*s).heap,
-        (*s).heap_max,
-        &mut (*s).bl_count,
-        &mut (*s).opt_len,
-        &mut (*s).static_len,
-    );
 }
 
 fn build_tree_state(
