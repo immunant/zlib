@@ -775,6 +775,27 @@ pub(crate) fn gz_read_close_cleanup(
     }
 }
 
+// Write-close cleanup has the same separation: state inspection chooses the
+// cleanup shape, while the matching deflater teardown and allocation release
+// stay at the raw boundary in `gzclose_w()`.
+pub(crate) enum GzWriteCloseCleanup {
+    None,
+    Input,
+    DeflaterAndBuffers,
+}
+
+pub(crate) fn gz_write_close_cleanup(
+    state: &crate::gzguts_h::gz_state,
+) -> GzWriteCloseCleanup {
+    if state.size == 0 {
+        GzWriteCloseCleanup::None
+    } else if state.direct != 0 {
+        GzWriteCloseCleanup::Input
+    } else {
+        GzWriteCloseCleanup::DeflaterAndBuffers
+    }
+}
+
 pub(crate) fn gz_zero_progress(
     state: &mut crate::gzguts_h::gz_state,
     offered: ::core::ffi::c_uint,

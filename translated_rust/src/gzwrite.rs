@@ -619,16 +619,21 @@ pub fn gzclose_w(
     }
     ret = gz_close_write_prepare(state);
     // SAFETY: this close path owns the initialized gzip allocations and the
-    // descriptor. The dispatcher bound `file` to this state, and no pointer
-    // escapes after it is released.
+    // descriptor. The cleanup plan is derived from that bound state, and no
+    // pointer escapes after its selected allocation is released.
     unsafe {
-        if state.size != 0 {
-            if state.direct == 0 {
+        let cleanup = crate::src::gzlib::gz_write_close_cleanup(state);
+        match cleanup {
+            crate::src::gzlib::GzWriteCloseCleanup::DeflaterAndBuffers => {
                 crate::src::deflate::deflateEnd(
                     &mut state.strm as *mut crate::zlib_h::z_stream_s,
                 );
                 crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
             }
+            crate::src::gzlib::GzWriteCloseCleanup::None
+            | crate::src::gzlib::GzWriteCloseCleanup::Input => {}
+        }
+        if !matches!(cleanup, crate::src::gzlib::GzWriteCloseCleanup::None) {
             crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
         }
     }
