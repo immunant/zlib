@@ -24,7 +24,7 @@ pub const DISTS: crate::src::inftrees::codetype = 2;
 
 pub mod inffixed_h {
 
-    pub static mut lenfix: [crate::src::inftrees::code; 512] = [
+    pub static lenfix: [crate::src::inftrees::code; 512] = [
         crate::src::inftrees::code {
             op: 96 as ::core::ffi::c_uchar,
             bits: 7 as ::core::ffi::c_uchar,
@@ -2587,7 +2587,7 @@ pub mod inffixed_h {
         },
     ];
 
-    pub static mut distfix: [crate::src::inftrees::code; 32] = [
+    pub static distfix: [crate::src::inftrees::code; 32] = [
         crate::src::inftrees::code {
             op: 16 as ::core::ffi::c_uchar,
             bits: 5 as ::core::ffi::c_uchar,
@@ -2807,11 +2807,8 @@ pub use crate::zlib_h::z_streamp;
 pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
 #[no_mangle]
 
-pub static mut inflate_copyright: [::core::ffi::c_char; 49] = unsafe {
-    ::core::mem::transmute::<[u8; 49], [::core::ffi::c_char; 49]>(
-        *b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
-    )
-};
+pub static inflate_copyright: [::core::ffi::c_char; 49] =
+    crate::c_char_array(b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0");
 pub unsafe extern "C" fn inflate_table(
     mut type_0: crate::src::inftrees::codetype,
     mut lens: *mut ::core::ffi::c_ushort,
@@ -2846,7 +2843,7 @@ pub unsafe extern "C" fn inflate_table(
     let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
     let mut offs: [::core::ffi::c_ushort; 16] = [0; 16];
-    static mut lbase: [::core::ffi::c_ushort; 31] = [
+    static lbase: [::core::ffi::c_ushort; 31] = [
         3 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         4 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         5 as ::core::ffi::c_int as ::core::ffi::c_ushort,
@@ -2879,7 +2876,7 @@ pub unsafe extern "C" fn inflate_table(
         0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
     ];
-    static mut lext: [::core::ffi::c_ushort; 31] = [
+    static lext: [::core::ffi::c_ushort; 31] = [
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
@@ -2912,7 +2909,7 @@ pub unsafe extern "C" fn inflate_table(
         68 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         193 as ::core::ffi::c_int as ::core::ffi::c_ushort,
     ];
-    static mut dbase: [::core::ffi::c_ushort; 32] = [
+    static dbase: [::core::ffi::c_ushort; 32] = [
         1 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         2 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         3 as ::core::ffi::c_int as ::core::ffi::c_ushort,
@@ -2946,7 +2943,7 @@ pub unsafe extern "C" fn inflate_table(
         0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
     ];
-    static mut dext: [::core::ffi::c_ushort; 32] = [
+    static dext: [::core::ffi::c_ushort; 32] = [
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
