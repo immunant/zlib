@@ -266,6 +266,9 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
+/// Validate a raw stream only for callers that do not already hold the
+/// borrowed stream and state.  The regular inflate and header paths validate
+/// their existing borrows directly, avoiding this raw-pointer dispatch.
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
@@ -811,13 +814,17 @@ pub unsafe fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if inflateStateCheck(strm.0) != 0 {
+    if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if input.len() != (*strm).avail_in as usize || output.len() != (*strm).avail_out as usize {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let mut state = InflateState(&mut *((*strm).state as *mut crate::src::inflate::inflate_state));
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    if !inflate_state_valid(&*strm, state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let mut state = InflateState(state);
     // The stream state retains this caller-owned header for the duration of
     // inflate().  Borrow it once, so header field access below stays within
     // the safe decoder state machine rather than repeatedly dereferencing the
@@ -2694,13 +2701,12 @@ pub unsafe fn inflateGetHeader(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // Validate the stream before borrowing its state through the ABI link.
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    if !inflate_state_valid(strm, state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let ret = inflate_get_header_impl(state.wrap);
     if ret != crate::zlib_h::Z_OK {
         return ret;
