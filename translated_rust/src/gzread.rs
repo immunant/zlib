@@ -1383,6 +1383,22 @@ fn gzread(
     return got;
 }
 
+// A complete read request runs over the pointer-free read owner and its
+// pointer-free action dispatcher.  The ABI adapters construct and republish
+// those views around this transaction; keeping the loop here lets byte and
+// item reads share it without one adapter calling another.
+fn gzread_with_dispatch(
+    read: &mut GzReadState,
+    output: &mut [u8],
+    dispatch: &mut GzReadDispatch<'_>,
+) -> ::core::ffi::c_uint {
+    let len = gzread(read, output, |action, read, destination| {
+        dispatch.dispatch(action, read, destination)
+    });
+    dispatch.project_from_read(read);
+    len as ::core::ffi::c_uint
+}
+
 // The ABI-shaped state is projected exactly once for a byte-read request.
 // Keep that projection under this adapter; `gzread()` itself is the
 // pointer-free owner loop used after the projection has completed.
@@ -1442,11 +1458,7 @@ unsafe fn gzread_from_state(
             total_in: &mut state.strm.total_in,
             total_out: &mut state.strm.total_out,
         };
-        let len = gzread(&mut read, output, |action, read, destination| {
-            dispatch.dispatch(action, read, destination)
-        });
-        dispatch.project_from_read(&mut read);
-        len as ::core::ffi::c_uint
+        gzread_with_dispatch(&mut read, output, &mut dispatch)
     };
     match state
         .buffers
@@ -1530,11 +1542,86 @@ unsafe fn gzfread(
         return 0 as crate::stdlib::z_size_t;
     }
     drop(error);
-    return if len != 0 {
-        gzread_from_state(state, output).max(0) as crate::stdlib::z_size_t / size
-    } else {
-        0 as crate::stdlib::z_size_t
+    if len == 0 {
+        return 0;
+    }
+
+    // Like gzread_from_state(), project the ABI handle into the pointer-free
+    // read owner only for this request.  Do not call that ABI adapter here:
+    // item reads share the safe transaction directly and retain their own
+    // item-count result policy below.
+    let mut read = GzReadState {
+        buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+        have: state.x.have,
+        pos: state.x.pos,
+        skip: state.skip,
+        how: state.how,
+        eof: state.eof,
+        past: state.past,
+        err: state.err,
+        avail_in: state.strm.avail_in,
     };
+    let read_len = {
+        let mut dispatch = GzReadDispatch {
+            buffers: &mut state.buffers,
+            have: &mut state.x.have,
+            pos: &mut state.x.pos,
+            skip: &mut state.skip,
+            how: &mut state.how,
+            eof: &mut state.eof,
+            past: &mut state.past,
+            err: &mut state.err,
+            want: state.want,
+            direct: &mut state.direct,
+            junk: &mut state.junk,
+            again: &mut state.again,
+            message: &mut state.msg,
+            fd: state.fd.as_ref().expect("gzip state has an open file"),
+            path: state.path.as_deref(),
+            avail_in: &mut state.strm.avail_in,
+            avail_out: &mut state.strm.avail_out,
+            total_in: &mut state.strm.total_in,
+            total_out: &mut state.strm.total_out,
+        };
+        gzread_with_dispatch(&mut read, output, &mut dispatch)
+    };
+    match state
+        .buffers
+        .output_cursor()
+        .map(|cursor| (cursor.start(), cursor.have()))
+    {
+        Some((start, have)) if have == state.x.have => {
+            let Some(buffer) = state.buffers.output.as_deref_mut() else {
+                return 0;
+            };
+            let Some(buffer) = buffer.get_mut(start..) else {
+                return 0;
+            };
+            state.x.next = buffer.as_mut_ptr();
+        }
+        None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
+        _ => return 0,
+    }
+    if read_len == 0 {
+        if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
+            return 0;
+        }
+        if state.again != 0 {
+            let errno_value = errno::errno().0;
+            let message = errno::Errno(errno_value).to_string();
+            crate::src::gzlib::gz_set_error(
+                &mut state.msg,
+                &mut state.err,
+                &mut state.x.have,
+                state.again,
+                state.path.as_deref(),
+                crate::zlib_h::Z_ERRNO,
+                Some(message.as_bytes()),
+            );
+            return 0;
+        }
+    }
+    read_len as crate::stdlib::z_size_t / size
 }
 #[export_name = "gzfread"]
 
