@@ -849,11 +849,11 @@ pub unsafe extern "C" fn gz_error(
     if err == crate::zlib_h::Z_MEM_ERROR {
         return;
     }
-    let msg_len = crate::stdlib::strlen(msg);
+    let msg_bytes = ::core::ffi::CStr::from_ptr(msg).to_bytes();
     let Some(len) = state
         .path
         .as_ref()
-        .and_then(|path| path.len().checked_add(msg_len))
+        .and_then(|path| path.len().checked_add(msg_bytes.len()))
         .and_then(|len| len.checked_add(3))
     else {
         state.err = crate::zlib_h::Z_MEM_ERROR;
@@ -866,7 +866,7 @@ pub unsafe extern "C" fn gz_error(
     }
     text.extend_from_slice(state.path.as_deref().unwrap());
     text.extend_from_slice(b": ");
-    text.extend_from_slice(::core::slice::from_raw_parts(msg.cast::<u8>(), msg_len));
+    text.extend_from_slice(msg_bytes);
     text.push(0);
     state.msg = Some(text.into_boxed_slice());
 }
