@@ -1359,6 +1359,30 @@ fn deflate_bound_for_state(
     }
 }
 
+fn deflate_bound_cstring_len(value: &::core::ffi::CStr) -> crate::stdlib::z_size_t {
+    value.to_bytes_with_nul().len() as crate::stdlib::z_size_t
+}
+
+fn deflate_bound_gzip_header_len(
+    extra_len: Option<crate::stdlib::uInt>,
+    name_len: crate::stdlib::z_size_t,
+    comment_len: crate::stdlib::z_size_t,
+    has_hcrc: bool,
+) -> crate::stdlib::z_size_t {
+    let mut wraplen = 18 as crate::stdlib::z_size_t;
+    if let Some(extra_len) = extra_len {
+        wraplen = wraplen.wrapping_add(
+            (2 as crate::stdlib::uInt).wrapping_add(extra_len) as crate::stdlib::z_size_t
+        );
+    }
+    wraplen = wraplen.wrapping_add(name_len);
+    wraplen = wraplen.wrapping_add(comment_len);
+    if has_hcrc {
+        wraplen = wraplen.wrapping_add(2 as crate::stdlib::z_size_t);
+    }
+    wraplen
+}
+
 fn deflate_zlib_header(
     w_bits: crate::stdlib::uInt,
     strategy: ::core::ffi::c_int,
@@ -1385,6 +1409,25 @@ fn deflate_zlib_header(
     header.wrapping_add(
         (31 as crate::stdlib::uInt).wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
     )
+}
+
+fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    flush * 2 as ::core::ffi::c_int
+        - if flush > crate::zlib_h::Z_FINISH {
+            9 as ::core::ffi::c_int
+        } else {
+            0 as ::core::ffi::c_int
+        }
+}
+
+fn deflate_repeated_flush_would_block(
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+    old_flush: ::core::ffi::c_int,
+) -> bool {
+    avail_in == 0 as crate::stdlib::uInt
+        && deflate_flush_rank(flush) <= deflate_flush_rank(old_flush)
+        && flush != crate::zlib_h::Z_FINISH
 }
 
 #[export_name = "deflateBound_z"]
@@ -1426,39 +1469,27 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
         2 => {
             wraplen = 18 as crate::stdlib::z_size_t;
             if !(*s).gzhead.is_null() {
-                let mut str: *mut crate::stdlib::Bytef =
-                    ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-                if !(*(*s).gzhead).extra.is_null() {
-                    wraplen = wraplen.wrapping_add(
-                        (2 as crate::stdlib::uInt).wrapping_add((*(*s).gzhead).extra_len)
-                            as crate::stdlib::z_size_t,
-                    );
-                }
-                str = (*(*s).gzhead).name;
-                if !str.is_null() {
-                    loop {
-                        wraplen = wraplen.wrapping_add(1);
-                        let c2rust_fresh63 = str;
-                        str = str.offset(1);
-                        if !(*c2rust_fresh63 != 0) {
-                            break;
-                        }
-                    }
-                }
-                str = (*(*s).gzhead).comment;
-                if !str.is_null() {
-                    loop {
-                        wraplen = wraplen.wrapping_add(1);
-                        let c2rust_fresh64 = str;
-                        str = str.offset(1);
-                        if !(*c2rust_fresh64 != 0) {
-                            break;
-                        }
-                    }
-                }
-                if (*(*s).gzhead).hcrc != 0 {
-                    wraplen = wraplen.wrapping_add(2 as crate::stdlib::z_size_t);
-                }
+                let head = &*(*s).gzhead;
+                let extra_len = if head.extra.is_null() {
+                    None
+                } else {
+                    Some(head.extra_len)
+                };
+                let name_len = if head.name.is_null() {
+                    0 as crate::stdlib::z_size_t
+                } else {
+                    let name = ::core::ffi::CStr::from_ptr(head.name as *const ::core::ffi::c_char);
+                    deflate_bound_cstring_len(name)
+                };
+                let comment_len = if head.comment.is_null() {
+                    0 as crate::stdlib::z_size_t
+                } else {
+                    let comment =
+                        ::core::ffi::CStr::from_ptr(head.comment as *const ::core::ffi::c_char);
+                    deflate_bound_cstring_len(comment)
+                };
+                wraplen =
+                    deflate_bound_gzip_header_len(extra_len, name_len, comment_len, head.hcrc != 0);
             }
         }
         _ => {
@@ -1582,21 +1613,7 @@ pub unsafe extern "C" fn deflate_ffi(
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
         }
-    } else if (*strm).avail_in == 0 as crate::stdlib::uInt
-        && flush * 2 as ::core::ffi::c_int
-            - (if flush > 4 as ::core::ffi::c_int {
-                9 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            })
-            <= old_flush * 2 as ::core::ffi::c_int
-                - (if old_flush > 4 as ::core::ffi::c_int {
-                    9 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-        && flush != crate::zlib_h::Z_FINISH
-    {
+    } else if deflate_repeated_flush_would_block((*strm).avail_in, flush, old_flush) {
         (*strm).msg = crate::src::zutil::zError(crate::zlib_h::Z_BUF_ERROR).as_ptr()
             as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
