@@ -2754,47 +2754,23 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int 
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let status = state.status;
-    if !state.pending_buf.is_null() {
-        unsafe {
-            Some(stream.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                stream.opaque,
-                state.pending_buf as crate::stdlib::voidpf,
-            );
+    // The C allocator releases these in this exact order.  Keep one explicit
+    // ABI-callback boundary for the loop; the individual allocations remain
+    // raw only until deflate storage becomes owned Rust data.
+    let allocations = [
+        state.pending_buf as crate::stdlib::voidpf,
+        state.head as crate::stdlib::voidpf,
+        state.prev as crate::stdlib::voidpf,
+        state.window as crate::stdlib::voidpf,
+        stream.state as crate::stdlib::voidpf,
+    ];
+    for allocation in allocations {
+        if !allocation.is_null() {
+            unsafe {
+                Some(stream.zfree.expect("non-null function pointer"))
+                    .expect("non-null function pointer")(stream.opaque, allocation);
+            }
         }
-    }
-    if !state.head.is_null() {
-        unsafe {
-            Some(stream.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                stream.opaque,
-                state.head as crate::stdlib::voidpf,
-            );
-        }
-    }
-    if !state.prev.is_null() {
-        unsafe {
-            Some(stream.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                stream.opaque,
-                state.prev as crate::stdlib::voidpf,
-            );
-        }
-    }
-    if !state.window.is_null() {
-        unsafe {
-            Some(stream.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                stream.opaque,
-                state.window as crate::stdlib::voidpf,
-            );
-        }
-    }
-    unsafe {
-        Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            stream.opaque,
-            stream.state as crate::stdlib::voidpf,
-        );
     }
     stream.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
