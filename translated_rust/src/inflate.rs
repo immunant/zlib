@@ -3300,9 +3300,15 @@ fn initialize_inflate_copy(
     crate::zlib_h::Z_OK
 }
 
-pub fn inflateCopy(
+/// Copy an already validated source state into a destination stream.
+///
+/// The `inflateCopy` ABI wrapper owns conversion of the opaque source-state
+/// handle.  Keeping this core typed prevents the copy validation and setup
+/// from needing to follow an ABI raw pointer itself.
+fn inflate_copy(
     dest: Option<&mut crate::zlib_h::z_stream>,
     source: Option<&crate::zlib_h::z_stream>,
+    source_state: Option<&crate::src::inflate::inflate_state>,
 ) -> ::core::ffi::c_int {
     let Some(source_ref) = source else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3310,12 +3316,7 @@ pub fn inflateCopy(
     if !inflate_stream_has_allocators(source_ref) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // The allocator pair above makes this the one ABI state-handle conversion
-    // in the copy implementation. Keep source validation ahead of any
-    // destination mutation.
-    let Some(state_ref) =
-        (unsafe { (source_ref.state as *const crate::src::inflate::inflate_state).as_ref() })
-    else {
+    let Some(state_ref) = source_state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if !inflate_state_valid(source_ref, state_ref) {
@@ -3345,7 +3346,13 @@ pub unsafe extern "C" fn inflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     let source = source.as_ref();
     let dest = dest.as_mut();
-    inflateCopy(dest, source)
+    let source_state = source.and_then(|source| {
+        if !inflate_stream_has_allocators(source) {
+            return None;
+        }
+        (source.state as *const crate::src::inflate::inflate_state).as_ref()
+    });
+    inflate_copy(dest, source, source_state)
 }
 fn inflate_undermine(
     state: Option<&mut crate::src::inflate::inflate_state>,
