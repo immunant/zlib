@@ -2534,7 +2534,8 @@ pub unsafe extern "C" fn inflate_ffi(
 ) -> ::core::ffi::c_int {
     inflate(strm, flush)
 }
-pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+#[export_name = "inflateEnd"]
+pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
@@ -2552,12 +2553,7 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         (*strm).state as crate::stdlib::voidpf,
     );
     (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateEnd"]
-
-pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    inflateEnd(strm)
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateGetDictionary"]
 pub unsafe extern "C" fn inflateGetDictionary_ffi(
@@ -4123,7 +4119,7 @@ mod tests {
         assert_eq!(inflate_sync_point(state), 0);
 
         assert_eq!(
-            unsafe { super::inflateEnd(&mut stream) },
+            unsafe { super::inflateEnd_ffi(&mut stream) },
             crate::zlib_h::Z_OK
         );
     }

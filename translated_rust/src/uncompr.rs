@@ -3,7 +3,7 @@ pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
-pub use crate::src::inflate::inflateEnd;
+pub use crate::src::inflate::inflateEnd_ffi as inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     );
     *sourceLen = outcome.source_len;
     *destLen = outcome.dest_len;
-    crate::src::inflate::inflateEnd(&raw mut stream as *mut crate::zlib_h::z_stream_s);
+    crate::src::inflate::inflateEnd_ffi(&raw mut stream as *mut crate::zlib_h::z_stream_s);
     outcome.status
 }
 

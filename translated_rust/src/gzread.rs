@@ -19,7 +19,7 @@ pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
-pub use crate::src::inflate::inflateEnd;
+pub use crate::src::inflate::inflateEnd_ffi as inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::src::inflate::inflateReset;
 
@@ -3971,7 +3971,7 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if (*state).size != 0 {
-        crate::src::inflate::inflateEnd(
+        crate::src::inflate::inflateEnd_ffi(
             &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
         crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
