@@ -3320,156 +3320,259 @@ fn detect_data_type_impl(tree: &[crate::src::deflate::ct_data_s; 573]) -> ::core
     return crate::zlib_h::Z_BINARY;
 }
 
+enum BlockPlan {
+    Stored,
+    Static,
+    Dynamic { max_blindex: ::core::ffi::c_int },
+}
+
+fn prepare_block(
+    data_type: Option<&mut ::core::ffi::c_int>,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &mut [crate::src::deflate::ct_data_s; 39],
+    l_desc: &mut crate::src::deflate::tree_desc_s,
+    d_desc: &mut crate::src::deflate::tree_desc_s,
+    bl_desc: &mut crate::src::deflate::tree_desc_s,
+    heap: &mut [::core::ffi::c_int; crate::src::deflate::HEAP_SIZE as usize],
+    heap_len: &mut ::core::ffi::c_int,
+    heap_max: &mut ::core::ffi::c_int,
+    depth: &mut [crate::zutil_h::uch; crate::src::deflate::HEAP_SIZE as usize],
+    bl_count: &mut [crate::zutil_h::ush; 16],
+    opt_len: &mut crate::zutil_h::ulg,
+    static_len: &mut crate::zutil_h::ulg,
+    stored_len: crate::zutil_h::ulg,
+    has_input: bool,
+) -> BlockPlan {
+    let (opt_lenb, static_lenb, max_blindex) = if level > 0 {
+        if let Some(data_type) = data_type {
+            if *data_type == crate::zlib_h::Z_UNKNOWN {
+                *data_type = detect_data_type_impl(dyn_ltree);
+            }
+        }
+        build_tree(
+            dyn_ltree, l_desc, heap, heap_len, heap_max, depth, bl_count, opt_len, static_len,
+        );
+        build_tree(
+            dyn_dtree, d_desc, heap, heap_len, heap_max, depth, bl_count, opt_len, static_len,
+        );
+        let max_blindex = build_bl_tree(
+            dyn_ltree,
+            l_desc.max_code,
+            dyn_dtree,
+            d_desc.max_code,
+            bl_tree,
+            bl_desc,
+            heap,
+            heap_len,
+            heap_max,
+            depth,
+            bl_count,
+            opt_len,
+            static_len,
+        );
+        let mut opt_lenb = opt_len
+            .wrapping_add(3 as crate::zutil_h::ulg)
+            .wrapping_add(7 as crate::zutil_h::ulg)
+            >> 3;
+        let static_lenb = static_len
+            .wrapping_add(3 as crate::zutil_h::ulg)
+            .wrapping_add(7 as crate::zutil_h::ulg)
+            >> 3;
+        if static_lenb <= opt_lenb || strategy == crate::zlib_h::Z_FIXED {
+            opt_lenb = static_lenb;
+        }
+        (opt_lenb, static_lenb, max_blindex)
+    } else {
+        let stored_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
+        (stored_lenb, stored_lenb, 0)
+    };
+
+    if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && has_input {
+        BlockPlan::Stored
+    } else if static_lenb == opt_lenb {
+        BlockPlan::Static
+    } else {
+        BlockPlan::Dynamic { max_blindex }
+    }
+}
+
+fn emit_nonstored_block(
+    plan: BlockPlan,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    last: ::core::ffi::c_int,
+    sym_buf_start: usize,
+    sym_next: crate::stdlib::uInt,
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &mut [crate::src::deflate::ct_data_s; 39],
+    l_desc: &crate::src::deflate::tree_desc_s,
+    d_desc: &crate::src::deflate::tree_desc_s,
+) {
+    match plan {
+        BlockPlan::Stored => return,
+        BlockPlan::Static => {
+            write_block_header(pending_buf, pending, bi_buf, bi_valid, 1, last);
+            compress_block(
+                pending_buf,
+                pending,
+                bi_buf,
+                bi_valid,
+                sym_buf_start,
+                sym_next,
+                &static_ltree,
+                &static_dtree,
+            );
+        }
+        BlockPlan::Dynamic { max_blindex } => {
+            write_block_header(pending_buf, pending, bi_buf, bi_valid, 2, last);
+            send_all_trees(
+                dyn_ltree,
+                dyn_dtree,
+                bl_tree,
+                pending_buf,
+                pending,
+                bi_buf,
+                bi_valid,
+                l_desc.max_code + 1,
+                d_desc.max_code + 1,
+                max_blindex + 1,
+            );
+            compress_block(
+                pending_buf,
+                pending,
+                bi_buf,
+                bi_valid,
+                sym_buf_start,
+                sym_next,
+                dyn_ltree,
+                dyn_dtree,
+            );
+        }
+    }
+}
+
+fn finish_block(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    bi_used: &mut ::core::ffi::c_int,
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &mut [crate::src::deflate::ct_data_s; 39],
+    static_len: &mut crate::zutil_h::ulg,
+    opt_len: &mut crate::zutil_h::ulg,
+    matches: &mut crate::stdlib::uInt,
+    sym_next_out: &mut crate::stdlib::uInt,
+    last: ::core::ffi::c_int,
+) {
+    init_block_fields(
+        dyn_ltree,
+        dyn_dtree,
+        bl_tree,
+        static_len,
+        opt_len,
+        matches,
+        sym_next_out,
+    );
+    if last != 0 {
+        bi_windup_bytes(pending_buf, pending, bi_buf, bi_valid, bi_used);
+    }
+}
+
 pub unsafe extern "C" fn _tr_flush_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    let mut opt_lenb: crate::zutil_h::ulg = 0;
-    let mut static_lenb: crate::zutil_h::ulg = 0;
-    let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let state = &mut *s;
-    if state.level > 0 as ::core::ffi::c_int {
-        // The stream is a separate ABI allocation.  Project it once for the
-        // data-type update so the tree construction below stays on the state
-        // and its pointer-free arrays.
-        let strm = &mut *state.strm;
-        if strm.data_type == crate::zlib_h::Z_UNKNOWN {
-            strm.data_type = detect_data_type_impl(&state.dyn_ltree);
-        }
-        build_tree(
-            &mut state.dyn_ltree,
-            &mut state.l_desc,
-            &mut state.heap,
-            &mut state.heap_len,
-            &mut state.heap_max,
-            &mut state.depth,
-            &mut state.bl_count,
-            &mut state.opt_len,
-            &mut state.static_len,
-        );
-        build_tree(
-            &mut state.dyn_dtree,
-            &mut state.d_desc,
-            &mut state.heap,
-            &mut state.heap_len,
-            &mut state.heap_max,
-            &mut state.depth,
-            &mut state.bl_count,
-            &mut state.opt_len,
-            &mut state.static_len,
-        );
-        max_blindex = build_bl_tree(
-            &mut state.dyn_ltree,
-            state.l_desc.max_code,
-            &mut state.dyn_dtree,
-            state.d_desc.max_code,
-            &mut state.bl_tree,
-            &mut state.bl_desc,
-            &mut state.heap,
-            &mut state.heap_len,
-            &mut state.heap_max,
-            &mut state.depth,
-            &mut state.bl_count,
-            &mut state.opt_len,
-            &mut state.static_len,
-        );
-        opt_lenb = state
-            .opt_len
-            .wrapping_add(3 as crate::zutil_h::ulg)
-            .wrapping_add(7 as crate::zutil_h::ulg)
-            >> 3 as ::core::ffi::c_int;
-        static_lenb = state
-            .static_len
-            .wrapping_add(3 as crate::zutil_h::ulg)
-            .wrapping_add(7 as crate::zutil_h::ulg)
-            >> 3 as ::core::ffi::c_int;
-        if static_lenb <= opt_lenb || state.strategy == crate::zlib_h::Z_FIXED {
-            opt_lenb = static_lenb;
-        }
-    } else {
-        static_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
-        opt_lenb = static_lenb;
-    }
-    if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
-        _tr_stored_block(s, buf, stored_len, last);
-    } else if static_lenb == opt_lenb {
-        {
+    let data_type = if state.level > 0 { Some(&mut (*state.strm).data_type) } else { None };
+    let plan = prepare_block(
+        data_type,
+        state.level,
+        state.strategy,
+        &mut state.dyn_ltree,
+        &mut state.dyn_dtree,
+        &mut state.bl_tree,
+        &mut state.l_desc,
+        &mut state.d_desc,
+        &mut state.bl_desc,
+        &mut state.heap,
+        &mut state.heap_len,
+        &mut state.heap_max,
+        &mut state.depth,
+        &mut state.bl_count,
+        &mut state.opt_len,
+        &mut state.static_len,
+        stored_len,
+        !buf.is_null(),
+    );
+    match plan {
+        BlockPlan::Stored => {
+            _tr_stored_block(s, buf, stored_len, last);
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
             );
-            write_block_header(
+            finish_block(
                 pending_buf,
                 &mut state.pending,
                 &mut state.bi_buf,
                 &mut state.bi_valid,
-                1,
+                &mut state.bi_used,
+                &mut state.dyn_ltree,
+                &mut state.dyn_dtree,
+                &mut state.bl_tree,
+                &mut state.static_len,
+                &mut state.opt_len,
+                &mut state.matches,
+                &mut state.sym_next,
                 last,
             );
-            compress_block(
+        }
+        plan => {
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            emit_nonstored_block(
+                plan,
                 pending_buf,
                 &mut state.pending,
                 &mut state.bi_buf,
                 &mut state.bi_valid,
+                last,
                 state.sym_buf_start,
                 state.sym_next,
-                &static_ltree,
-                &static_dtree,
+                &mut state.dyn_ltree,
+                &mut state.dyn_dtree,
+                &mut state.bl_tree,
+                &state.l_desc,
+                &state.d_desc,
+            );
+            finish_block(
+                pending_buf,
+                &mut state.pending,
+                &mut state.bi_buf,
+                &mut state.bi_valid,
+                &mut state.bi_used,
+                &mut state.dyn_ltree,
+                &mut state.dyn_dtree,
+                &mut state.bl_tree,
+                &mut state.static_len,
+                &mut state.opt_len,
+                &mut state.matches,
+                &mut state.sym_next,
+                last,
             );
         }
-    } else {
-        // The pending allocation is exactly `pending_buf_size` bytes.  Keep
-        // one bounded view for the complete dynamic-block sequence: the
-        // header, tree descriptions, and payload all advance `pending` in
-        // order through this same allocation.
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
-        write_block_header(
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-            2,
-            last,
-        );
-        send_all_trees(
-            &state.dyn_ltree,
-            &state.dyn_dtree,
-            &state.bl_tree,
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-            state.l_desc.max_code + 1 as ::core::ffi::c_int,
-            state.d_desc.max_code + 1 as ::core::ffi::c_int,
-            max_blindex + 1 as ::core::ffi::c_int,
-        );
-        compress_block(
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-            state.sym_buf_start,
-            state.sym_next,
-            &state.dyn_ltree,
-            &state.dyn_dtree,
-        );
-    }
-    init_block_fields(
-        &mut state.dyn_ltree,
-        &mut state.dyn_dtree,
-        &mut state.bl_tree,
-        &mut state.static_len,
-        &mut state.opt_len,
-        &mut state.matches,
-        &mut state.sym_next,
-    );
-    if last != 0 {
-        bi_flush_or_windup(s, BitOutputAction::Windup);
     }
 }
 #[export_name = "_tr_flush_block"]
