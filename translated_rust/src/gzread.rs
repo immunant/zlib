@@ -470,13 +470,22 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                     break;
                 }
                 GzDecompInflateStep::DataError => {
-                    let message = if state.strm.msg.is_null() {
-                        ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0").ok()
-                    } else {
-                        Some(::std::ffi::CStr::from_ptr(
-                            state.strm.msg as *const ::core::ffi::c_char,
-                        ))
-                    };
+                    // `inflate()` assigns every data-error message from its
+                    // immutable diagnostic table. Match that storage by
+                    // address rather than borrowing an arbitrary C pointer.
+                    // A null message retains zlib's generic diagnostic.
+                    let message = crate::src::inflate::INFLATE_ERROR_MESSAGES
+                        .iter()
+                        .find(|candidate| {
+                            ::core::ptr::eq(
+                                candidate.as_ptr(),
+                                state.strm.msg.cast_const().cast::<u8>(),
+                            )
+                        })
+                        .and_then(|candidate| ::std::ffi::CStr::from_bytes_with_nul(candidate).ok())
+                        .or_else(|| {
+                            ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0").ok()
+                        });
                     crate::src::gzlib::gz_error_update_state(
                         state,
                         crate::zlib_h::Z_DATA_ERROR,
