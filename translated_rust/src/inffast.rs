@@ -1,19 +1,37 @@
 use crate::src::inflate::{inflate_state, CodeTableRef, BAD, TYPE};
 use crate::src::inftrees::code;
 
-enum FastExit {
+pub(crate) enum FastExit {
     Continue,
     Type,
     InvalidDistance,
     InvalidCode,
 }
 
-struct FastResult {
-    input_used: usize,
-    output_used: usize,
-    hold: u64,
-    bits: u32,
-    exit: FastExit,
+pub(crate) struct FastResult {
+    pub(crate) input_used: usize,
+    pub(crate) output_used: usize,
+    pub(crate) hold: u64,
+    pub(crate) bits: u32,
+    pub(crate) exit: FastExit,
+}
+
+// The fast decoder's resumable state is deliberately pointer-free.  Both the
+// normal inflate loop and the exported `inflate_fast` boundary build this
+// view, so the decoder itself never needs an ABI stream or raw cursor.
+pub(crate) struct InflateFastState<'a> {
+    pub(crate) window: Option<&'a [u8]>,
+    pub(crate) wsize: usize,
+    pub(crate) whave: usize,
+    pub(crate) wnext: usize,
+    pub(crate) hold: u64,
+    pub(crate) bits: u32,
+    pub(crate) lcode: CodeTableRef,
+    pub(crate) dcode: CodeTableRef,
+    pub(crate) lmask: u32,
+    pub(crate) dmask: u32,
+    pub(crate) codes: &'a [code],
+    pub(crate) sane: bool,
 }
 
 #[inline]
@@ -186,10 +204,37 @@ fn inflate_fast_core(
     }
 }
 
+pub(crate) fn inflate_fast_from_views(
+    input: &[u8],
+    output: &mut [u8],
+    output_pos: usize,
+    state: &mut InflateFastState<'_>,
+) -> FastResult {
+    let result = inflate_fast_core(
+        input,
+        output,
+        output_pos,
+        state.window,
+        state.wsize,
+        state.whave,
+        state.wnext,
+        state.hold,
+        state.bits,
+        state.lcode,
+        state.dcode,
+        state.lmask,
+        state.dmask,
+        state.codes,
+        state.sane,
+    );
+    state.hold = result.hold;
+    state.bits = result.bits;
+    result
+}
+
 pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::core::ffi::c_uint) {
-    // Project the ABI stream and state once.  All subsequent decoder work is
-    // on bounded slices and ordinary Rust references; this adapter only
-    // creates and republishes the caller-owned cursor views.
+    // The exported boundary owns raw cursor projection.  The decoder called
+    // below receives only bounded views and scalar state.
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut inflate_state);
     let input = core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
@@ -199,29 +244,27 @@ pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::c
     let window = state
         .window
         .map(|window| core::slice::from_raw_parts(window.as_ptr(), state.wsize as usize));
-    let result = inflate_fast_core(
-        input,
-        output,
-        written,
+    let mut fast_state = InflateFastState {
         window,
-        state.wsize as usize,
-        state.whave as usize,
-        state.wnext as usize,
-        state.hold,
-        state.bits,
-        state.lencode,
-        state.distcode,
-        (1u32 << state.lenbits) - 1,
-        (1u32 << state.distbits) - 1,
-        &state.codes,
-        state.sane != 0,
-    );
+        wsize: state.wsize as usize,
+        whave: state.whave as usize,
+        wnext: state.wnext as usize,
+        hold: state.hold,
+        bits: state.bits,
+        lcode: state.lencode,
+        dcode: state.distcode,
+        lmask: (1u32 << state.lenbits) - 1,
+        dmask: (1u32 << state.distbits) - 1,
+        codes: &state.codes,
+        sane: state.sane != 0,
+    };
+    let result = inflate_fast_from_views(input, output, written, &mut fast_state);
     strm.next_in = strm.next_in.wrapping_add(result.input_used);
     strm.avail_in = input.len().wrapping_sub(result.input_used) as crate::stdlib::uInt;
     strm.next_out = output_start.wrapping_add(result.output_used);
     strm.avail_out = output.len().wrapping_sub(result.output_used) as crate::stdlib::uInt;
-    state.hold = result.hold;
-    state.bits = result.bits;
+    state.hold = fast_state.hold;
+    state.bits = fast_state.bits;
     match result.exit {
         FastExit::Continue => {}
         FastExit::Type => state.mode = TYPE,
