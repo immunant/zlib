@@ -814,7 +814,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     let deflate_state = (state.strm.state as *mut crate::src::deflate::deflate_state)
         .as_mut()
         .map(|deflate_state| {
-            let hash_tables = if deflate_state.head.is_none() || deflate_state.prev.is_null() {
+            let hash_tables = if deflate_state.head.is_none() || deflate_state.prev.is_none() {
                 None
             } else {
                 Some((
@@ -823,7 +823,10 @@ pub unsafe extern "C" fn gzsetparams_ffi(
                         deflate_state.hash_size as usize,
                     ),
                     ::core::slice::from_raw_parts_mut(
-                        deflate_state.prev,
+                        deflate_state
+                            .prev
+                            .expect("checked non-null previous chain")
+                            .as_ptr(),
                         deflate_state.w_size as usize,
                     ),
                 ))

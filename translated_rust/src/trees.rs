@@ -4340,8 +4340,13 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut last: ::core::ffi::c_int,
 ) {
     let state = &mut *s;
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("tree bridge requires pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
+    );
     let source = if stored_len == 0 {
         None
     } else {
@@ -4363,7 +4368,13 @@ pub fn _tr_flush_bits(
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let state = unsafe { &mut *s };
     let pending_buf = unsafe {
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize)
+        ::core::slice::from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("tree bridge requires pending buffer")
+                .as_ptr(),
+            state.pending_buf_size as usize,
+        )
     };
     _tr_flush_bits(state, pending_buf);
 }
@@ -4386,7 +4397,13 @@ pub fn _tr_align(
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let state = unsafe { &mut *s };
     let pending_buf = unsafe {
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize)
+        ::core::slice::from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("tree bridge requires pending buffer")
+                .as_ptr(),
+            state.pending_buf_size as usize,
+        )
     };
     _tr_align(state, pending_buf)
 }
@@ -4553,8 +4570,13 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
         return;
     }
     let strm = &mut *::core::ptr::with_exposed_provenance_mut(state.strm);
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("tree bridge requires pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
+    );
     let source = if buf.is_null() {
         None
     } else if stored_len == 0 {
@@ -4611,7 +4633,13 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 ) -> ::core::ffi::c_int {
     let state = unsafe { &mut *s };
     let pending_buf = unsafe {
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize)
+        ::core::slice::from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("tree bridge requires pending buffer")
+                .as_ptr(),
+            state.pending_buf_size as usize,
+        )
     };
     tr_tally(state, pending_buf, dist, lc)
 }
