@@ -254,6 +254,12 @@ pub fn inflateBack(
     // The callback ABI and caller-owned buffers remain one internal unsafe
     // boundary. Keeping it here lets callers dispatch through a safe core.
     unsafe {
+    // Adapt the output callback once for this invocation.  The decoder below
+    // only decides when a complete window is ready; this closure owns the
+    // repeated ABI call and keeps each call site in terms of a checked slice.
+    let emit_window = |bytes: &mut [u8], length: ::core::ffi::c_uint| -> bool {
+        out.expect("non-null function pointer")(out_desc, bytes.as_mut_ptr(), length) == 0
+    };
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     // `window` is the one validated caller-owned history/output span.  Keep
     // its output cursor as an index so the decoder never advances a raw
@@ -410,7 +416,7 @@ pub fn inflateBack(
                             put_index = 0;
                             left = state.wsize;
                             state.whave = left;
-                            if out.expect("non-null function pointer")(out_desc, window.as_mut_ptr(), left) != 0 {
+                            if !emit_window(window, left) {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             }
@@ -957,7 +963,7 @@ pub fn inflateBack(
                     put_index = 0;
                     left = state.wsize;
                     state.whave = left;
-                    if out.expect("non-null function pointer")(out_desc, window.as_mut_ptr(), left) != 0 {
+                    if !emit_window(window, left) {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break;
                     }
@@ -1147,8 +1153,7 @@ pub fn inflateBack(
                                 put_index = 0;
                                 left = state.wsize;
                                 state.whave = left;
-                                if out.expect("non-null function pointer")(out_desc, window.as_mut_ptr(), left) != 0
-                                {
+                                if !emit_window(window, left) {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break '_inf_leave;
                                 }
@@ -1201,11 +1206,7 @@ pub fn inflateBack(
         }
     }
     if left < state.wsize {
-        if out.expect("non-null function pointer")(
-            out_desc,
-            window.as_mut_ptr(),
-            state.wsize.wrapping_sub(left),
-        ) != 0
+        if !emit_window(window, state.wsize.wrapping_sub(left))
             && ret == crate::zlib_h::Z_STREAM_END
         {
             ret = crate::zlib_h::Z_BUF_ERROR;
