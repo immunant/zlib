@@ -3427,32 +3427,16 @@ fn deflate_huff(
                 }
             }
             state.match_length = 0 as crate::stdlib::uInt;
-            let cc: crate::zutil_h::uch =
-                *state.window.wrapping_add(state.strstart as usize) as crate::zutil_h::uch;
+            let window =
+                &*::core::ptr::slice_from_raw_parts(state.window, state.window_size as usize);
+            let cc: crate::zutil_h::uch = window[state.strstart as usize] as crate::zutil_h::uch;
             let symbol = crate::src::trees::tr_tally_literal_update(&mut state.dyn_ltree, cc);
             append_deflate_sym(state, pending_buf, symbol);
             bflush = (state.sym_next == state.sym_end) as ::core::ffi::c_int;
             state.lookahead = state.lookahead.wrapping_sub(1);
             state.strstart = state.strstart.wrapping_add(1);
             if bflush != 0 {
-                let buf = if state.block_start >= 0 as ::core::ffi::c_long {
-                    state
-                        .window
-                        .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
-                        as *mut crate::stdlib::Bytef
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                };
-                let stored_len = (state.strstart as ::core::ffi::c_long - state.block_start)
-                    as crate::zutil_h::ulg;
-                crate::src::trees::_tr_flush_block_ffi(
-                    state,
-                    buf,
-                    stored_len,
-                    0 as ::core::ffi::c_int,
-                );
-                state.block_start = state.strstart as ::core::ffi::c_long;
+                deflate_flush_block_impl(state, strm, pending_buf, window, 0 as ::core::ffi::c_int);
                 let avail_out = flush_pending(state, strm);
                 if avail_out == 0 as crate::stdlib::uInt {
                     return deflate_flush_blocked_state(false);
