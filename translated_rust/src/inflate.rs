@@ -2447,33 +2447,33 @@ pub unsafe extern "C" fn inflate(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    let progress = inflate_call_progress(
-        in_0,
-        (*strm).avail_in as ::core::ffi::c_uint,
-        out,
-        (*strm).avail_out as ::core::ffi::c_uint,
-    );
+    let strm = &mut *strm;
+    let state = &mut *state;
+    let progress = inflate_call_progress(in_0, strm.avail_in, out, strm.avail_out);
     in_0 = progress.consumed;
     out = progress.produced;
-    (*strm).total_in = (*strm).total_in.wrapping_add(in_0 as crate::stdlib::uLong);
-    (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
-    (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
-    if let Some(checksum) = inflate_output_checksum((*state).wrap, (*state).flags, out) {
-        (*state).check = (match checksum {
+    inflate_accumulate_totals(
+        &mut strm.total_in,
+        &mut strm.total_out,
+        &mut state.total,
+        progress,
+    );
+    if let Some(checksum) = inflate_output_checksum(state.wrap, state.flags, out) {
+        state.check = (match checksum {
             InflateOutputChecksum::Crc32 => crate::src::crc32::crc32_ffi(
-                (*state).check as crate::stdlib::uLong,
+                state.check as crate::stdlib::uLong,
                 checksum_start,
                 out as crate::stdlib::uInt,
             ),
             InflateOutputChecksum::Adler32 => crate::src::adler32::adler32_ffi(
-                (*state).check as crate::stdlib::uLong,
+                state.check as crate::stdlib::uLong,
                 checksum_start,
                 out as crate::stdlib::uInt,
             ),
         }) as ::core::ffi::c_ulong;
-        (*strm).adler = (*state).check as crate::stdlib::uLong;
+        strm.adler = state.check as crate::stdlib::uLong;
     }
-    (*strm).data_type = inflate_data_type_value((*state).bits, (*state).last, (*state).mode);
+    inflate_assign_data_type(&mut strm.data_type, state.bits, state.last, state.mode);
     if inflate_needs_buffer_error(in_0, out, flush, ret) {
         ret = crate::zlib_h::Z_BUF_ERROR;
     }
@@ -2631,6 +2631,15 @@ fn inflate_data_type_value(
         + inflate_mode_data_type_flags(mode)
 }
 
+fn inflate_assign_data_type(
+    data_type: &mut ::core::ffi::c_int,
+    bits: ::core::ffi::c_uint,
+    last: ::core::ffi::c_int,
+    mode: inflate_mode,
+) {
+    *data_type = inflate_data_type_value(bits, last, mode);
+}
+
 fn inflate_needs_buffer_error(
     consumed: ::core::ffi::c_uint,
     produced: ::core::ffi::c_uint,
@@ -2785,6 +2794,17 @@ fn inflate_call_progress(
         consumed: inflate_cursor_progress(initial_input, remaining_input),
         produced: inflate_cursor_progress(initial_output, remaining_output),
     }
+}
+
+fn inflate_accumulate_totals(
+    total_in: &mut crate::stdlib::uLong,
+    total_out: &mut crate::stdlib::uLong,
+    total: &mut ::core::ffi::c_ulong,
+    progress: InflateCallProgress,
+) {
+    *total_in = total_in.wrapping_add(progress.consumed as crate::stdlib::uLong);
+    *total_out = total_out.wrapping_add(progress.produced as crate::stdlib::uLong);
+    *total = total.wrapping_add(progress.produced as ::core::ffi::c_ulong);
 }
 
 fn inflate_match_is_complete(remaining_length: ::core::ffi::c_uint) -> bool {
@@ -3216,14 +3236,15 @@ mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_code_length_repeat_spec, dynamic_header_counts, gzip_extra_copy_bounds,
-        inflateSyncPoint_ffi, inflate_align_to_byte_boundary, inflate_block_header,
-        inflate_call_progress, inflate_can_use_fast_path, inflate_codes_used_offset_value,
-        inflate_copy_match_from_output, inflate_copy_progress, inflate_data_type_value,
-        inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
-        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_bytes,
-        inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
-        inflate_gzip_header_has_crc, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflateSyncPoint_ffi, inflate_accumulate_totals, inflate_align_to_byte_boundary,
+        inflate_assign_data_type, inflate_block_header, inflate_call_progress,
+        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
+        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
+        inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_gzip_extra_progress,
+        inflate_gzip_flags, inflate_gzip_flags_error, inflate_gzip_flags_validation,
+        inflate_gzip_header_crc_bytes, inflate_gzip_header_crc_is_valid,
+        inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_text_field_should_continue,
         inflate_gzip_window_bits, inflate_head_skip_mode, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
@@ -3500,6 +3521,36 @@ mod tests {
         assert_eq!(inflate_data_type_value(5, 1, TYPE), 5 + 64 + 128);
         assert_eq!(inflate_data_type_value(5, 0, LEN_), 5 + 256);
         assert_eq!(inflate_data_type_value(5, 0, COPY_), 5 + 256);
+    }
+
+    #[test]
+    fn inflate_assign_data_type_updates_the_destination() {
+        let mut data_type = 0;
+
+        inflate_assign_data_type(&mut data_type, 5, 1, TYPE);
+
+        assert_eq!(data_type, 5 + 64 + 128);
+    }
+
+    #[test]
+    fn inflate_accumulate_totals_preserves_wrapping_progress() {
+        let mut total_in = crate::stdlib::uLong::MAX;
+        let mut total_out = 2;
+        let mut total = ::core::ffi::c_ulong::MAX;
+
+        inflate_accumulate_totals(
+            &mut total_in,
+            &mut total_out,
+            &mut total,
+            InflateCallProgress {
+                consumed: 3,
+                produced: 5,
+            },
+        );
+
+        assert_eq!(total_in, 2);
+        assert_eq!(total_out, 7);
+        assert_eq!(total, 4);
     }
 
     #[test]

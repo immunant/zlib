@@ -4216,25 +4216,26 @@ unsafe fn pqdownheap(
     mut tree: *mut crate::src::deflate::ct_data,
     mut k: ::core::ffi::c_int,
 ) {
-    let mut v: ::core::ffi::c_int = (*s).heap[k as usize];
+    let s = &mut *s;
+    let mut v: ::core::ffi::c_int = s.heap[k as usize];
     let parent_frequency = (*tree.wrapping_add(v as usize)).fc.value;
-    let parent_depth = (*s).depth[v as usize];
+    let parent_depth = s.depth[v as usize];
     let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
-    while j <= (*s).heap_len {
-        let left_index = (*s).heap[j as usize];
+    while j <= s.heap_len {
+        let left_index = s.heap[j as usize];
         let left = HeapChild {
             heap_position: j,
             node_index: left_index,
             frequency: (*tree.wrapping_add(left_index as usize)).fc.value,
-            depth: (*s).depth[left_index as usize],
+            depth: s.depth[left_index as usize],
         };
-        let right = if j < (*s).heap_len {
-            let right_index = (*s).heap[(j + 1 as ::core::ffi::c_int) as usize];
+        let right = if j < s.heap_len {
+            let right_index = s.heap[(j + 1 as ::core::ffi::c_int) as usize];
             Some(HeapChild {
                 heap_position: j + 1 as ::core::ffi::c_int,
                 node_index: right_index,
                 frequency: (*tree.wrapping_add(right_index as usize)).fc.value,
-                depth: (*s).depth[right_index as usize],
+                depth: s.depth[right_index as usize],
             })
         } else {
             None
@@ -4243,38 +4244,39 @@ unsafe fn pqdownheap(
         else {
             break;
         };
-        (*s).heap[k as usize] = child.node_index;
+        s.heap[k as usize] = child.node_index;
         k = child.heap_position;
         j <<= 1 as ::core::ffi::c_int;
     }
-    (*s).heap[k as usize] = v;
+    s.heap[k as usize] = v;
 }
 
 unsafe fn gen_bitlen(
     mut s: *mut crate::src::deflate::deflate_state,
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
-    let mut tree: *mut crate::src::deflate::ct_data = (*desc).dyn_tree;
-    let mut max_code: ::core::ffi::c_int = (*desc).max_code;
-    let mut stree: *const crate::src::deflate::ct_data = (*(*desc).stat_desc).static_tree.map_or(
+    let s = &mut *s;
+    let desc = &mut *desc;
+    let stat_desc = &*desc.stat_desc;
+    let mut tree: *mut crate::src::deflate::ct_data = desc.dyn_tree;
+    let mut max_code: ::core::ffi::c_int = desc.max_code;
+    let mut stree: *const crate::src::deflate::ct_data = stat_desc.static_tree.map_or(
         ::core::ptr::null(),
         <[crate::src::deflate::ct_data]>::as_ptr,
     );
-    let mut extra: *const crate::stdlib::intf = (*(*desc).stat_desc).extra_bits.as_ptr();
-    let mut base: ::core::ffi::c_int = (*(*desc).stat_desc).extra_base;
-    let mut max_length: ::core::ffi::c_int = (*(*desc).stat_desc).max_length;
+    let mut extra: *const crate::stdlib::intf = stat_desc.extra_bits.as_ptr();
+    let mut base: ::core::ffi::c_int = stat_desc.extra_base;
+    let mut max_length: ::core::ffi::c_int = stat_desc.max_length;
     let mut h: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
     let mut bits: ::core::ffi::c_int = 0;
     let mut overflow: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    reset_bit_length_counts(&mut (*s).bl_count);
-    (*tree.offset((*s).heap[(*s).heap_max as usize] as isize))
-        .dl
-        .len = 0 as crate::zutil_h::ush;
-    h = (*s).heap_max + 1 as ::core::ffi::c_int;
+    reset_bit_length_counts(&mut s.bl_count);
+    (*tree.offset(s.heap[s.heap_max as usize] as isize)).dl.len = 0 as crate::zutil_h::ush;
+    h = s.heap_max + 1 as ::core::ffi::c_int;
     while h < crate::src::deflate::HEAP_SIZE {
-        n = (*s).heap[h as usize];
+        n = s.heap[h as usize];
         let counts_toward_tree = n <= max_code;
         let (frequency, extra_bits, static_bit_length) = if counts_toward_tree {
             let extra_bits = if n >= base {
@@ -4304,31 +4306,31 @@ unsafe fn gen_bitlen(
             frequency,
             extra_bits,
             static_bit_length,
-            (*s).opt_len,
-            (*s).static_len,
+            s.opt_len,
+            s.static_len,
         );
         if node_plan.overflowed {
             overflow += 1;
         }
         (*tree.offset(n as isize)).dl.len = node_plan.bit_length as crate::zutil_h::ush;
         if let Some(bits) = node_plan.count_index {
-            (*s).bl_count[bits] = (*s).bl_count[bits].wrapping_add(1);
+            s.bl_count[bits] = s.bl_count[bits].wrapping_add(1);
         }
         if let Some((opt_len, static_len)) = node_plan.totals {
-            ((*s).opt_len, (*s).static_len) = (opt_len, static_len);
+            (s.opt_len, s.static_len) = (opt_len, static_len);
         }
         h += 1;
     }
     if overflow == 0 as ::core::ffi::c_int {
         return;
     }
-    rebalance_overflowed_bit_lengths(&mut (*s).bl_count, max_length, overflow);
+    rebalance_overflowed_bit_lengths(&mut s.bl_count, max_length, overflow);
     bits = max_length;
     while bits != 0 as ::core::ffi::c_int {
-        n = (*s).bl_count[bits as usize] as ::core::ffi::c_int;
+        n = s.bl_count[bits as usize] as ::core::ffi::c_int;
         while n != 0 as ::core::ffi::c_int {
             h -= 1;
-            m = (*s).heap[h as usize];
+            m = s.heap[h as usize];
             let reassignment = if m > max_code {
                 gen_bitlen_overflow_reassignment(None, bits)
             } else {
@@ -4347,7 +4349,7 @@ unsafe fn gen_bitlen(
                     bit_length,
                     opt_len_delta,
                 } => {
-                    (*s).opt_len = (*s).opt_len.wrapping_add(opt_len_delta);
+                    s.opt_len = s.opt_len.wrapping_add(opt_len_delta);
                     (*tree.offset(m as isize)).dl.len = bit_length;
                 }
             }

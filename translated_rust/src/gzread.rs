@@ -1087,6 +1087,21 @@ fn gz_decomp_needs_input_load(avail_in: crate::stdlib::uInt) -> bool {
     avail_in == 0
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct GzDecompStreamState {
+    avail_in: crate::stdlib::uInt,
+    avail_out: crate::stdlib::uInt,
+    inflate_message_present: bool,
+}
+
+fn gz_decomp_stream_state(stream: &crate::zlib_h::z_stream) -> GzDecompStreamState {
+    GzDecompStreamState {
+        avail_in: stream.avail_in,
+        avail_out: stream.avail_out,
+        inflate_message_present: !stream.msg.is_null(),
+    }
+}
+
 fn gz_decomp_produced_output(
     prior_avail_out: ::core::ffi::c_uint,
     avail_out: crate::stdlib::uInt,
@@ -1197,23 +1212,20 @@ fn gz_decomp_apply_trailing_junk_plan(
 
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let mut had: ::core::ffi::c_uint = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
-    had = (*strm).avail_out as ::core::ffi::c_uint;
+    let had = gz_decomp_stream_state(&state.strm).avail_out as ::core::ffi::c_uint;
     loop {
-        let (load_failed, state_err, again) = (
-            gz_decomp_needs_input_load((*strm).avail_in)
-                && gz_avail(state) == -1 as ::core::ffi::c_int,
-            state.err,
-            state.again,
-        );
-        match gz_decomp_input_action(load_failed, (*strm).avail_in) {
+        let needs_input_load =
+            gz_decomp_needs_input_load(gz_decomp_stream_state(&state.strm).avail_in);
+        let load_failed = needs_input_load && gz_avail(state) == -1 as ::core::ffi::c_int;
+        let stream_state = gz_decomp_stream_state(&state.strm);
+        match gz_decomp_input_action(load_failed, stream_state.avail_in) {
             GzDecompInputAction::InputError => {
-                ret = state_err;
+                ret = state.err;
                 break;
             }
             GzDecompInputAction::UnexpectedEof => {
-                if gz_decomp_reports_unexpected_eof(again) {
+                if gz_decomp_reports_unexpected_eof(state.again) {
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_BUF_ERROR,
@@ -1228,11 +1240,12 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             strm as *mut crate::zlib_h::z_stream_s,
             crate::zlib_h::Z_NO_FLUSH,
         );
+        let stream_state = gz_decomp_stream_state(&state.strm);
         let decision = gz_decomp_decision(
             ret,
-            gz_decomp_produced_output(had, (*strm).avail_out),
+            gz_decomp_produced_output(had, stream_state.avail_out),
             state.junk,
-            (*strm).avail_out,
+            stream_state.avail_out,
         );
         if decision.clear_junk {
             state.junk = 0 as ::core::ffi::c_int;
@@ -1267,12 +1280,15 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 break;
             }
             GzDecompAction::DataError => {
-                let message = match gz_decomp_data_error_message(!(*strm).msg.is_null()) {
-                    GzDecompDataErrorMessage::Generic => {
-                        b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                    }
-                    GzDecompDataErrorMessage::Inflate => (*strm).msg as *const ::core::ffi::c_char,
-                };
+                let message =
+                    match gz_decomp_data_error_message(stream_state.inflate_message_present) {
+                        GzDecompDataErrorMessage::Generic => {
+                            b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
+                        }
+                        GzDecompDataErrorMessage::Inflate => {
+                            state.strm.msg as *const ::core::ffi::c_char
+                        }
+                    };
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_DATA_ERROR,
@@ -1284,7 +1300,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             GzDecompAction::Continue => {}
         }
     }
-    let progress = gz_decomp_output_progress(had, (*strm).avail_out);
+    let progress = gz_decomp_output_progress(had, gz_decomp_stream_state(&state.strm).avail_out);
     gz_decomp_apply_output_progress(&mut state.x, &state.strm, &progress);
     gz_decomp_apply_result(&mut state.how, &mut state.junk, ret)
 }
@@ -1910,6 +1926,64 @@ mod tests {
         assert!(gz_decomp_needs_input_load(0));
         assert!(!gz_decomp_needs_input_load(1));
         assert!(!gz_decomp_needs_input_load(crate::stdlib::uInt::MAX));
+    }
+
+    #[test]
+    fn gz_decomp_stream_state_extracts_input_output_and_message_state() {
+        let stream = crate::zlib_h::z_stream_s {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 3,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 7,
+            total_out: 0,
+            msg: b"inflate failed\0".as_ptr() as *mut ::core::ffi::c_char,
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            gz_decomp_stream_state(&stream),
+            GzDecompStreamState {
+                avail_in: 3,
+                avail_out: 7,
+                inflate_message_present: true,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_decomp_stream_state_reports_absent_inflate_message() {
+        let stream = crate::zlib_h::z_stream_s {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            gz_decomp_stream_state(&stream),
+            GzDecompStreamState {
+                avail_in: 0,
+                avail_out: 0,
+                inflate_message_present: false,
+            }
+        );
     }
 
     #[test]
