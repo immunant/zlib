@@ -65,6 +65,17 @@ fn consume_bits(
     (hold >> bit_count, bits.wrapping_sub(bit_count))
 }
 
+fn append_input_byte(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    byte: ::core::ffi::c_uchar,
+) -> (::core::ffi::c_ulong, ::core::ffi::c_uint) {
+    (
+        hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits),
+        bits.wrapping_add(8 as ::core::ffi::c_uint),
+    )
+}
+
 fn unread_bit_state(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -132,12 +143,10 @@ pub unsafe extern "C" fn inflate_fast(
         if bits < 15 as ::core::ffi::c_uint {
             let c2rust_fresh0 = in_0;
             in_0 = in_0.offset(1);
-            hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
-            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+            (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh0);
             let c2rust_fresh1 = in_0;
             in_0 = in_0.offset(1);
-            hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
-            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+            (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh1);
         }
         here = lcode.offset((hold & lmask as ::core::ffi::c_ulong) as isize);
         loop {
@@ -157,8 +166,7 @@ pub unsafe extern "C" fn inflate_fast(
                     if bits < op {
                         let c2rust_fresh3 = in_0;
                         in_0 = in_0.offset(1);
-                        hold = hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
-                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                        (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh3);
                     }
                     len = len.wrapping_add(low_bits(hold, op));
                     (hold, bits) = consume_bits(hold, bits, op);
@@ -166,12 +174,10 @@ pub unsafe extern "C" fn inflate_fast(
                 if bits < 15 as ::core::ffi::c_uint {
                     let c2rust_fresh4 = in_0;
                     in_0 = in_0.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh4 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                    (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh4);
                     let c2rust_fresh5 = in_0;
                     in_0 = in_0.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh5 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                    (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh5);
                 }
                 here = dcode.offset((hold & dmask as ::core::ffi::c_ulong) as isize);
                 c2rust_current_block_141 = 3217834059723038609;
@@ -200,15 +206,11 @@ pub unsafe extern "C" fn inflate_fast(
                         if bits < op {
                             let c2rust_fresh6 = in_0;
                             in_0 = in_0.offset(1);
-                            hold =
-                                hold.wrapping_add((*c2rust_fresh6 as ::core::ffi::c_ulong) << bits);
-                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh6);
                             if bits < op {
                                 let c2rust_fresh7 = in_0;
                                 in_0 = in_0.offset(1);
-                                hold = hold
-                                    .wrapping_add((*c2rust_fresh7 as ::core::ffi::c_ulong) << bits);
-                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh7);
                             }
                         }
                         dist = dist.wrapping_add(low_bits(hold, op));
@@ -433,7 +435,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{bit_mask, consume_bits, low_bits, unread_bit_state};
+    use super::{append_input_byte, bit_mask, consume_bits, low_bits, unread_bit_state};
 
     #[test]
     fn bit_mask_selects_requested_low_bits() {
@@ -459,6 +461,18 @@ mod tests {
     fn consume_bits_preserves_zero_count_and_wrapping_subtraction() {
         assert_eq!(consume_bits(0xfeed, 9, 0), (0xfeed, 9));
         assert_eq!(consume_bits(1, 0, 1), (0, ::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn append_input_byte_packs_bytes_low_bit_first() {
+        let (hold, bits) = append_input_byte(0, 0, 0xab);
+        assert_eq!((hold, bits), (0xab, 8));
+        assert_eq!(append_input_byte(hold, bits, 0xcd), (0xcdab, 16));
+    }
+
+    #[test]
+    fn append_input_byte_preserves_existing_bits() {
+        assert_eq!(append_input_byte(0b101, 3, 0b11), (0b1_1101, 11));
     }
 
     #[test]

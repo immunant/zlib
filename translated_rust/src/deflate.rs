@@ -3656,8 +3656,9 @@ mod tests {
         deflate_state_status_valid, deflate_version_matches, fill_window_available_space,
         fill_window_insert_after_slide, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len, read_buf_len,
-        short_msb_bytes, slide_hash_entry, stored_block_min_size, stored_insert_after_input,
-        zlib_header,
+        short_msb_bytes,
+        slide_hash_entry, stored_block_min_size,
+        stored_insert_after_input, zlib_header,
     };
 
     #[test]

@@ -52,8 +52,8 @@ fn gz_init_core(state: &mut crate::gzguts_h::gz_state) {
     state.size = state.want;
     if state.direct == 0 {
         state.strm.avail_out = state.size as crate::stdlib::uInt;
-        state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
-        state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
+        state.strm.next_out = state.out;
+        state.x.next = state.strm.next_out;
     }
 }
 
@@ -534,7 +534,7 @@ unsafe fn gz_comp(
             }
             if gz_comp_needs_output_buffer_reset((*strm).avail_out) {
                 (*strm).avail_out = (*state).size as crate::stdlib::uInt;
-                (*strm).next_out = (*state).out as *mut crate::stdlib::Bytef;
+                (*strm).next_out = (*state).out;
                 (*state).x.next = (*state).out;
             }
         }
@@ -585,7 +585,7 @@ unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
             first = 0 as ::core::ffi::c_int;
         }
         (*strm).avail_in = n as crate::stdlib::uInt;
-        (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+        (*strm).next_in = (*state).in_0;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         let remaining_avail_in = (*strm).avail_in;
         let has_skip = gz_zero_apply_progress(
@@ -625,7 +625,7 @@ unsafe fn gz_write(
             let mut have: ::core::ffi::c_uint = 0;
             let mut copy: ::core::ffi::c_uint = 0;
             if gz_write_needs_input_reset((*state).strm.avail_in) {
-                (*state).strm.next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+                (*state).strm.next_in = (*state).in_0;
             }
             have = gz_buffered_have(
                 (*state).in_0 as usize,
