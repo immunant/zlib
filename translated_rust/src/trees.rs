@@ -2379,6 +2379,13 @@ struct SendAllTreesHeaderBits {
     bi_valid: ::core::ffi::c_int,
 }
 
+struct TrAlignBits {
+    bytes: [crate::stdlib::Byte; 6],
+    len: usize,
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+}
+
 fn send_bits_state(
     bi_buf: crate::zutil_h::ush,
     bi_valid: ::core::ffi::c_int,
@@ -2506,6 +2513,53 @@ fn bi_flush_state(bi_buf: crate::zutil_h::ush, bi_valid: ::core::ffi::c_int) -> 
             bi_buf,
             bi_valid,
         }
+    }
+}
+
+fn push_tr_align_bytes(
+    out: &mut [crate::stdlib::Byte; 6],
+    out_len: &mut usize,
+    bytes: &[crate::stdlib::Byte],
+) {
+    for byte in bytes.iter().copied() {
+        out[*out_len] = byte;
+        *out_len += 1;
+    }
+}
+
+fn tr_align_bits(
+    mut bi_buf: crate::zutil_h::ush,
+    mut bi_valid: ::core::ffi::c_int,
+) -> TrAlignBits {
+    let mut bytes = [0; 6];
+    let mut len = 0;
+    let first = send_bits_state(
+        bi_buf,
+        bi_valid,
+        (1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int,
+        3 as ::core::ffi::c_int,
+    );
+    push_tr_align_bytes(&mut bytes, &mut len, &first.bytes[..first.len]);
+    bi_buf = first.bi_buf;
+    bi_valid = first.bi_valid;
+
+    let second = send_bits_state(
+        bi_buf,
+        bi_valid,
+        static_ltree[256 as ::core::ffi::c_int as usize].freq as ::core::ffi::c_int,
+        static_ltree[256 as ::core::ffi::c_int as usize].dad as ::core::ffi::c_int,
+    );
+    push_tr_align_bytes(&mut bytes, &mut len, &second.bytes[..second.len]);
+    bi_buf = second.bi_buf;
+    bi_valid = second.bi_valid;
+
+    let flush = bi_flush_state(bi_buf, bi_valid);
+    push_tr_align_bytes(&mut bytes, &mut len, &flush.bytes[..flush.len]);
+    TrAlignBits {
+        bytes,
+        len,
+        bi_buf: flush.bi_buf,
+        bi_valid: flush.bi_valid,
     }
 }
 
@@ -3430,12 +3484,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
 #[export_name = "_tr_align"]
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    let bits = send_bits_state(
-        (*s).bi_buf,
-        (*s).bi_valid,
-        (1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int,
-        3 as ::core::ffi::c_int,
-    );
+    let bits = tr_align_bits((*s).bi_buf, (*s).bi_valid);
     for byte in bits.bytes[..bits.len].iter().copied() {
         let pending = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
@@ -3443,20 +3492,6 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     }
     (*s).bi_buf = bits.bi_buf;
     (*s).bi_valid = bits.bi_valid;
-    let bits = send_bits_state(
-        (*s).bi_buf,
-        (*s).bi_valid,
-        static_ltree[256 as ::core::ffi::c_int as usize].freq as ::core::ffi::c_int,
-        static_ltree[256 as ::core::ffi::c_int as usize].dad as ::core::ffi::c_int,
-    );
-    for byte in bits.bytes[..bits.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_buf = bits.bi_buf;
-    (*s).bi_valid = bits.bi_valid;
-    bi_flush(s);
 }
 unsafe extern "C" fn compress_block(
     mut s: *mut crate::src::deflate::deflate_state,
