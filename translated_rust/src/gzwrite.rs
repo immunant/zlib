@@ -412,6 +412,27 @@ fn gz_write_direct_chunk_plan(remaining: crate::stdlib::z_size_t) -> ::core::ffi
     }
 }
 
+/// Advance the temporary caller-input view after a compressor step.  The
+/// codec reports its progress through `avail_in`; validate that report before
+/// it is used as either Rust slice or scalar progress.  A corrupt/stale codec
+/// cursor must fail the gzip write instead of wrapping the count and panicking
+/// on a slice range.
+fn gz_write_direct_progress<'a>(
+    source: &'a [u8],
+    remaining: crate::stdlib::z_size_t,
+    before: crate::stdlib::uInt,
+    after: crate::stdlib::uInt,
+) -> Option<(&'a [u8], crate::stdlib::z_size_t, ::core::ffi::c_uint)> {
+    let consumed = before.checked_sub(after)?;
+    let consumed = usize::try_from(consumed).ok()?;
+    let next_remaining = remaining.checked_sub(consumed)?;
+    Some((
+        source.get(consumed..)?,
+        next_remaining,
+        consumed as ::core::ffi::c_uint,
+    ))
+}
+
 /// Commit progress reported by a direct-write compression step.  The caller
 /// keeps the raw stream cursor at the boundary; this preserves zlib's
 /// wrapping logical-position arithmetic and returns the remaining input.
@@ -737,12 +758,19 @@ unsafe fn gz_write(
         }
         state.strm.next_in = source.as_ptr() as *mut crate::stdlib::Bytef;
         loop {
-            let mut n = gz_write_direct_chunk_plan(len);
+            let n = gz_write_direct_chunk_plan(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
-            len = gz_write_direct_commit_state(state, len, n);
-            source = &source[n as usize..];
+            let Some((next_source, _next_len, consumed)) = gz_write_direct_progress(
+                source,
+                len,
+                n as crate::stdlib::uInt,
+                state.strm.avail_in,
+            ) else {
+                return 0;
+            };
+            len = gz_write_direct_commit_state(state, len, consumed);
+            source = next_source;
             if ret == -1 as ::core::ffi::c_int {
                 return gz_write_failure_result(state.again, put, len);
             }
