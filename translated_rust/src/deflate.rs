@@ -1806,18 +1806,58 @@ struct DeflateBoundState {
     w_bits: crate::stdlib::uInt,
     hash_bits: crate::stdlib::uInt,
     level: ::core::ffi::c_int,
+    gzip_header_len: Option<crate::stdlib::z_size_t>,
 }
 
 // Once a stream has been bound, the bound calculation needs only this value
-// snapshot. Keep the state-only projection out of the raw stream adapter.
-fn deflate_bound_state(state: &crate::src::deflate::deflate_state) -> DeflateBoundState {
+// snapshot. The optional gzip-header snapshot has already copied every
+// variable-length caller field, so the calculation never needs to reopen a
+// retained foreign header pointer.
+fn deflate_bound_state(
+    state: &crate::src::deflate::deflate_state,
+    gzip_header: Option<&DeflateHeaderSnapshot>,
+) -> DeflateBoundState {
     DeflateBoundState {
         wrap: state.wrap,
         strstart: state.strstart,
         w_bits: state.w_bits,
         hash_bits: state.hash_bits,
         level: state.level,
+        gzip_header_len: gzip_header.map(deflate_gzip_header_len),
     }
+}
+
+// This mirrors the user-header additions in zlib's `deflateBound_z()`.  Name
+// and comment snapshots include their terminating NUL, exactly as C's
+// `do { wraplen++; } while (*str++);` loops count them.  Keep the additions
+// wrapping until the same final overflow checks used by the C implementation.
+fn deflate_gzip_header_len(header: &DeflateHeaderSnapshot) -> crate::stdlib::z_size_t {
+    let mut len = 18 as crate::stdlib::z_size_t;
+    if header.has_extra {
+        len = len
+            .wrapping_add(2 as crate::stdlib::z_size_t)
+            .wrapping_add(header.extra_len as crate::stdlib::z_size_t);
+    }
+    if header.has_name {
+        len = len.wrapping_add(
+            header
+                .name
+                .as_ref()
+                .map_or(0, |name| name.len() as crate::stdlib::z_size_t),
+        );
+    }
+    if header.has_comment {
+        len = len.wrapping_add(
+            header
+                .comment
+                .as_ref()
+                .map_or(0, |comment| comment.len() as crate::stdlib::z_size_t),
+        );
+    }
+    if header.hcrc != 0 {
+        len = len.wrapping_add(2 as crate::stdlib::z_size_t);
+    }
+    len
 }
 
 fn deflate_bound_z(
@@ -1870,7 +1910,9 @@ fn deflate_bound_z(
                 })) as crate::stdlib::z_size_t;
         }
         2 => {
-            wraplen = 18 as crate::stdlib::z_size_t;
+            wraplen = state
+                .gzip_header_len
+                .unwrap_or(18 as crate::stdlib::z_size_t);
         }
         _ => {
             wraplen = 18 as crate::stdlib::z_size_t;
@@ -1905,22 +1947,34 @@ fn deflate_bound_z(
     }
 }
 
-// The numeric bound is defined solely by a bound deflater state. Configured
-// caller-owned gzip headers return the conservative maximum before this path.
+// The numeric bound is defined by a bound deflater state plus its owned gzip
+// header snapshot. A non-null header without a snapshot is not a state this
+// implementation creates; retain the conservative maximum if one is supplied
+// by foreign code rather than dereferencing its unbounded fields.
 fn deflate_bound_from_state(
     source_len: crate::stdlib::z_size_t,
     state: Option<&crate::src::deflate::deflate_state>,
 ) -> crate::stdlib::z_size_t {
-    deflate_bound_z(source_len, state.map(deflate_bound_state))
+    let Some(state) = state else {
+        return deflate_bound_z(source_len, None);
+    };
+    let gzip_header = if state.gzhead.is_null() {
+        None
+    } else {
+        let Some(header) = deflate_header_snapshot(state) else {
+            return crate::stdlib::z_size_t::MAX;
+        };
+        Some(header)
+    };
+    deflate_bound_z(
+        source_len,
+        Some(deflate_bound_state(state, gzip_header.as_deref())),
+    )
 }
 
-// A configured gzip header is caller-owned and its variable-length fields
-// have no Rust lifetime or fully bounded representation here.  In particular,
-// even an extra-only header would require reopening that retained raw header
-// to produce a tight bound. `deflateBound()` promises an upper bound, not the
-// tightest one, so use the representable maximum for every configured header.
-// This keeps the implementation reference-bound and the C ABI wrapper below
-// a thin exported dispatcher.
+// The configured gzip header was copied when it was installed, so the bound
+// calculation can reproduce zlib's exact header allowance without touching
+// caller memory. The exported wrapper below only binds the stream pointer.
 pub fn deflateBound_z(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut sourceLen: crate::stdlib::z_size_t,
@@ -1929,12 +1983,6 @@ pub fn deflateBound_z(
         Some(strm) => deflateStateCheck(strm).map(|(_strm, state)| state),
         None => None,
     };
-    if state
-        .as_deref()
-        .is_some_and(|state| !state.gzhead.is_null())
-    {
-        return crate::stdlib::z_size_t::MAX;
-    }
     deflate_bound_from_state(sourceLen, state.as_deref())
 }
 #[export_name = "deflateBound_z"]
