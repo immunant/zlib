@@ -61,7 +61,7 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::FromRawFd;
 
 fn gz_reset(
     have: &mut crate::stdlib::uInt,
@@ -455,7 +455,6 @@ pub unsafe fn gzseek64(
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
     let mut n: ::core::ffi::c_uint = 0;
-    let mut ret: crate::stdlib::off64_t = 0;
     if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
         return -1 as crate::stdlib::off64_t;
     }
@@ -479,12 +478,15 @@ pub unsafe fn gzseek64(
         && state.how == crate::gzguts_h::COPY
         && state.x.pos + offset >= 0 as crate::stdlib::off64_t
     {
-        ret = crate::stdlib::lseek64(
-            state.fd.as_ref().expect("open gzip state owns its descriptor").as_raw_fd(),
-            offset as crate::stdlib::__off64_t - state.x.have as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if ret == -1 as crate::stdlib::off64_t {
+        let delta = offset as crate::stdlib::__off64_t - state.x.have as crate::stdlib::__off64_t;
+        if rustix::fs::seek(
+            state.fd.as_ref().expect("open gzip state owns its descriptor"),
+            rustix::fs::SeekFrom::Current(delta),
+        )
+        .ok()
+        .and_then(|position| crate::stdlib::off64_t::try_from(position).ok())
+        .is_none()
+        {
             return -1 as crate::stdlib::off64_t;
         }
         state.x.have = 0 as ::core::ffi::c_uint;
