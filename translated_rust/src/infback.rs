@@ -1132,11 +1132,12 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
 }
 // Keep the callback-facing window separate from the general inflater's
 // history window.  `inflateBack()` lends the caller's window to `out`, whereas
-// `inflate()` keeps an independently managed history ring.  The adapter uses
-// an owned history buffer for one decode and restores the caller's window
-// before returning, so no callback-owned cursor needs a raw dereference here.
+// `inflate()` keeps an independently managed history ring.  The ABI adapter
+// binds the callback-owned output window once; this core uses that slice only
+// for publication and keeps decoder history in Rust-owned storage.
 pub(crate) fn inflateBack(
     strm: Option<&mut crate::zlib_h::z_stream>,
+    callback_window: Option<&mut [crate::stdlib::Bytef]>,
     input: crate::zlib_h::in_func,
     input_desc: *mut ::core::ffi::c_void,
     output: crate::zlib_h::out_func,
@@ -1148,113 +1149,89 @@ pub(crate) fn inflateBack(
     let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    macro_rules! decode_with_window {
-        ($strm:expr, $state:expr, $callback_window:expr) => {{
-            let strm = $strm;
-            let state = $state;
-            let callback_window = $callback_window;
-            if callback_window.len() != state.wsize as usize {
-                crate::zlib_h::Z_STREAM_ERROR
-            } else {
-                inflate_back_begin_decode(strm, state);
-                inflate_back_normalize_initial_input(strm);
-                let window_size = state.wsize as usize;
-                let saved_next_out = strm.next_out;
-                let saved_avail_out = strm.avail_out;
-                let saved_public = (strm.total_in, strm.total_out, strm.data_type, strm.adler);
-                let saved_bit_buffer = (state.hold, state.bits);
-                let mut history = vec![0; window_size];
-                let mut written = 0usize;
-                let mut published_full_window = false;
-                state.window = history.as_mut_ptr();
-                state.wnext = 0;
-                state.whave = 0;
-                let mut ret = loop {
-                    strm.next_out = callback_window[written..].as_mut_ptr();
-                    strm.avail_out = (window_size - written) as crate::stdlib::uInt;
-                    let status = crate::src::inflate::inflate(
-                        strm,
-                        crate::zlib_h::Z_NO_FLUSH,
-                        None,
-                        &mut callback_window[written..],
-                        None,
-                    );
-                    written = inflate_back_pending_output(
-                        window_size as ::core::ffi::c_uint,
-                        strm.avail_out,
-                    )
-                    .unwrap_or(0) as usize;
-                    if written == window_size {
-                        published_full_window = true;
-                        if output.expect("non-null function pointer")(
-                            output_desc,
-                            callback_window.as_mut_ptr(),
-                            state.wsize,
-                        ) != 0
-                        {
-                            break crate::zlib_h::Z_BUF_ERROR;
-                        }
-                        written = 0;
-                        continue;
-                    }
-                    match status {
-                        crate::zlib_h::Z_STREAM_END
-                        | crate::zlib_h::Z_DATA_ERROR
-                        | crate::zlib_h::Z_MEM_ERROR
-                        | crate::zlib_h::Z_STREAM_ERROR => break status,
-                        crate::zlib_h::Z_OK | crate::zlib_h::Z_BUF_ERROR if strm.avail_in == 0 => {
-                            let mut next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            let have = input.expect("non-null function pointer")(
-                                input_desc,
-                                &raw mut next,
-                            );
-                            if have == 0 || next.is_null() {
-                                strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-                                strm.avail_in = 0;
-                                break crate::zlib_h::Z_BUF_ERROR;
-                            }
-                            strm.next_in = next;
-                            inflate_back_publish_available_input(strm, have);
-                        }
-                        crate::zlib_h::Z_OK | crate::zlib_h::Z_BUF_ERROR => break status,
-                        _ => break status,
-                    }
-                };
-                if written != 0 {
-                    let output_failed = output.expect("non-null function pointer")(
-                        output_desc,
-                        callback_window.as_mut_ptr(),
-                        written as ::core::ffi::c_uint,
-                    ) != 0;
-                    ret = inflate_back_finish_pending_output(ret, output_failed);
-                }
-                state.window = callback_window.as_mut_ptr();
-                state.wnext = 0;
-                state.whave = if published_full_window {
-                    state.wsize
-                } else {
-                    0
-                };
-                (state.hold, state.bits) = saved_bit_buffer;
-                (strm.total_in, strm.total_out, strm.data_type, strm.adler) = saved_public;
-                strm.next_out = saved_next_out;
-                strm.avail_out = saved_avail_out;
-                ret
-            }
-        }};
+    let Some(callback_window) = callback_window else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if callback_window.len() != state.wsize as usize {
+        return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::inflate::updatewindow(
-        strm,
-        state,
-        crate::src::inflate::InflateWindowAccess::Inspect,
-        |strm, state, callback_window| {
-            let Some(callback_window) = callback_window else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            decode_with_window!(strm, state, callback_window)
-        },
-    )
-    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+    inflate_back_begin_decode(strm, state);
+    inflate_back_normalize_initial_input(strm);
+    let window_size = state.wsize as usize;
+    let saved_next_out = strm.next_out;
+    let saved_avail_out = strm.avail_out;
+    let saved_public = (strm.total_in, strm.total_out, strm.data_type, strm.adler);
+    let saved_bit_buffer = (state.hold, state.bits);
+    if crate::src::inflate::inflate_back_install_history(state, window_size).is_err() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let mut written = 0usize;
+    let mut published_full_window = false;
+    let mut ret = loop {
+        strm.next_out = callback_window[written..].as_mut_ptr();
+        strm.avail_out = (window_size - written) as crate::stdlib::uInt;
+        let status = crate::src::inflate::inflate(
+            strm,
+            crate::zlib_h::Z_NO_FLUSH,
+            None,
+            &mut callback_window[written..],
+            None,
+        );
+        written = inflate_back_pending_output(window_size as ::core::ffi::c_uint, strm.avail_out)
+            .unwrap_or(0) as usize;
+        if written == window_size {
+            published_full_window = true;
+            if output.expect("non-null function pointer")(
+                output_desc,
+                callback_window.as_mut_ptr(),
+                state.wsize,
+            ) != 0
+            {
+                break crate::zlib_h::Z_BUF_ERROR;
+            }
+            written = 0;
+            continue;
+        }
+        match status {
+            crate::zlib_h::Z_STREAM_END
+            | crate::zlib_h::Z_DATA_ERROR
+            | crate::zlib_h::Z_MEM_ERROR
+            | crate::zlib_h::Z_STREAM_ERROR => break status,
+            crate::zlib_h::Z_OK | crate::zlib_h::Z_BUF_ERROR if strm.avail_in == 0 => {
+                let mut next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                let have = input.expect("non-null function pointer")(input_desc, &raw mut next);
+                if have == 0 || next.is_null() {
+                    strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                    strm.avail_in = 0;
+                    break crate::zlib_h::Z_BUF_ERROR;
+                }
+                strm.next_in = next;
+                inflate_back_publish_available_input(strm, have);
+            }
+            crate::zlib_h::Z_OK | crate::zlib_h::Z_BUF_ERROR => break status,
+            _ => break status,
+        }
+    };
+    if written != 0 {
+        let output_failed = output.expect("non-null function pointer")(
+            output_desc,
+            callback_window.as_mut_ptr(),
+            written as ::core::ffi::c_uint,
+        ) != 0;
+        ret = inflate_back_finish_pending_output(ret, output_failed);
+    }
+    state.wnext = 0;
+    state.whave = if published_full_window {
+        state.wsize
+    } else {
+        0
+    };
+    crate::src::inflate::inflate_back_remove_history(state);
+    (state.hold, state.bits) = saved_bit_buffer;
+    (strm.total_in, strm.total_out, strm.data_type, strm.adler) = saved_public;
+    strm.next_out = saved_next_out;
+    strm.avail_out = saved_avail_out;
+    ret
 }
 
 #[export_name = "inflateBack"]
@@ -1266,11 +1243,28 @@ pub unsafe extern "C" fn inflateBack_ffi(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    // SAFETY: this ABI adapter only binds the optional foreign stream
-    // reference. The implementation retains callback validation and all
-    // callback-owned cursor handling.
-    let strm = unsafe { strm.as_mut() };
-    inflateBack(strm, in_0, in_desc, out, out_desc)
+    // SAFETY: this ABI adapter binds the foreign stream and its configured
+    // callback window once. The initializer guarantees the window's length
+    // from `wbits`; the safe implementation retains all decoder, callback,
+    // and cursor handling.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let callback_window = if strm.state.is_null() {
+        None
+    } else {
+        let state = unsafe { &*(strm.state as *const crate::src::inflate::inflate_state) };
+        let len = 1usize.checked_shl(state.wbits);
+        if !(8..=15).contains(&state.wbits)
+            || len != Some(state.wsize as usize)
+            || state.window.is_null()
+        {
+            None
+        } else {
+            Some(unsafe { ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize) })
+        }
+    };
+    inflateBack(Some(strm), callback_window, in_0, in_desc, out, out_desc)
 }
 // The ABI forwarder only binds the foreign stream reference. Keep validation
 // and the post-release transition reference-bound; only the configured C

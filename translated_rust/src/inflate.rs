@@ -1057,6 +1057,26 @@ pub(crate) fn updatewindow<T>(
     state.window_storage = window_storage;
     result
 }
+
+// `inflateBack()` publishes into a caller-owned window, but its decoder still
+// needs an ordinary owned history ring for `inflate()`'s bounded window
+// operations. Keep that temporary storage owned by the inflater state rather
+// than reopening the callback window as a Rust slice.
+pub(crate) fn inflate_back_install_history(
+    state: &mut crate::src::inflate::inflate_state,
+    len: usize,
+) -> Result<(), ()> {
+    if !state.window_storage.is_empty() {
+        return Err(());
+    }
+    state.window_storage = vec![0; len];
+    Ok(())
+}
+
+pub(crate) fn inflate_back_remove_history(state: &mut crate::src::inflate::inflate_state) {
+    state.window_storage = ::std::vec::Vec::new();
+}
+
 // The checked stream/state binding below, followed by the null cursor guard,
 // keeps the implementation's Rust-facing contract reference-bound. Its raw
 // decoder operations stay internal to this implementation.
