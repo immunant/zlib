@@ -1409,7 +1409,7 @@ pub unsafe extern "C" fn deflateBound_z(
                     loop {
                         wraplen = wraplen.wrapping_add(1);
                         let c2rust_fresh63 = str;
-                        str = str.offset(1);
+                        str = str.wrapping_add(1);
                         if !(*c2rust_fresh63 != 0) {
                             break;
                         }
@@ -1420,7 +1420,7 @@ pub unsafe extern "C" fn deflateBound_z(
                     loop {
                         wraplen = wraplen.wrapping_add(1);
                         let c2rust_fresh64 = str;
-                        str = str.offset(1);
+                        str = str.wrapping_add(1);
                         if !(*c2rust_fresh64 != 0) {
                             break;
                         }

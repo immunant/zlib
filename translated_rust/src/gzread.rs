@@ -996,15 +996,20 @@ fn gzclose_r_result(
 
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     loop {
-        match gz_skip_action((*state).x.have, (*state).eof, (*state).strm.avail_in) {
+        let action = {
+            let state_ref = &mut *state;
+            gz_skip_action(state_ref.x.have, state_ref.eof, state_ref.strm.avail_in)
+        };
+        match action {
             GzSkipAction::ConsumeBuffered => {
+                let state_ref = &mut *state;
                 let n = gz_skip_core(
-                    &mut (*state).x.have,
-                    &mut (*state).x.pos,
-                    &mut (*state).skip,
+                    &mut state_ref.x.have,
+                    &mut state_ref.x.pos,
+                    &mut state_ref.skip,
                     crate::src::gzlib::gz_intmax(),
                 );
-                (*state).x.next = (*state).x.next.wrapping_add(n as usize);
+                state_ref.x.next = state_ref.x.next.wrapping_add(n as usize);
             }
             GzSkipAction::StopAtEof => break,
             GzSkipAction::Fetch => {
@@ -1013,7 +1018,11 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
                 }
             }
         }
-        if !gz_skip_should_continue((*state).skip) {
+        let should_continue = {
+            let state_ref = &*state;
+            gz_skip_should_continue(state_ref.skip)
+        };
+        if !should_continue {
             break;
         }
     }
