@@ -612,6 +612,54 @@ impl GzCodecOutput {
     }
 }
 
+// The result of one embedded inflate call is entirely scalar.  Keep this
+// state-machine decision separate from the ABI stream so gzip can eventually
+// drive it from an owned codec facade instead of inspecting `z_stream` after
+// each call.  In particular, the raw-copy fallback (`Junk`) is distinct from
+// a corrupt compressed member even though inflate reports Z_DATA_ERROR for
+// both.
+pub(crate) enum GzDecompAction {
+    Continue,
+    Stop,
+    Junk,
+    StreamError,
+    MemoryError,
+    DataError,
+}
+
+pub(crate) struct GzDecompStep {
+    pub(crate) produced_output: bool,
+    pub(crate) action: GzDecompAction,
+}
+
+pub(crate) fn gz_decomp_step(
+    result: ::core::ffi::c_int,
+    output_available: crate::stdlib::uInt,
+    produced_output: bool,
+    junk: ::core::ffi::c_int,
+) -> GzDecompStep {
+    let action = if result == crate::zlib_h::Z_STREAM_ERROR || result == crate::zlib_h::Z_NEED_DICT
+    {
+        GzDecompAction::StreamError
+    } else if result == crate::zlib_h::Z_MEM_ERROR {
+        GzDecompAction::MemoryError
+    } else if result == crate::zlib_h::Z_DATA_ERROR {
+        if junk == 1 {
+            GzDecompAction::Junk
+        } else {
+            GzDecompAction::DataError
+        }
+    } else if output_available == 0 || result == crate::zlib_h::Z_STREAM_END {
+        GzDecompAction::Stop
+    } else {
+        GzDecompAction::Continue
+    };
+    GzDecompStep {
+        produced_output,
+        action,
+    }
+}
+
 struct GzResetFields {
     have: ::core::ffi::c_uint,
     read: Option<GzReadResetFields>,

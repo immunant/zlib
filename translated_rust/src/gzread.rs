@@ -600,40 +600,53 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 crate::zlib_h::Z_NO_FLUSH,
             );
             output_progress.record_available(strm.avail_out);
-            if output_progress.has_output() {
+            let produced_output = output_progress.has_output();
+            let junk = if produced_output {
+                0 as ::core::ffi::c_int
+            } else {
+                state.junk
+            };
+            let step =
+                crate::src::gzlib::gz_decomp_step(ret, strm.avail_out, produced_output, junk);
+            if step.produced_output {
                 state.junk = 0 as ::core::ffi::c_int;
             }
-            if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
-                crate::src::gzlib::GzErrorState {
-                    message: &mut state.msg,
-                    error: &mut state.err,
-                    buffered: &mut state.x.have,
-                    again: state.again,
-                    path: state.path.as_deref(),
-                }
-                .set(
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    Some(b"internal error: inflate stream corrupt"),
-                );
-                break;
-            } else if ret == crate::zlib_h::Z_MEM_ERROR {
-                crate::src::gzlib::GzErrorState {
-                    message: &mut state.msg,
-                    error: &mut state.err,
-                    buffered: &mut state.x.have,
-                    again: state.again,
-                    path: state.path.as_deref(),
-                }
-                .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-                break;
-            } else if ret == crate::zlib_h::Z_DATA_ERROR {
-                if state.junk == 1 as ::core::ffi::c_int {
+            match step.action {
+                crate::src::gzlib::GzDecompAction::Continue => {}
+                crate::src::gzlib::GzDecompAction::Stop => break,
+                crate::src::gzlib::GzDecompAction::Junk => {
                     strm.avail_in = 0 as crate::stdlib::uInt;
                     state.eof = 1 as ::core::ffi::c_int;
                     state.how = crate::gzguts_h::LOOK;
                     ret = crate::zlib_h::Z_OK;
                     break;
-                } else {
+                }
+                crate::src::gzlib::GzDecompAction::StreamError => {
+                    crate::src::gzlib::GzErrorState {
+                        message: &mut state.msg,
+                        error: &mut state.err,
+                        buffered: &mut state.x.have,
+                        again: state.again,
+                        path: state.path.as_deref(),
+                    }
+                    .set(
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(b"internal error: inflate stream corrupt"),
+                    );
+                    break;
+                }
+                crate::src::gzlib::GzDecompAction::MemoryError => {
+                    crate::src::gzlib::GzErrorState {
+                        message: &mut state.msg,
+                        error: &mut state.err,
+                        buffered: &mut state.x.have,
+                        again: state.again,
+                        path: state.path.as_deref(),
+                    }
+                    .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
+                    break;
+                }
+                crate::src::gzlib::GzDecompAction::DataError => {
                     // `inflate()` owns every diagnostic it publishes through
                     // `strm.msg`. Match that known static storage by address,
                     // rather than dereferencing the ABI pointer just to copy
@@ -654,8 +667,6 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                     .set(crate::zlib_h::Z_DATA_ERROR, Some(message));
                     break;
                 }
-            } else if !(strm.avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END) {
-                break;
             }
         }
     }
