@@ -3687,15 +3687,10 @@ unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
     }
 }
 
-unsafe extern "C" fn gen_codes(
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
-    bl_count: &[crate::zutil_h::ush; 16],
-) {
+fn next_codes(bl_count: &[crate::zutil_h::ush; 16]) -> [crate::zutil_h::ush; 16] {
     let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
     let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut bits: ::core::ffi::c_int = 0;
-    let mut n: ::core::ffi::c_int = 0;
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
         code = code.wrapping_add(
@@ -3704,13 +3699,24 @@ unsafe extern "C" fn gen_codes(
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;
     }
+    next_code
+}
+
+unsafe extern "C" fn gen_codes(
+    mut tree: *mut crate::src::deflate::ct_data,
+    mut max_code: ::core::ffi::c_int,
+    bl_count: &[crate::zutil_h::ush; 16],
+) {
+    let mut next_code = next_codes(bl_count);
+    let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
-        let mut len: ::core::ffi::c_int = (*tree.offset(n as isize)).dl.len as ::core::ffi::c_int;
+        let node = tree.wrapping_add(n as usize);
+        let mut len: ::core::ffi::c_int = (*node).dl.len as ::core::ffi::c_int;
         if !(len == 0 as ::core::ffi::c_int) {
             let c2rust_fresh58 = next_code[len as usize];
             next_code[len as usize] = next_code[len as usize].wrapping_add(1);
-            (*tree.offset(n as isize)).fc.value =
+            (*node).fc.value =
                 bi_reverse(c2rust_fresh58 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
         n += 1;
@@ -5107,7 +5113,7 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
-        dist_code_index, MAX_BITS,
+        dist_code_index, next_codes, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5159,6 +5165,20 @@ mod tests {
                 assert_eq!(bi_reverse(code, len), expected, "code={code}, len={len}");
             }
         }
+    }
+
+    #[test]
+    fn canonical_code_starts_follow_bit_length_counts() {
+        let mut counts = [0; 16];
+        counts[1] = 1;
+        counts[2] = 2;
+        counts[3] = 2;
+
+        let codes = next_codes(&counts);
+        assert_eq!(codes[1], 0);
+        assert_eq!(codes[2], 2);
+        assert_eq!(codes[3], 8);
+        assert_eq!(codes[4], 20);
     }
 
     #[test]
