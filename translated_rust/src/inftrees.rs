@@ -3251,11 +3251,11 @@ fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
     state.distbits = 5 as ::core::ffi::c_uint;
 }
 
-pub unsafe extern "C" fn inflate_fixed(mut state: *mut crate::src::inflate::inflate_state) {
-    inflate_fixed_state(&mut *state)
+pub fn inflate_fixed(state: &mut crate::src::inflate::inflate_state) {
+    inflate_fixed_state(state)
 }
 #[export_name = "inflate_fixed"]
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
-    inflate_fixed(state)
+    inflate_fixed(&mut *state)
 }
