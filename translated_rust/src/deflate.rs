@@ -1595,21 +1595,16 @@ fn set_dictionary_core(
     Ok(checksum)
 }
 
-pub unsafe extern "C" fn deflateSetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
+// Dictionary bytes are scoped by the FFI wrapper before this state adapter is
+// entered.  Keep the callback-backed state allocation views here with the
+// stream borrow, but let the dictionary kernel receive only a bounded slice.
+pub unsafe fn deflateSetDictionary(
+    strm: &mut crate::zlib_h::z_stream_s,
+    dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    if dictionary.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some((strm, s)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
-    else {
+    let Some((strm, s)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let dictionary = ::core::slice::from_raw_parts(dictionary, dictLength as usize);
     let window = ::core::slice::from_raw_parts_mut(
         s.window.expect("initialized window").as_ptr(),
         s.window_size as usize,
@@ -1667,7 +1662,15 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateSetDictionary(strm, dictionary, dictLength)
+    let Some(dictionary) = ::core::ptr::NonNull::new(dictionary.cast_mut()) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let dictionary =
+        ::core::slice::from_raw_parts(dictionary.as_ptr().cast_const(), dictLength as usize);
+    deflateSetDictionary(strm, dictionary)
 }
 pub unsafe extern "C" fn deflateGetDictionary(
     mut strm: crate::zlib_h::z_streamp,
