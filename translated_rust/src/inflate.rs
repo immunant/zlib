@@ -1865,8 +1865,14 @@ pub fn inflate(
     let mut strm = strm_ref as *mut crate::zlib_h::z_stream;
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    // The decoder advances these checked offsets while the compatibility
+    // cursors themselves stay fixed.  Slice views own all interior movement.
+    let mut next: usize = 0;
+    let mut put: usize = 0;
+    let mut next_cursor: *mut ::core::ffi::c_uchar =
+        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut put_cursor: *mut ::core::ffi::c_uchar =
+        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -1935,9 +1941,11 @@ pub fn inflate(
         };
         state = state_ref as *mut crate::src::inflate::inflate_state;
         state_ref.mode = entry_mode;
-        put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
+        put_cursor = strm_ref.next_out as *mut ::core::ffi::c_uchar;
+        put = 0;
         left = strm_ref.avail_out as ::core::ffi::c_uint;
-        next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
+        next_cursor = strm_ref.next_in as *mut ::core::ffi::c_uchar;
+        next = 0;
         have = strm_ref.avail_in as ::core::ffi::c_uint;
         hold = state_ref.hold;
         bits = state_ref.bits;
@@ -1950,8 +1958,14 @@ pub fn inflate(
             // invokes callbacks nor reallocates the history window.  This
             // scope ends before the exit boundary, where allocation callbacks
             // are again possible.
-            let input = ::core::slice::from_raw_parts(next, have as usize);
-            let output = ::core::slice::from_raw_parts_mut(put, left as usize);
+            // zlib permits a null `next_in` when no input is available.  Do
+            // not turn that valid empty ABI cursor into a Rust slice.
+            let input = if have == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(next_cursor, have as usize)
+            };
+            let output = ::core::slice::from_raw_parts_mut(put_cursor, left as usize);
             let window = if state_ref.window.is_null() {
                 None
             } else {
@@ -2505,9 +2519,9 @@ pub fn inflate(
                                                                                         let state_ref =
                                                                                         &mut *state;
                                                                                         if state_ref.havedict == 0 as ::core::ffi::c_int {
-                                                                                        strm_ref.next_out = put as *mut crate::stdlib::Bytef;
+                                                                                        strm_ref.next_out = output[put..].as_mut_ptr();
                                                                                         strm_ref.avail_out = left as crate::stdlib::uInt;
-                                                                                        strm_ref.next_in = next as *mut crate::stdlib::Bytef;
+                                                                                        strm_ref.next_in = input[next..].as_ptr() as *mut crate::stdlib::Bytef;
                                                                                         strm_ref.avail_in = have as crate::stdlib::uInt;
                                                                                         state_ref.hold = hold;
                                                                                         state_ref.bits = bits;
@@ -3752,6 +3766,14 @@ pub fn inflate(
                 state_ref.mode = crate::src::inflate::LEN;
             }
         }
+            // Convert the final checked offsets back to ABI cursors only after
+            // the decode loop has released both bounded views.
+            next_cursor = if in_0 == 0 {
+                strm_ref.next_in as *mut ::core::ffi::c_uchar
+            } else {
+                input[next..].as_ptr() as *mut ::core::ffi::c_uchar
+            };
+            put_cursor = output[put..].as_mut_ptr();
         }
         // The invocation-local ABI views above have ended before this exit
         // boundary can invoke an allocator callback.
@@ -3766,9 +3788,9 @@ pub fn inflate(
         {
             let strm_ref = &mut *strm;
             let state_ref = &mut *state;
-            strm_ref.next_out = put as *mut crate::stdlib::Bytef;
+            strm_ref.next_out = put_cursor as *mut crate::stdlib::Bytef;
             strm_ref.avail_out = left as crate::stdlib::uInt;
-            strm_ref.next_in = next as *mut crate::stdlib::Bytef;
+            strm_ref.next_in = next_cursor as *mut crate::stdlib::Bytef;
             strm_ref.avail_in = have as crate::stdlib::uInt;
             state_ref.hold = hold;
             state_ref.bits = bits;
