@@ -2400,21 +2400,18 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         )
     };
     if !pending_buf.is_null() {
-        Some(zfree).expect("non-null function pointer")(
-            opaque,
-            pending_buf as crate::stdlib::voidpf,
-        );
+        zfree(opaque, pending_buf as crate::stdlib::voidpf);
     }
     if !head.is_null() {
-        Some(zfree).expect("non-null function pointer")(opaque, head as crate::stdlib::voidpf);
+        zfree(opaque, head as crate::stdlib::voidpf);
     }
     if !prev.is_null() {
-        Some(zfree).expect("non-null function pointer")(opaque, prev as crate::stdlib::voidpf);
+        zfree(opaque, prev as crate::stdlib::voidpf);
     }
     if !window.is_null() {
-        Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
+        zfree(opaque, window as crate::stdlib::voidpf);
     }
-    Some(zfree).expect("non-null function pointer")(opaque, state_ptr as crate::stdlib::voidpf);
+    zfree(opaque, state_ptr as crate::stdlib::voidpf);
     deflate_end_complete(&mut *strm, status)
 }
 

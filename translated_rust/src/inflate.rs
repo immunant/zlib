@@ -2436,11 +2436,10 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         strm.state,
     );
     if !window.is_null() {
-        Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
+        zfree(opaque, window as crate::stdlib::voidpf);
     }
-    Some(zfree).expect("non-null function pointer")(opaque, state_ptr as crate::stdlib::voidpf);
-    clear_inflate_state(strm);
-    crate::zlib_h::Z_OK
+    zfree(opaque, state_ptr as crate::stdlib::voidpf);
+    inflate_end_complete(strm)
 }
 
 // Gzip initializes its private inflater with zlib's default callbacks.  Its
@@ -2465,6 +2464,14 @@ pub(crate) fn inflate_end_default_bound(strm: &mut crate::zlib_h::z_stream) -> :
 
 fn clear_inflate_state(strm: &mut crate::zlib_h::z_stream) {
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+}
+
+// Keep the only post-release stream transition in a reference-bound helper.
+// The callback plan above contains all values the deallocator can observe,
+// so this helper does not need to retain state or allocator references.
+fn inflate_end_complete(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    clear_inflate_state(strm);
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateEnd"]
 
