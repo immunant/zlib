@@ -2857,19 +2857,31 @@ pub unsafe extern "C" fn inflate_ffi(
     };
     inflate(strm, flush)
 }
+// This is the pointer-free half of ending a normal inflate stream.  Its
+// callback-owned state record stays live until the ABI adapter completes the
+// paired `zfree` call below, but its Rust-owned history must be released
+// first, exactly as it was when the state record's drop glue ran at teardown.
+fn inflate_end_release_owned_state(normal: &mut InflateNormalState) {
+    drop(normal.owned_window.take());
+}
+
 pub unsafe fn inflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    // Keep the ABI projections at the callback-release boundary.  The
-    // window must be dropped before the caller-owned state allocation is
-    // released, and the stream must continue to point at that state during
-    // the callback just as it did in the C implementation.
+    // Snapshot the opaque allocation handle before borrowing its typed
+    // contents.  This preserves the callback's provenance without deriving
+    // a new raw address from the projected state reference.
+    let Some(state_handle) = stream.state else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // Keep the ABI projections at the callback-release boundary.  The stream
+    // must continue to point at that state during `zfree`, matching C's
+    // observable release order.
     let Some((stream, state)) = inflate_stream_and_state(stream) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state_ptr = ::core::ptr::from_mut(state);
-    drop(state.normal.owned_window.take());
+    inflate_end_release_owned_state(&mut state.normal);
     let zfree = stream.zfree.expect("non-null function pointer");
     let opaque = stream.opaque;
-    zfree(opaque, state_ptr.cast());
+    zfree(opaque, state_handle.as_ptr().cast());
     stream.state = None;
     return crate::zlib_h::Z_OK;
 }
