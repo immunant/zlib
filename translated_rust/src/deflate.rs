@@ -497,10 +497,11 @@ impl DeflateCallbackStorageOwner {
             .expect("validated pending allocation geometry")
     }
 
-    fn record_storage(&mut self, slot: DeflateStorageSlot, allocated: bool) {
-        if !allocated {
-            return;
-        }
+    // Recording is deliberately possible only after a non-null callback
+    // result has been published into the matching state slot.  This makes the
+    // ledger's liveness bit an acknowledgement of that single transaction,
+    // rather than a second interpretation of a nullable callback result.
+    fn record_storage(&mut self, slot: DeflateStorageSlot) {
         match slot {
             DeflateStorageSlot::Window => self.window = true,
             DeflateStorageSlot::Prev => self.prev = true,
@@ -1333,11 +1334,9 @@ mod callback_owner {
             // Keeping the nullable result as a local also prevents an FFI
             // wrapper from inheriting any part of this transaction.
             let allocation = match callback {
-                Some(callback) => ::core::ptr::NonNull::new(callback(
-                    opaque,
-                    request.items,
-                    request.size,
-                )),
+                Some(callback) => {
+                    ::core::ptr::NonNull::new(callback(opaque, request.items, request.size))
+                }
                 None => None,
             };
             match slot {
@@ -1374,11 +1373,10 @@ mod callback_owner {
                                     state.pending_buf = Some(allocation.cast())
                                 }
                             }
-                            state.callback_storage.record_storage(slot, true);
+                            state.callback_storage.record_storage(slot);
                         }
                         None => {
                             complete = false;
-                            state.callback_storage.record_storage(slot, false);
                         }
                     }
                 }
