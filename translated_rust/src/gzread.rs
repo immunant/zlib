@@ -314,7 +314,6 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 if result.status == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
-                state.x.next = state.out;
                 return 0 as ::core::ffi::c_int;
             }
             crate::src::gzlib::GzFetchPlan::Gzip { output } => {

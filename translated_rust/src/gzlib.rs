@@ -220,6 +220,7 @@ pub(crate) fn gz_fetch_copy_loaded(
     received: ::core::ffi::c_uint,
 ) {
     state.x.have = received;
+    state.x.next = state.out;
 }
 
 pub(crate) fn gz_fetch_needs_more(state: &crate::gzguts_h::gz_state) -> bool {
