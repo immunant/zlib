@@ -1,11 +1,6 @@
 pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
-use crate::src::compress::OneShotCursor;
-pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
-pub use crate::src::inflate::inflateEnd;
-pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::uLongf;
@@ -15,10 +10,6 @@ pub use crate::stdlib::Byte;
 pub use crate::stdlib::Bytef;
 pub use crate::zlib_h::alloc_func;
 pub use crate::zlib_h::free_func;
-pub use crate::zlib_h::z_stream;
-pub use crate::zlib_h::z_stream_s;
-pub use crate::zlib_h::z_streamp;
-pub use crate::zlib_h::ZLIB_VERSION;
 pub use crate::zlib_h::Z_BUF_ERROR;
 pub use crate::zlib_h::Z_DATA_ERROR;
 pub use crate::zlib_h::Z_NEED_DICT;
@@ -38,90 +29,22 @@ fn uncompress2_z(
     dest: &mut [crate::stdlib::Bytef],
     source: &[crate::stdlib::Bytef],
 ) -> Result<UncompressProgress, ::core::ffi::c_int> {
-    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
-        next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_in: 0,
-        total_in: 0,
-        next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_out: 0,
-        total_out: 0,
-        msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
-        zalloc: None,
-        zfree: None,
-        opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
-        data_type: 0,
-        adler: 0,
-        reserved: 0,
-    };
-    let mut err: ::core::ffi::c_int;
-    let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut input = OneShotCursor::new(source.len());
-    let mut output = OneShotCursor::new(dest.len());
-    stream.next_in = source.as_ptr().cast_mut();
-    stream.avail_in = 0 as crate::stdlib::uInt;
-    stream.zalloc = None;
-    stream.zfree = None;
-    stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    // The stream is an ABI mirror used only while this slice-backed loop is
-    // active.  Empty output still needs a non-null cursor for inflate's ABI.
-    unsafe {
-        err = crate::src::inflate::inflateInit2_(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            crate::zutil_h::DEF_WBITS,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        );
-    }
-    if err != crate::zlib_h::Z_OK {
-        return Err(err);
-    }
-    stream.next_out = if dest.is_empty() {
-        &raw mut stream.reserved as *mut crate::stdlib::Bytef
-    } else {
-        dest.as_mut_ptr()
-    };
-    stream.avail_out = 0 as crate::stdlib::uInt;
-    loop {
-        if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = output.next_chunk(max);
-        }
-        if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = input.next_chunk(max);
-        }
-        unsafe {
-            err = crate::src::inflate::inflate(
-                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-                crate::zlib_h::Z_NO_FLUSH,
-            );
-        }
-        if err != crate::zlib_h::Z_OK {
-            break;
-        }
-    }
-    let len = input
-        .remaining()
-        .wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
-    let left = output
-        .remaining()
-        .wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
-    unsafe {
-        crate::src::inflate::inflateEnd(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
-    }
+    let mut owner = crate::src::inflate::InflateOneShotOwner::new(source, dest);
+    let progress = crate::src::inflate::inflate_one_shot(&mut owner)?;
     Ok(UncompressProgress {
-        status: if err == crate::zlib_h::Z_STREAM_END {
+        status: if progress.status == crate::zlib_h::Z_STREAM_END {
             crate::zlib_h::Z_OK
-        } else if err == crate::zlib_h::Z_NEED_DICT {
+        } else if progress.status == crate::zlib_h::Z_NEED_DICT {
             crate::zlib_h::Z_DATA_ERROR
-        } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
+        } else if progress.status == crate::zlib_h::Z_BUF_ERROR
+            && progress.source_remaining == 0 as crate::stdlib::z_size_t
+        {
             crate::zlib_h::Z_DATA_ERROR
         } else {
-            err
+            progress.status
         },
-        source_remaining: len,
-        output_remaining: left,
+        source_remaining: progress.source_remaining,
+        output_remaining: progress.output_remaining,
     })
 }
 #[export_name = "uncompress2_z"]
