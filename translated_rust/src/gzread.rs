@@ -105,8 +105,9 @@ unsafe extern "C" fn gz_load(
     let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
         >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint);
+    let errno = crate::stdlib::__errno_location();
     (*state).again = 0 as ::core::ffi::c_int;
-    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+    *errno = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
     loop {
         get = len.wrapping_sub(*have);
@@ -127,8 +128,9 @@ unsafe extern "C" fn gz_load(
         }
     }
     if ret < 0 as ::core::ffi::c_int {
-        if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-            || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
+        let errno_value = *errno;
+        if errno_value == crate::stdlib::EAGAIN
+            || errno_value == crate::stdlib::EWOULDBLOCK
         {
             (*state).again = 1 as ::core::ffi::c_int;
             if *have != 0 as ::core::ffi::c_uint {
@@ -138,7 +140,7 @@ unsafe extern "C" fn gz_load(
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+            crate::stdlib::strerror(errno_value),
         );
         return -1 as ::core::ffi::c_int;
     }
