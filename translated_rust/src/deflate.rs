@@ -4796,180 +4796,139 @@ fn deflate_fast(
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    // The fast loop still needs the legacy state, window, hash, symbol, and
-    // pending-buffer cursor lends. Keep that compatibility boundary explicit
-    // so ordinary deflate dispatch does not inherit an unsafe requirement.
-    unsafe {
-        let mut hash_head: crate::src::deflate::IPos = 0;
-        let mut bflush: ::core::ffi::c_int = 0;
-        loop {
-            let needs_input =
-                s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
-            if needs_input {
-                fill_window_state(s, strm, input, window_hash);
-                if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                    && flush == crate::zlib_h::Z_NO_FLUSH
-                {
-                    return need_more;
-                }
-                if s.lookahead == 0 as crate::stdlib::uInt {
-                    break;
-                }
+    // The ABI boundary already lent the callback-owned window, hash tables,
+    // and pending buffer. Keep each no-refill parser transition within those
+    // checked spans.
+    let mut hash_head: crate::src::deflate::IPos = 0;
+    let mut bflush: ::core::ffi::c_int = 0;
+    loop {
+        let needs_input = s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
+        if needs_input {
+            fill_window_state(s, strm, input, window_hash);
+            if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                && flush == crate::zlib_h::Z_NO_FLUSH
+            {
+                return need_more;
             }
-            hash_head = NIL as crate::src::deflate::IPos;
-            // Both parser transitions need the same callback-owned window
-            // and pending allocation. Lend each once per no-refill
-            // transition; only the match path additionally needs hash views.
-            let state: &mut crate::src::deflate::deflate_state = s;
-            let has_min_match = state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
-            let (Ok(window_len), Ok(pending_len)) = (
-                usize::try_from(state.window_size),
-                usize::try_from(state.pending_buf_size),
+            if s.lookahead == 0 as crate::stdlib::uInt {
+                break;
+            }
+        }
+        hash_head = NIL as crate::src::deflate::IPos;
+        // Both parser transitions need the same callback-owned window
+        // and pending allocation. Lend each once per no-refill
+        // transition; only the match path additionally needs hash views.
+        let state: &mut crate::src::deflate::deflate_state = s;
+        let has_min_match = state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+        let (Ok(window_len), Ok(pending_len)) = (
+            usize::try_from(state.window_size),
+            usize::try_from(state.pending_buf_size),
+        ) else {
+            return need_more;
+        };
+        if (window_len != 0 && state.window.is_null())
+            || window_hash.window.len() != window_len
+            || pending_buf.len() != pending_len
+        {
+            return need_more;
+        }
+        let window = &*window_hash.window;
+        let pending_and_symbols = &mut *pending_buf;
+        if has_min_match {
+            let (Ok(head_len), Ok(prev_len)) = (
+                usize::try_from(state.hash_size),
+                usize::try_from(state.w_size),
             ) else {
                 return need_more;
             };
-            if (window_len != 0 && state.window.is_null()) || pending_buf.len() != pending_len {
+            if (head_len != 0 && state.head.is_null())
+                || (prev_len != 0 && state.prev.is_null())
+                || window_hash.head.len() != head_len
+                || window_hash.prev.len() != prev_len
+            {
                 return need_more;
             }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
+            let head = &mut *window_hash.head;
+            let prev = &mut *window_hash.prev;
+            // `sym_start` is the literal-buffer offset within the pending
+            // allocation. Keep this existing no-refill window/hash lend
+            // alive through a checked tree flush, rather than rebuilding
+            // either the symbol cursor or stored-block cursor below.
+            let Some(previous) = insert_string_state(
+                window,
+                head,
+                prev,
+                state.strstart,
+                &mut state.ins_h,
+                state.hash_shift,
+                state.hash_mask,
+                state.w_mask,
+            ) else {
+                return need_more;
             };
-            let pending_and_symbols = &mut *pending_buf;
-            if has_min_match {
-                let (Ok(head_len), Ok(prev_len)) = (
-                    usize::try_from(state.hash_size),
-                    usize::try_from(state.w_size),
-                ) else {
+            hash_head = previous;
+            if hash_match_is_usable(
+                state.strstart as crate::src::deflate::IPos,
+                hash_head,
+                state.w_size,
+            ) {
+                state.match_length =
+                    longest_match_state(state, window, prev, hash_head).unwrap_or(0);
+            }
+            if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+                let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
                     return need_more;
                 };
-                if (head_len != 0 && state.head.is_null())
-                    || (prev_len != 0 && state.prev.is_null())
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+                    return need_more;
+                };
+                let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
+                    return need_more;
+                };
+                let Some((flush_now, length)) = fast_tally_match_state(state, symbols) else {
+                    return need_more;
+                };
+                bflush = flush_now as ::core::ffi::c_int;
+                if length <= state.max_lazy_match
+                    && state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
                 {
-                    return need_more;
-                }
-                let head = if head_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.head, head_len)
-                };
-                let prev = if prev_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                };
-                // `sym_start` is the literal-buffer offset within the pending
-                // allocation. Keep this existing no-refill window/hash lend
-                // alive through a checked tree flush, rather than rebuilding
-                // either the symbol cursor or stored-block cursor below.
-                let Some(previous) = insert_string_state(
-                    window,
-                    head,
-                    prev,
-                    state.strstart,
-                    &mut state.ins_h,
-                    state.hash_shift,
-                    state.hash_mask,
-                    state.w_mask,
-                ) else {
-                    return need_more;
-                };
-                hash_head = previous;
-                if hash_match_is_usable(
-                    state.strstart as crate::src::deflate::IPos,
-                    hash_head,
-                    state.w_size,
-                ) {
-                    state.match_length =
-                        longest_match_state(state, window, prev, hash_head).unwrap_or(0);
-                }
-                if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-                    let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
-                        return need_more;
-                    };
-                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                        return need_more;
-                    };
-                    let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
-                        return need_more;
-                    };
-                    let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
-                    else {
-                        return need_more;
-                    };
-                    let Some((flush_now, length)) = fast_tally_match_state(state, symbols) else {
-                        return need_more;
-                    };
-                    bflush = flush_now as ::core::ffi::c_int;
-                    if length <= state.max_lazy_match
-                        && state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                    {
-                        state.match_length = length.wrapping_sub(1);
-                        loop {
-                            state.strstart = state.strstart.wrapping_add(1);
-                            let Some(previous) = insert_string_state(
-                                window,
-                                head,
-                                prev,
-                                state.strstart,
-                                &mut state.ins_h,
-                                state.hash_shift,
-                                state.hash_mask,
-                                state.w_mask,
-                            ) else {
-                                return need_more;
-                            };
-                            hash_head = previous;
-                            state.match_length = state.match_length.wrapping_sub(1);
-                            if state.match_length == 0 as crate::stdlib::uInt {
-                                break;
-                            }
-                        }
+                    state.match_length = length.wrapping_sub(1);
+                    loop {
                         state.strstart = state.strstart.wrapping_add(1);
-                    } else {
-                        state.strstart = state.strstart.wrapping_add(state.match_length);
-                        state.match_length = 0 as crate::stdlib::uInt;
-                        let Some(ins_h) = initialize_hash_state(
+                        let Some(previous) = insert_string_state(
                             window,
+                            head,
+                            prev,
                             state.strstart,
+                            &mut state.ins_h,
                             state.hash_shift,
                             state.hash_mask,
+                            state.w_mask,
                         ) else {
                             return need_more;
                         };
-                        state.ins_h = ins_h;
+                        hash_head = previous;
+                        state.match_length = state.match_length.wrapping_sub(1);
+                        if state.match_length == 0 as crate::stdlib::uInt {
+                            break;
+                        }
                     }
+                    state.strstart = state.strstart.wrapping_add(1);
                 } else {
-                    let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                    state.strstart = state.strstart.wrapping_add(state.match_length);
+                    state.match_length = 0 as crate::stdlib::uInt;
+                    let Some(ins_h) = initialize_hash_state(
+                        window,
+                        state.strstart,
+                        state.hash_shift,
+                        state.hash_mask,
+                    ) else {
                         return need_more;
                     };
-                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                        return need_more;
-                    };
-                    let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
-                        return need_more;
-                    };
-                    let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
-                    else {
-                        return need_more;
-                    };
-                    let Some(flush_now) = tally_current_literal_state(state, window, symbols)
-                    else {
-                        return need_more;
-                    };
-                    bflush = flush_now as ::core::ffi::c_int;
-                }
-                if bflush != 0 {
-                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
-                    let avail_out = {
-                        state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
-                    };
-                    if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                        return result;
-                    }
-                    bflush = 0;
+                    state.ins_h = ins_h;
                 }
             } else {
                 let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
@@ -4988,76 +4947,103 @@ fn deflate_fast(
                     return need_more;
                 };
                 bflush = flush_now as ::core::ffi::c_int;
-                if bflush != 0 {
-                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
-                    let avail_out = {
-                        state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
-                    };
-                    if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                        return result;
-                    }
-                    bflush = 0;
+            }
+            if bflush != 0 {
+                flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+                let avail_out = {
+                    state.block_start = state.strstart as ::core::ffi::c_long;
+                    flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
+                };
+                if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                    return result;
                 }
+                bflush = 0;
+            }
+        } else {
+            let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                return need_more;
+            };
+            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                return need_more;
+            };
+            let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+                return need_more;
+            };
+            let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
+                return need_more;
+            };
+            let Some(flush_now) = tally_current_literal_state(state, window, symbols) else {
+                return need_more;
+            };
+            bflush = flush_now as ::core::ffi::c_int;
+            if bflush != 0 {
+                flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+                let avail_out = {
+                    state.block_start = state.strstart as ::core::ffi::c_long;
+                    flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
+                };
+                if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                    return result;
+                }
+                bflush = 0;
             }
         }
-        // The fast parser's final and symbol-only tails use the same checked
-        // pending/window layout as its regular block flushes.  Finish all
-        // tree work while those lends are live, then release them before
-        // `flush_pending()` reaches the ABI-owned output cursor.
-        let tail_last = {
-            let state: &mut crate::src::deflate::deflate_state = s;
-            state.insert = if state.strstart
-                < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-            {
-                state.strstart
-            } else {
-                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-            };
-            let needs_flush = flush == crate::zlib_h::Z_FINISH || state.sym_next != 0;
-            if !needs_flush {
-                None
-            } else {
-                let (Ok(window_len), Ok(pending_len)) = (
-                    usize::try_from(state.window_size),
-                    usize::try_from(state.pending_buf_size),
-                ) else {
-                    return need_more;
-                };
-                if (window_len != 0 && state.window.is_null()) || pending_buf.len() != pending_len {
-                    return need_more;
-                }
-                let window = if window_len == 0 {
-                    &[]
-                } else {
-                    ::core::slice::from_raw_parts(state.window, window_len)
-                };
-                let pending_and_symbols = &mut *pending_buf;
-                let last = flush == crate::zlib_h::Z_FINISH;
-                flush_tree_window_block_state(
-                    state,
-                    pending_and_symbols,
-                    window,
-                    last as ::core::ffi::c_int,
-                );
-                Some(last)
-            }
-        };
-        if let Some(last) = tail_last {
-            let avail_out = {
-                let state: &mut crate::src::deflate::deflate_state = s;
-                state.block_start = state.strstart as ::core::ffi::c_long;
-                flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
-            };
-            if let Some(result) = deflate_post_flush_result(avail_out, last) {
-                return result;
-            }
-            if last {
-                return finish_done;
-            }
-        }
-        return block_done;
     }
+    // The fast parser's final and symbol-only tails use the same checked
+    // pending/window layout as its regular block flushes.  Finish all
+    // tree work while those lends are live, then release them before
+    // `flush_pending()` reaches the ABI-owned output cursor.
+    let tail_last = {
+        let state: &mut crate::src::deflate::deflate_state = s;
+        state.insert = if state.strstart
+            < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+        {
+            state.strstart
+        } else {
+            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+        };
+        let needs_flush = flush == crate::zlib_h::Z_FINISH || state.sym_next != 0;
+        if !needs_flush {
+            None
+        } else {
+            let (Ok(window_len), Ok(pending_len)) = (
+                usize::try_from(state.window_size),
+                usize::try_from(state.pending_buf_size),
+            ) else {
+                return need_more;
+            };
+            if (window_len != 0 && state.window.is_null())
+                || window_hash.window.len() != window_len
+                || pending_buf.len() != pending_len
+            {
+                return need_more;
+            }
+            let window = &*window_hash.window;
+            let pending_and_symbols = &mut *pending_buf;
+            let last = flush == crate::zlib_h::Z_FINISH;
+            flush_tree_window_block_state(
+                state,
+                pending_and_symbols,
+                window,
+                last as ::core::ffi::c_int,
+            );
+            Some(last)
+        }
+    };
+    if let Some(last) = tail_last {
+        let avail_out = {
+            let state: &mut crate::src::deflate::deflate_state = s;
+            state.block_start = state.strstart as ::core::ffi::c_long;
+            flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
+        };
+        if let Some(result) = deflate_post_flush_result(avail_out, last) {
+            return result;
+        }
+        if last {
+            return finish_done;
+        }
+    }
+    return block_done;
 }
 
 fn deflate_slow(
@@ -5069,182 +5055,117 @@ fn deflate_slow(
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    // Slow parsing still needs the legacy state, hash-table, symbol-buffer,
-    // and pending-output lends. Keep that compatibility boundary local so
-    // ordinary dispatch does not inherit an unsafe-function requirement.
-    unsafe {
-        let mut hash_head: crate::src::deflate::IPos = 0;
-        let mut bflush: ::core::ffi::c_int = 0;
-        loop {
-            let needs_input =
-                { s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt };
-            if needs_input {
-                fill_window_state(s, strm, input, window_hash);
-                if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                    && flush == crate::zlib_h::Z_NO_FLUSH
-                {
-                    return need_more;
-                }
-                if s.lookahead == 0 as crate::stdlib::uInt {
-                    break;
-                }
-            }
-            hash_head = NIL as crate::src::deflate::IPos;
-            let has_min_match = {
-                s.prev_length = s.match_length;
-                s.prev_match = s.match_start as crate::src::deflate::IPos;
-                s.match_length =
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                s.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            };
-            let mut handled_previous_match = false;
-            // Both slow-parser outcomes inspect the same window and may tally
-            // into the same pending allocation.  Lend them once for this
-            // no-refill transition, then end the lends before `flush_pending()`
-            // can revisit the ABI output cursor.
+    // The ABI boundary already lent the callback-owned window, hash tables,
+    // and pending buffer. Keep each no-refill parser transition within those
+    // checked spans.
+    let mut hash_head: crate::src::deflate::IPos = 0;
+    let mut bflush: ::core::ffi::c_int = 0;
+    loop {
+        let needs_input =
+            { s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt };
+        if needs_input {
+            fill_window_state(s, strm, input, window_hash);
+            if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                && flush == crate::zlib_h::Z_NO_FLUSH
             {
-                let state = &mut *s;
-                let (Ok(window_len), Ok(pending_len)) = (
-                    usize::try_from(state.window_size),
-                    usize::try_from(state.pending_buf_size),
+                return need_more;
+            }
+            if s.lookahead == 0 as crate::stdlib::uInt {
+                break;
+            }
+        }
+        hash_head = NIL as crate::src::deflate::IPos;
+        let has_min_match = {
+            s.prev_length = s.match_length;
+            s.prev_match = s.match_start as crate::src::deflate::IPos;
+            s.match_length =
+                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+            s.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+        };
+        let mut handled_previous_match = false;
+        // Both slow-parser outcomes inspect the same window and may tally
+        // into the same pending allocation.  Lend them once for this
+        // no-refill transition, then end the lends before `flush_pending()`
+        // can revisit the ABI output cursor.
+        {
+            let state = deflate_reborrow_mut(s);
+            let (Ok(window_len), Ok(pending_len)) = (
+                usize::try_from(state.window_size),
+                usize::try_from(state.pending_buf_size),
+            ) else {
+                return need_more;
+            };
+            if (window_len != 0 && state.window.is_null())
+                || window_hash.window.len() != window_len
+                || pending_buf.len() != pending_len
+            {
+                return need_more;
+            }
+            let window = &*window_hash.window;
+            // `sym_start` is the literal-buffer offset within this pending
+            // allocation. Keep the existing no-refill window/hash lends
+            // through a possible tree flush instead of rebuilding either
+            // raw cursor at the block boundary.
+            let pending_and_symbols = &mut *pending_buf;
+            if has_min_match {
+                let (Ok(head_len), Ok(prev_len)) = (
+                    usize::try_from(state.hash_size),
+                    usize::try_from(state.w_size),
                 ) else {
                     return need_more;
                 };
-                if (window_len != 0 && state.window.is_null()) || pending_buf.len() != pending_len {
+                if (head_len != 0 && state.head.is_null())
+                    || (prev_len != 0 && state.prev.is_null())
+                    || window_hash.head.len() != head_len
+                    || window_hash.prev.len() != prev_len
+                {
                     return need_more;
                 }
-                let window = if window_len == 0 {
-                    &[]
-                } else {
-                    ::core::slice::from_raw_parts(state.window, window_len)
+                let head = &mut *window_hash.head;
+                let prev = &mut *window_hash.prev;
+                let Some(previous) = insert_string_state(
+                    window,
+                    head,
+                    prev,
+                    state.strstart,
+                    &mut state.ins_h,
+                    state.hash_shift,
+                    state.hash_mask,
+                    state.w_mask,
+                ) else {
+                    return need_more;
                 };
-                // `sym_start` is the literal-buffer offset within this pending
-                // allocation. Keep the existing no-refill window/hash lends
-                // through a possible tree flush instead of rebuilding either
-                // raw cursor at the block boundary.
-                let pending_and_symbols = &mut *pending_buf;
-                if has_min_match {
-                    let (Ok(head_len), Ok(prev_len)) = (
-                        usize::try_from(state.hash_size),
-                        usize::try_from(state.w_size),
-                    ) else {
-                        return need_more;
-                    };
-                    if (head_len != 0 && state.head.is_null())
-                        || (prev_len != 0 && state.prev.is_null())
-                    {
-                        return need_more;
-                    }
-                    let head = if head_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.head, head_len)
-                    };
-                    let prev = if prev_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                    };
-                    let Some(previous) = insert_string_state(
-                        window,
-                        head,
-                        prev,
+                hash_head = previous;
+                if lazy_hash_match_is_usable(
+                    state.strstart as crate::src::deflate::IPos,
+                    hash_head,
+                    state.prev_length,
+                    state.max_lazy_match,
+                    state.w_size,
+                ) {
+                    state.match_length =
+                        longest_match_state(state, window, prev, hash_head).unwrap_or(0);
+                    state.match_length = filtered_match_length(
+                        state.match_length,
+                        state.strategy,
                         state.strstart,
-                        &mut state.ins_h,
-                        state.hash_shift,
-                        state.hash_mask,
-                        state.w_mask,
-                    ) else {
-                        return need_more;
-                    };
-                    hash_head = previous;
-                    if lazy_hash_match_is_usable(
-                        state.strstart as crate::src::deflate::IPos,
-                        hash_head,
-                        state.prev_length,
-                        state.max_lazy_match,
-                        state.w_size,
-                    ) {
-                        state.match_length =
-                            longest_match_state(state, window, prev, hash_head).unwrap_or(0);
-                        state.match_length = filtered_match_length(
-                            state.match_length,
-                            state.strategy,
-                            state.strstart,
-                            state.match_start,
-                        );
-                    }
-                    let use_previous_match = state.prev_length
-                        >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                        && state.match_length <= state.prev_length;
-                    if use_previous_match {
-                        let max_insert = state
-                            .strstart
-                            .wrapping_add(state.lookahead)
-                            .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-                        let len = state.prev_length.wrapping_sub(3 as crate::stdlib::uInt)
-                            as crate::zutil_h::uch;
-                        let dist = (state.strstart as crate::src::deflate::IPos)
-                            .wrapping_sub(1 as crate::src::deflate::IPos)
-                            .wrapping_sub(state.prev_match)
-                            as crate::zutil_h::ush;
-                        let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
-                            return need_more;
-                        };
-                        let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                            return need_more;
-                        };
-                        let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
-                            return need_more;
-                        };
-                        let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
-                        else {
-                            return need_more;
-                        };
-                        let Some(flush_now) =
-                            tally_symbol_state(state, symbols, dist.into(), len.into())
-                        else {
-                            return need_more;
-                        };
-                        bflush = flush_now as ::core::ffi::c_int;
-                        state.lookahead = state
-                            .lookahead
-                            .wrapping_sub(state.prev_length.wrapping_sub(1 as crate::stdlib::uInt));
-                        state.prev_length =
-                            state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
-                        loop {
-                            state.strstart = state.strstart.wrapping_add(1);
-                            if state.strstart <= max_insert {
-                                let Some(previous) = insert_string_state(
-                                    window,
-                                    head,
-                                    prev,
-                                    state.strstart,
-                                    &mut state.ins_h,
-                                    state.hash_shift,
-                                    state.hash_mask,
-                                    state.w_mask,
-                                ) else {
-                                    return need_more;
-                                };
-                                hash_head = previous;
-                            }
-                            state.prev_length = state.prev_length.wrapping_sub(1);
-                            if state.prev_length == 0 as crate::stdlib::uInt {
-                                break;
-                            }
-                        }
-                        state.match_available = 0 as ::core::ffi::c_int;
-                        state.match_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
-                            as crate::stdlib::uInt;
-                        state.strstart = state.strstart.wrapping_add(1);
-                        handled_previous_match = true;
-                        if bflush != 0 {
-                            flush_tree_window_block_state(state, pending_and_symbols, window, 0);
-                        }
-                    }
+                        state.match_start,
+                    );
                 }
-                if !handled_previous_match && state.match_available != 0 {
+                let use_previous_match = state.prev_length
+                    >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                    && state.match_length <= state.prev_length;
+                if use_previous_match {
+                    let max_insert = state
+                        .strstart
+                        .wrapping_add(state.lookahead)
+                        .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+                    let len = state.prev_length.wrapping_sub(3 as crate::stdlib::uInt)
+                        as crate::zutil_h::uch;
+                    let dist = (state.strstart as crate::src::deflate::IPos)
+                        .wrapping_sub(1 as crate::src::deflate::IPos)
+                        .wrapping_sub(state.prev_match)
+                        as crate::zutil_h::ush;
                     let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
                         return need_more;
                     };
@@ -5258,129 +5179,179 @@ fn deflate_slow(
                     else {
                         return need_more;
                     };
-                    let Some(flush_now) = tally_previous_literal_state(state, window, symbols)
+                    let Some(flush_now) =
+                        tally_symbol_state(state, symbols, dist.into(), len.into())
                     else {
                         return need_more;
                     };
-                    if flush_now {
+                    bflush = flush_now as ::core::ffi::c_int;
+                    state.lookahead = state
+                        .lookahead
+                        .wrapping_sub(state.prev_length.wrapping_sub(1 as crate::stdlib::uInt));
+                    state.prev_length = state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
+                    loop {
+                        state.strstart = state.strstart.wrapping_add(1);
+                        if state.strstart <= max_insert {
+                            let Some(previous) = insert_string_state(
+                                window,
+                                head,
+                                prev,
+                                state.strstart,
+                                &mut state.ins_h,
+                                state.hash_shift,
+                                state.hash_mask,
+                                state.w_mask,
+                            ) else {
+                                return need_more;
+                            };
+                            hash_head = previous;
+                        }
+                        state.prev_length = state.prev_length.wrapping_sub(1);
+                        if state.prev_length == 0 as crate::stdlib::uInt {
+                            break;
+                        }
+                    }
+                    state.match_available = 0 as ::core::ffi::c_int;
+                    state.match_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                        as crate::stdlib::uInt;
+                    state.strstart = state.strstart.wrapping_add(1);
+                    handled_previous_match = true;
+                    if bflush != 0 {
                         flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     }
-                    bflush = flush_now as ::core::ffi::c_int;
-                    if bflush != 0 {
-                        state.block_start = state.strstart as ::core::ffi::c_long;
-                    }
-                    state.strstart = state.strstart.wrapping_add(1);
-                    state.lookahead = state.lookahead.wrapping_sub(1);
-                } else if !handled_previous_match {
-                    state.match_available = 1 as ::core::ffi::c_int;
-                    state.strstart = state.strstart.wrapping_add(1);
-                    state.lookahead = state.lookahead.wrapping_sub(1);
-                } else if bflush != 0 {
+                }
+            }
+            if !handled_previous_match && state.match_available != 0 {
+                let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                    return need_more;
+                };
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+                    return need_more;
+                };
+                let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
+                    return need_more;
+                };
+                let Some(flush_now) = tally_previous_literal_state(state, window, symbols) else {
+                    return need_more;
+                };
+                if flush_now {
+                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+                }
+                bflush = flush_now as ::core::ffi::c_int;
+                if bflush != 0 {
                     state.block_start = state.strstart as ::core::ffi::c_long;
                 }
-            }
-            if bflush != 0 {
-                let avail_out =
-                    { flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never).0 };
-                if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                    return result;
-                }
-                if avail_out == 0 as crate::stdlib::uInt {
-                    return need_more;
-                }
-                // The legacy branches consumed this flag at their individual
-                // flush sites. The shared post-transition flush needs the
-                // equivalent reset before the next parser iteration.
-                bflush = 0;
+                state.strstart = state.strstart.wrapping_add(1);
+                state.lookahead = state.lookahead.wrapping_sub(1);
+            } else if !handled_previous_match {
+                state.match_available = 1 as ::core::ffi::c_int;
+                state.strstart = state.strstart.wrapping_add(1);
+                state.lookahead = state.lookahead.wrapping_sub(1);
+            } else if bflush != 0 {
+                state.block_start = state.strstart as ::core::ffi::c_long;
             }
         }
-        // At end of input the deferred literal, final block, and ordinary
-        // symbol tail all share the same callback-owned window and pending
-        // allocation. Lend each once, derive symbols from their documented
-        // pending offset, and finish the tree work before `flush_pending()`
-        // can revisit the ABI output cursor.
-        let tail_last = {
-            let state = &mut *s;
-            let match_available = state.match_available != 0;
-            let needs_flush = flush == crate::zlib_h::Z_FINISH || state.sym_next != 0;
-            if match_available || needs_flush {
-                let (Ok(window_len), Ok(pending_len)) = (
-                    usize::try_from(state.window_size),
-                    usize::try_from(state.pending_buf_size),
-                ) else {
-                    return need_more;
-                };
-                if (window_len != 0 && state.window.is_null()) || pending_buf.len() != pending_len {
-                    return need_more;
-                }
-                let window = if window_len == 0 {
-                    &[]
-                } else {
-                    ::core::slice::from_raw_parts(state.window, window_len)
-                };
-                let pending_and_symbols = &mut *pending_buf;
-                if match_available {
-                    let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
-                        return need_more;
-                    };
-                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                        return need_more;
-                    };
-                    let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
-                        return need_more;
-                    };
-                    let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
-                    else {
-                        return need_more;
-                    };
-                    let Some(flush_now) = tally_previous_literal_state(state, window, symbols)
-                    else {
-                        return need_more;
-                    };
-                    bflush = flush_now as ::core::ffi::c_int;
-                    state.match_available = 0 as ::core::ffi::c_int;
-                }
-                state.insert = if state.strstart
-                    < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-                {
-                    state.strstart
-                } else {
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-                };
-                if flush == crate::zlib_h::Z_FINISH {
-                    flush_tree_window_block_state(state, pending_and_symbols, window, 1);
-                    Some(true)
-                } else if state.sym_next != 0 {
-                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
-                    Some(false)
-                } else {
-                    None
-                }
-            } else {
-                state.insert = if state.strstart
-                    < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-                {
-                    state.strstart
-                } else {
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-                };
-                None
-            }
-        };
-        if let Some(last) = tail_last {
-            let avail_out = {
-                s.block_start = s.strstart as ::core::ffi::c_long;
-                flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never).0
-            };
-            if let Some(result) = deflate_post_flush_result(avail_out, last) {
+        if bflush != 0 {
+            let avail_out =
+                { flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never).0 };
+            if let Some(result) = deflate_post_flush_result(avail_out, false) {
                 return result;
             }
-            if last {
-                return finish_done;
+            if avail_out == 0 as crate::stdlib::uInt {
+                return need_more;
             }
+            // The legacy branches consumed this flag at their individual
+            // flush sites. The shared post-transition flush needs the
+            // equivalent reset before the next parser iteration.
+            bflush = 0;
         }
-        return block_done;
     }
+    // At end of input the deferred literal, final block, and ordinary
+    // symbol tail all share the same callback-owned window and pending
+    // allocation. Lend each once, derive symbols from their documented
+    // pending offset, and finish the tree work before `flush_pending()`
+    // can revisit the ABI output cursor.
+    let tail_last = {
+        let state = deflate_reborrow_mut(s);
+        let match_available = state.match_available != 0;
+        let needs_flush = flush == crate::zlib_h::Z_FINISH || state.sym_next != 0;
+        if match_available || needs_flush {
+            let (Ok(window_len), Ok(pending_len)) = (
+                usize::try_from(state.window_size),
+                usize::try_from(state.pending_buf_size),
+            ) else {
+                return need_more;
+            };
+            if (window_len != 0 && state.window.is_null())
+                || window_hash.window.len() != window_len
+                || pending_buf.len() != pending_len
+            {
+                return need_more;
+            }
+            let window = &*window_hash.window;
+            let pending_and_symbols = &mut *pending_buf;
+            if match_available {
+                let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                    return need_more;
+                };
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+                    return need_more;
+                };
+                let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
+                    return need_more;
+                };
+                let Some(flush_now) = tally_previous_literal_state(state, window, symbols) else {
+                    return need_more;
+                };
+                bflush = flush_now as ::core::ffi::c_int;
+                state.match_available = 0 as ::core::ffi::c_int;
+            }
+            state.insert = if state.strstart
+                < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+            {
+                state.strstart
+            } else {
+                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+            };
+            if flush == crate::zlib_h::Z_FINISH {
+                flush_tree_window_block_state(state, pending_and_symbols, window, 1);
+                Some(true)
+            } else if state.sym_next != 0 {
+                flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+                Some(false)
+            } else {
+                None
+            }
+        } else {
+            state.insert = if state.strstart
+                < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+            {
+                state.strstart
+            } else {
+                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+            };
+            None
+        }
+    };
+    if let Some(last) = tail_last {
+        let avail_out = {
+            s.block_start = s.strstart as ::core::ffi::c_long;
+            flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never).0
+        };
+        if let Some(result) = deflate_post_flush_result(avail_out, last) {
+            return result;
+        }
+        if last {
+            return finish_done;
+        }
+    }
+    return block_done;
 }
 
 fn rle_match_length_state(
@@ -5705,95 +5676,59 @@ fn deflate_rle(
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    // RLE parsing retains the same transitional callback-owned lends as the
-    // other block modes; confine them to this codec boundary.
-    unsafe {
-        let mut bflush: ::core::ffi::c_int = 0;
-        loop {
-            let needs_input = s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt;
-            if needs_input {
-                fill_window_state(s, strm, input, window_hash);
-                if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
-                    && flush == crate::zlib_h::Z_NO_FLUSH
-                {
-                    return need_more;
-                }
-            }
-            let state: &mut crate::src::deflate::deflate_state = s;
-            if state.lookahead == 0 as crate::stdlib::uInt
-                && !matches!(
-                    deflate_tail_action_state(state, flush),
-                    DeflateTailAction::Finish | DeflateTailAction::FlushSymbols
-                )
+    // The ABI boundary already lent the callback-owned window and pending
+    // buffer; RLE parsing stays within those checked spans.
+    let mut bflush: ::core::ffi::c_int = 0;
+    loop {
+        let needs_input = s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt;
+        if needs_input {
+            fill_window_state(s, strm, input, window_hash);
+            if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+                && flush == crate::zlib_h::Z_NO_FLUSH
             {
-                return block_done;
-            }
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return need_more;
-            };
-            if window_len != 0 && state.window.is_null() {
                 return need_more;
             }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                return need_more;
-            };
-            if pending_buf.len() != pending_len {
-                return need_more;
-            }
-            // `sym_start` is the literal-buffer offset inside `pending_buf`.
-            // Keep this existing callback-owned lend alive for a possible
-            // checked tree flush instead of re-entering its raw adapter.
-            let pending_and_symbols = &mut *pending_buf;
-            if state.lookahead == 0 as crate::stdlib::uInt {
-                let tail_action = deflate_tail_action_state(state, flush);
-                if matches!(tail_action, DeflateTailAction::Finish) {
-                    flush_tree_window_block_state(state, pending_and_symbols, window, 1);
-                    let avail_out = {
-                        state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
-                    };
-                    if let Some(result) = deflate_post_flush_result(avail_out, true) {
-                        return result;
-                    }
-                    return finish_done;
+        }
+        let state: &mut crate::src::deflate::deflate_state = s;
+        if state.lookahead == 0 as crate::stdlib::uInt
+            && !matches!(
+                deflate_tail_action_state(state, flush),
+                DeflateTailAction::Finish | DeflateTailAction::FlushSymbols
+            )
+        {
+            return block_done;
+        }
+        let Ok(window_len) = usize::try_from(state.window_size) else {
+            return need_more;
+        };
+        if (window_len != 0 && state.window.is_null()) || window_hash.window.len() != window_len {
+            return need_more;
+        }
+        let window = &*window_hash.window;
+        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            return need_more;
+        };
+        if pending_buf.len() != pending_len {
+            return need_more;
+        }
+        // `sym_start` is the literal-buffer offset inside `pending_buf`.
+        // Keep this existing callback-owned lend alive for a possible
+        // checked tree flush instead of re-entering its raw adapter.
+        let pending_and_symbols = &mut *pending_buf;
+        if state.lookahead == 0 as crate::stdlib::uInt {
+            let tail_action = deflate_tail_action_state(state, flush);
+            if matches!(tail_action, DeflateTailAction::Finish) {
+                flush_tree_window_block_state(state, pending_and_symbols, window, 1);
+                let avail_out = {
+                    state.block_start = state.strstart as ::core::ffi::c_long;
+                    flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
+                };
+                if let Some(result) = deflate_post_flush_result(avail_out, true) {
+                    return result;
                 }
-                if matches!(tail_action, DeflateTailAction::FlushSymbols) {
-                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
-                    let avail_out = {
-                        state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
-                    };
-                    if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                        return result;
-                    }
-                }
-                return block_done;
+                return finish_done;
             }
-            let Some(symbol) = rle_symbol_plan_state(state, window) else {
-                return need_more;
-            };
-            let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
-                return need_more;
-            };
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
-            };
-            let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
-                return need_more;
-            };
-            let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
-                return need_more;
-            };
-            let Some(flush_now) = rle_tally_symbol_state(state, symbols, symbol) else {
-                return need_more;
-            };
-            bflush = flush_now as ::core::ffi::c_int;
-            if bflush != 0 {
+            if matches!(tail_action, DeflateTailAction::FlushSymbols) {
                 flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                 let avail_out = {
                     state.block_start = state.strstart as ::core::ffi::c_long;
@@ -5802,6 +5737,36 @@ fn deflate_rle(
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
                 }
+            }
+            return block_done;
+        }
+        let Some(symbol) = rle_symbol_plan_state(state, window) else {
+            return need_more;
+        };
+        let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+            return need_more;
+        };
+        let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+            return need_more;
+        };
+        let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+            return need_more;
+        };
+        let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
+            return need_more;
+        };
+        let Some(flush_now) = rle_tally_symbol_state(state, symbols, symbol) else {
+            return need_more;
+        };
+        bflush = flush_now as ::core::ffi::c_int;
+        if bflush != 0 {
+            flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+            let avail_out = {
+                state.block_start = state.strstart as ::core::ffi::c_long;
+                flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
+            };
+            if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                return result;
             }
         }
     }
