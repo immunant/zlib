@@ -319,7 +319,15 @@ pub unsafe extern "C" fn gzopen64_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen_ffi(path, mode)
+    if path.is_null() || mode.is_null() {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    let path_ref = ::core::ffi::CStr::from_ptr(path);
+    let mode_ref = ::core::ffi::CStr::from_ptr(mode);
+    let Some(parsed_mode) = gz_parse_open_mode(mode_ref.to_bytes()) else {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    };
+    return gz_open(path_ref, -1 as ::core::ffi::c_int, parsed_mode);
 }
 #[export_name = "gzdopen"]
 
@@ -663,7 +671,14 @@ pub fn gztell(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
 #[export_name = "gztell"]
 
 pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gztell64_ffi(file) as crate::stdlib::off_t
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+    }
+    let state = &*(file as crate::gzguts_h::gz_statep);
+    if !gz_state_open(state) {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+    }
+    gztell(state)
 }
 pub fn gzoffset64(
     state: &crate::gzguts_h::gz_state,
@@ -708,7 +723,22 @@ pub fn gzoffset(
 #[export_name = "gzoffset"]
 
 pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gzoffset64_ffi(file) as crate::stdlib::off_t
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+    }
+    let state = &*(file as crate::gzguts_h::gz_statep);
+    if !gz_state_open(state) {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+    }
+    let offset = crate::stdlib::lseek64(
+        state.fd,
+        0 as crate::stdlib::__off64_t,
+        crate::stdlib::SEEK_CUR,
+    ) as crate::stdlib::off64_t;
+    if offset == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+    }
+    gzoffset(state, offset)
 }
 pub fn gzeof(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return if state.mode == crate::gzguts_h::GZ_READ {
