@@ -78,10 +78,6 @@ fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0 as crate::stdlib::uInt;
 }
 
-unsafe extern "C" fn gz_reset(state: crate::gzguts_h::gz_statep) {
-    gz_reset_state(&mut *state);
-}
-
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -290,7 +286,7 @@ unsafe extern "C" fn gz_open(
             (*state).start = 0 as crate::stdlib::off64_t;
         }
     }
-    gz_reset(state);
+    gz_reset_state(&mut *state);
     return state as crate::zlib_h::gzFile;
 }
 pub unsafe extern "C" fn gzopen(
@@ -420,7 +416,7 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
     {
         return -1 as ::core::ffi::c_int;
     }
-    gz_reset(state);
+    gz_reset_state(&mut *state);
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzrewind"]
