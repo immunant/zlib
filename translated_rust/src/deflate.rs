@@ -1480,6 +1480,19 @@ fn lm_head_clear_len(hash_size: crate::stdlib::uInt) -> crate::__stddef_size_t_h
 }
 
 #[derive(Debug, PartialEq, Eq)]
+struct LmHeadResetPlan {
+    last_entry_index: usize,
+    clear_len: crate::__stddef_size_t_h::size_t,
+}
+
+fn lm_head_reset_plan(hash_size: crate::stdlib::uInt) -> LmHeadResetPlan {
+    LmHeadResetPlan {
+        last_entry_index: hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
+        clear_len: lm_head_clear_len(hash_size),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 struct LmResetPlan {
     window_size: crate::zutil_h::ulg,
     prev_length: crate::stdlib::uInt,
@@ -1523,14 +1536,12 @@ fn lm_apply_reset(state: &mut crate::src::deflate::deflate_state, plan: LmResetP
 unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
     let plan = lm_reset_plan(state.w_size, state.level);
-    *state
-        .head
-        .wrapping_add(state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
-        NIL as crate::src::deflate::Posf;
+    let head_reset = lm_head_reset_plan(state.hash_size);
+    *state.head.wrapping_add(head_reset.last_entry_index) = NIL as crate::src::deflate::Posf;
     crate::stdlib::memset(
         state.head as *mut ::core::ffi::c_void,
         0 as ::core::ffi::c_int,
-        lm_head_clear_len(state.hash_size),
+        head_reset.clear_len,
     );
     lm_apply_reset(state, plan);
 }
@@ -4284,7 +4295,7 @@ mod tests {
         fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
         fill_window_state_after_slide, fill_window_zero_range, flush_pending_accounting,
         gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        lm_head_clear_len, lm_initial_state, lm_match_parameters, lm_reset_plan,
+        lm_head_reset_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
@@ -4586,15 +4597,31 @@ mod tests {
     }
 
     #[test]
-    fn lm_head_clear_len_preserves_hash_entry_count_and_wrapping() {
+    fn lm_head_reset_plan_preserves_sentinel_index_and_clear_length() {
         let entry_size =
             ::core::mem::size_of::<crate::src::deflate::Posf>() as crate::__stddef_size_t_h::size_t;
 
-        assert_eq!(lm_head_clear_len(1), 0);
-        assert_eq!(lm_head_clear_len(17), 16 * entry_size);
         assert_eq!(
-            lm_head_clear_len(0),
-            (crate::stdlib::uInt::MAX as crate::__stddef_size_t_h::size_t).wrapping_mul(entry_size),
+            lm_head_reset_plan(1),
+            super::LmHeadResetPlan {
+                last_entry_index: 0,
+                clear_len: 0,
+            },
+        );
+        assert_eq!(
+            lm_head_reset_plan(17),
+            super::LmHeadResetPlan {
+                last_entry_index: 16,
+                clear_len: 16 * entry_size,
+            },
+        );
+        assert_eq!(
+            lm_head_reset_plan(0),
+            super::LmHeadResetPlan {
+                last_entry_index: crate::stdlib::uInt::MAX as usize,
+                clear_len: (crate::stdlib::uInt::MAX as crate::__stddef_size_t_h::size_t)
+                    .wrapping_mul(entry_size),
+            },
         );
     }
 
