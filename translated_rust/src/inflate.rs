@@ -311,6 +311,48 @@ fn initial_inflate_normal_state() -> InflateNormalState {
     }
 }
 
+impl InflateNormalState {
+    // The fast decoder borrows only the normal decoder's owned history and
+    // tables.  Keep that snapshot construction on the pointer-free state so
+    // every caller uses the same selector, masks, and history policy before
+    // it enters the bounded fast request.
+    pub(crate) fn fast_state(&self) -> crate::src::inffast::InflateFastState<'_> {
+        crate::src::inffast::InflateFastState {
+            history: crate::src::inffast::FastHistory::External(self.owned_window.as_deref()),
+            wsize: self.wsize as usize,
+            whave: self.whave as usize,
+            wnext: self.wnext as usize,
+            hold: self.hold,
+            bits: self.bits,
+            lcode: self.lencode,
+            dcode: self.distcode,
+            lmask: (1u32 << self.lenbits) - 1,
+            dmask: (1u32 << self.distbits) - 1,
+            codes: &self.codes,
+            sane: self.sane != 0,
+        }
+    }
+
+    // A bounded fast request returns its cursor update separately.  Apply
+    // only the resumable decoder portion here; callers still own diagnostic
+    // publication in their respective stream/core completion boundaries.
+    pub(crate) fn apply_fast_update(
+        &mut self,
+        update: &crate::src::inffast::InflateFastStreamUpdate,
+    ) {
+        self.hold = update.hold;
+        self.bits = update.bits;
+        match update.exit {
+            crate::src::inffast::FastExit::Continue => {}
+            crate::src::inffast::FastExit::Type => self.mode = crate::src::inflate::TYPE,
+            crate::src::inffast::FastExit::InvalidDistance
+            | crate::src::inffast::FastExit::InvalidCode => {
+                self.mode = crate::src::inflate::BAD;
+            }
+        }
+    }
+}
+
 // This owns only the normal decoder payload, which is already free of raw
 // registrations.  It is intentionally not installed in gzip yet: callers
 // still use the ABI adapter until the bounded inflate-call core can consume
@@ -2460,25 +2502,9 @@ fn inflate(request: InflateStreamOwner<'_, '_, '_, '_, '_>) -> InflateDecoderRes
                                                 let written = out.wrapping_sub(left) as usize;
                                                 // The fast core receives only this bounded
                                                 // normal-state view, never an ABI stream.
-                                                let window = normal.owned_window.as_deref();
-                                                let fast_state =
-                                                crate::src::inffast::InflateFastState {
-                                                    history:
-                                                        crate::src::inffast::FastHistory::External(
-                                                            window,
-                                                        ),
-                                                    wsize: normal.wsize as usize,
-                                                    whave: normal.whave as usize,
-                                                    wnext: normal.wnext as usize,
-                                                    hold,
-                                                    bits,
-                                                    lcode: normal.lencode,
-                                                    dcode: normal.distcode,
-                                                    lmask: (1u32 << normal.lenbits) - 1,
-                                                    dmask: (1u32 << normal.distbits) - 1,
-                                                    codes: &normal.codes,
-                                                    sane: normal.sane != 0,
-                                                };
+                                                normal.hold = hold;
+                                                normal.bits = bits;
+                                                let fast_state = normal.fast_state();
                                                 let owner = InflateNormalStreamOwner::new(
                                                     input, output, written, fast_state,
                                                 )
@@ -2492,18 +2518,15 @@ fn inflate(request: InflateStreamOwner<'_, '_, '_, '_, '_>) -> InflateDecoderRes
                                                     result.output_remaining as ::core::ffi::c_uint;
                                                 hold = result.hold;
                                                 bits = result.bits;
+                                                normal.apply_fast_update(&result);
                                                 match result.exit {
                                                 crate::src::inffast::FastExit::Continue => {}
-                                                crate::src::inffast::FastExit::Type => {
-                                                    normal.mode = crate::src::inflate::TYPE;
-                                                }
+                                                crate::src::inffast::FastExit::Type => {}
                                                 crate::src::inffast::FastExit::InvalidDistance => {
                                                     stream.message = Some(InflateMessage::Error(17));
-                                                    normal.mode = crate::src::inflate::BAD;
                                                 }
                                                 crate::src::inffast::FastExit::InvalidCode => {
                                                     stream.message = Some(InflateMessage::InvalidCode);
-                                                    normal.mode = crate::src::inflate::BAD;
                                                 }
                                             }
                                                 if normal.mode as ::core::ffi::c_uint
