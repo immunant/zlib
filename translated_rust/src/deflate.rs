@@ -713,6 +713,27 @@ fn clear_owned_full_flush_hash(state: &mut crate::src::deflate::deflate_state) -
     result
 }
 
+/// Borrow a custom-allocator hash table only for one typed operation.
+///
+/// Callback-owned deflate buffers still use ABI pointer handles, but reset
+/// policy should not need to construct a raw slice itself.  This narrow
+/// adapter is deliberately the single conversion point for the callback head
+/// table; an eventual allocator owner can replace it without changing reset
+/// behavior or its callers.
+fn with_callback_deflate_head<R>(
+    state: &mut crate::src::deflate::deflate_state,
+    action: impl FnOnce(
+        &mut crate::src::deflate::deflate_state,
+        &mut [crate::src::deflate::Posf],
+    ) -> R,
+) -> Option<R> {
+    if state.head.is_null() {
+        return None;
+    }
+    let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
+    Some(action(state, head))
+}
+
 fn read_buf(
     strm: &mut crate::zlib_h::z_stream,
     wrap: ::core::ffi::c_int,
@@ -1751,10 +1772,11 @@ pub(crate) fn deflate_reset_state(
         .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
     }
     // Custom and mixed allocator streams retain callback-owned storage. Keep
-    // their one raw borrowing boundary here until the allocator facade can
-    // represent that ownership without changing callback observations.
-    let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
-    deflate_reset(stream, state, head)
+    // their one raw borrowing boundary in the named adapter until the
+    // allocator facade can represent that ownership without changing callback
+    // observations.
+    with_callback_deflate_head(state, |state, head| deflate_reset(stream, state, head))
+        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
 /// Reset a gzip-owned ABI stream that does not yet retain a typed state.
