@@ -2381,30 +2381,20 @@ pub unsafe extern "C" fn inflateSetDictionary(
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-    if state.wrap != 0
-        && state.mode as ::core::ffi::c_uint
-            != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     let dictionary = if dictLength == 0 {
         &[]
     } else {
         ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
-    if state.mode as ::core::ffi::c_uint
-        == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        let dictid = crate::src::adler32::adler32_bytes(1, dictionary);
-        if dictid != state.check {
-            return crate::zlib_h::Z_DATA_ERROR;
-        }
+    if let Err(error) = inflate_dictionary_check(state, dictionary) {
+        return error;
     }
     if state.window.is_null() {
-        state.window = Some((*strm).zalloc.expect("non-null function pointer"))
+        state.window = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
+            strm.opaque,
             (1 as crate::stdlib::uInt) << state.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
@@ -2417,6 +2407,35 @@ pub unsafe extern "C" fn inflateSetDictionary(
         state.window,
         ((1 as ::core::ffi::c_uint) << state.wbits) as usize,
     );
+    inflate_set_dictionary(state, window, dictionary)
+}
+
+fn inflate_dictionary_check(
+    state: &crate::src::inflate::inflate_state,
+    dictionary: &[crate::stdlib::Bytef],
+) -> Result<(), ::core::ffi::c_int> {
+    if state.wrap != 0
+        && state.mode as ::core::ffi::c_uint
+            != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
+    {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    if state.mode as ::core::ffi::c_uint
+        == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
+    {
+        let dictid = crate::src::adler32::adler32_bytes(1, dictionary);
+        if dictid != state.check {
+            return Err(crate::zlib_h::Z_DATA_ERROR);
+        }
+    }
+    Ok(())
+}
+
+fn inflate_set_dictionary(
+    state: &mut crate::src::inflate::inflate_state,
+    window: &mut [crate::stdlib::Bytef],
+    dictionary: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
     update_window(state, window, dictionary);
     state.havedict = 1;
     crate::zlib_h::Z_OK
