@@ -2648,22 +2648,37 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     };
     inflateSetDictionary(strm, dictionary)
 }
-pub unsafe extern "C" fn inflateGetHeader(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
+fn inflate_get_header_impl(wrap: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    crate::zlib_h::Z_OK
+}
+
+pub unsafe fn inflateGetHeader(
+    strm: crate::zlib_h::z_streamp,
+    head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // Validate the stream before borrowing its state through the ABI link.
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let ret = inflate_get_header_impl(state.wrap);
+    if ret != crate::zlib_h::Z_OK {
+        return ret;
     }
-    (*state).head = head;
-    (*head).done = 0 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_OK;
+    let Some(head) = head.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    state.head = head;
+    head.done = 0 as ::core::ffi::c_int;
+    ret
 }
 #[export_name = "inflateGetHeader"]
 
