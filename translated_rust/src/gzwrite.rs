@@ -370,11 +370,7 @@ pub unsafe extern "C" fn gzwrite(
     {
         return 0 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
@@ -455,22 +451,23 @@ unsafe fn gzputc(
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if state.size != 0 {
         let size = state.size;
-        let in_0 = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
-        let strm = &mut state.strm;
-        if strm.avail_in == 0 as crate::stdlib::uInt {
-            strm.next_in = in_0 as *mut crate::stdlib::Bytef;
-        }
-        let Some(end) = strm.next_in.addr().checked_add(strm.avail_in as usize) else {
+        let Some(in_0) = state.in_0.as_deref().map(|buffer| buffer.as_ptr()) else {
+            return -1 as ::core::ffi::c_int;
+        };
+        let (next_in, avail_in) = {
+            let strm = &mut state.strm;
+            if strm.avail_in == 0 as crate::stdlib::uInt {
+                strm.next_in = in_0 as *mut crate::stdlib::Bytef;
+            }
+            (strm.next_in, strm.avail_in)
+        };
+        let Some(end) = next_in.addr().checked_add(avail_in as usize) else {
             return -1 as ::core::ffi::c_int;
         };
         let Some(have_at) = end.checked_sub(in_0.addr()) else {
@@ -481,11 +478,13 @@ unsafe fn gzputc(
         };
         have = have_value;
         if have < size {
-            let buffer = ::core::slice::from_raw_parts_mut(in_0, size as usize);
+            let Some(buffer) = state.in_0.as_deref_mut() else {
+                return -1 as ::core::ffi::c_int;
+            };
             if !write_buffered_byte(buffer, have as usize, c as ::core::ffi::c_uchar) {
                 return -1 as ::core::ffi::c_int;
             }
-            strm.avail_in = strm.avail_in.wrapping_add(1);
+            state.strm.avail_in = state.strm.avail_in.wrapping_add(1);
             state.x.pos += 1;
             return c & 0xff as ::core::ffi::c_int;
         }

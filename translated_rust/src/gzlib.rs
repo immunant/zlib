@@ -187,6 +187,14 @@ pub fn gzeof(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi:
     }
 }
 
+pub(crate) fn gz_clear_error(
+    message: &mut Option<Box<[u8]>>,
+    error: &mut ::core::ffi::c_int,
+) {
+    *message = None;
+    *error = crate::zlib_h::Z_OK;
+}
+
 fn gzbuffer_want(
     mode: ::core::ffi::c_int,
     current_size: ::core::ffi::c_uint,
