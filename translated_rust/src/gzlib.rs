@@ -577,33 +577,17 @@ unsafe extern "C" fn gz_open(
     );
     return state as crate::zlib_h::gzFile;
 }
-pub unsafe extern "C" fn gzopen(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    return gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    );
-}
 #[export_name = "gzopen"]
 
 pub unsafe extern "C" fn gzopen_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen(path, mode)
-}
-pub unsafe extern "C" fn gzopen64(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    return gz_open(
+    gz_open(
         path as *const ::core::ffi::c_void,
         -1 as ::core::ffi::c_int,
         mode,
-    );
+    )
 }
 #[export_name = "gzopen64"]
 
@@ -611,7 +595,11 @@ pub unsafe extern "C" fn gzopen64_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen64(path, mode)
+    gz_open(
+        path as *const ::core::ffi::c_void,
+        -1 as ::core::ffi::c_int,
+        mode,
+    )
 }
 fn gzdopen_has_valid_descriptor(fd: ::core::ffi::c_int) -> bool {
     fd != -1 as ::core::ffi::c_int
@@ -806,15 +794,6 @@ fn gz_legacy_offset_result(ret: crate::stdlib::off64_t) -> crate::stdlib::off_t 
     }
 }
 
-pub unsafe extern "C" fn gzseek(
-    mut file: crate::zlib_h::gzFile,
-    mut offset: crate::stdlib::off_t,
-    mut whence: ::core::ffi::c_int,
-) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzseek64(file, offset, whence);
-    return gz_legacy_offset_result(ret);
-}
 #[export_name = "gzseek"]
 
 pub unsafe extern "C" fn gzseek_ffi(
@@ -822,7 +801,7 @@ pub unsafe extern "C" fn gzseek_ffi(
     mut offset: crate::stdlib::off_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
-    gzseek(file, offset, whence)
+    gz_legacy_offset_result(gzseek64(file, offset, whence))
 }
 
 fn gztell64_core(
