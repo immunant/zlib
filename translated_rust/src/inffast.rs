@@ -78,7 +78,8 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
     in_0 = strm.next_in as *mut ::core::ffi::c_uchar;
     last = in_0.wrapping_offset(strm.avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
     out = strm.next_out as *mut ::core::ffi::c_uchar;
-    beg = out.wrapping_offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
+    beg = out
+        .wrapping_offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
     end = out.wrapping_offset(strm.avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
     wsize = (*state).wsize;
     whave = (*state).whave;
@@ -203,7 +204,10 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                                             break;
                                         }
                                     }
-                                    from = out.offset(-(dist as isize));
+                                    // `dist` was checked against the produced output above;
+                                    // after copying the window prefix, this rewind stays within
+                                    // the same output allocation.
+                                    from = out.wrapping_offset(-(dist as isize));
                                 }
                             } else if wnext < op {
                                 from = from.wrapping_add(
@@ -238,7 +242,8 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                                                 break;
                                             }
                                         }
-                                        from = out.offset(-(dist as isize));
+                                        // See the matching history-distance check above.
+                                        from = out.wrapping_offset(-(dist as isize));
                                     }
                                 }
                             } else {
@@ -256,7 +261,8 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                                             break;
                                         }
                                     }
-                                    from = out.offset(-(dist as isize));
+                                    // See the matching history-distance check above.
+                                    from = out.wrapping_offset(-(dist as isize));
                                 }
                             }
                             while len > 2 as ::core::ffi::c_uint {
@@ -293,7 +299,9 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                             }
                             break 's_92;
                         } else {
-                            from = out.offset(-(dist as isize));
+                            // `dist <= out - beg` on this branch, so this is a
+                            // same-allocation match-source cursor rewind.
+                            from = out.wrapping_offset(-(dist as isize));
                             loop {
                                 let c2rust_fresh26 = from;
                                 from = from.wrapping_add(1);
