@@ -521,6 +521,34 @@ fn inflate_header_crc_matches(
     wrap & 4 as ::core::ffi::c_int == 0 || hold == check & 0xffff as ::core::ffi::c_ulong
 }
 
+/// Commit policy for gzip's optional header-CRC word after the decoder
+/// boundary has gathered it.  The cursor and retained ABI header remain at
+/// that boundary; this plan only decides whether the gathered word is valid
+/// and which scalar bit-buffer/header fields follow it.
+struct InflateGzipHeaderCrcPlan {
+    matches: bool,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    hcrc: ::core::ffi::c_int,
+}
+
+fn inflate_gzip_header_crc_plan(
+    flags: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+    check: ::core::ffi::c_ulong,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+) -> InflateGzipHeaderCrcPlan {
+    let has_crc = flags & 0x200 != 0;
+    let matches = !has_crc || inflate_header_crc_matches(wrap, check, hold);
+    InflateGzipHeaderCrcPlan {
+        matches,
+        hold: if has_crc && matches { 0 } else { hold },
+        bits: if has_crc && matches { 0 } else { bits },
+        hcrc: (flags >> 9) & 1,
+    }
+}
+
 /// Identify the diagnostic for an ordinary zlib header word.  This is only
 /// the scalar validation performed after the cursor loop has supplied two
 /// bytes; consuming those bytes and publishing the error remain at the ABI
@@ -3522,21 +3550,25 @@ pub fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh9 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    if !inflate_header_crc_matches(state_ref.wrap, state_ref.check, hold) {
-                        strm_ref.msg = INFLATE_ERROR_MESSAGES[16].as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
-                        state_ref.mode = crate::src::inflate::BAD;
-                        continue '_inf_leave;
-                    } else {
-                        hold = 0 as ::core::ffi::c_ulong;
-                        bits = 0 as ::core::ffi::c_uint;
-                    }
                 }
+                let plan = inflate_gzip_header_crc_plan(
+                    state_ref.flags,
+                    state_ref.wrap,
+                    state_ref.check,
+                    hold,
+                    bits,
+                );
+                if !plan.matches {
+                    strm_ref.msg = INFLATE_ERROR_MESSAGES[16].as_ptr() as *const ::core::ffi::c_char
+                        as *mut ::core::ffi::c_char;
+                    state_ref.mode = crate::src::inflate::BAD;
+                    continue '_inf_leave;
+                }
+                hold = plan.hold;
+                bits = plan.bits;
                 if !state_ref.head.is_null() {
                     let head = &mut *state_ref.head;
-                    head.hcrc =
-                        state_ref.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                    head.hcrc = plan.hcrc;
                     head.done = 1 as ::core::ffi::c_int;
                 }
                 state_ref.check = inflate_header_crc_update(0, &[]);
