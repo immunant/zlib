@@ -137,7 +137,7 @@ impl GzDeflater<'_> {
     }
 
     fn compress(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
-        unsafe { crate::src::deflate::deflate(self.stream, flush) }
+        crate::src::deflate::DeflateCall::new(self.stream).compress(flush)
     }
 
     fn set_params(&mut self, level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) {

@@ -1856,6 +1856,26 @@ struct DeflateParamsStream<'a> {
     stream: &'a mut crate::zlib_h::z_stream_s,
 }
 
+/// A short-lived handle for one legacy ABI-stream compression step.
+///
+/// Gzip and other safe staging code use this named boundary rather than
+/// invoking the legacy state-machine entry point themselves.  The remaining
+/// unsafe transition stays beside the stream implementation until the ABI
+/// stream's cursors and state link have owners of their own.
+pub(crate) struct DeflateCall<'a> {
+    stream: &'a mut crate::zlib_h::z_stream_s,
+}
+
+impl<'a> DeflateCall<'a> {
+    pub(crate) fn new(stream: &'a mut crate::zlib_h::z_stream_s) -> Self {
+        Self { stream }
+    }
+
+    pub(crate) fn compress(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
+        unsafe { deflate(self.stream, flush) }
+    }
+}
+
 impl DeflateParamsStream<'_> {
     fn flush_block(&mut self) -> ::core::ffi::c_int {
         // `deflate` owns the remaining ABI cursor conversions for a complete
