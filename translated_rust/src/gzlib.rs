@@ -218,16 +218,9 @@ unsafe extern "C" fn gz_open(
         Some(open) => open,
         None => return ::core::ptr::null_mut(),
     };
-    // Keep the allocation and deallocation convention used by the existing close paths.
-    let state_ptr = crate::stdlib::malloc(::core::mem::size_of::<crate::gzguts_h::gz_state>())
-        as crate::gzguts_h::gz_statep;
-    if state_ptr.is_null() {
-        return ::core::ptr::null_mut();
-    }
     let path_bytes = path.to_bytes_with_nul();
     state.path = crate::stdlib::malloc(path_bytes.len()) as *mut ::core::ffi::c_char;
     if state.path.is_null() {
-        crate::stdlib::free(state_ptr.cast());
         return ::core::ptr::null_mut();
     }
     ::core::ptr::copy_nonoverlapping(path_bytes.as_ptr().cast(), state.path, path_bytes.len());
@@ -272,7 +265,6 @@ unsafe extern "C" fn gz_open(
     }
     if state.fd == -1 as ::core::ffi::c_int {
         crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
-        crate::stdlib::free(state_ptr.cast());
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     if state.mode == crate::gzguts_h::GZ_APPEND {
@@ -294,8 +286,7 @@ unsafe extern "C" fn gz_open(
         }
     }
     gz_reset(&mut state);
-    ::core::ptr::write(state_ptr, state);
-    state_ptr as crate::zlib_h::gzFile
+    Box::into_raw(Box::new(state)) as crate::zlib_h::gzFile
 }
 #[export_name = "gzopen"]
 
