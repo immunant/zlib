@@ -510,11 +510,30 @@ pub fn inflateReset(
     return inflateResetKeep(strm, state);
 }
 
+/// Reset an already-borrowed inflate state.
+///
+/// The ABI-facing callers validate allocator callbacks before converting the
+/// opaque state handle. Keeping this typed dispatch separate gives owned
+/// stream users a reset target without recreating that handle as a Rust
+/// reference.
+pub(crate) fn inflate_reset_state(
+    strm: &mut crate::zlib_h::z_stream,
+    state: Option<&mut crate::src::inflate::inflate_state>,
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) = state else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflateReset(strm, state)
+}
+
 /// Reset a stream whose opaque state is still represented by the ABI handle.
 ///
 /// This is the sole internal bridge for users that own a validated stream but
 /// not its typed inflate state.  Keeping the conversion here leaves gzip
-/// setup in terms of the same named reset implementation as other callers.
+/// setup in terms of the same typed reset implementation as other callers.
 pub(crate) fn inflate_reset_stream(
     strm: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
@@ -526,7 +545,7 @@ pub(crate) fn inflate_reset_stream(
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateReset(strm, state)
+    inflate_reset_state(strm, Some(state))
 }
 
 #[export_name = "inflateReset"]
@@ -543,7 +562,7 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateReset(strm, state)
+    inflate_reset_state(strm, Some(state))
 }
 /// The safe reset decision, including a callback-owned window that the ABI
 /// boundary must release before the reset mutates the stream state.
