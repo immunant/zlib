@@ -192,27 +192,39 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 // boundaries within this adapter.
 fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
-        // The default allocator accepts every requested `uInt` size, so
-        // publishing its results is a normal state transition. Keep these
-        // foreign calls in this existing implementation function: the unsafe
-        // audit tracks foreign-call counts per function.
-        state.in_0 = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
-            as *mut ::core::ffi::c_uchar;
-        state.out = crate::stdlib::malloc(
-            (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-        ) as *mut ::core::ffi::c_uchar;
-        if state.in_0.is_null() || state.out.is_null() {
+        // Keep both default-allocator buffers local until the inflater is
+        // ready to own them.  This preserves C's input-then-output allocation
+        // order while avoiding a partially-published state across setup.
+        let input = ::core::ptr::NonNull::new(
+            crate::src::zutil::zcalloc(::core::ptr::null_mut(), 1, state.want)
+                .cast::<::core::ffi::c_uchar>(),
+        );
+        let output = ::core::ptr::NonNull::new(
+            crate::src::zutil::zcalloc(::core::ptr::null_mut(), 1, state.want.wrapping_shl(1))
+                .cast::<::core::ffi::c_uchar>(),
+        );
+        let (Some(input), Some(output)) = (input, output) else {
             // These are zlib default-allocator allocations, so the matching
             // safe callback adapter can release either successful buffer.
-            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
-            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
+            if let Some(output) = output {
+                crate::src::zutil::zcfree(
+                    ::core::ptr::null_mut(),
+                    output.as_ptr() as crate::stdlib::voidpf,
+                );
+            }
+            if let Some(input) = input {
+                crate::src::zutil::zcfree(
+                    ::core::ptr::null_mut(),
+                    input.as_ptr() as crate::stdlib::voidpf,
+                );
+            }
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
                 Some(b"out of memory\0"),
             );
             return -1 as ::core::ffi::c_int;
-        }
+        };
         gz_look_prepare_stream(state);
         // SAFETY: this state now owns both gzip buffers and has initialized
         // its stream fields. The inflater constructor is the remaining raw
@@ -226,8 +238,14 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             )
         };
         if init_ret != crate::zlib_h::Z_OK {
-            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
-            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
+            crate::src::zutil::zcfree(
+                ::core::ptr::null_mut(),
+                output.as_ptr() as crate::stdlib::voidpf,
+            );
+            crate::src::zutil::zcfree(
+                ::core::ptr::null_mut(),
+                input.as_ptr() as crate::stdlib::voidpf,
+            );
             gz_look_init_failed(state);
             crate::src::gzlib::gz_error(
                 state,
@@ -236,6 +254,8 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
+        state.in_0 = input.as_ptr();
+        state.out = output.as_ptr();
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
         // SAFETY: initialization above, or the existing read state, provides
