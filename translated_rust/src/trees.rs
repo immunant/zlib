@@ -3780,14 +3780,15 @@ fn bi_windup_core(
 }
 
 unsafe fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
-    let (used, count, bytes) = bi_windup_core(&mut (*s).bi_buf, &mut (*s).bi_valid);
-    (*s).bi_used = used;
-    let pending = (*s).pending;
+    let state = &mut *s;
+    let (used, count, bytes) = bi_windup_core(&mut state.bi_buf, &mut state.bi_valid);
+    state.bi_used = used;
+    let pending = state.pending;
     for (index, byte) in bytes.into_iter().take(count).enumerate() {
         let cursor = pending.wrapping_add(index as crate::zutil_h::ulg);
-        *(*s).pending_buf.wrapping_add(cursor as usize) = byte;
+        *state.pending_buf.wrapping_add(cursor as usize) = byte;
     }
-    (*s).pending = pending_cursor_after_bytes(pending, count);
+    state.pending = pending_cursor_after_bytes(pending, count);
 }
 
 fn next_codes(bl_count: &[crate::zutil_h::ush; 16]) -> [crate::zutil_h::ush; 16] {
@@ -4722,7 +4723,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 ) {
     _tr_stored_block(s, buf, stored_len, last)
 }
-unsafe fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
+pub(crate) unsafe fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
     let (count, bytes) = bi_flush_core(&mut (*s).bi_buf, &mut (*s).bi_valid);
     let pending = (*s).pending;
     for (index, byte) in bytes.into_iter().take(count).enumerate() {
@@ -4731,14 +4732,10 @@ unsafe fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
     }
     (*s).pending = pending_cursor_after_bytes(pending, count);
 }
-
-pub unsafe extern "C" fn _tr_flush_bits(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s);
-}
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_flush_bits(s)
+    bi_flush(s)
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
