@@ -2773,7 +2773,9 @@ pub fn deflateCopy(
     // allocation. A user allocator can modify the published destination
     // stream, and zlib observes those changes on each subsequent request.
     let window = {
-        let dest_stream = &mut *dest;
+        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
@@ -2783,7 +2785,9 @@ pub fn deflateCopy(
         ) as *mut crate::stdlib::Bytef
     };
     let prev = {
-        let dest_stream = &mut *dest;
+        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
@@ -2792,7 +2796,9 @@ pub fn deflateCopy(
         ) as *mut crate::src::deflate::Posf
     };
     let head = {
-        let dest_stream = &mut *dest;
+        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
@@ -2801,7 +2807,9 @@ pub fn deflateCopy(
         ) as *mut crate::src::deflate::Posf
     };
     let pending_buf = {
-        let dest_stream = &mut *dest;
+        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest_stream.opaque,
@@ -2810,7 +2818,9 @@ pub fn deflateCopy(
         ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
     };
     if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
-        deflateEnd(&mut *dest);
+        if let Some((destination_stream, _destination_state)) = deflateStateCheck(dest) {
+            deflateEnd(destination_stream);
+        }
         return crate::zlib_h::Z_MEM_ERROR;
     }
     // All allocation callbacks are complete. Bind the two independently
@@ -2834,38 +2844,43 @@ pub fn deflateCopy(
     destination_state.pending_out = pending_buf.wrapping_add(pending_offset);
     destination_state.sym_buf = pending_buf.wrapping_add(destination_state.lit_bufsize as usize)
         as *mut crate::zutil_h::uchf;
-    // The pending allocation is the only buffer not covered by `fill_window`.
-    // Its prevalidated copy length lets this narrow binding stay separate from
-    // the window and hash-table views below.
-    let source_pending =
-        ::core::slice::from_raw_parts(source_state.pending_buf, plan.pending_buf_len);
-    let destination_pending = ::core::slice::from_raw_parts_mut(
-        destination_state.pending_buf,
-        plan.pending_buf_len,
-    );
-    // `fill_window()` is the existing binding point for a live deflater's
-    // window and hash tables. Reuse it for both states so these copies remain
-    // typed, bounded slice operations instead of creating duplicate raw views.
-    fill_window(
+    // Reuse the common pending binder for both independently-owned pending
+    // allocations. Their prevalidated copy length keeps those views bounded,
+    // while `fill_window()` supplies the window and hash-table views below.
+    flush_pending(
         source_state,
         source_stream,
         false,
-        |_, _, source_window, source_head, source_prev, _| {
-            fill_window(
+        |source_state, source_stream, source_pending, _| {
+            flush_pending(
                 destination_state,
                 destination_stream,
                 false,
-                |_, _, destination_window, destination_head, destination_prev, _| {
-                    deflate_copy_buffers(
-                        &plan,
-                        source_window,
-                        destination_window,
-                        source_head,
-                        destination_head,
-                        source_prev,
-                        destination_prev,
-                        source_pending,
-                        destination_pending,
+                |destination_state, destination_stream, destination_pending, _| {
+                    fill_window(
+                        source_state,
+                        source_stream,
+                        false,
+                        |_, _, source_window, source_head, source_prev, _| {
+                            fill_window(
+                                destination_state,
+                                destination_stream,
+                                false,
+                                |_, _, destination_window, destination_head, destination_prev, _| {
+                                    deflate_copy_buffers(
+                                        &plan,
+                                        source_window,
+                                        destination_window,
+                                        source_head,
+                                        destination_head,
+                                        source_prev,
+                                        destination_prev,
+                                        source_pending,
+                                        destination_pending,
+                                    );
+                                },
+                            );
+                        },
                     );
                 },
             );
