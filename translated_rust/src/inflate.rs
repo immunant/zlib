@@ -2687,6 +2687,8 @@ pub unsafe extern "C" fn inflateCopy(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*source).state as *mut crate::src::inflate::inflate_state;
+    let state = &*state;
+    let plan = inflate_copy_plan(state);
     copy = Some((*source).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*source).opaque,
@@ -2702,11 +2704,11 @@ pub unsafe extern "C" fn inflateCopy(
         ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
     );
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !(*state).window.is_null() {
+    if let Some(window_len) = plan.window_len {
         window = Some((*source).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*source).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
+            window_len as crate::stdlib::uInt,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
         if window.is_null() {
@@ -2719,7 +2721,6 @@ pub unsafe extern "C" fn inflateCopy(
         }
     }
     let source = &*source;
-    let state = &*state;
     let dest = &mut *dest;
     let copy = &mut *copy;
     let window = if window.is_null() {
@@ -2729,7 +2730,7 @@ pub unsafe extern "C" fn inflateCopy(
             ::core::slice::from_raw_parts(state.window, state.whave as usize),
             ::core::slice::from_raw_parts_mut(
                 window,
-                (1 as ::core::ffi::c_uint).wrapping_shl(state.wbits) as usize,
+                plan.window_len.expect("window allocation has a length"),
             ),
         ))
     };
@@ -2737,6 +2738,19 @@ pub unsafe extern "C" fn inflateCopy(
     dest.state = copy as *mut crate::src::inflate::inflate_state
         as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
+}
+
+struct InflateCopyPlan {
+    window_len: Option<usize>,
+}
+
+// Everything needed to decide whether a copied inflater owns a window is
+// ordinary state inspection.  The surrounding `inflateCopy()` keeps the
+// allocator and raw storage bindings at its existing ABI boundary.
+fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> InflateCopyPlan {
+    InflateCopyPlan {
+        window_len: (!state.window.is_null()).then_some((1usize) << state.wbits),
+    }
 }
 
 fn inflate_copy_state(
