@@ -1941,8 +1941,25 @@ static GZ_OWNED_STATES: ::std::sync::OnceLock<
     ::std::sync::Mutex<Vec<(usize, GzOwnedState)>>,
 > = ::std::sync::OnceLock::new();
 
+// Gzip's input and output arrays have the same opaque lifetime as the state,
+// but are initialized lazily on the first read.  Retaining their Vec backing
+// here makes the allocation explicit and lets read-side operations borrow an
+// owned buffer without reconstructing a slice from `state.out`.
+struct GzOwnedBuffers {
+    input: Vec<::core::ffi::c_uchar>,
+    output: Vec<::core::ffi::c_uchar>,
+}
+
+static GZ_OWNED_BUFFERS: ::std::sync::OnceLock<
+    ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>>,
+> = ::std::sync::OnceLock::new();
+
 fn gz_state_key(state: &crate::gzguts_h::gz_state) -> usize {
     ::core::ptr::from_ref(state).addr()
+}
+
+pub(crate) fn gz_owned_buffer_key(state: &crate::gzguts_h::gz_state) -> usize {
+    gz_state_key(state)
 }
 
 fn gz_owned_strings() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>> {
@@ -1951,6 +1968,64 @@ fn gz_owned_strings() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)
 
 fn gz_owned_states() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedState)>> {
     GZ_OWNED_STATES.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+fn gz_owned_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>> {
+    GZ_OWNED_BUFFERS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+// Allocate a zero-filled C-compatible buffer without publishing it through
+// the state until the paired input/output setup has succeeded.
+pub(crate) fn gz_owned_buffer(len: ::core::ffi::c_uint) -> Option<Vec<::core::ffi::c_uchar>> {
+    let len = usize::try_from(len).ok()?;
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(len).ok()?;
+    buffer.resize(len, 0);
+    Some(buffer)
+}
+
+// Publish both lazy read buffers together. Their Vec allocations never grow
+// after publication, so the C cursor fields retain stable addresses.
+pub(crate) fn gz_register_owned_buffers(
+    state: &mut crate::gzguts_h::gz_state,
+    mut input: Vec<::core::ffi::c_uchar>,
+    mut output: Vec<::core::ffi::c_uchar>,
+) -> bool {
+    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    if buffers.try_reserve(1).is_err() {
+        return false;
+    }
+    state.in_0 = input.as_mut_ptr();
+    state.out = output.as_mut_ptr();
+    buffers.push((
+        gz_state_key(state),
+        GzOwnedBuffers { input, output },
+    ));
+    true
+}
+
+// The closure receives the allocation's safe slice, while the caller keeps
+// responsibility for state/cursor transitions. This keeps owned-buffer
+// lookup out of exported ABI adapters.
+pub(crate) fn gz_with_owned_output_buffer<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(&mut buffers.output))
+}
+
+// The close paths call this only after their last input/output use. Dropping
+// the registry entry releases both lazy arrays before the opaque state box.
+pub(crate) fn gz_release_owned_buffers(state: &crate::gzguts_h::gz_state) {
+    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    if let Some(index) = buffers
+        .iter()
+        .position(|(key, _)| *key == gz_state_key(state))
+    {
+        buffers.swap_remove(index);
+    }
 }
 
 // Close has already completed all state access when it calls this function.

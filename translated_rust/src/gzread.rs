@@ -222,32 +222,18 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 // boundaries within this adapter.
 fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
-        // Keep both default-allocator buffers local until the inflater is
-        // ready to own them.  This preserves C's input-then-output allocation
-        // order while avoiding a partially-published state across setup.
-        let input = ::core::ptr::NonNull::new(
-            crate::src::zutil::zcalloc(::core::ptr::null_mut(), 1, state.want)
-                .cast::<::core::ffi::c_uchar>(),
-        );
-        let output = ::core::ptr::NonNull::new(
-            crate::src::zutil::zcalloc(::core::ptr::null_mut(), 1, state.want.wrapping_shl(1))
-                .cast::<::core::ffi::c_uchar>(),
-        );
-        let (Some(input), Some(output)) = (input, output) else {
-            // These are zlib default-allocator allocations, so the matching
-            // safe callback adapter can release either successful buffer.
-            if let Some(output) = output {
-                crate::src::zutil::zcfree(
-                    ::core::ptr::null_mut(),
-                    output.as_ptr() as crate::stdlib::voidpf,
-                );
-            }
-            if let Some(input) = input {
-                crate::src::zutil::zcfree(
-                    ::core::ptr::null_mut(),
-                    input.as_ptr() as crate::stdlib::voidpf,
-                );
-            }
+        // Keep both zero-filled buffers local until the inflater and their
+        // registry ownership are ready. This preserves C's allocation order
+        // while avoiding a partially-published state across setup.
+        let Some(input) = crate::src::gzlib::gz_owned_buffer(state.want) else {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                Some(b"out of memory\0"),
+            );
+            return -1 as ::core::ffi::c_int;
+        };
+        let Some(output) = crate::src::gzlib::gz_owned_buffer(state.want.wrapping_shl(1)) else {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -263,14 +249,6 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
         if init_ret != crate::zlib_h::Z_OK {
-            crate::src::zutil::zcfree(
-                ::core::ptr::null_mut(),
-                output.as_ptr() as crate::stdlib::voidpf,
-            );
-            crate::src::zutil::zcfree(
-                ::core::ptr::null_mut(),
-                input.as_ptr() as crate::stdlib::voidpf,
-            );
             gz_look_init_failed(state);
             crate::src::gzlib::gz_error(
                 state,
@@ -279,8 +257,16 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
-        state.in_0 = input.as_ptr();
-        state.out = output.as_ptr();
+        if !crate::src::gzlib::gz_register_owned_buffers(state, input, output) {
+            crate::src::inflate::inflateEnd(&mut state.strm);
+            gz_look_init_failed(state);
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                Some(b"out of memory\0"),
+            );
+            return -1 as ::core::ffi::c_int;
+        }
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
         crate::src::inflate::inflate_reset_stream_bound(&mut state.strm);
@@ -885,10 +871,10 @@ fn gzungetc_dispatch(
     }
 }
 
-// Once `gzungetc_dispatch()` has accepted the request, the ABI adapter has
-// bound the initialized output allocation. The cursor movement and overlap
-// handling below are therefore entirely safe slice operations.
-fn gzungetc(
+// Once `gzungetc_dispatch()` has accepted the request, the implementation
+// borrows the initialized owned output allocation. The cursor movement and
+// overlap handling below are therefore entirely safe slice operations.
+fn gzungetc_with_output(
     c: ::core::ffi::c_int,
     state: &mut crate::gzguts_h::gz_state,
     output: &mut [::core::ffi::c_uchar],
@@ -921,6 +907,19 @@ fn gzungetc(
     }
     c
 }
+
+// This implementation owns the lookahead, state validation, and owned output
+// buffer lookup. The exported wrapper need only bind its opaque C handle.
+fn gzungetc(c: ::core::ffi::c_int, state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    let Some(plan) = gzungetc_dispatch(c, state) else {
+        return -1;
+    };
+    let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+    crate::src::gzlib::gz_with_owned_output_buffer(state_key, |output| {
+        gzungetc_with_output(c, state, output, plan)
+    })
+    .unwrap_or(-1)
+}
 #[export_name = "gzungetc"]
 
 pub unsafe extern "C" fn gzungetc_ffi(
@@ -931,14 +930,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let Some(plan) = gzungetc_dispatch(c, state) else {
-        return -1;
-    };
-    // The dispatcher above reached `gz_look()` and accepted a plan derived
-    // from its initialized output allocation. This ABI binder performs the
-    // only raw conversion; the implementation receives the bounded slice.
-    let output = ::core::slice::from_raw_parts_mut(state.out, state.size.wrapping_shl(1) as usize);
-    gzungetc(c, state, output, plan)
+    gzungetc(c, state)
 }
 // The ABI wrapper binds the caller's writable string once. Reuse `gz_read()`
 // for each byte, so this line reader shares the existing bounded handling of
@@ -1063,9 +1055,7 @@ pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
     }
     if release_buffers {
-        // `gz_look` allocated these through zlib's default allocator.
-        crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
-        crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
+        crate::src::gzlib::gz_release_owned_buffers(state);
     }
     err = gz_close_read_finish(state);
     let fd = state.fd;
