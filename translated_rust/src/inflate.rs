@@ -3171,13 +3171,10 @@ fn inflate_undermine_sane(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
     crate::zlib_h::Z_DATA_ERROR
 }
 
-pub unsafe extern "C" fn inflateUndermine(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn inflateUndermine(
+    strm: &mut crate::zlib_h::z_stream_s,
     _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3189,6 +3186,9 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateUndermine(strm, subvert)
 }
 
