@@ -137,11 +137,12 @@ pub fn zError(mut err: ::core::ffi::c_int) -> &'static [u8] {
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     zError(err).as_ptr().cast()
 }
-pub unsafe extern "C" fn zcalloc(
-    _opaque: crate::stdlib::voidpf,
-    mut items: ::core::ffi::c_uint,
-    mut size: ::core::ffi::c_uint,
-) -> crate::stdlib::voidpf {
+// The allocator broker keeps ownership bookkeeping pointer-free.  The FFI
+// callback below is the only place an allocation is published as a C pointer.
+fn zcalloc_allocate(
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> Option<Box<[MaybeUninit<u128>]>> {
     // `uInt` is the ABI's fixed-width `u32`, so this is the translated C
     // branch selected on every supported target.  Keep its wrapping product
     // and allocation semantics, without retaining the unreachable calloc
@@ -153,20 +154,39 @@ pub unsafe extern "C" fn zcalloc(
     let words = words.max(1);
     let mut allocation = Vec::<MaybeUninit<u128>>::new();
     if allocation.try_reserve_exact(words).is_err() {
-        return ::core::ptr::null_mut();
+        return None;
     }
     allocation.resize_with(words, MaybeUninit::uninit);
-    let mut allocation = allocation.into_boxed_slice();
-    let pointer = ::core::ptr::from_mut(&mut allocation[0]).cast::<::core::ffi::c_void>();
+    Some(allocation.into_boxed_slice())
+}
+
+fn zcalloc_store(address: usize, allocation: Box<[MaybeUninit<u128>]>) -> bool {
     let mut allocations = match ZCALLOC_ALLOCATIONS.lock() {
         Ok(allocations) => allocations,
         Err(poisoned) => poisoned.into_inner(),
     };
     if allocations.try_reserve(1).is_err() {
-        return ::core::ptr::null_mut();
+        return false;
     }
-    allocations.push((pointer as usize, allocation));
-    pointer
+    allocations.push((address, allocation));
+    true
+}
+
+pub unsafe extern "C" fn zcalloc(
+    _opaque: crate::stdlib::voidpf,
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> crate::stdlib::voidpf {
+    let mut allocation = match zcalloc_allocate(items, size) {
+        Some(allocation) => allocation,
+        None => return ::core::ptr::null_mut(),
+    };
+    let pointer = allocation.as_mut_ptr().cast::<::core::ffi::c_void>();
+    if zcalloc_store(pointer as usize, allocation) {
+        pointer
+    } else {
+        ::core::ptr::null_mut()
+    }
 }
 #[export_name = "zcalloc"]
 
@@ -177,10 +197,10 @@ pub unsafe extern "C" fn zcalloc_ffi(
 ) -> crate::stdlib::voidpf {
     zcalloc(opaque, items, size)
 }
-pub unsafe extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
-    if ptr.is_null() {
-        return;
-    }
+
+// Returns whether this address was not owned by the default allocation
+// broker.  The wrapper performs the corresponding C-compatible free.
+fn zcfree_is_external(address: usize) -> bool {
     let allocation = {
         let mut allocations = match ZCALLOC_ALLOCATIONS.lock() {
             Ok(allocations) => allocations,
@@ -188,13 +208,17 @@ pub unsafe extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::
         };
         allocations
             .iter()
-            .position(|(address, _)| *address == ptr as usize)
+            .position(|(stored_address, _)| *stored_address == address)
             .map(|index| allocations.swap_remove(index).1)
     };
-    if allocation.is_none() {
+    allocation.is_none()
+}
+
+pub unsafe extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, ptr: crate::stdlib::voidpf) {
+    if !ptr.is_null() && zcfree_is_external(ptr as usize) {
         // Preserve zcfree's public free-compatible behavior for allocations
         // supplied by an external caller rather than this default broker.
-        crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
+        crate::stdlib::free(ptr);
     }
 }
 #[export_name = "zcfree"]
