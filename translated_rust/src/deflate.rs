@@ -44,18 +44,16 @@ pub struct ct_data_s {
     pub dl: crate::src::deflate::C2Rust_Unnamed_0,
 }
 #[derive(Copy, Clone)]
-#[repr(C)]
-
-pub union C2Rust_Unnamed_1 {
+#[repr(transparent)]
+pub struct C2Rust_Unnamed_1 {
+    // `freq` and `code` were C union aliases with identical representation.
     pub freq: crate::zutil_h::ush,
-    pub code: crate::zutil_h::ush,
 }
 #[derive(Copy, Clone)]
-#[repr(C)]
-
-pub union C2Rust_Unnamed_0 {
+#[repr(transparent)]
+pub struct C2Rust_Unnamed_0 {
+    // `dad` and `len` were C union aliases with identical representation.
     pub dad: crate::zutil_h::ush,
-    pub len: crate::zutil_h::ush,
 }
 
 pub type static_tree_desc = crate::src::deflate::static_tree_desc_s;
