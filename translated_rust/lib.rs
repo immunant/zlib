@@ -40,7 +40,7 @@ pub mod gzguts_h {
     pub struct gz_state {
         pub x: crate::zlib_h::gzFile_s,
         pub mode: ::core::ffi::c_int,
-        pub fd: ::core::ffi::c_int,
+        pub fd: Option<::std::os::fd::OwnedFd>,
         pub path: ::core::mem::ManuallyDrop<Option<::std::ffi::CString>>,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,

@@ -40,7 +40,6 @@ pub use crate::zlib_h::Z_NULL;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-use std::os::fd::BorrowedFd;
 
 fn gz_write_error(state: &mut crate::gzguts_h::gz_state, error: rustix::io::Errno) {
     let message = ::std::ffi::CString::new(::std::io::Error::from(error).to_string()).ok();
@@ -143,14 +142,14 @@ fn gz_comp(
     }
     let strm = &mut state.strm;
     if state.direct != 0 {
-        if state.fd < 0 {
+        if state.fd.is_none() {
             state.again = 0 as ::core::ffi::c_int;
             gz_write_error(state, rustix::io::Errno::BADF);
             gz_set_errno(rustix::io::Errno::BADF);
             return -1 as ::core::ffi::c_int;
         }
         // `fd` was checked above and remains owned by `state` for this call.
-        let fd = unsafe { BorrowedFd::borrow_raw(state.fd) };
+        let fd = state.fd.as_ref().expect("checked descriptor");
         while strm.avail_in != 0 {
             gz_clear_errno();
             state.again = 0 as ::core::ffi::c_int;
@@ -212,14 +211,14 @@ fn gz_comp(
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
-    if state.fd < 0 {
+    if state.fd.is_none() {
         state.again = 0 as ::core::ffi::c_int;
         gz_write_error(state, rustix::io::Errno::BADF);
         gz_set_errno(rustix::io::Errno::BADF);
         return -1 as ::core::ffi::c_int;
     }
     // `fd` was checked above and remains owned by `state` for this call.
-    let fd = unsafe { BorrowedFd::borrow_raw(state.fd) };
+    let fd = state.fd.as_ref().expect("checked descriptor");
     loop {
         if strm.avail_out == 0 as crate::stdlib::uInt
             || flush != crate::zlib_h::Z_NO_FLUSH
@@ -746,9 +745,13 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
             );
         }
         gzclose_w_cleanup(state);
-        state.fd
+        state.fd.take()
     };
-    if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
+    let close_result = match fd {
+        Some(fd) => crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)),
+        None => -1,
+    };
+    if close_result == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
     drop(Box::from_raw(::core::ptr::slice_from_raw_parts_mut(state, 1)));

@@ -43,7 +43,7 @@ pub use crate::zlib_h::Z_NULL;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-use std::os::fd::BorrowedFd;
+use std::os::fd::OwnedFd;
 
 fn gz_load_error(state: &mut crate::gzguts_h::gz_state, error: rustix::io::Errno) {
     errno::set_errno(errno::Errno(error.raw_os_error()));
@@ -61,7 +61,7 @@ fn gz_current_errno_error(state: &mut crate::gzguts_h::gz_state) {
 }
 
 fn gz_load(
-    fd: BorrowedFd<'_>,
+    fd: &OwnedFd,
     buf: &mut [u8],
     again: &mut ::core::ffi::c_int,
     eof: &mut ::core::ffi::c_int,
@@ -93,7 +93,6 @@ fn gz_load(
 
 fn gz_avail(
     state: &mut crate::gzguts_h::gz_state,
-    fd: Option<BorrowedFd<'_>>,
 ) -> ::core::ffi::c_int {
     if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
@@ -158,7 +157,7 @@ fn gz_avail(
             }
             input.copy_within(offset..end, 0);
         }
-        let Some(fd) = fd else {
+        let Some(fd) = state.fd.as_ref() else {
             gz_load_error(state, rustix::io::Errno::BADF);
             return -1 as ::core::ffi::c_int;
         };
@@ -269,12 +268,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    let fd = if state.eof == 0 && state.fd >= 0 {
-        Some(unsafe { BorrowedFd::borrow_raw(state.fd) })
-    } else {
-        None
-    };
-    if gz_avail(state, fd) == -1 as ::core::ffi::c_int {
+    if gz_avail(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if state.strm.avail_in == 0 as crate::stdlib::uInt
@@ -329,14 +323,8 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut had: ::core::ffi::c_uint = 0;
     had = state.strm.avail_out as ::core::ffi::c_uint;
     loop {
-        let fd = if state.eof == 0 && state.fd >= 0 {
-            // The descriptor is checked above and remains owned by `state` for this call.
-            Some(unsafe { BorrowedFd::borrow_raw(state.fd) })
-        } else {
-            None
-        };
         if state.strm.avail_in == 0 as crate::stdlib::uInt
-            && gz_avail(state, fd) == -1 as ::core::ffi::c_int
+            && gz_avail(state) == -1 as ::core::ffi::c_int
         {
             ret = state.err;
             break;
@@ -426,12 +414,11 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 }
             }
             crate::gzguts_h::COPY => {
-                let fd = if state.fd < 0 {
+                let fd = if state.fd.is_none() {
                     gz_load_error(state, rustix::io::Errno::BADF);
                     return -1 as ::core::ffi::c_int;
                 } else {
-                    // The descriptor is checked above and remains owned by state for this call.
-                    unsafe { BorrowedFd::borrow_raw(state.fd) }
+                    state.fd.as_ref().expect("checked descriptor")
                 };
                 let Some(output_len) = (state.size as usize).checked_mul(2) else {
                     crate::src::gzlib::gz_static_error(
@@ -646,13 +633,12 @@ fn gz_read(
                     }
                     break 's_28;
                 } else if state.how == crate::gzguts_h::COPY {
-                    if state.fd < 0 {
+                    if state.fd.is_none() {
                         gz_load_error(state, rustix::io::Errno::BADF);
                         err = -1;
                         n = 0;
                     } else {
-                        // The descriptor is checked above and remains owned by state for this call.
-                        let fd = unsafe { BorrowedFd::borrow_raw(state.fd) };
+                        let fd = state.fd.as_ref().expect("checked descriptor");
                         match gz_load(fd, &mut buf[..n as usize], &mut state.again, &mut state.eof) {
                             Ok(read) => n = read as ::core::ffi::c_uint,
                             Err((read, error)) => {
@@ -1038,9 +1024,12 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
             );
         }
         let err = gzclose_r_cleanup(state);
-        (state.fd, err)
+        (state.fd.take(), err)
     };
-    let ret = crate::stdlib::close(fd);
+    let ret = match fd {
+        Some(fd) => crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)),
+        None => -1,
+    };
     drop(Box::from_raw(::core::ptr::slice_from_raw_parts_mut(state, 1)));
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
