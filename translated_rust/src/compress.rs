@@ -86,6 +86,20 @@ impl CompressProgress {
     }
 }
 
+fn next_compress_chunk_slices<'a>(
+    source: &'a [crate::stdlib::Bytef],
+    dest: &'a mut [crate::stdlib::Bytef],
+    source_progress: CompressProgress,
+    dest_progress: CompressProgress,
+) -> (&'a [crate::stdlib::Bytef], &'a mut [crate::stdlib::Bytef]) {
+    let input_len = source_progress.next_chunk_len();
+    let output_len = dest_progress.next_chunk_len();
+    (
+        &source[source_progress.used..source_progress.used + input_len],
+        &mut dest[dest_progress.used..dest_progress.used + output_len],
+    )
+}
+
 fn compress_bound_z_impl(source_len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
     let bound = source_len
         .wrapping_add(source_len >> 12)
@@ -168,10 +182,14 @@ pub unsafe extern "C" fn compress2_z_ffi(
     let mut source_progress = CompressProgress::new(source_slice.len());
     let mut dest_progress = CompressProgress::new(dest_slice.len());
     let status = loop {
-        let input_len = source_progress.next_chunk_len();
-        let output_len = dest_progress.next_chunk_len();
-        let input = &source_slice[source_progress.used..source_progress.used + input_len];
-        let output = &mut dest_slice[dest_progress.used..dest_progress.used + output_len];
+        let (input, output) = next_compress_chunk_slices(
+            source_slice,
+            dest_slice,
+            source_progress,
+            dest_progress,
+        );
+        let input_len = input.len();
+        let output_len = output.len();
 
         stream.next_in = if input.is_empty() {
             source as *mut crate::stdlib::Bytef
@@ -275,7 +293,7 @@ pub unsafe extern "C" fn compressBound_ffi(
 mod tests {
     use super::{
         compress2_buffers_are_valid, compress_bound, compress_bound_z_impl,
-        normalize_compress_status, CompressProgress, MAX_CHUNK,
+        next_compress_chunk_slices, normalize_compress_status, CompressProgress, MAX_CHUNK,
     };
 
     #[test]
@@ -299,6 +317,36 @@ mod tests {
     #[test]
     fn compress2_buffer_validation_accepts_present_nonempty_buffers() {
         assert!(compress2_buffers_are_valid(1, 1, false, false));
+    }
+
+    #[test]
+    fn compress_chunk_slices_follow_progress_and_handle_empty_windows() {
+        let source = b"abcdef";
+        let mut dest = [0u8; 8];
+        let source_progress = CompressProgress { total: source.len(), used: 2 };
+        let dest_progress = CompressProgress { total: dest.len(), used: 3 };
+        let (input, output) =
+            next_compress_chunk_slices(source, &mut dest, source_progress, dest_progress);
+        assert_eq!(input, b"cdef");
+        assert_eq!(output.len(), 5);
+        output[0] = b'x';
+        assert_eq!(dest[3], b'x');
+
+        let dest_len = dest.len();
+        let (input, output) = next_compress_chunk_slices(
+            source,
+            &mut dest,
+            CompressProgress {
+                total: source.len(),
+                used: source.len(),
+            },
+            CompressProgress {
+                total: dest_len,
+                used: dest_len,
+            },
+        );
+        assert!(input.is_empty());
+        assert!(output.is_empty());
     }
 
     #[test]

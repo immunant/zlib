@@ -2859,6 +2859,10 @@ fn table_index(table_start: usize, table_offset: usize, entry_offset: usize) -> 
         .checked_add(entry_offset)
 }
 
+fn table_next_cursor(table_cursor: usize, table_size: u32) -> Option<usize> {
+    table_cursor.checked_add(table_size as usize)
+}
+
 fn table_usage_fits(type_0: CodeType, used: u32, table_start: usize, table_len: usize) -> bool {
     let within_type_capacity = match type_0 {
         CodeType::Codes => true,
@@ -3069,7 +3073,10 @@ pub fn inflate_table_safe(
             if drop_bits == 0 {
                 drop_bits = root;
             }
-            next += next_table_size as usize;
+            let Some(next_cursor) = table_next_cursor(next, next_table_size) else {
+                return 1;
+            };
+            next = next_cursor;
             curr = length - drop_bits;
             left = 1i32 << curr;
             while curr + drop_bits < max {
@@ -3184,6 +3191,13 @@ mod tests {
         assert_eq!(entry.op, op);
         assert_eq!(entry.bits, bits);
         assert_eq!(entry.val, val);
+    }
+
+    #[test]
+    fn table_next_cursor_checks_overflow() {
+        assert_eq!(table_next_cursor(3, 8), Some(11));
+        assert_eq!(table_next_cursor(usize::MAX - 8, 8), Some(usize::MAX));
+        assert_eq!(table_next_cursor(usize::MAX - 7, 8), None);
     }
 
     #[test]
