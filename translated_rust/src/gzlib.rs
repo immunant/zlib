@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -70,6 +70,10 @@ fn gz_is_read_or_write_mode(mode: ::core::ffi::c_int) -> bool {
 
 fn gz_is_read_mode(mode: ::core::ffi::c_int) -> bool {
     mode == crate::gzguts_h::GZ_READ
+}
+
+fn gz_open_has_required_inputs(path_present: bool, mode_present: bool) -> bool {
+    path_present && mode_present
 }
 
 pub(crate) fn gz_request_len(
@@ -656,7 +660,7 @@ unsafe fn gz_open(
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     let mut len: crate::stdlib::z_size_t = 0;
-    if path.is_null() || mode.is_null() {
+    if !gz_open_has_required_inputs(!path.is_null(), !mode.is_null()) {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     state = crate::stdlib::malloc(
@@ -1225,19 +1229,20 @@ mod tests {
         gz_clear_read_flags, gz_errno_is_retryable, gz_error_clears_buffer,
         gz_error_message_allocation_len, gz_error_needs_message_allocation, gz_error_plan,
         gz_is_read_mode, gz_is_read_or_write_mode, gz_legacy_offset_result, gz_lseek_succeeded,
-        gz_open_fd_plan, gz_open_offset_plan, gz_open_path_buffer_len, gz_open_recorded_offset,
-        gz_parse_open_mode, gz_position_after_skip, gz_post_open_metadata, gz_prepare_open,
-        gz_request_len, gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want,
-        gzclearerr_core, gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result,
-        gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
-        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
-        gzseek_clears_pending_skip, gzseek_effective_skip, gzseek_error_allows_positioning,
-        gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset, gzseek_finish_fast_forward,
-        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset, gzseek_plan_request,
-        gzseek_read_buffer_consumed, gzseek_read_buffer_plan_for_mode,
-        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid, gzseek_uses_read_buffer,
-        gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenFdPlan,
-        GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan, GzSeekRequestPlan,
+        gz_open_fd_plan, gz_open_has_required_inputs, gz_open_offset_plan, gz_open_path_buffer_len,
+        gz_open_recorded_offset, gz_parse_open_mode, gz_position_after_skip, gz_post_open_metadata,
+        gz_prepare_open, gz_request_len, gz_reset_core, gzbuffer_can_set_want,
+        gzbuffer_normalized_want, gzclearerr_core, gzdopen_has_valid_descriptor,
+        gzdopen_path_buffer_len, gzeof_result, gzerror_core, gzoffset64_adjust_for_buffered_read,
+        gzoffset64_result, gzrewind_request_is_valid, gzseek_adjust_offset,
+        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
+        gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
+        gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan_read_buffer_consumption,
+        gzseek_plan_remaining_offset, gzseek_plan_request, gzseek_read_buffer_consumed,
+        gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
+        gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
+        GzErrorMessage, GzErrorPlan, GzOpenFdPlan, GzOpenOffsetPlan, GzResetFields,
+        GzSeekOffsetPlan, GzSeekReadBufferPlan, GzSeekRequestPlan,
     };
 
     #[test]
@@ -1246,6 +1251,14 @@ mod tests {
         let mut past = 1;
         gz_clear_read_flags(&mut eof, &mut past);
         assert_eq!((eof, past), (0, 0));
+    }
+
+    #[test]
+    fn gz_open_requires_both_path_and_mode() {
+        assert!(gz_open_has_required_inputs(true, true));
+        assert!(!gz_open_has_required_inputs(false, true));
+        assert!(!gz_open_has_required_inputs(true, false));
+        assert!(!gz_open_has_required_inputs(false, false));
     }
 
     #[test]

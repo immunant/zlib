@@ -124,13 +124,9 @@ fn gz_zero_initial_step(
 ) -> GzZeroStep {
     match gz_zero_pending_step(pending_input) {
         GzZeroStep::FlushPending => GzZeroStep::FlushPending,
-        GzZeroStep::WriteChunk { .. } => gz_zero_chunk_step(
-            first,
-            size,
-            skip,
-            int_and_off64_are_same_size,
-            int_max,
-        ),
+        GzZeroStep::WriteChunk { .. } => {
+            gz_zero_chunk_step(first, size, skip, int_and_off64_are_same_size, int_max)
+        }
     }
 }
 
@@ -416,8 +412,18 @@ fn gz_comp_needs_output_write(
             && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
 }
 
-fn gz_comp_needs_output_buffer_reset(avail_out: crate::stdlib::uInt) -> bool {
-    avail_out == 0
+#[derive(Debug, Eq, PartialEq)]
+enum GzCompOutputBufferAction {
+    Keep,
+    Reset,
+}
+
+fn gz_comp_output_buffer_action(avail_out: crate::stdlib::uInt) -> GzCompOutputBufferAction {
+    if avail_out == 0 {
+        GzCompOutputBufferAction::Reset
+    } else {
+        GzCompOutputBufferAction::Keep
+    }
 }
 
 fn gz_comp_needs_reset(avail_in: crate::stdlib::uInt, flush: ::core::ffi::c_int) -> bool {
@@ -774,11 +780,14 @@ unsafe fn gz_comp(
                 (*state).x.next = (*state).x.next.wrapping_add(progress.cursor_advance);
                 *out_pending = progress.remaining_pending;
             }
-            if gz_comp_needs_output_buffer_reset((*strm).avail_out) {
-                (*strm).avail_out = (*state).size as crate::stdlib::uInt;
-                (*strm).next_out = (*state).out;
-                (*state).x.next = (*state).out;
-                *out_pending = 0;
+            match gz_comp_output_buffer_action((*strm).avail_out) {
+                GzCompOutputBufferAction::Keep => {}
+                GzCompOutputBufferAction::Reset => {
+                    (*strm).avail_out = (*state).size as crate::stdlib::uInt;
+                    (*strm).next_out = (*state).out;
+                    (*state).x.next = (*state).out;
+                    *out_pending = 0;
+                }
             }
         }
         have = (*strm).avail_out as ::core::ffi::c_uint;
@@ -1284,7 +1293,7 @@ mod tests {
     use super::{
         gz_buffer_is_initialized, gz_comp_apply_deflate_progress, gz_comp_deflate_progress,
         gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress, gz_comp_has_output,
-        gz_comp_max_write_chunk, gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write,
+        gz_comp_max_write_chunk, gz_comp_needs_output_write, gz_comp_output_buffer_action,
         gz_comp_needs_reset, gz_comp_output_produced, gz_comp_output_write_chunk_len,
         gz_comp_output_write_progress, gz_comp_pending_after_write, gz_comp_reset_action,
         gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
@@ -1296,13 +1305,14 @@ mod tests {
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_chunk_step, gz_zero_initial_step, gz_zero_needs_initialization,
-        gz_zero_pending_step, gz_zero_progress,
-        gzclose_buffer_action, gzclose_mode_is_writable, gzclose_w_result, gzflush_action,
-        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_request, GzCloseBufferAction, GzCompResetAction,
-        GzCompWriteFailure, GzCompWriteResult, GzFlushAction, GzPutcWriteAction,
-        GzSetParamsBufferAction, GzWriteDirectAction, GzZeroAction, GzZeroStep,
+        gz_zero_pending_step, gz_zero_progress, gzclose_buffer_action, gzclose_mode_is_writable,
+        gzclose_w_result, gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result,
+        gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
+        GzCloseBufferAction, GzCompOutputBufferAction, GzCompResetAction, GzCompWriteFailure,
+        GzCompWriteResult,
+        GzFlushAction, GzPutcWriteAction, GzSetParamsBufferAction, GzWriteDirectAction,
+        GzZeroAction, GzZeroStep,
     };
 
     #[test]
@@ -1652,14 +1662,23 @@ mod tests {
     }
 
     #[test]
-    fn gz_comp_needs_output_buffer_reset_when_buffer_is_exhausted() {
-        assert!(gz_comp_needs_output_buffer_reset(0));
+    fn gz_comp_output_buffer_action_resets_exhausted_buffers() {
+        assert_eq!(
+            gz_comp_output_buffer_action(0),
+            GzCompOutputBufferAction::Reset
+        );
     }
 
     #[test]
-    fn gz_comp_needs_output_buffer_reset_preserves_available_buffer() {
-        assert!(!gz_comp_needs_output_buffer_reset(1));
-        assert!(!gz_comp_needs_output_buffer_reset(crate::stdlib::uInt::MAX));
+    fn gz_comp_output_buffer_action_keeps_available_buffers() {
+        assert_eq!(
+            gz_comp_output_buffer_action(1),
+            GzCompOutputBufferAction::Keep
+        );
+        assert_eq!(
+            gz_comp_output_buffer_action(crate::stdlib::uInt::MAX),
+            GzCompOutputBufferAction::Keep
+        );
     }
 
     #[test]

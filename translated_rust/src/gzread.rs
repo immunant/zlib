@@ -864,6 +864,10 @@ fn gz_decomp_input_action(load_failed: bool, avail_in: crate::stdlib::uInt) -> G
     }
 }
 
+fn gz_decomp_reports_unexpected_eof(again: ::core::ffi::c_int) -> bool {
+    again == 0
+}
+
 fn gz_decomp_output_len(
     had: ::core::ffi::c_uint,
     avail_out: crate::stdlib::uInt,
@@ -933,7 +937,7 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
                 break;
             }
             GzDecompInputAction::UnexpectedEof => {
-                if (*state).again == 0 {
+                if gz_decomp_reports_unexpected_eof((*state).again) {
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_BUF_ERROR,
@@ -1425,6 +1429,13 @@ mod tests {
             gz_decomp_input_action(false, 1),
             GzDecompInputAction::Inflate
         );
+    }
+
+    #[test]
+    fn gz_decomp_reports_unexpected_eof_only_without_retry_state() {
+        assert!(gz_decomp_reports_unexpected_eof(0));
+        assert!(!gz_decomp_reports_unexpected_eof(1));
+        assert!(!gz_decomp_reports_unexpected_eof(-1));
     }
 
     #[test]
