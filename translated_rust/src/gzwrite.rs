@@ -701,12 +701,24 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
             crate::src::deflate::deflateEnd(
                 &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
-            ::core::mem::ManuallyDrop::drop(&mut (*state).out);
+            let output = ::core::mem::replace(
+                &mut (*state).out,
+                ::core::mem::ManuallyDrop::new(Vec::new()),
+            );
+            drop(::core::mem::ManuallyDrop::into_inner(output));
         }
-        ::core::mem::ManuallyDrop::drop(&mut (*state).in_0);
+        let input = ::core::mem::replace(
+            &mut (*state).in_0,
+            ::core::mem::ManuallyDrop::new(Vec::new()),
+        );
+        drop(::core::mem::ManuallyDrop::into_inner(input));
     }
     crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
-    ::core::mem::ManuallyDrop::drop(&mut (*state).path);
+    let path = ::core::mem::replace(
+        &mut (*state).path,
+        ::core::mem::ManuallyDrop::new(None),
+    );
+    drop(::core::mem::ManuallyDrop::into_inner(path));
     if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
