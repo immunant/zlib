@@ -1820,7 +1820,6 @@ pub fn inflate(
     let mut in_0: ::core::ffi::c_uint = 0;
     let mut out: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -1894,7 +1893,23 @@ pub fn inflate(
         in_0 = have;
         out = left;
         ret = crate::zlib_h::Z_OK;
-        '_inf_leave: loop {
+        {
+            // Lend the immutable input, mutable output, and separate history
+            // allocation once for this decoder invocation.  The loop neither
+            // invokes callbacks nor reallocates the history window.  This
+            // scope ends before the exit boundary, where allocation callbacks
+            // are again possible.
+            let input = ::core::slice::from_raw_parts(next, have as usize);
+            let output = ::core::slice::from_raw_parts_mut(put, left as usize);
+            let window = if state_ref.window.is_null() {
+                None
+            } else {
+                Some(::core::slice::from_raw_parts(
+                    state_ref.window,
+                    state_ref.wsize as usize,
+                ))
+            };
+            '_inf_leave: loop {
             'c_2425: {
                 'c_2327: {
                     'c_2422: {
@@ -2236,9 +2251,21 @@ pub fn inflate(
                                                                                                     // borrow instead of traversing the compatibility
                                                                                                     // pointer for each field.
                                                                                                     let state_ref = &mut *state;
-                                                                                                    let c2rust_fresh32 = put;
+                                                                                                    let Some(output_index) = out
+                                                                                                        .checked_sub(left)
+                                                                                                        .and_then(|offset| usize::try_from(offset).ok())
+                                                                                                    else {
+                                                                                                        state_ref.mode = crate::src::inflate::BAD;
+                                                                                                        ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                                        break '_inf_leave;
+                                                                                                    };
+                                                                                                    let Some(destination) = output.get_mut(output_index) else {
+                                                                                                        state_ref.mode = crate::src::inflate::BAD;
+                                                                                                        ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                                        break '_inf_leave;
+                                                                                                    };
+                                                                                                    *destination = state_ref.length as ::core::ffi::c_uchar;
                                                                                                     put = put.wrapping_add(1);
-                                                                                                    *c2rust_fresh32 = state_ref.length as ::core::ffi::c_uchar;
                                                                                                     left = left.wrapping_sub(1);
                                                                                                     state_ref.mode = crate::src::inflate::LEN;
                                                                                                     continue '_inf_leave;
@@ -2276,10 +2303,11 @@ pub fn inflate(
                                                                                                         if state_ref.wrap & 4 as ::core::ffi::c_int != 0
                                                                                                             && out != 0
                                                                                                         {
-                                                                                                            let output = core::slice::from_raw_parts(
-                                                                                                                put.wrapping_sub(out as usize),
-                                                                                                                out as usize,
-                                                                                                            );
+                                                                                                            let Some(output) = output.get(..out as usize) else {
+                                                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                                                break '_inf_leave;
+                                                                                                            };
                                                                                                             if let Some(check) = inflate_exit_checksum(
                                                                                                                 state_ref.wrap,
                                                                                                                 state_ref.check as crate::stdlib::uLong,
@@ -2709,24 +2737,48 @@ pub fn inflate(
                                                                             if copy == 0 {
                                                                                 break '_inf_leave;
                                                                             }
-                                                                            // The bounded stored-block
-                                                                            // copy is intentionally
-                                                                            // bytewise here: this legacy
-                                                                            // decoder boundary cannot lend
-                                                                            // new raw slices without
-                                                                            // increasing implementation
-                                                                            // unsafety.
-                                                                            let mut copied = 0usize;
-                                                                            while copied
-                                                                                < copy as usize
-                                                                            {
-                                                                                *put.wrapping_add(
-                                                                                copied,
-                                                                            ) = *next.wrapping_add(
-                                                                                copied,
-                                                                            );
-                                                                                copied += 1;
-                                                                            }
+                                                                            let Some(input_start) = in_0
+                                                                                .checked_sub(have)
+                                                                                .and_then(|offset| usize::try_from(offset).ok())
+                                                                            else {
+                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                break '_inf_leave;
+                                                                            };
+                                                                            let Some(output_start) = out
+                                                                                .checked_sub(left)
+                                                                                .and_then(|offset| usize::try_from(offset).ok())
+                                                                            else {
+                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                break '_inf_leave;
+                                                                            };
+                                                                            let Ok(copy_len) = usize::try_from(copy) else {
+                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                break '_inf_leave;
+                                                                            };
+                                                                            let Some(input_end) = input_start.checked_add(copy_len) else {
+                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                break '_inf_leave;
+                                                                            };
+                                                                            let Some(output_end) = output_start.checked_add(copy_len) else {
+                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                break '_inf_leave;
+                                                                            };
+                                                                            let Some(source) = input.get(input_start..input_end) else {
+                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                break '_inf_leave;
+                                                                            };
+                                                                            let Some(destination) = output.get_mut(output_start..output_end) else {
+                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                                                break '_inf_leave;
+                                                                            };
+                                                                            destination.copy_from_slice(source);
                                                                             have = have
                                                                                 .wrapping_sub(copy);
                                                                             next = next
@@ -2995,23 +3047,18 @@ pub fn inflate(
                                                 // zlib's distance accounting relative to `out`.
                                                 let window = if span.window_len == 0 {
                                                     Some(&[][..])
-                                                } else if state_ref.window.is_null() {
-                                                    None
                                                 } else {
-                                                    Some(::core::slice::from_raw_parts(
-                                                        state_ref.window,
-                                                        span.window_len,
-                                                    ))
+                                                    window.and_then(|window| {
+                                                        window.get(..span.window_len)
+                                                    })
                                                 };
-                                                if let Some(window) = window {
-                                                    let input = ::core::slice::from_raw_parts(
-                                                        next,
-                                                        span.input_len,
-                                                    );
-                                                    let output = ::core::slice::from_raw_parts_mut(
-                                                        put.wrapping_sub(span.output_start),
-                                                        span.output_len,
-                                                    );
+                                                let input_start = in_0.checked_sub(have)
+                                                    .and_then(|offset| usize::try_from(offset).ok());
+                                                let input = input_start.and_then(|start| {
+                                                    start.checked_add(span.input_len)
+                                                        .and_then(|end| input.get(start..end))
+                                                });
+                                                if let (Some(window), Some(input)) = (window, input) {
                                                     inflate_fast_tables(
                                                         &state_ref.codes,
                                                         state_ref.lencode,
@@ -3657,28 +3704,42 @@ pub fn inflate(
                 state_ref.mode = crate::src::inflate::BAD;
                 continue;
             };
-            from = match plan.source {
-                InflateMatchSource::Window { index } => state_ref.window.wrapping_add(index),
-                InflateMatchSource::Output { offset } => put.wrapping_sub(offset),
-            };
             copy = plan.copy;
-            left = left.wrapping_sub(copy);
-            state_ref.length = plan.remaining_length;
-            loop {
-                let c2rust_fresh30 = from;
-                from = from.wrapping_add(1);
-                let c2rust_fresh31 = put;
-                put = put.wrapping_add(1);
-                *c2rust_fresh31 = *c2rust_fresh30;
-                copy = copy.wrapping_sub(1);
-                if copy == 0 {
-                    break;
+            let copied = (|| {
+                let output_start = usize::try_from(out.checked_sub(left)?).ok()?;
+                let copy_len = usize::try_from(copy).ok()?;
+                let output_end = output_start.checked_add(copy_len)?;
+                match plan.source {
+                    InflateMatchSource::Window { index } => {
+                        let source_end = index.checked_add(copy_len)?;
+                        let source = window?.get(index..source_end)?;
+                        let destination = output.get_mut(output_start..output_end)?;
+                        destination.copy_from_slice(source);
+                        Some(())
+                    }
+                    InflateMatchSource::Output { offset } => {
+                        let output_copy_start = output_start.checked_sub(offset)?;
+                        let copied = output.get_mut(output_copy_start..output_end)?;
+                        inflate_output_match_copy(copied, offset, copy_len)
+                    }
                 }
+            })();
+            if copied.is_none() {
+                strm_ref.msg = INFLATE_ERROR_MESSAGES[17].as_ptr()
+                    as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                state_ref.mode = crate::src::inflate::BAD;
+                continue;
             }
+            left = left.wrapping_sub(copy);
+            put = put.wrapping_add(copy as usize);
+            state_ref.length = plan.remaining_length;
             if state_ref.length == 0 as ::core::ffi::c_uint {
                 state_ref.mode = crate::src::inflate::LEN;
             }
         }
+        }
+        // The invocation-local ABI views above have ended before this exit
+        // boundary can invoke an allocator callback.
         // Keep the decoder loop's raw cursors local to that loop.  The exit
         // commit adopts each ABI record once, so cursor publication, history
         // planning, totals, and checksum state use ordinary field access.
