@@ -734,7 +734,6 @@ pub unsafe extern "C" fn gzgets(
     let mut left: ::core::ffi::c_uint = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut eol: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if buf.is_null() || len < 1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
@@ -754,24 +753,28 @@ pub unsafe extern "C" fn gzgets(
                 }
                 crate::src::gzlib::GzGetsPlan::Copy(chunk) => {
                     n = chunk;
-                    eol = crate::stdlib::memchr(
-                        state.x.next as *const ::core::ffi::c_void,
-                        '\n' as ::core::ffi::c_int,
-                        n as crate::__stddef_size_t_h::size_t,
-                    ) as *mut ::core::ffi::c_uchar;
-                    if !eol.is_null() {
-                        n = (eol.offset_from(state.x.next) as ::core::ffi::c_uint)
-                            .wrapping_add(1 as ::core::ffi::c_uint);
-                    }
-                    crate::stdlib::memcpy(
-                        buf as *mut ::core::ffi::c_void,
-                        state.x.next as *const ::core::ffi::c_void,
-                        n as crate::__stddef_size_t_h::size_t,
+                    // SAFETY: `gz_gets_plan()` bounds this view by `x.have`,
+                    // whose initialized bytes begin at `x.next`.
+                    let source = ::core::slice::from_raw_parts(state.x.next, n as usize);
+                    let found_eol = if let Some(eol) = source.iter().position(|byte| *byte == b'\n') {
+                        n = (eol as ::core::ffi::c_uint).wrapping_add(1);
+                        true
+                    } else {
+                        false
+                    };
+                    // SAFETY: the caller supplied `len` writable bytes and
+                    // the plan bounds this copy by the remaining request;
+                    // as for C's `memcpy`, the distinct caller and gzip
+                    // buffers must not overlap.
+                    let destination = ::core::slice::from_raw_parts_mut(
+                        buf as *mut ::core::ffi::c_uchar,
+                        n as usize,
                     );
+                    destination.copy_from_slice(&source[..n as usize]);
                     gz_consume(state, n as crate::stdlib::off64_t);
                     crate::src::gzlib::gz_gets_after_copy(&mut left, n);
                     buf = buf.wrapping_add(n as usize);
-                    if !crate::src::gzlib::gz_gets_should_continue(left, !eol.is_null()) {
+                    if !crate::src::gzlib::gz_gets_should_continue(left, found_eol) {
                         break;
                     }
                 }
