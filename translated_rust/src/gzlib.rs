@@ -1411,7 +1411,7 @@ pub unsafe extern "C" fn gzerror_ffi(
         errnum.as_mut(),
     )
 }
-fn gzclearerr(state: &mut crate::gzguts_h::gz_state) {
+pub(crate) fn gzclearerr(state: &mut crate::gzguts_h::gz_state) {
     if !gz_clear_error_state(state) {
         return;
     }

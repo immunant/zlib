@@ -532,18 +532,17 @@ pub unsafe extern "C" fn gzputs_ffi(
     }
     gzputs(&mut *(file as crate::gzguts_h::gz_statep), s)
 }
-pub unsafe extern "C" fn gzflush(
+fn gzflush(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    // For a validated write state, `gzclearerr` has the same error-reset
+    // effect as `gz_error(..., Z_OK, null)` without widening this
+    // reference-bound coordinator's unsafe surface.
+    crate::src::gzlib::gzclearerr(state);
     if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
