@@ -579,6 +579,34 @@ fn deflate_fast_should_insert_match(
     match_length <= max_lazy_match && lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeflateFastMatchProgress {
+    lookahead: crate::stdlib::uInt,
+    remaining_match_length: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    insert: bool,
+}
+
+fn deflate_fast_match_progress(
+    match_length: crate::stdlib::uInt,
+    max_lazy_match: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+) -> DeflateFastMatchProgress {
+    let lookahead = lookahead.wrapping_sub(match_length);
+    let insert = deflate_fast_should_insert_match(match_length, max_lazy_match, lookahead);
+    DeflateFastMatchProgress {
+        lookahead,
+        remaining_match_length: if insert {
+            match_length.wrapping_sub(1)
+        } else {
+            0
+        },
+        strstart: strstart.wrapping_add(match_length),
+        insert,
+    }
+}
+
 fn deflate_insert_after_block(strstart: crate::stdlib::uInt) -> crate::stdlib::uInt {
     strstart.min((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt)
 }
@@ -3531,13 +3559,15 @@ unsafe extern "C" fn deflate_fast(
                     .value
                     .wrapping_add(1);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
-            (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
-            if deflate_fast_should_insert_match(
+            let progress = deflate_fast_match_progress(
                 (*s).match_length,
                 (*s).max_lazy_match,
                 (*s).lookahead,
-            ) {
-                (*s).match_length = (*s).match_length.wrapping_sub(1);
+                (*s).strstart,
+            );
+            (*s).lookahead = progress.lookahead;
+            if progress.insert {
+                (*s).match_length = progress.remaining_match_length;
                 loop {
                     (*s).strstart = (*s).strstart.wrapping_add(1);
                     (*s).ins_h = ((*s).ins_h << (*s).hash_shift
@@ -3557,9 +3587,9 @@ unsafe extern "C" fn deflate_fast(
                         break;
                     }
                 }
-                (*s).strstart = (*s).strstart.wrapping_add(1);
+                (*s).strstart = progress.strstart;
             } else {
-                (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
+                (*s).strstart = progress.strstart;
                 (*s).match_length = 0 as crate::stdlib::uInt;
                 (*s).ins_h = *(*s).window.offset((*s).strstart as isize) as crate::stdlib::uInt;
                 (*s).ins_h = ((*s).ins_h << (*s).hash_shift
@@ -4280,12 +4310,12 @@ mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
-        deflate_dictionary_state_after_load, deflate_fast_should_insert_match, deflate_flush_rank,
-        deflate_huff_literal_progress, deflate_insert_after_block,
-        deflate_literal_state_after_emit, deflate_match_refill_action, deflate_pending_value,
-        deflate_preflight, deflate_prime_bits_valid, deflate_request_is_invalid,
-        deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
-        deflate_rle_literal_tally_plan, deflate_rle_match_length,
+        deflate_dictionary_state_after_load, deflate_fast_match_progress,
+        deflate_fast_should_insert_match, deflate_flush_rank, deflate_huff_literal_progress,
+        deflate_insert_after_block, deflate_literal_state_after_emit, deflate_match_refill_action,
+        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
+        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
+        deflate_rle_clamp_match_length, deflate_rle_literal_tally_plan, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
         deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_check_impl,
@@ -4303,8 +4333,9 @@ mod tests {
         short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
         stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
         stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
-        symbol_buffer_is_full, symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
+        symbol_buffer_is_full, symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress,
+        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
+        ReadBufChecksum,
     };
 
     #[test]
@@ -4506,6 +4537,39 @@ mod tests {
             crate::stdlib::uInt::MAX,
             crate::stdlib::uInt::MAX,
         ));
+    }
+
+    #[test]
+    fn deflate_fast_match_progress_preserves_insert_skip_and_wrapping_transitions() {
+        let min_match = crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+
+        assert_eq!(
+            deflate_fast_match_progress(4, 4, min_match + 6, 10),
+            DeflateFastMatchProgress {
+                lookahead: min_match + 2,
+                remaining_match_length: 3,
+                strstart: 14,
+                insert: true,
+            },
+        );
+        assert_eq!(
+            deflate_fast_match_progress(5, 4, min_match + 6, 10),
+            DeflateFastMatchProgress {
+                lookahead: min_match + 1,
+                remaining_match_length: 0,
+                strstart: 15,
+                insert: false,
+            },
+        );
+        assert_eq!(
+            deflate_fast_match_progress(3, 3, min_match, crate::stdlib::uInt::MAX),
+            DeflateFastMatchProgress {
+                lookahead: 0,
+                remaining_match_length: 0,
+                strstart: 2,
+                insert: false,
+            },
+        );
     }
 
     #[test]

@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -404,6 +404,29 @@ fn gzseek_fast_forward_lseek_offset(
     buffered_input: crate::stdlib::uInt,
 ) -> crate::stdlib::off64_t {
     offset - buffered_input as crate::stdlib::off64_t
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GzSeekFastForwardPlan {
+    lseek_offset: crate::stdlib::off64_t,
+    position: crate::stdlib::off64_t,
+}
+
+fn gzseek_plan_fast_forward(
+    mode: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    position: crate::stdlib::off64_t,
+    offset: crate::stdlib::off64_t,
+    buffered_input: crate::stdlib::uInt,
+) -> Option<GzSeekFastForwardPlan> {
+    if !gzseek_can_fast_forward(mode, how, position, offset) {
+        return None;
+    }
+
+    Some(GzSeekFastForwardPlan {
+        lseek_offset: gzseek_fast_forward_lseek_offset(offset, buffered_input),
+        position: gz_position_after_skip(position, offset),
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -903,33 +926,37 @@ pub unsafe extern "C" fn gzseek64(
         }
     };
     offset = request_plan.offset;
-    let fast_forwarded = {
+    let fast_forward_plan = {
         let state = &mut *state_ptr;
         if request_plan.clear_pending_skip {
             state.skip = 0 as crate::stdlib::off64_t;
         }
-        if gzseek_can_fast_forward(state.mode, state.how, state.x.pos, offset) {
+        if let Some(plan) =
+            gzseek_plan_fast_forward(state.mode, state.how, state.x.pos, offset, state.x.have)
+        {
             let ret = crate::stdlib::lseek64(
                 state.fd,
-                gzseek_fast_forward_lseek_offset(offset, state.x.have) as crate::stdlib::__off64_t,
+                plan.lseek_offset as crate::stdlib::__off64_t,
                 crate::stdlib::SEEK_CUR,
             ) as crate::stdlib::off64_t;
             if !gz_lseek_succeeded(ret as crate::stdlib::__off64_t) {
                 return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
             }
             gzseek_fast_forward_reset(state);
-            true
+            Some(plan)
         } else {
-            false
+            None
         }
     };
-    if fast_forwarded {
+    if let Some(plan) = fast_forward_plan {
         gz_error(
             state_ptr,
             crate::zlib_h::Z_OK,
             ::core::ptr::null::<::core::ffi::c_char>(),
         );
-        return gzseek_finish_fast_forward(&mut *state_ptr, offset);
+        let position = gzseek_finish_fast_forward(&mut *state_ptr, offset);
+        debug_assert_eq!(position, plan.position);
+        return position;
     }
     let seek_plan = {
         let state = &mut *state_ptr;
@@ -1257,12 +1284,13 @@ mod tests {
         gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
         gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
         gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
-        gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan_read_buffer_consumption,
-        gzseek_plan_remaining_offset, gzseek_plan_request, gzseek_read_buffer_consumed,
-        gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
-        gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
-        GzErrorMessage, GzErrorPlan, GzOpenFdPlan, GzOpenOffsetPlan, GzResetFields,
-        GzSeekOffsetPlan, GzSeekReadBufferPlan, GzSeekRequestPlan,
+        gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan_fast_forward,
+        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset, gzseek_plan_request,
+        gzseek_read_buffer_consumed, gzseek_read_buffer_plan_for_mode,
+        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid, gzseek_uses_read_buffer,
+        gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenFdPlan,
+        GzOpenOffsetPlan, GzResetFields, GzSeekFastForwardPlan, GzSeekOffsetPlan,
+        GzSeekReadBufferPlan, GzSeekRequestPlan,
     };
 
     #[test]
@@ -2132,6 +2160,25 @@ mod tests {
         assert_eq!(gzseek_fast_forward_lseek_offset(19, 7), 12);
         assert_eq!(gzseek_fast_forward_lseek_offset(-3, 7), -10);
         assert_eq!(gzseek_fast_forward_lseek_offset(0, 0), 0);
+    }
+
+    #[test]
+    fn gzseek_fast_forward_plan_preserves_seek_and_position_calculations() {
+        assert_eq!(
+            gzseek_plan_fast_forward(crate::gzguts_h::GZ_READ, crate::gzguts_h::COPY, 12, 19, 7),
+            Some(GzSeekFastForwardPlan {
+                lseek_offset: 12,
+                position: 31,
+            })
+        );
+        assert_eq!(
+            gzseek_plan_fast_forward(crate::gzguts_h::GZ_READ, crate::gzguts_h::LOOK, 12, 19, 7),
+            None
+        );
+        assert_eq!(
+            gzseek_plan_fast_forward(crate::gzguts_h::GZ_READ, crate::gzguts_h::COPY, 12, -13, 7),
+            None
+        );
     }
 
     #[test]
