@@ -376,22 +376,16 @@ unsafe fn gzbuffer_state(
     return 0 as ::core::ffi::c_int;
 }
 
-pub unsafe extern "C" fn gzbuffer(
-    file: crate::zlib_h::gzFile,
-    size: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    gzbuffer_state(&mut *(file as crate::gzguts_h::gz_statep), size)
-}
 #[export_name = "gzbuffer"]
 
 pub unsafe extern "C" fn gzbuffer_ffi(
     mut file: crate::zlib_h::gzFile,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzbuffer(file, size)
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzbuffer_state(&mut *(file as crate::gzguts_h::gz_statep), size)
 }
 pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
