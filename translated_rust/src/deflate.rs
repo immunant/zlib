@@ -884,63 +884,29 @@ impl<'input, 'output> DeflateOneShotOwner<'input, 'output> {
     }
 }
 
-// This adapter owns the complete temporary ABI lifecycle for compress2_z().
-// Its interface is pointer-free, so all chunking and result accounting remain
-// in `DeflateOneShotOwner`.
+// The one-shot compressor owns the complete codec state and its four backing
+// regions.  It never constructs a temporary ABI stream, so `compress2_z()`
+// can retain the same bounded chunking without crossing the callback-backed
+// lifecycle used by the resumable stream API.
 pub(crate) fn deflate_one_shot(
     owner: &mut DeflateOneShotOwner<'_, '_>,
     level: ::core::ffi::c_int,
 ) -> DeflateOneShotProgress {
-    deflate_one_shot_abi(owner, level)
-}
-
-// Keep the temporary ABI stream's complete lifecycle at one codec boundary.
-// The caller owns only pointer-free input/output cursors and receives scalar
-// completion, so none of the temporary stream's raw fields escape this
-// adapter.
-fn deflate_one_shot_abi(
-    owner: &mut DeflateOneShotOwner<'_, '_>,
-    level: ::core::ffi::c_int,
-) -> DeflateOneShotProgress {
-    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
-        next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_in: 0,
-        total_in: 0,
-        next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_out: 0,
-        total_out: 0,
-        msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        state: None,
-        zalloc: None,
-        zfree: None,
-        opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
-        data_type: 0,
-        adler: 0,
-        reserved: 0,
+    let mut codec = match DeflateOneShotCodec::new(level) {
+        Ok(codec) => codec,
+        Err(status) => {
+            return DeflateOneShotProgress {
+                status,
+                produced: 0,
+            }
+        }
     };
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut input_offset = 0usize;
     let mut output_offset = 0usize;
     let mut input_available = 0 as crate::stdlib::uInt;
     let mut output_available = 0 as crate::stdlib::uInt;
-    let mut status = unsafe {
-        deflateInit2_(
-            Some(&mut stream),
-            level,
-            crate::zlib_h::Z_DEFLATED,
-            crate::stdlib::MAX_WBITS,
-            crate::zutil_h::DEF_MEM_LEVEL,
-            crate::zlib_h::Z_DEFAULT_STRATEGY,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        )
-    };
-    if status != crate::zlib_h::Z_OK {
-        return DeflateOneShotProgress {
-            status,
-            produced: 0,
-        };
-    }
+    let mut status;
     loop {
         let (remaining_input, remaining_output) = {
             let request = owner.request(
@@ -950,12 +916,9 @@ fn deflate_one_shot_abi(
                 output_offset,
                 &mut output_available,
             );
-            stream.next_in = request.input.as_ptr().cast_mut();
-            stream.avail_in = request.input.len() as crate::stdlib::uInt;
-            stream.next_out = request.output.as_mut_ptr();
-            stream.avail_out = request.output.len() as crate::stdlib::uInt;
-            status = unsafe { deflate_dispatch_from_abi_stream(&mut stream, request.flush, None) };
-            (stream.avail_in, stream.avail_out)
+            let completion = codec.dispatch(request);
+            status = completion.status;
+            (completion.avail_in, completion.avail_out)
         };
         owner.commit(
             &mut input_offset,
@@ -970,9 +933,6 @@ fn deflate_one_shot_abi(
         }
     }
     let produced = owner.produced(output_available);
-    unsafe {
-        deflateEnd(::core::ptr::NonNull::from(&mut stream));
-    }
     DeflateOneShotProgress {
         status: if status == crate::zlib_h::Z_STREAM_END {
             crate::zlib_h::Z_OK
@@ -5092,6 +5052,348 @@ fn deflate_from_stream(
         }
     }
     dispatch.complete(result)
+}
+
+// This is the scalar half of a one-shot compressor.  It mirrors only the
+// fields consumed by the slice-based dispatch core; its backing regions are
+// owned separately by `DeflateOwnedStorage`, rather than by callback handles
+// in `internal_state`.
+struct DeflateOneShotState {
+    status: ::core::ffi::c_int,
+    pending_buf_size: crate::zutil_h::ulg,
+    pending_out: usize,
+    pending: crate::zutil_h::ulg,
+    wrap: ::core::ffi::c_int,
+    gzhead: Option<GzipHeader>,
+    gzindex: usize,
+    last_flush: ::core::ffi::c_int,
+    w_size: crate::stdlib::uInt,
+    w_bits: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    window_size: crate::zutil_h::ulg,
+    hash_size: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+    match_length: crate::stdlib::uInt,
+    prev_match: crate::src::deflate::IPos,
+    match_available: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    match_start: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    prev_length: crate::stdlib::uInt,
+    max_chain_length: crate::stdlib::uInt,
+    max_lazy_match: crate::stdlib::uInt,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    good_match: crate::stdlib::uInt,
+    nice_match: ::core::ffi::c_int,
+    dyn_ltree: [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: [crate::src::deflate::ct_data_s; 61],
+    bl_tree: [crate::src::deflate::ct_data_s; 39],
+    l_desc: crate::src::deflate::tree_desc_s,
+    d_desc: crate::src::deflate::tree_desc_s,
+    bl_desc: crate::src::deflate::tree_desc_s,
+    bl_count: [crate::zutil_h::ush; 16],
+    heap: [::core::ffi::c_int; 573],
+    heap_len: ::core::ffi::c_int,
+    heap_max: ::core::ffi::c_int,
+    depth: [crate::zutil_h::uch; 573],
+    sym_buf_start: usize,
+    sym_next: crate::stdlib::uInt,
+    sym_end: crate::stdlib::uInt,
+    opt_len: crate::zutil_h::ulg,
+    static_len: crate::zutil_h::ulg,
+    matches: crate::stdlib::uInt,
+    insert: crate::stdlib::uInt,
+    ins_h: crate::stdlib::uInt,
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+    bi_used: ::core::ffi::c_int,
+    high_water: crate::zutil_h::ulg,
+    slid: ::core::ffi::c_int,
+}
+
+struct DeflateOneShotCodec {
+    storage: DeflateOwnedStorage,
+    state: DeflateOneShotState,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    data_type: ::core::ffi::c_int,
+}
+
+struct DeflateOneShotCompletion {
+    status: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    avail_out: crate::stdlib::uInt,
+}
+
+impl DeflateOneShotCodec {
+    fn new(level: ::core::ffi::c_int) -> Result<Self, ::core::ffi::c_int> {
+        let layout = deflate_layout(
+            level,
+            crate::zlib_h::Z_DEFLATED,
+            crate::stdlib::MAX_WBITS,
+            crate::zutil_h::DEF_MEM_LEVEL,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+        )
+        .ok_or(crate::zlib_h::Z_STREAM_ERROR)?;
+        let initial = layout.initial_state();
+        let storage_layout = layout.storage();
+        let pending_buf_size = storage_layout
+            .pending
+            .byte_len()
+            .expect("validated one-shot pending allocation geometry")
+            as crate::zutil_h::ulg;
+        let mut storage = storage_layout
+            .allocate_owned()
+            .ok_or(crate::zlib_h::Z_MEM_ERROR)?;
+        let mut state = DeflateOneShotState {
+            status: initial.status,
+            pending_buf_size,
+            pending_out: initial.pending_out,
+            pending: initial.pending,
+            wrap: initial.wrap,
+            gzhead: None,
+            gzindex: initial.gzindex,
+            last_flush: initial.last_flush,
+            w_size: initial.w_size,
+            w_bits: initial.w_bits,
+            w_mask: initial.w_mask,
+            window_size: initial.window_size,
+            hash_size: initial.hash_size,
+            hash_mask: initial.hash_mask,
+            hash_shift: initial.hash_shift,
+            block_start: 0,
+            match_length: 0,
+            prev_match: 0,
+            match_available: 0,
+            strstart: 0,
+            match_start: 0,
+            lookahead: 0,
+            prev_length: 0,
+            max_chain_length: 0,
+            max_lazy_match: 0,
+            level: layout.level,
+            strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
+            good_match: 0,
+            nice_match: 0,
+            dyn_ltree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 573],
+            dyn_dtree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 61],
+            bl_tree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 39],
+            l_desc: crate::src::deflate::tree_desc_s {
+                kind: crate::src::deflate::TreeKind::LitLen,
+                max_code: 0,
+            },
+            d_desc: crate::src::deflate::tree_desc_s {
+                kind: crate::src::deflate::TreeKind::Dist,
+                max_code: 0,
+            },
+            bl_desc: crate::src::deflate::tree_desc_s {
+                kind: crate::src::deflate::TreeKind::BitLen,
+                max_code: 0,
+            },
+            bl_count: [0; 16],
+            heap: [0; 573],
+            heap_len: 0,
+            heap_max: 0,
+            depth: [0; 573],
+            sym_buf_start: layout.lit_bufsize as usize,
+            sym_next: 0,
+            sym_end: layout.lit_bufsize.wrapping_sub(1).wrapping_mul(3),
+            opt_len: 0,
+            static_len: 0,
+            matches: 0,
+            insert: 0,
+            ins_h: initial.ins_h,
+            bi_buf: 0,
+            bi_valid: 0,
+            bi_used: 0,
+            high_water: 0,
+            slid: 0,
+        };
+        let adler = reset_keep_core(
+            &mut state.pending,
+            &mut state.pending_out,
+            &mut state.wrap,
+            &mut state.status,
+            &mut state.last_flush,
+            &mut state.dyn_ltree,
+            &mut state.dyn_dtree,
+            &mut state.bl_tree,
+            &mut state.l_desc,
+            &mut state.d_desc,
+            &mut state.bl_desc,
+            &mut state.static_len,
+            &mut state.opt_len,
+            &mut state.matches,
+            &mut state.sym_next,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+        );
+        let DeflateCopyDestinationViews { head, .. } = storage.destination_views();
+        DeflateResetCore {
+            window_size: &mut state.window_size,
+            slid: &mut state.slid,
+            max_lazy_match: &mut state.max_lazy_match,
+            good_match: &mut state.good_match,
+            nice_match: &mut state.nice_match,
+            max_chain_length: &mut state.max_chain_length,
+            strstart: &mut state.strstart,
+            block_start: &mut state.block_start,
+            lookahead: &mut state.lookahead,
+            insert: &mut state.insert,
+            prev_length: &mut state.prev_length,
+            match_length: &mut state.match_length,
+            match_available: &mut state.match_available,
+            ins_h: &mut state.ins_h,
+        }
+        .reset_after_keep(
+            head,
+            state.w_size,
+            &configuration_table[state.level as usize],
+        );
+        Ok(Self {
+            storage,
+            state,
+            total_in: 0,
+            total_out: 0,
+            adler,
+            data_type: crate::zlib_h::Z_UNKNOWN,
+        })
+    }
+
+    fn dispatch(&mut self, request: DeflateOneShotRequest<'_, '_>) -> DeflateOneShotCompletion {
+        let flush = DeflateFlush::parse(request.flush).expect("one-shot flush is valid");
+        let input_len = request.input.len() as crate::stdlib::uInt;
+        let output_len = request.output.len() as crate::stdlib::uInt;
+        let (storage, state) = (&mut self.storage, &mut self.state);
+        let completion = deflate_from_stream(
+            DeflateDispatch {
+                flush,
+                stream: DeflateDispatchStream {
+                    input: request.input,
+                    output: request.output,
+                    next_in: 0,
+                    next_out: 0,
+                    avail_in: input_len,
+                    avail_out: output_len,
+                    total_in: self.total_in,
+                    total_out: self.total_out,
+                    adler: self.adler,
+                    data_type: self.data_type,
+                    message: None,
+                },
+                state: DeflateDispatchState {
+                    storage: DeflateDispatchStorage {
+                        pending_buf: storage.pending.as_mut(),
+                        window: storage.window.as_mut(),
+                        prev: storage.prev.as_mut(),
+                        head: storage.head.as_mut(),
+                    },
+                    status: state.status,
+                    pending_buf_size: state.pending_buf_size,
+                    pending_out: state.pending_out,
+                    pending: state.pending,
+                    wrap: state.wrap,
+                    gzhead: &mut state.gzhead,
+                    gzindex: state.gzindex,
+                    last_flush: state.last_flush,
+                    w_size: state.w_size,
+                    w_bits: state.w_bits,
+                    w_mask: state.w_mask,
+                    hash_size: state.hash_size,
+                    hash_mask: state.hash_mask,
+                    hash_shift: state.hash_shift,
+                    block_start: state.block_start,
+                    match_length: state.match_length,
+                    prev_match: state.prev_match,
+                    match_available: state.match_available,
+                    strstart: state.strstart,
+                    match_start: state.match_start,
+                    lookahead: state.lookahead,
+                    prev_length: state.prev_length,
+                    max_chain_length: state.max_chain_length,
+                    max_lazy_match: state.max_lazy_match,
+                    level: state.level,
+                    strategy: state.strategy,
+                    good_match: state.good_match,
+                    nice_match: state.nice_match,
+                    dyn_ltree: &mut state.dyn_ltree,
+                    dyn_dtree: &mut state.dyn_dtree,
+                    bl_tree: &mut state.bl_tree,
+                    l_desc: &mut state.l_desc,
+                    d_desc: &mut state.d_desc,
+                    bl_desc: &mut state.bl_desc,
+                    bl_count: &mut state.bl_count,
+                    heap: &mut state.heap,
+                    heap_len: state.heap_len,
+                    heap_max: state.heap_max,
+                    depth: &mut state.depth,
+                    sym_buf_start: state.sym_buf_start,
+                    sym_next: state.sym_next,
+                    sym_end: state.sym_end,
+                    opt_len: state.opt_len,
+                    static_len: state.static_len,
+                    matches: state.matches,
+                    insert: state.insert,
+                    ins_h: state.ins_h,
+                    bi_buf: state.bi_buf,
+                    bi_valid: state.bi_valid,
+                    bi_used: state.bi_used,
+                    high_water: state.high_water,
+                    slid: state.slid,
+                },
+            },
+            None,
+        );
+        self.total_in = completion.stream.total_in;
+        self.total_out = completion.stream.total_out;
+        self.adler = completion.stream.adler;
+        self.data_type = completion.stream.data_type;
+        let update = completion.state;
+        self.state.status = update.status;
+        self.state.pending_out = update.pending_out;
+        self.state.pending = update.pending;
+        self.state.wrap = update.wrap;
+        self.state.gzindex = update.gzindex;
+        self.state.last_flush = update.last_flush;
+        self.state.block_start = update.block_start;
+        self.state.match_length = update.match_length;
+        self.state.prev_match = update.prev_match;
+        self.state.match_available = update.match_available;
+        self.state.strstart = update.strstart;
+        self.state.match_start = update.match_start;
+        self.state.lookahead = update.lookahead;
+        self.state.prev_length = update.prev_length;
+        self.state.max_chain_length = update.max_chain_length;
+        self.state.max_lazy_match = update.max_lazy_match;
+        self.state.level = update.level;
+        self.state.strategy = update.strategy;
+        self.state.good_match = update.good_match;
+        self.state.nice_match = update.nice_match;
+        self.state.heap_len = update.heap_len;
+        self.state.heap_max = update.heap_max;
+        self.state.sym_next = update.sym_next;
+        self.state.sym_end = update.sym_end;
+        self.state.opt_len = update.opt_len;
+        self.state.static_len = update.static_len;
+        self.state.matches = update.matches;
+        self.state.insert = update.insert;
+        self.state.ins_h = update.ins_h;
+        self.state.bi_buf = update.bi_buf;
+        self.state.bi_valid = update.bi_valid;
+        self.state.bi_used = update.bi_used;
+        self.state.high_water = update.high_water;
+        self.state.slid = update.slid;
+        DeflateOneShotCompletion {
+            status: completion.result,
+            avail_in: completion.stream.avail_in,
+            avail_out: completion.stream.avail_out,
+        }
+    }
 }
 
 // This is the only raw deflate-call boundary. It validates the ABI cursors,
