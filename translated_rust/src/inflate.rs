@@ -284,6 +284,45 @@ fn inflate_stored_block_len(hold: ::core::ffi::c_ulong) -> Option<::core::ffi::c
     }
 }
 
+/// Scalar result of parsing the 14-bit dynamic-Huffman table header. The
+/// ordinary decoder has already accumulated those bits; this keeps its
+/// compatibility cursor and diagnostics at the boundary while making the
+/// field extraction and DEFLATE limits independently checked.
+struct InflateTableHeaderPlan {
+    nlen: ::core::ffi::c_uint,
+    ndist: ::core::ffi::c_uint,
+    ncode: ::core::ffi::c_uint,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+}
+
+/// Parse a complete dynamic-Huffman table header. Return `None` for the
+/// original "too many length or distance symbols" condition.
+fn inflate_table_header_plan(
+    mut hold: ::core::ffi::c_ulong,
+    mut bits: ::core::ffi::c_uint,
+) -> Option<InflateTableHeaderPlan> {
+    let nlen = (hold as ::core::ffi::c_uint & 0x1f).wrapping_add(257);
+    hold >>= 5;
+    bits = bits.wrapping_sub(5);
+    let ndist = (hold as ::core::ffi::c_uint & 0x1f).wrapping_add(1);
+    hold >>= 5;
+    bits = bits.wrapping_sub(5);
+    let ncode = (hold as ::core::ffi::c_uint & 0x0f).wrapping_add(4);
+    hold >>= 4;
+    bits = bits.wrapping_sub(4);
+    if nlen > 286 || ndist > 30 {
+        return None;
+    }
+    Some(InflateTableHeaderPlan {
+        nlen,
+        ndist,
+        ncode,
+        hold,
+        bits,
+    })
+}
+
 /// Ordinary inflate only validates a trailer when the active wrapper has a
 /// checksum.  This preserves the raw decoder's no-wrapper path while keeping
 /// the comparison as a safe scalar operation.
@@ -1713,46 +1752,21 @@ pub fn inflate(
                                                                                                     // scalar commits and diagnostics.
                                                                                                     let strm_ref = &mut *strm;
                                                                                                     let state_ref = &mut *state;
-                                                                                                    state_ref.nlen = (hold as ::core::ffi::c_uint
-                                                                                                        & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                                                                                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                                                                        .wrapping_add(257 as ::core::ffi::c_uint);
-                                                                                                    hold >>= 5 as ::core::ffi::c_int;
-                                                                                                    bits = bits
-                                                                                                        .wrapping_sub(
-                                                                                                            5 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                                                                                        );
-                                                                                                    state_ref.ndist = (hold as ::core::ffi::c_uint
-                                                                                                        & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                                                                                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                                                                        .wrapping_add(1 as ::core::ffi::c_uint);
-                                                                                                    hold >>= 5 as ::core::ffi::c_int;
-                                                                                                    bits = bits
-                                                                                                        .wrapping_sub(
-                                                                                                            5 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                                                                                        );
-                                                                                                    state_ref.ncode = (hold as ::core::ffi::c_uint
-                                                                                                        & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                                                                                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                                                                        .wrapping_add(4 as ::core::ffi::c_uint);
-                                                                                                    hold >>= 4 as ::core::ffi::c_int;
-                                                                                                    bits = bits
-                                                                                                        .wrapping_sub(
-                                                                                                            4 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                                                                                        );
-                                                                                                    if state_ref.nlen > 286 as ::core::ffi::c_uint
-                                                                                                        || state_ref.ndist > 30 as ::core::ffi::c_uint
-                                                                                                    {
-                                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[5]
-                                                                                                            .as_ptr() as *const ::core::ffi::c_char
-                                                                                                            as *mut ::core::ffi::c_char;
-                                                                                                        state_ref.mode = crate::src::inflate::BAD;
-                                                                                                        continue '_inf_leave;
-                                                                                                    } else {
-                                                                                                        state_ref.have = 0 as ::core::ffi::c_uint;
-                                                                                                        state_ref.mode = crate::src::inflate::LENLENS;
-                                                                                                        break 's_1582;
-                                                                                                    }
+                                                                                                    let Some(plan) = inflate_table_header_plan(hold, bits) else {
+                                                                                                       strm_ref.msg = INFLATE_ERROR_MESSAGES[5]
+                                                                                                           .as_ptr() as *const ::core::ffi::c_char
+                                                                                                           as *mut ::core::ffi::c_char;
+                                                                                                       state_ref.mode = crate::src::inflate::BAD;
+                                                                                                       continue '_inf_leave;
+                                                                                                    };
+                                                                                                    state_ref.nlen = plan.nlen;
+                                                                                                    state_ref.ndist = plan.ndist;
+                                                                                                    state_ref.ncode = plan.ncode;
+                                                                                                    hold = plan.hold;
+                                                                                                    bits = plan.bits;
+                                                                                                    state_ref.have = 0 as ::core::ffi::c_uint;
+                                                                                                    state_ref.mode = crate::src::inflate::LENLENS;
+                                                                                                    break 's_1582;
                                                                                                 }
                                                                                                 16197 => {
                                                                                                     break 's_1582;
