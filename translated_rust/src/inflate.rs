@@ -1185,6 +1185,31 @@ fn inflate_exit_progress(
     }
 }
 
+/// Validate ordinary `inflate()`'s scalar entry relationship before the
+/// legacy cursor loop adopts its compatibility records.  Keeping this policy
+/// free of ABI pointers makes the boundary's only jobs pointer validation,
+/// temporary record adoption, and cursor setup.
+fn inflate_entry_mode(
+    has_zalloc: bool,
+    has_zfree: bool,
+    state_belongs_to_stream: bool,
+    state_mode: inflate_mode,
+    output_present: bool,
+    input_is_valid: bool,
+) -> Option<inflate_mode> {
+    if !inflate_state_values_are_valid(has_zalloc, has_zfree, state_belongs_to_stream, state_mode)
+        || !output_present
+        || !input_is_valid
+    {
+        return None;
+    }
+    Some(if state_mode == crate::src::inflate::TYPE {
+        crate::src::inflate::TYPEDO
+    } else {
+        state_mode
+    })
+}
+
 pub unsafe fn inflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -1253,22 +1278,18 @@ pub unsafe fn inflate(
         }
         &mut *state
     };
-    if !inflate_state_values_are_valid(
+    let Some(entry_mode) = inflate_entry_mode(
         strm_ref.zalloc.is_some(),
         strm_ref.zfree.is_some(),
         state_ref.strm == strm,
         state_ref.mode,
-    ) || strm_ref.next_out.is_null()
-        || strm_ref.next_in.is_null() && strm_ref.avail_in != 0 as crate::stdlib::uInt
-    {
+        !strm_ref.next_out.is_null(),
+        !strm_ref.next_in.is_null() || strm_ref.avail_in == 0 as crate::stdlib::uInt,
+    ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
     state = state_ref as *mut crate::src::inflate::inflate_state;
-    if state_ref.mode as ::core::ffi::c_uint
-        == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        state_ref.mode = crate::src::inflate::TYPEDO;
-    }
+    state_ref.mode = entry_mode;
     put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
     left = strm_ref.avail_out as ::core::ffi::c_uint;
     next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
