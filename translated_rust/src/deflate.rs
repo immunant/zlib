@@ -758,7 +758,11 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             slide_hash(s);
             more = next_more;
         }
-        if (*state.strm).avail_in == 0 as crate::stdlib::uInt {
+        // `read_buf()` consumes at most this exact available-input snapshot.
+        // Retain it so the loop need not dereference the compatibility stream
+        // again merely to decide whether more input remains.
+        let avail_in = (*state.strm).avail_in;
+        if avail_in == 0 as crate::stdlib::uInt {
             break;
         }
         n = read_buf(
@@ -819,7 +823,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             }
         }
         if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && (*state.strm).avail_in != 0 as crate::stdlib::uInt)
+            && avail_in.wrapping_sub(n) != 0 as crate::stdlib::uInt)
         {
             break;
         }
