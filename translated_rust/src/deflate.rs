@@ -1818,8 +1818,13 @@ macro_rules! deflate_params_at_boundary {
                     break 'deflate_params_result crate::zlib_h::Z_BUF_ERROR;
                 }
             }
-            if (&*s).level != plan.level {
-                let state = &mut *s;
+            // No callback-capable work remains after the optional block
+            // flush above, so commit this whole configuration transition
+            // through one boundary-owned state borrow.  In particular, keep
+            // the hash-buffer lends and strategy update together instead of
+            // re-adopting the raw state for the final field write.
+            let state = &mut *s;
+            if state.level != plan.level {
                 if state.level == 0 as ::core::ffi::c_int
                     && state.matches != 0 as crate::stdlib::uInt
                 {
@@ -1869,7 +1874,7 @@ macro_rules! deflate_params_at_boundary {
                 state.nice_match = plan.config.nice_length as ::core::ffi::c_int;
                 state.max_chain_length = plan.config.max_chain as crate::stdlib::uInt;
             }
-            (&mut *s).strategy = plan.strategy;
+            state.strategy = plan.strategy;
             crate::zlib_h::Z_OK
         }
     }};
