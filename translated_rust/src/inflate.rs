@@ -586,6 +586,21 @@ fn inflate_fast_dynamic_table(
         .and_then(|offset| state.codes.get(offset / code_size..))
 }
 
+/// Turn a compatibility table cursor into an index without relying on raw
+/// same-allocation pointer-distance operations.  Callers keep the raw cursor
+/// validation at their ABI boundary and pass only address tokens here.
+fn inflate_code_index(code_start: usize, code_len: usize, cursor: usize) -> Option<usize> {
+    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+    let byte_len = code_len.checked_mul(code_size)?;
+    let code_end = code_start.checked_add(byte_len)?;
+    let offset = cursor.checked_sub(code_start)?;
+    if cursor > code_end || code_size == 0 || offset % code_size != 0 {
+        return None;
+    }
+    let index = offset / code_size;
+    (index <= code_len).then_some(index)
+}
+
 /// Resolve the two active decode-table cursors to their bounded table tails.
 /// Fixed tables have stable static storage; dynamic tables live in `codes`.
 /// The codec boundary uses this only to lend the safe fast decoder its table
@@ -2952,26 +2967,27 @@ pub unsafe extern "C" fn inflateCopy_ffi(
                 .wrapping_add(crate::src::inftrees::ENOUGH as usize)
                 .wrapping_sub(1) as *const crate::src::inftrees::code
     {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(
-            (*state)
-                .lencode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as usize,
-        );
-        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code)
-            .wrapping_add(
-                (*state)
-                    .distcode
-                    .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                    as usize,
-            );
+        let source_codes = &raw mut (*state).codes as *mut crate::src::inftrees::code;
+        let copy_codes = &raw mut (*copy).codes as *mut crate::src::inftrees::code;
+        let code_start = source_codes as usize;
+        let code_len = crate::src::inftrees::ENOUGH as usize;
+        if let (Some(lencode), Some(distcode)) = (
+            inflate_code_index(code_start, code_len, (*state).lencode as usize),
+            inflate_code_index(code_start, code_len, (*state).distcode as usize),
+        ) {
+            (*copy).lencode = copy_codes.wrapping_add(lencode);
+            (*copy).distcode = copy_codes.wrapping_add(distcode);
+        }
     }
-    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(
-        (*state)
-            .next
-            .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-            as usize,
-    );
+    let source_codes = &raw mut (*state).codes as *mut crate::src::inftrees::code;
+    let copy_codes = &raw mut (*copy).codes as *mut crate::src::inftrees::code;
+    let next = inflate_code_index(
+        source_codes as usize,
+        crate::src::inftrees::ENOUGH as usize,
+        (*state).next as usize,
+    )
+    .unwrap_or(0);
+    (*copy).next = copy_codes.wrapping_add(next);
     if !window.is_null() {
         crate::stdlib::memcpy(
             window as *mut ::core::ffi::c_void,
