@@ -2434,7 +2434,7 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(strm, DeflateScalarAction::Reset(DeflateResetKind::Keep))
+    deflate_scalar_from_abi_stream(strm, DeflateScalarAction::Reset(DeflateResetKind::Keep))
 }
 #[export_name = "deflateReset"]
 
@@ -2444,7 +2444,7 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(strm, DeflateScalarAction::Reset(DeflateResetKind::Full))
+    deflate_scalar_from_abi_stream(strm, DeflateScalarAction::Reset(DeflateResetKind::Full))
 }
 // Header registration is ordinary owned-state policy once the ABI header has
 // been copied.  Keeping the mode check and replacement here lets the boundary
@@ -2546,7 +2546,7 @@ pub unsafe extern "C" fn deflatePending_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(
+    deflate_scalar_from_abi_stream(
         strm,
         DeflateScalarAction::Pending {
             pending: pending.as_mut(),
@@ -2574,7 +2574,7 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(
+    deflate_scalar_from_abi_stream(
         strm,
         DeflateScalarAction::Used {
             bits: bits.as_mut(),
@@ -2628,7 +2628,7 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(strm, DeflateScalarAction::Prime { bits, value })
+    deflate_scalar_from_abi_stream(strm, DeflateScalarAction::Prime { bits, value })
 }
 
 // Level changes have a small amount of hash-table cleanup policy, but none
@@ -2799,7 +2799,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(strm, DeflateScalarAction::Params { level, strategy })
+    deflate_scalar_from_abi_stream(strm, DeflateScalarAction::Params { level, strategy })
 }
 fn deflate_tune_values(
     good_length: ::core::ffi::c_int,
@@ -2818,6 +2818,33 @@ fn deflate_tune_values(
         nice_length,
         max_chain as crate::stdlib::uInt,
     )
+}
+
+// The tune API updates only these four persistent scalar slots.  Keep that
+// mutation separate from the stream/state projection so the public tuning
+// operation neither receives an ABI carrier nor knows how callback-backed
+// storage is represented.
+struct DeflateTuneOwner<'state> {
+    good_match: &'state mut crate::stdlib::uInt,
+    max_lazy_match: &'state mut crate::stdlib::uInt,
+    nice_match: &'state mut ::core::ffi::c_int,
+    max_chain_length: &'state mut crate::stdlib::uInt,
+}
+
+fn deflateTune(
+    owner: DeflateTuneOwner<'_>,
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let (good_match, max_lazy_match, nice_match, max_chain_length) =
+        deflate_tune_values(good_length, max_lazy, nice_length, max_chain);
+    *owner.good_match = good_match;
+    *owner.max_lazy_match = max_lazy_match;
+    *owner.nice_match = nice_match;
+    *owner.max_chain_length = max_chain_length;
+    crate::zlib_h::Z_OK
 }
 
 // The established tuning projection also covers scalar queries over the same
@@ -2852,11 +2879,11 @@ pub(crate) enum DeflateScalarAction<'a> {
     },
 }
 
-// The export wrapper owns the nullable ABI-stream conversion.  Scalar
-// controls, including the two-phase parameter transition, retain their
-// stream/state and callback-storage projection here while their policy stays
-// over ordinary values and bounded slices.
-pub(crate) unsafe fn deflateTune(
+// Scalar controls, including the two-phase parameter transition, retain their
+// stream/state and callback-storage projection in this ABI adapter while
+// their policy stays over ordinary values and bounded slices. The public tune
+// operation itself is the pointer-free `deflateTune()` owner above.
+pub(crate) unsafe fn deflate_scalar_from_abi_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     action: DeflateScalarAction<'_>,
 ) -> ::core::ffi::c_int {
@@ -3020,15 +3047,18 @@ pub(crate) unsafe fn deflateTune(
             max_lazy,
             nice_length,
             max_chain,
-        } => {
-            let (good_match, max_lazy_match, nice_match, max_chain_length) =
-                deflate_tune_values(good_length, max_lazy, nice_length, max_chain);
-            s.good_match = good_match;
-            s.max_lazy_match = max_lazy_match;
-            s.nice_match = nice_match;
-            s.max_chain_length = max_chain_length;
-            crate::zlib_h::Z_OK
-        }
+        } => deflateTune(
+            DeflateTuneOwner {
+                good_match: &mut s.good_match,
+                max_lazy_match: &mut s.max_lazy_match,
+                nice_match: &mut s.nice_match,
+                max_chain_length: &mut s.max_chain_length,
+            },
+            good_length,
+            max_lazy,
+            nice_length,
+            max_chain,
+        ),
     }
 }
 #[export_name = "deflateTune"]
@@ -3043,7 +3073,7 @@ pub unsafe extern "C" fn deflateTune_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateTune(
+    deflate_scalar_from_abi_stream(
         strm,
         DeflateScalarAction::Tune {
             good_length,

@@ -16,7 +16,7 @@ pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflate_dispatch_from_abi_stream as deflate;
 pub use crate::src::deflate::internal_state;
 use crate::src::deflate::DeflateResetKind;
-use crate::src::deflate::{deflateTune, DeflateScalarAction};
+use crate::src::deflate::{deflate_scalar_from_abi_stream, DeflateScalarAction};
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpc;
@@ -976,11 +976,14 @@ unsafe fn gz_comp(
                     GzCompCodecResult::Complete
                 }
                 GzCompCodecAction::Reset => {
-                    deflateTune(strm, DeflateScalarAction::Reset(DeflateResetKind::Full));
+                    deflate_scalar_from_abi_stream(
+                        strm,
+                        DeflateScalarAction::Reset(DeflateResetKind::Full),
+                    );
                     GzCompCodecResult::Complete
                 }
                 GzCompCodecAction::Retune(retune) => {
-                    deflateTune(
+                    deflate_scalar_from_abi_stream(
                         strm,
                         DeflateScalarAction::Params {
                             level: retune.level,
