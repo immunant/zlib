@@ -2229,7 +2229,14 @@ pub unsafe fn inflate(
                                                         continue '_inf_leave;
                                                     }
                                                 }
-                                                if (*state).flags & 0x400 as ::core::ffi::c_int != 0
+                                                // EXLEN only consumes the already-validated input
+                                                // cursor and updates retained header/scalar state.
+                                                // Keep those commits on one short-lived state borrow
+                                                // instead of repeatedly traversing the compatibility
+                                                // state pointer.
+                                                let state_ref = &mut *state;
+                                                if state_ref.flags & 0x400 as ::core::ffi::c_int
+                                                    != 0
                                                 {
                                                     while bits
                                                         < 16 as ::core::ffi::c_int
@@ -2249,15 +2256,15 @@ pub unsafe fn inflate(
                                                         bits = bits
                                                             .wrapping_add(8 as ::core::ffi::c_uint);
                                                     }
-                                                    (*state).length = hold as ::core::ffi::c_uint;
-                                                    if !(*state).head.is_null() {
-                                                        (*(*state).head).extra_len = hold
+                                                    state_ref.length = hold as ::core::ffi::c_uint;
+                                                    if !state_ref.head.is_null() {
+                                                        (*state_ref.head).extra_len = hold
                                                             as ::core::ffi::c_uint
                                                             as crate::stdlib::uInt;
                                                     }
-                                                    if (*state).flags & 0x200 as ::core::ffi::c_int
+                                                    if state_ref.flags & 0x200 as ::core::ffi::c_int
                                                         != 0
-                                                        && (*state).wrap & 4 as ::core::ffi::c_int
+                                                        && state_ref.wrap & 4 as ::core::ffi::c_int
                                                             != 0
                                                     {
                                                         hbuf[0 as ::core::ffi::c_int as usize] =
@@ -2265,20 +2272,20 @@ pub unsafe fn inflate(
                                                         hbuf[1 as ::core::ffi::c_int as usize] =
                                                             (hold >> 8 as ::core::ffi::c_int)
                                                                 as ::core::ffi::c_uchar;
-                                                        (*state).check = inflate_header_crc_update(
-                                                            (*state).check,
+                                                        state_ref.check = inflate_header_crc_update(
+                                                            state_ref.check,
                                                             &hbuf[..2],
                                                         );
                                                     }
                                                     hold = 0 as ::core::ffi::c_ulong;
                                                     bits = 0 as ::core::ffi::c_uint;
-                                                } else if !(*state).head.is_null() {
-                                                    (*(*state).head).extra = ::core::ptr::null_mut::<
+                                                } else if !state_ref.head.is_null() {
+                                                    (*state_ref.head).extra = ::core::ptr::null_mut::<
                                                         crate::stdlib::Bytef,
                                                     >(
                                                     );
                                                 }
-                                                (*state).mode = crate::src::inflate::EXTRA;
+                                                state_ref.mode = crate::src::inflate::EXTRA;
                                                 break 'c_2319;
                                             }
                                             (*state).mode = crate::src::inflate::LEN;
