@@ -2350,11 +2350,11 @@ pub fn inflate(
                     copy = copy.wrapping_sub((*state).wnext);
                     from = (*state)
                         .window
-                        .offset((*state).wsize.wrapping_sub(copy) as isize);
+                        .wrapping_add((*state).wsize.wrapping_sub(copy) as usize);
                 } else {
                     from = (*state)
                         .window
-                        .offset((*state).wnext.wrapping_sub(copy) as isize);
+                        .wrapping_add((*state).wnext.wrapping_sub(copy) as usize);
                 }
                 if copy > (*state).length {
                     copy = (*state).length;
