@@ -2291,7 +2291,7 @@ pub unsafe fn deflate(
         bstate = (if (*s).level == 0 as ::core::ffi::c_int {
             deflate_stored(&mut *s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(s, flush) as ::core::ffi::c_uint
+            deflate_huff(&mut *s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, flush) as ::core::ffi::c_uint
         } else {
@@ -3517,99 +3517,75 @@ unsafe fn deflate_rle(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_huff(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut flush: ::core::ffi::c_int,
+unsafe fn deflate_huff(
+    s: &mut crate::src::deflate::deflate_state,
+    flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead == 0 as crate::stdlib::uInt {
-            fill_window(s);
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+        if s.lookahead == 0 as crate::stdlib::uInt {
+            fill_window(core::ptr::from_mut(s));
+            if s.lookahead == 0 as crate::stdlib::uInt {
                 if flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
                 }
                 break;
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        let mut cc: crate::zutil_h::uch =
-            *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        let _ = (*s).put_symbol(0, cc as crate::stdlib::uInt);
-        (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-        (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-        (*s).strstart = (*s).strstart.wrapping_add(1);
+        s.match_length = 0;
+        let Some(cc) = s.window_byte(s.strstart) else {
+            return need_more;
+        };
+        let cc = cc as crate::zutil_h::uch;
+        let _ = s.put_symbol(0, cc as crate::stdlib::uInt);
+        s.dyn_ltree[cc as usize].fc = s.dyn_ltree[cc as usize].fc.wrapping_add(1);
+        bflush = (s.sym_next == s.sym_end) as ::core::ffi::c_int;
+        s.lookahead = s.lookahead.wrapping_sub(1);
+        s.strstart = s.strstart.wrapping_add(1);
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
-                if (*s).block_start >= 0 as ::core::ffi::c_long {
-                    (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
-                ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
-                0 as ::core::ffi::c_int,
-            );
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-            flush_pending((*s).strm);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+            let block_len = (s.strstart as ::core::ffi::c_long - s.block_start)
+                as crate::zutil_h::ulg;
+            let block = if s.block_start >= 0 {
+                s.block_data(s.block_start as crate::stdlib::uInt, block_len)
+            } else {
+                None
+            };
+            crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 0);
+            s.block_start = s.strstart as ::core::ffi::c_long;
+            flush_pending(s.strm);
+            if s.avail_out() == Some(0) {
+                return need_more;
             }
         }
     }
-    (*s).insert = 0 as crate::stdlib::uInt;
+    s.insert = 0;
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
-            1 as ::core::ffi::c_int,
-        );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        let block_len = (s.strstart as ::core::ffi::c_long - s.block_start) as crate::zutil_h::ulg;
+        let block = if s.block_start >= 0 {
+            s.block_data(s.block_start as crate::stdlib::uInt, block_len)
+        } else {
+            None
+        };
+        crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 1);
+        s.block_start = s.strstart as ::core::ffi::c_long;
+        flush_pending(s.strm);
+        if s.avail_out() == Some(0) {
+            return finish_started;
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
-            0 as ::core::ffi::c_int,
-        );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-            return (if false {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+    if s.sym_next != 0 {
+        let block_len = (s.strstart as ::core::ffi::c_long - s.block_start) as crate::zutil_h::ulg;
+        let block = if s.block_start >= 0 {
+            s.block_data(s.block_start as crate::stdlib::uInt, block_len)
+        } else {
+            None
+        };
+        crate::src::trees::tr_flush_block_impl(s, block.as_deref(), block_len, 0);
+        s.block_start = s.strstart as ::core::ffi::c_long;
+        flush_pending(s.strm);
+        if s.avail_out() == Some(0) {
+            return need_more;
         }
     }
     return block_done;
