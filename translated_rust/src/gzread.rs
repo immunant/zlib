@@ -264,6 +264,29 @@ fn gz_avail_refill_step(
     }
 }
 
+fn gz_avail_prepare_refill(
+    input: &mut [crate::stdlib::Byte],
+    size: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    compact_input: bool,
+    input_offset: usize,
+) -> Option<GzAvailRefillPlan> {
+    let step = gz_avail_refill_step(size, avail_in, compact_input, input_offset == 0);
+    let plan = step.plan;
+    let refill_end = plan.input_offset.checked_add(plan.read_len as usize)?;
+    if refill_end > input.len() {
+        return None;
+    }
+    if step.compact_input {
+        let input_end = input_offset.checked_add(plan.prior_avail_in as usize)?;
+        if input_end > input.len() {
+            return None;
+        }
+        input.copy_within(input_offset..input_end, 0);
+    }
+    Some(plan)
+}
+
 fn gzread_request(len: ::core::ffi::c_uint) -> Option<crate::stdlib::z_size_t> {
     ((len as ::core::ffi::c_int) >= 0).then_some(len as crate::stdlib::z_size_t)
 }
@@ -823,15 +846,25 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             let (buf, len, prior_avail_in) = {
                 let p = state.in_0;
                 let q = state.strm.next_in;
-                let step =
-                    gz_avail_refill_step(state.size, state.strm.avail_in, compact_input, q == p);
-                if step.compact_input {
-                    core::ptr::copy(q, p, state.strm.avail_in as usize);
+                if p.is_null() {
+                    return -1 as ::core::ffi::c_int;
                 }
+                let input = core::slice::from_raw_parts_mut(p, state.size as usize);
+                let input_offset = (q as usize).wrapping_sub(p as usize);
+                let plan = match gz_avail_prepare_refill(
+                    input,
+                    state.size,
+                    state.strm.avail_in,
+                    compact_input,
+                    input_offset,
+                ) {
+                    Some(plan) => plan,
+                    None => return -1 as ::core::ffi::c_int,
+                };
                 (
-                    state.in_0.wrapping_add(step.plan.input_offset),
-                    step.plan.read_len,
-                    step.plan.prior_avail_in,
+                    state.in_0.wrapping_add(plan.input_offset),
+                    plan.read_len,
+                    plan.prior_avail_in,
                 )
             };
             let load = gz_load(state, buf, len);
@@ -1921,10 +1954,32 @@ mod tests {
     }
 
     #[test]
-    fn gz_avail_input_compaction_preserves_overlapping_tail() {
+    fn gz_avail_prepare_refill_compacts_overlapping_input_and_plans_read() {
         let mut input = *b"abcdefgh";
-        input.copy_within(2..8, 0);
+        assert_eq!(
+            gz_avail_prepare_refill(&mut input, 8, 6, true, 2),
+            Some(GzAvailRefillPlan {
+                input_offset: 6,
+                read_len: 2,
+                prior_avail_in: 6,
+            })
+        );
         assert_eq!(&input[..6], b"cdefgh");
+    }
+
+    #[test]
+    fn gz_avail_prepare_refill_keeps_uncompacted_input_and_validates_capacity() {
+        let mut input = *b"abcdefgh";
+        assert_eq!(
+            gz_avail_prepare_refill(&mut input, 8, 0, false, 0),
+            Some(GzAvailRefillPlan {
+                input_offset: 0,
+                read_len: 8,
+                prior_avail_in: 0,
+            })
+        );
+        assert_eq!(input, *b"abcdefgh");
+        assert_eq!(gz_avail_prepare_refill(&mut input, 8, 6, true, 3), None);
     }
 
     #[test]

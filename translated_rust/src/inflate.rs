@@ -1204,6 +1204,21 @@ fn update_window_produced_slice<'a>(
     produced.unwrap_or(&[])
 }
 
+fn update_window_state_core(
+    state: &mut crate::src::inflate::inflate_state,
+    window: &mut [crate::stdlib::Bytef],
+    produced: &[crate::stdlib::Bytef],
+) {
+    update_window_core(
+        state.wbits,
+        &mut state.wsize,
+        &mut state.wnext,
+        &mut state.whave,
+        window,
+        produced,
+    );
+}
+
 unsafe fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
@@ -1220,20 +1235,14 @@ unsafe fn updatewindow(
         Ok(slices) => slices,
         Err(status) => return status,
     };
-    update_window_core(
-        state.wbits,
-        &mut state.wsize,
-        &mut state.wnext,
-        &mut state.whave,
-        core::slice::from_raw_parts_mut(state.window, slices.window_len),
-        update_window_produced_slice(match slices.produced_len {
-            Some(produced_len) => Some(core::slice::from_raw_parts(
-                end.wrapping_sub(produced_len),
-                produced_len,
-            )),
-            None => None,
-        }),
-    );
+    let window = core::slice::from_raw_parts_mut(state.window, slices.window_len);
+    let produced = match slices.produced_len {
+        Some(produced_len) => {
+            core::slice::from_raw_parts(end.wrapping_sub(produced_len), produced_len)
+        }
+        None => update_window_produced_slice(None),
+    };
+    update_window_state_core(state, window, produced);
     0
 }
 pub unsafe extern "C" fn inflate(
@@ -2543,7 +2552,6 @@ pub unsafe extern "C" fn inflate(
     return ret;
 }
 #[export_name = "inflate"]
-
 pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -4797,6 +4805,59 @@ mod tests {
         assert_eq!(wnext, 3);
         assert_eq!(whave, 3);
         assert_eq!(&window[..3], b"xyz");
+    }
+
+    #[test]
+    fn window_state_core_updates_only_window_history_fields() {
+        let mut state = super::inflate_state {
+            strm: ::core::ptr::null_mut(),
+            mode: HEAD,
+            last: 0,
+            wrap: 0,
+            havedict: 0,
+            flags: 0,
+            dmax: 0,
+            check: 0,
+            total: 0,
+            head: ::core::ptr::null_mut(),
+            wbits: 3,
+            wsize: 0,
+            whave: 0,
+            wnext: 0,
+            window: ::core::ptr::null_mut(),
+            hold: 0,
+            bits: 0,
+            length: 0,
+            offset: 0,
+            extra: 0,
+            lencode: ::core::ptr::null(),
+            distcode: ::core::ptr::null(),
+            lenbits: 0,
+            distbits: 0,
+            ncode: 0,
+            nlen: 0,
+            ndist: 0,
+            have: 0,
+            next: ::core::ptr::null_mut(),
+            lens: [0; 320],
+            work: [0; 288],
+            codes: [crate::src::inftrees::code {
+                op: 0,
+                bits: 0,
+                val: 0,
+            }; 1444],
+            sane: 0,
+            back: 0,
+            was: 0,
+        };
+        let mut window = [0; 8];
+
+        super::update_window_state_core(&mut state, &mut window, b"xyz");
+
+        assert_eq!((state.wsize, state.wnext, state.whave), (8, 3, 3));
+        assert_eq!(&window[..3], b"xyz");
+        assert_eq!(state.mode, HEAD);
+        assert_eq!(state.total, 0);
     }
 
     #[test]

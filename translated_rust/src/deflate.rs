@@ -705,40 +705,29 @@ fn deflate_slow_can_search_match(
         && can_search_hash_match(hash_head, strstart, w_size)
 }
 
-fn rebase_hash_entries(entries: &mut [Posf], window_size: crate::stdlib::uInt) {
-    for entry in entries.iter_mut() {
-        *entry = slide_hash_entry(*entry as ::core::ffi::c_uint, window_size);
-    }
-}
-
-fn slide_hash_tables(head: &mut [Posf], prev: &mut [Posf], window_size: crate::stdlib::uInt) {
-    rebase_hash_entries(head, window_size);
-    rebase_hash_entries(prev, window_size);
-}
-
 unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let wsize = (*s).w_size;
-    let mut n = (*s).hash_size;
-    let mut p = (*s).head.wrapping_add(n as usize);
+    let state = &mut *s;
+    let mut head = state.head;
+    let mut head_left = state.hash_size;
     loop {
-        p = p.wrapping_sub(1);
-        *p = slide_hash_entry(*p as ::core::ffi::c_uint, wsize);
-        n = n.wrapping_sub(1);
-        if n == 0 {
+        *head = slide_hash_entry(*head as ::core::ffi::c_uint, state.w_size);
+        head = head.wrapping_add(1);
+        head_left = head_left.wrapping_sub(1);
+        if head_left == 0 {
             break;
         }
     }
-    n = wsize;
-    p = (*s).prev.wrapping_add(n as usize);
+    let mut prev = state.prev;
+    let mut prev_left = state.w_size;
     loop {
-        p = p.wrapping_sub(1);
-        *p = slide_hash_entry(*p as ::core::ffi::c_uint, wsize);
-        n = n.wrapping_sub(1);
-        if n == 0 {
+        *prev = slide_hash_entry(*prev as ::core::ffi::c_uint, state.w_size);
+        prev = prev.wrapping_add(1);
+        prev_left = prev_left.wrapping_sub(1);
+        if prev_left == 0 {
             break;
         }
     }
-    (*s).slid = 1;
+    state.slid = 1;
 }
 
 fn read_buf_len(
@@ -4376,14 +4365,13 @@ mod tests {
         longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
         pending_output_len, pending_short_cursors, read_buf_checksum,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
-        rebase_hash_entries, short_msb_bytes, slide_hash_entry, slide_hash_tables,
-        stored_block_available_output, stored_block_buffered_len, stored_block_can_emit,
-        stored_block_copy_lengths, stored_block_header_bytes, stored_block_is_last,
-        stored_block_length_bytes, stored_block_min_size, stored_block_payload_len,
-        stored_block_should_wait, stored_insert_after_input, symbol_buffer_is_full,
-        symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress, DeflateFinalFlushAction,
-        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
-        ReadBufChecksum,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output,
+        stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
+        stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
+        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
+        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
+        DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
     };
 
     #[test]
@@ -5206,26 +5194,6 @@ mod tests {
             entries.map(|entry| slide_hash_entry(entry as ::core::ffi::c_uint, window_size));
 
         assert_eq!(rebased, [0, 0, 0, 15]);
-    }
-
-    #[test]
-    fn rebase_hash_entries_updates_every_entry_in_place() {
-        let mut entries: [crate::src::deflate::Posf; 4] = [0, 31, 32, 47];
-
-        rebase_hash_entries(&mut entries, 32);
-
-        assert_eq!(entries, [0, 0, 0, 15]);
-    }
-
-    #[test]
-    fn slide_hash_tables_rebases_head_and_previous_tables() {
-        let mut head: [crate::src::deflate::Posf; 3] = [31, 32, 63];
-        let mut prev: [crate::src::deflate::Posf; 3] = [0, 47, 64];
-
-        slide_hash_tables(&mut head, &mut prev, 32);
-
-        assert_eq!(head, [0, 0, 31]);
-        assert_eq!(prev, [0, 15, 32]);
     }
 
     #[test]
