@@ -240,9 +240,23 @@ fn gz_comp(
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
         // `gz_init` configured this deflater, and the dispatcher validates
-        // its state before advancing the gzip write machine.
+        // its state before advancing the gzip write machine. The write
+        // registry owns the output buffer, so lend its current bounded range
+        // through the deflate core instead of reconstructing it from the C
+        // cursor there.
         let consumed = input.len().wrapping_sub(state.strm.avail_in as usize);
-        ret = crate::src::deflate::deflate(&mut state.strm, flush, &input[consumed..]);
+        let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+        ret = crate::src::gzlib::gz_with_owned_write_output_buffer(state_key, |output| {
+            let offset = state.strm.next_out.addr().checked_sub(output.as_ptr().addr());
+            let output = offset.and_then(|offset| {
+                output.get_mut(offset..offset.checked_add(state.strm.avail_out as usize)?)
+            });
+            let Some(output) = output else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            crate::src::deflate::deflate(&mut state.strm, flush, &input[consumed..], output)
+        })
+        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error(
                 state,
@@ -874,7 +888,22 @@ pub fn gzsetparams(
             };
             input
         };
-        crate::src::deflate::deflateParams(&mut state.strm, level, strategy, &input);
+        let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+        let _ = crate::src::gzlib::gz_with_owned_write_output_buffer(state_key, |output| {
+            let offset = state.strm.next_out.addr().checked_sub(output.as_ptr().addr());
+            let output = offset.and_then(|offset| {
+                output.get_mut(offset..offset.checked_add(state.strm.avail_out as usize)?)
+            });
+            output.map_or(crate::zlib_h::Z_STREAM_ERROR, |output| {
+                crate::src::deflate::deflateParams(
+                    &mut state.strm,
+                    level,
+                    strategy,
+                    &input,
+                    output,
+                )
+            })
+        });
     }
     state.level = level;
     state.strategy = strategy;

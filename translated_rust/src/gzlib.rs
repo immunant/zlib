@@ -2235,6 +2235,17 @@ pub(crate) fn gz_with_owned_write_input_buffer<R>(
     Some(operation(&mut buffers.input))
 }
 
+pub(crate) fn gz_with_owned_write_output_buffer<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_write_buffers()
+        .lock()
+        .expect("gzip write buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(buffers.output.as_deref_mut()?))
+}
+
 pub(crate) fn gz_release_owned_write_buffers(state: &crate::gzguts_h::gz_state) {
     let mut buffers = gz_owned_write_buffers()
         .lock()

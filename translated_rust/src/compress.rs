@@ -150,7 +150,15 @@ fn compress2_z_bound(
             err = crate::zlib_h::Z_STREAM_ERROR;
             break;
         };
-        err = crate::src::deflate::deflate(&mut stream, compress_flush(sourceLen), input);
+        let output = dest.as_deref_mut().and_then(|dest| {
+            let offset = stream.next_out.addr().checked_sub(dest.as_ptr().addr())?;
+            dest.get_mut(offset..offset.checked_add(stream.avail_out as usize)?)
+        });
+        let Some(output) = output.or_else(|| (stream.avail_out == 0).then_some(&mut [][..])) else {
+            err = crate::zlib_h::Z_STREAM_ERROR;
+            break;
+        };
+        err = crate::src::deflate::deflate(&mut stream, compress_flush(sourceLen), input, output);
         if err != crate::zlib_h::Z_OK {
             break;
         }
