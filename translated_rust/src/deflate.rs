@@ -1396,7 +1396,10 @@ pub unsafe extern "C" fn deflatePrime_ffi(
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     deflate_prime_checked(state, pending, bits, value)
 }
-pub unsafe extern "C" fn deflateParams(
+// All raw stream/state binding is contained in `deflateStateCheck()` and the
+// bounded helpers it calls, so this implementation itself has no unsafe
+// contract. The exported ABI wrapper below remains the foreign-call boundary.
+pub extern "C" fn deflateParams(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
