@@ -798,6 +798,46 @@ fn update_window_from_slice(
     0
 }
 
+// The normal decoder keeps a call's cursor arithmetic in this bounded owner
+// before it enters the fast path.  It deliberately contains neither the ABI
+// stream nor the opaque inflate state: the projection adapter supplies the
+// short-lived history/table view, and only this pointer-free completion is
+// used to update the surrounding decoder cursors.
+pub(crate) struct InflateNormalStreamOwner<'input, 'output> {
+    input: &'input [u8],
+    output: &'output mut [u8],
+    output_pos: usize,
+}
+
+impl<'input, 'output> InflateNormalStreamOwner<'input, 'output> {
+    pub(crate) fn new(
+        input: &'input [u8],
+        output: &'output mut [u8],
+        output_pos: usize,
+    ) -> Option<Self> {
+        output.get(output_pos..)?;
+        Some(Self {
+            input,
+            output,
+            output_pos,
+        })
+    }
+
+    pub(crate) fn run_fast(
+        self,
+        state: crate::src::inffast::InflateFastState<'_>,
+    ) -> crate::src::inffast::InflateFastStreamUpdate {
+        let request = crate::src::inffast::InflateFastRequest::new(
+            self.input,
+            self.output,
+            self.output_pos,
+            state,
+        )
+        .expect("normal inflate checked its fast output cursor");
+        crate::src::inffast::inflate_fast(request).into_stream_update()
+    }
+}
+
 // Header registration is persistent ABI state, but each inflate call needs
 // only bounded output buffers and a small set of scalar updates.  Keep those
 // decoder-facing values pointer-free.  The registration itself remains a
@@ -2154,7 +2194,7 @@ pub unsafe extern "C" fn inflate(
                                                 // no raw state or stream values.
                                                 let state = &mut *state;
                                                 let window = state.owned_window.as_deref();
-                                                let mut fast_state =
+                                                let fast_state =
                                                 crate::src::inffast::InflateFastState {
                                                     history:
                                                         crate::src::inffast::FastHistory::External(
@@ -2172,25 +2212,23 @@ pub unsafe extern "C" fn inflate(
                                                     codes: &state.codes,
                                                     sane: state.sane != 0,
                                                 };
-                                                let result =
-                                                    crate::src::inffast::inflate_fast_from_views(
-                                                        input,
-                                                        output,
-                                                        written,
-                                                        &mut fast_state,
-                                                    );
+                                                let owner = InflateNormalStreamOwner::new(
+                                                    input,
+                                                    output,
+                                                    written,
+                                                )
+                                                .expect("normal inflate checked its fast output cursor");
+                                                let result = owner.run_fast(fast_state);
                                                 next =
                                                     input.as_ptr().wrapping_add(result.input_used)
                                                         as *mut ::core::ffi::c_uchar;
-                                                have = input.len().wrapping_sub(result.input_used)
-                                                    as ::core::ffi::c_uint;
+                                                have = result.input_remaining as ::core::ffi::c_uint;
                                                 put = output
                                                     .as_mut_ptr()
                                                     .wrapping_add(result.output_used);
-                                                left = output.len().wrapping_sub(result.output_used)
-                                                    as ::core::ffi::c_uint;
-                                                hold = fast_state.hold;
-                                                bits = fast_state.bits;
+                                                left = result.output_remaining as ::core::ffi::c_uint;
+                                                hold = result.hold;
+                                                bits = result.bits;
                                                 match result.exit {
                                                 crate::src::inffast::FastExit::Continue => {}
                                                 crate::src::inffast::FastExit::Type => {

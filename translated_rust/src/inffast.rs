@@ -42,6 +42,12 @@ pub(crate) struct InflateFastStreamUpdate {
     pub(crate) exit: FastExit,
 }
 
+impl InflateFastCompletion {
+    pub(crate) fn into_stream_update(self) -> InflateFastStreamUpdate {
+        InflateFastStreamUpdate::from_completion(self)
+    }
+}
+
 impl InflateFastStreamUpdate {
     pub(crate) fn from_completion(completion: InflateFastCompletion) -> Self {
         Self {
