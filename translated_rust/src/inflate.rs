@@ -520,9 +520,22 @@ fn inflate_initialize_state(
 // Default callbacks belong to initialization, after the ABI entry point has
 // bound the stream. This keeps callback selection out of the exported
 // forwarding wrapper and leaves the allocation sequence below unchanged.
-fn inflate_prepare_stream(strm: &mut crate::zlib_h::z_stream) -> bool {
+fn inflate_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    crate::src::zutil::prepare_stream_allocator(strm)
+    crate::src::zutil::prepare_stream_allocator(strm);
+}
+
+// `inflate_prepare_stream()` always publishes an allocator on the stream.
+// Route every state allocation through that callback, including zlib's
+// default allocator, so custom callback identity, opaque values, and the
+// callback sequence remain observable exactly as they are on the stream.
+// In particular, do not call `zcalloc` directly after preparation: callers
+// may deliberately install it with a non-default opaque value.
+macro_rules! inflate_allocate {
+    ($stream:expr, $items:expr, $size:expr $(,)?) => {{
+        let zalloc = $stream.zalloc.expect("prepared stream has an allocator");
+        zalloc($stream.opaque, $items, $size)
+    }};
 }
 
 #[export_name = "inflateReset2"]
@@ -568,23 +581,14 @@ pub(crate) fn inflateInit2_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // The remaining initialization is ordinary stream/state work, including
-    // default callback selection.
-    let uses_default_allocator = inflate_prepare_stream(strm);
-    state = if uses_default_allocator {
-        crate::src::zutil::zcalloc(
-            strm.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    } else {
-        Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    };
+    // Preparation chose either zlib's default allocator or the caller's
+    // callback. Keep the state request on that published stream callback.
+    inflate_prepare_stream(strm);
+    state = inflate_allocate!(
+        strm,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+    ) as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
