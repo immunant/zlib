@@ -696,18 +696,6 @@ pub unsafe extern "C" fn gzseek64_ffi(
         gzseek64_impl(&mut *(file as crate::gzguts_h::gz_statep), offset, whence)
     }
 }
-pub unsafe fn gzseek(
-    state: &mut crate::gzguts_h::gz_state,
-    mut offset: crate::stdlib::off_t,
-    mut whence: ::core::ffi::c_int,
-) -> crate::stdlib::off_t {
-    let ret = gzseek64_impl(state, offset, whence);
-    return if ret == ret {
-        ret
-    } else {
-        -1 as crate::stdlib::off_t
-    };
-}
 #[export_name = "gzseek"]
 
 pub unsafe extern "C" fn gzseek_ffi(
