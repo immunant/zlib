@@ -154,6 +154,75 @@ fn inflate_mode_is_valid(mode: crate::src::inflate::inflate_mode) -> bool {
     mode >= crate::src::inflate::HEAD && mode <= crate::src::inflate::SYNC
 }
 
+pub(crate) struct InflateDynamicCounts {
+    pub(crate) nlen: ::core::ffi::c_uint,
+    pub(crate) ndist: ::core::ffi::c_uint,
+    pub(crate) ncode: ::core::ffi::c_uint,
+    pub(crate) hold: ::core::ffi::c_ulong,
+    pub(crate) bits: ::core::ffi::c_uint,
+}
+
+pub(crate) fn inflate_dynamic_counts(
+    mut hold: ::core::ffi::c_ulong,
+    mut bits: ::core::ffi::c_uint,
+) -> InflateDynamicCounts {
+    let nlen = (hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
+            .wrapping_sub(1 as ::core::ffi::c_uint))
+    .wrapping_add(257 as ::core::ffi::c_uint);
+    hold >>= 5 as ::core::ffi::c_int;
+    bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
+    let ndist = (hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
+            .wrapping_sub(1 as ::core::ffi::c_uint))
+    .wrapping_add(1 as ::core::ffi::c_uint);
+    hold >>= 5 as ::core::ffi::c_int;
+    bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
+    let ncode = (hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
+            .wrapping_sub(1 as ::core::ffi::c_uint))
+    .wrapping_add(4 as ::core::ffi::c_uint);
+    hold >>= 4 as ::core::ffi::c_int;
+    bits = bits.wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
+
+    InflateDynamicCounts {
+        nlen,
+        ndist,
+        ncode,
+        hold,
+        bits,
+    }
+}
+
+fn inflate_data_type(
+    bits: ::core::ffi::c_uint,
+    last: ::core::ffi::c_int,
+    mode: crate::src::inflate::inflate_mode,
+) -> ::core::ffi::c_int {
+    bits as ::core::ffi::c_int
+        + (if last != 0 {
+            64 as ::core::ffi::c_int
+        } else {
+            0 as ::core::ffi::c_int
+        })
+        + (if mode as ::core::ffi::c_uint
+            == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            128 as ::core::ffi::c_int
+        } else {
+            0 as ::core::ffi::c_int
+        })
+        + (if mode as ::core::ffi::c_uint
+            == crate::src::inflate::LEN_ as ::core::ffi::c_int as ::core::ffi::c_uint
+            || mode as ::core::ffi::c_uint
+                == crate::src::inflate::COPY_ as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            256 as ::core::ffi::c_int
+        } else {
+            0 as ::core::ffi::c_int
+        })
+}
+
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
@@ -779,24 +848,12 @@ pub unsafe extern "C" fn inflate_ffi(
                     hold = hold.wrapping_add((*c2rust_fresh13 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                (*state).nlen = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(257 as ::core::ffi::c_uint);
-                hold >>= 5 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                (*state).ndist = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(1 as ::core::ffi::c_uint);
-                hold >>= 5 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                (*state).ncode = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(4 as ::core::ffi::c_uint);
-                hold >>= 4 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
+                let counts = inflate_dynamic_counts(hold, bits);
+                (*state).nlen = counts.nlen;
+                (*state).ndist = counts.ndist;
+                (*state).ncode = counts.ncode;
+                hold = counts.hold;
+                bits = counts.bits;
                 if (*state).nlen > 286 as ::core::ffi::c_uint
                     || (*state).ndist > 30 as ::core::ffi::c_uint
                 {
@@ -1938,28 +1995,7 @@ pub unsafe extern "C" fn inflate_ffi(
         }) as ::core::ffi::c_ulong;
         (*strm).adler = (*state).check as crate::stdlib::uLong;
     }
-    (*strm).data_type = (*state).bits as ::core::ffi::c_int
-        + (if (*state).last != 0 {
-            64 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        })
-        + (if (*state).mode as ::core::ffi::c_uint
-            == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            128 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        })
-        + (if (*state).mode as ::core::ffi::c_uint
-            == crate::src::inflate::LEN_ as ::core::ffi::c_int as ::core::ffi::c_uint
-            || (*state).mode as ::core::ffi::c_uint
-                == crate::src::inflate::COPY_ as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            256 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        });
+    (*strm).data_type = inflate_data_type((*state).bits, (*state).last, (*state).mode);
     if (in_0 == 0 as ::core::ffi::c_uint && out == 0 as ::core::ffi::c_uint
         || flush == crate::zlib_h::Z_FINISH)
         && ret == crate::zlib_h::Z_OK

@@ -343,24 +343,12 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     hold = hold.wrapping_add((*c2rust_fresh2 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                (*state).nlen = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(257 as ::core::ffi::c_uint);
-                hold >>= 5 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                (*state).ndist = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(1 as ::core::ffi::c_uint);
-                hold >>= 5 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                (*state).ncode = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(4 as ::core::ffi::c_uint);
-                hold >>= 4 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
+                let counts = crate::src::inflate::inflate_dynamic_counts(hold, bits);
+                (*state).nlen = counts.nlen;
+                (*state).ndist = counts.ndist;
+                (*state).ncode = counts.ncode;
+                hold = counts.hold;
+                bits = counts.bits;
                 if (*state).nlen > 286 as ::core::ffi::c_uint
                     || (*state).ndist > 30 as ::core::ffi::c_uint
                 {

@@ -156,6 +156,11 @@ fn gz_is_gzip_header(header: [crate::stdlib::Bytef; 4]) -> bool {
         && (header[3] as ::core::ffi::c_int) < 32 as ::core::ffi::c_int
 }
 
+fn gz_prepare_fetch_output(state: &mut crate::gzguts_h::gz_state) {
+    state.strm.avail_out = (state.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
+}
+
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
@@ -343,9 +348,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 return 0 as ::core::ffi::c_int;
             }
             crate::gzguts_h::GZIP => {
-                (*strm).avail_out =
-                    ((*state).size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                (*strm).next_out = (*state).out as *mut crate::stdlib::Bytef;
+                gz_prepare_fetch_output(&mut *state);
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
