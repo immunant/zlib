@@ -112,7 +112,7 @@ fn gz_open_state(
         size: 0,
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
         in_0: ::core::ptr::null_mut(),
-        out: ::core::ptr::null_mut(),
+        out: Vec::new(),
         direct: 0,
         junk: 0,
         how: 0,

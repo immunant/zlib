@@ -46,7 +46,9 @@ pub mod gzguts_h {
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
         pub in_0: *mut ::core::ffi::c_uchar,
-        pub out: *mut ::core::ffi::c_uchar,
+        /// Buffer owned by this gzip session.  `x.next` and the codec stream
+        /// may temporarily point into it, but ownership never leaves here.
+        pub out: Vec<u8>,
         pub direct: ::core::ffi::c_int,
         pub junk: ::core::ffi::c_int,
         pub how: ::core::ffi::c_int,
