@@ -311,14 +311,12 @@ pub unsafe extern "C" fn gzopen_ffi(
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    let Some(parsed_mode) = gz_parse_open_mode(::core::ffi::CStr::from_ptr(mode).to_bytes()) else {
+    let path_ref = ::core::ffi::CStr::from_ptr(path);
+    let mode_ref = ::core::ffi::CStr::from_ptr(mode);
+    let Some(parsed_mode) = gz_parse_open_mode(mode_ref.to_bytes()) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    return gz_open(
-        ::core::ffi::CStr::from_ptr(path),
-        -1 as ::core::ffi::c_int,
-        parsed_mode,
-    );
+    return gz_open(path_ref, -1 as ::core::ffi::c_int, parsed_mode);
 }
 #[export_name = "gzopen64"]
 
@@ -340,7 +338,8 @@ pub unsafe extern "C" fn gzdopen_ffi(
     if mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    let Some(parsed_mode) = gz_parse_open_mode(::core::ffi::CStr::from_ptr(mode).to_bytes()) else {
+    let mode_ref = ::core::ffi::CStr::from_ptr(mode);
+    let Some(parsed_mode) = gz_parse_open_mode(mode_ref.to_bytes()) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
     let Some(path) = gz_fd_path(fd) else {

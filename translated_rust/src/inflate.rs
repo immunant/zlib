@@ -1118,24 +1118,30 @@ pub unsafe extern "C" fn inflate_ffi(
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
-    if inflate_state_check_raw!(strm) != 0
-        || (*strm).next_out.is_null()
-        || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
-    {
+    if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).mode as ::core::ffi::c_uint
-        == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
     {
-        (*state).mode = crate::src::inflate::TYPEDO;
+        let strm_ref = &mut *strm;
+        if strm_ref.next_out.is_null()
+            || strm_ref.next_in.is_null() && strm_ref.avail_in != 0 as crate::stdlib::uInt
+        {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+        let state_ref = &mut *state;
+        if state_ref.mode as ::core::ffi::c_uint
+            == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            state_ref.mode = crate::src::inflate::TYPEDO;
+        }
+        put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
+        left = strm_ref.avail_out as ::core::ffi::c_uint;
+        next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
+        have = strm_ref.avail_in as ::core::ffi::c_uint;
+        hold = state_ref.hold;
+        bits = state_ref.bits;
     }
-    put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    left = (*strm).avail_out as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    have = (*strm).avail_in as ::core::ffi::c_uint;
-    hold = (*state).hold;
-    bits = (*state).bits;
     in_0 = have;
     out = left;
     ret = crate::zlib_h::Z_OK;

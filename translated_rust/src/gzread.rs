@@ -319,7 +319,7 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         } else if state.strm.avail_in == 0 as crate::stdlib::uInt {
             if state.again == 0 {
                 crate::src::gzlib::gz_error_static(
-                    &mut *state,
+                    state,
                     crate::zlib_h::Z_BUF_ERROR,
                     b"unexpected end of file\0",
                 );
@@ -337,14 +337,14 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             if gz_inflate_stream_corrupt(ret) {
                 crate::src::gzlib::gz_error_static(
-                    &mut *state,
+                    state,
                     crate::zlib_h::Z_STREAM_ERROR,
                     b"internal error: inflate stream corrupt\0",
                 );
                 break;
             } else if ret == crate::zlib_h::Z_MEM_ERROR {
                 crate::src::gzlib::gz_error_static(
-                    &mut *state,
+                    state,
                     crate::zlib_h::Z_MEM_ERROR,
                     b"out of memory\0",
                 );
@@ -361,17 +361,13 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                     GzDecompDataErrorAction::Report { use_default_msg } => {
                         if use_default_msg {
                             crate::src::gzlib::gz_error_static(
-                                &mut *state,
+                                state,
                                 crate::zlib_h::Z_DATA_ERROR,
                                 b"compressed data error\0",
                             );
                         } else {
                             let msg = state.strm.msg as *const ::core::ffi::c_char;
-                            crate::src::gzlib::gz_error(
-                                &mut *state,
-                                crate::zlib_h::Z_DATA_ERROR,
-                                msg,
-                            );
+                            crate::src::gzlib::gz_error(state, crate::zlib_h::Z_DATA_ERROR, msg);
                         }
                         break;
                     }
