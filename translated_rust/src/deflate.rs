@@ -2372,10 +2372,30 @@ pub unsafe fn deflate(
             hcrc: header.hcrc,
         })
     };
+    // Gzip header emission may resume in any of these phases.  Keep its
+    // pending-buffer conversion at this one legacy boundary, then reborrow
+    // the checked slice for each phase below.
+    let mut gzip_pending_buf = if state.status == crate::src::deflate::GZIP_STATE
+        || state.status == crate::src::deflate::EXTRA_STATE
+        || state.status == crate::src::deflate::NAME_STATE
+        || state.status == crate::src::deflate::COMMENT_STATE
+        || state.status == crate::src::deflate::HCRC_STATE
+    {
+        if state.pending_buf.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        Some(::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        ))
+    } else {
+        None
+    };
     if state.status == crate::src::deflate::GZIP_STATE {
         strm.adler = crate::src::crc32::crc32(0 as crate::stdlib::uLong, None);
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let Some(pending_buf) = gzip_pending_buf.as_deref_mut() else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         if !write_gzip_header_magic(state, pending_buf) {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
@@ -2414,10 +2434,9 @@ pub unsafe fn deflate(
         };
         if let Some(extra) = header.extra {
             let extra_len = extra.len();
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
+            let Some(pending_buf) = gzip_pending_buf.as_deref_mut() else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
             let hcrc = header.hcrc != 0;
             let mut beg: crate::zutil_h::ulg = state.pending;
             let mut left: crate::zutil_h::ulg =
@@ -2463,10 +2482,9 @@ pub unsafe fn deflate(
         };
         if let Some(name) = header.name {
             let name = name.to_bytes_with_nul();
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
+            let Some(pending_buf) = gzip_pending_buf.as_deref_mut() else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
             let hcrc = header.hcrc != 0;
             let mut beg_0: crate::zutil_h::ulg = state.pending;
             loop {
@@ -2513,10 +2531,9 @@ pub unsafe fn deflate(
         };
         if let Some(comment) = header.comment {
             let comment = comment.to_bytes_with_nul();
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
+            let Some(pending_buf) = gzip_pending_buf.as_deref_mut() else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
             let hcrc = header.hcrc != 0;
             let mut beg_1: crate::zutil_h::ulg = state.pending;
             loop {
@@ -2560,8 +2577,9 @@ pub unsafe fn deflate(
         let Some(header) = gzip_header.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let Some(pending_buf) = gzip_pending_buf.as_deref_mut() else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         if header.hcrc != 0 {
             if state.pending.wrapping_add(2 as crate::zutil_h::ulg) > state.pending_buf_size {
                 let Some(output) = output_tail(strm, &mut output_buffer) else {
