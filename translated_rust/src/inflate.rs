@@ -2747,8 +2747,12 @@ pub unsafe extern "C" fn inflateCopy(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*source).state as *mut crate::src::inflate::inflate_state;
+    // Derive all source-state information needed after allocation before
+    // calling the source allocator. This value snapshot prevents a Rust
+    // reference to source state from spanning that user callback.
     let state = &*state;
     let plan = inflate_copy_plan(state);
+    let source_state = *state;
     copy = Some((*source).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*source).opaque,
@@ -2787,14 +2791,14 @@ pub unsafe extern "C" fn inflateCopy(
         None
     } else {
         Some((
-            ::core::slice::from_raw_parts(state.window, state.whave as usize),
+            ::core::slice::from_raw_parts(source_state.window, source_state.whave as usize),
             ::core::slice::from_raw_parts_mut(
                 window,
                 plan.window_len.expect("window allocation has a length"),
             ),
         ))
     };
-    inflate_copy_state(dest, source, copy, state, window);
+    inflate_copy_state(dest, source, copy, &source_state, window);
     dest.state =
         copy as *mut crate::src::inflate::inflate_state as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
