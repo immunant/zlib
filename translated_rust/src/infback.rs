@@ -456,12 +456,15 @@ pub unsafe extern "C" fn inflateBack(
                         (*state).have = 0 as ::core::ffi::c_uint;
                         while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
                             loop {
-                                here = crate::src::inftrees::code::copied_from((*state).lencode.get(&(*state).codes,
-                                    (hold as ::core::ffi::c_uint
-                                        & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
-                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                        as isize,
-                                ));
+                                here = crate::src::inftrees::code::copied_from(
+                                    (*state).lencode.get(
+                                        &(*state).codes,
+                                        (hold as ::core::ffi::c_uint
+                                            & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
+                                                .wrapping_sub(1 as ::core::ffi::c_uint))
+                                            as isize,
+                                    ),
+                                );
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
@@ -693,7 +696,8 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
-                                (*state).distcode = crate::src::inflate::CodeTableRef::Dynamic((*state).next);
+                                (*state).distcode =
+                                    crate::src::inflate::CodeTableRef::Dynamic((*state).next);
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
                                 ret = 'table: {
                                     let state = &mut *state;
@@ -771,11 +775,15 @@ pub unsafe extern "C" fn inflateBack(
             bits = (*state).bits;
         } else {
             loop {
-                here = crate::src::inftrees::code::copied_from((*state).lencode.get(&(*state).codes,
-                    (hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
-                            .wrapping_sub(1 as ::core::ffi::c_uint)) as isize,
-                ));
+                here = crate::src::inftrees::code::copied_from(
+                    (*state).lencode.get(
+                        &(*state).codes,
+                        (hold as ::core::ffi::c_uint
+                            & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
+                                .wrapping_sub(1 as ::core::ffi::c_uint))
+                            as isize,
+                    ),
+                );
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
                 }
@@ -799,16 +807,19 @@ pub unsafe extern "C" fn inflateBack(
             {
                 last = crate::src::inftrees::code::copied_from(&here);
                 loop {
-                    here = crate::src::inftrees::code::copied_from((*state).lencode.get(&(*state).codes,
-                        (last.val as ::core::ffi::c_uint).wrapping_add(
-                            (hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint)
-                                    << last.bits as ::core::ffi::c_int
-                                        + last.op as ::core::ffi::c_int)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint))
-                                >> last.bits as ::core::ffi::c_int,
-                        ) as isize,
-                    ));
+                    here = crate::src::inftrees::code::copied_from(
+                        (*state).lencode.get(
+                            &(*state).codes,
+                            (last.val as ::core::ffi::c_uint).wrapping_add(
+                                (hold as ::core::ffi::c_uint
+                                    & ((1 as ::core::ffi::c_uint)
+                                        << last.bits as ::core::ffi::c_int
+                                            + last.op as ::core::ffi::c_int)
+                                        .wrapping_sub(1 as ::core::ffi::c_uint))
+                                    >> last.bits as ::core::ffi::c_int,
+                            ) as isize,
+                        ),
+                    );
                     if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                         as ::core::ffi::c_uint
                         <= bits
@@ -884,12 +895,15 @@ pub unsafe extern "C" fn inflateBack(
                     bits = bits.wrapping_sub((*state).extra);
                 }
                 loop {
-                    here = crate::src::inftrees::code::copied_from((*state).distcode.get(&(*state).codes,
-                        (hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).distbits)
-                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                            as isize,
-                    ));
+                    here = crate::src::inftrees::code::copied_from(
+                        (*state).distcode.get(
+                            &(*state).codes,
+                            (hold as ::core::ffi::c_uint
+                                & ((1 as ::core::ffi::c_uint) << (*state).distbits)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint))
+                                as isize,
+                        ),
+                    );
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
                     }
@@ -912,16 +926,19 @@ pub unsafe extern "C" fn inflateBack(
                 {
                     last = crate::src::inftrees::code::copied_from(&here);
                     loop {
-                        here = crate::src::inftrees::code::copied_from((*state).distcode.get(&(*state).codes,
-                            (last.val as ::core::ffi::c_uint).wrapping_add(
-                                (hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint)
-                                        << last.bits as ::core::ffi::c_int
-                                            + last.op as ::core::ffi::c_int)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    >> last.bits as ::core::ffi::c_int,
-                            ) as isize,
-                        ));
+                        here = crate::src::inftrees::code::copied_from(
+                            (*state).distcode.get(
+                                &(*state).codes,
+                                (last.val as ::core::ffi::c_uint).wrapping_add(
+                                    (hold as ::core::ffi::c_uint
+                                        & ((1 as ::core::ffi::c_uint)
+                                            << last.bits as ::core::ffi::c_int
+                                                + last.op as ::core::ffi::c_int)
+                                            .wrapping_sub(1 as ::core::ffi::c_uint))
+                                        >> last.bits as ::core::ffi::c_int,
+                                ) as isize,
+                            ),
+                        );
                         if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                             as ::core::ffi::c_uint
                             <= bits
@@ -983,13 +1000,13 @@ pub unsafe extern "C" fn inflateBack(
                         bits = bits.wrapping_sub((*state).extra);
                     }
                     if (*state).offset
-                        > (*state).wsize.wrapping_sub(
-                            if (*state).whave < (*state).wsize {
+                        > (*state)
+                            .wsize
+                            .wrapping_sub(if (*state).whave < (*state).wsize {
                                 left
                             } else {
                                 0 as ::core::ffi::c_uint
-                            } ,
-                        )
+                            })
                     {
                         (*strm).msg = b"invalid distance too far back\0".as_ptr()
                             as *const ::core::ffi::c_char

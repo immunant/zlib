@@ -85,7 +85,11 @@ impl Clone for CodeTableRef {
 
 impl CodeTableRef {
     #[inline]
-    pub fn get<'a>(self, codes: &'a [crate::src::inftrees::code], index: isize) -> &'a crate::src::inftrees::code {
+    pub fn get<'a>(
+        self,
+        codes: &'a [crate::src::inftrees::code],
+        index: isize,
+    ) -> &'a crate::src::inftrees::code {
         let index = index as usize;
         match self {
             Self::Dynamic(start) => &codes[start + index],
@@ -496,12 +500,7 @@ fn copy_history_window(
     }
 }
 
-fn copy_history_dictionary(
-    output: &mut [u8],
-    window: &[u8],
-    wnext: usize,
-    whave: usize,
-) {
+fn copy_history_dictionary(output: &mut [u8], window: &[u8], wnext: usize, whave: usize) {
     let first = whave - wnext;
     output[..first].copy_from_slice(&window[wnext..wnext + first]);
     output[first..whave].copy_from_slice(&window[..wnext]);
@@ -516,12 +515,13 @@ unsafe extern "C" fn updatewindow(
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).window.is_none() {
-        (*state).window = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*strm).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar);
+        (*state).window =
+            ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                (*strm).opaque,
+                (1 as crate::stdlib::uInt) << (*state).wbits,
+                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            ) as *mut ::core::ffi::c_uchar);
         if (*state).window.is_none() {
             return 1 as ::core::ffi::c_int;
         }
@@ -1139,7 +1139,9 @@ pub unsafe extern "C" fn inflate(
                                                                                             (*state).lens[order[c2rust_fresh16 as usize] as usize] = 0
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
-                                                                                        (*state).next = 0;
+                                                                                        (*state)
+                                                                                            .next =
+                                                                                            0;
                                                                                         (*state).distcode = crate::src::inflate::CodeTableRef::Dynamic(0);
                                                                                         (*state).lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
                                                                                         (*state).lenbits = 7 as ::core::ffi::c_uint;
@@ -1214,8 +1216,8 @@ pub unsafe extern "C" fn inflate(
                                                                                         );
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
-                                                                                if let Some(head) = (*state)
-                                                                                    .head
+                                                                                if let Some(head) =
+                                                                                    (*state).head
                                                                                 {
                                                                                     (*head.as_ptr()).time = hold
                                                                                         as crate::stdlib::uLong;
@@ -1786,13 +1788,18 @@ pub unsafe extern "C" fn inflate(
                                         } else {
                                             (*state).back = 0 as ::core::ffi::c_int;
                                             loop {
-                                                here = crate::src::inftrees::code::copied_from((*state).lencode.get(&(*state).codes,
-                                                    (hold as ::core::ffi::c_uint
-                                                        & ((1 as ::core::ffi::c_uint)
-                                                            << (*state).lenbits)
-                                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                        as isize,
-                                                ));
+                                                here = crate::src::inftrees::code::copied_from(
+                                                    (*state).lencode.get(
+                                                        &(*state).codes,
+                                                        (hold as ::core::ffi::c_uint
+                                                            & ((1 as ::core::ffi::c_uint)
+                                                                << (*state).lenbits)
+                                                                .wrapping_sub(
+                                                                    1 as ::core::ffi::c_uint,
+                                                                ))
+                                                            as isize,
+                                                    ),
+                                                );
                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                     break;
                                                 }
@@ -1813,7 +1820,8 @@ pub unsafe extern "C" fn inflate(
                                                     & 0xf0 as ::core::ffi::c_int
                                                     == 0 as ::core::ffi::c_int
                                             {
-                                                last = crate::src::inftrees::code::copied_from(&here);
+                                                last =
+                                                    crate::src::inftrees::code::copied_from(&here);
                                                 loop {
                                                     here = crate::src::inftrees::code::copied_from((*state).lencode.get(&(*state).codes,
                                                         (last.val as ::core::ffi::c_uint)
@@ -1898,29 +1906,29 @@ pub unsafe extern "C" fn inflate(
                                         }
                                         if copy != 0 {
                                             if let Some(head) = (*state).head {
-                                                if !(*head.as_ptr()).extra.is_null()
-                                                    && {
-                                                        len = ((*head.as_ptr()).extra_len as ::core::ffi::c_uint)
-                                                            .wrapping_sub((*state).length);
-                                                        len < (*head.as_ptr()).extra_max
-                                                    }
-                                                {
-                                                // The caller input and the separately registered
-                                                // header-extra buffer have the original C memcpy
-                                                // non-overlap contract.
-                                                ::core::ptr::copy_nonoverlapping(
-                                                    next,
-                                                    (*head.as_ptr()).extra.add(len as usize),
-                                                    (if len.wrapping_add(copy)
-                                                        > (*head.as_ptr()).extra_max
-                                                    {
-                                                        ((*head.as_ptr()).extra_max
-                                                            as ::core::ffi::c_uint)
-                                                            .wrapping_sub(len)
-                                                    } else {
-                                                        copy
-                                                    }) as usize,
-                                                );
+                                                if !(*head.as_ptr()).extra.is_null() && {
+                                                    len = ((*head.as_ptr()).extra_len
+                                                        as ::core::ffi::c_uint)
+                                                        .wrapping_sub((*state).length);
+                                                    len < (*head.as_ptr()).extra_max
+                                                } {
+                                                    // The caller input and the separately registered
+                                                    // header-extra buffer have the original C memcpy
+                                                    // non-overlap contract.
+                                                    ::core::ptr::copy_nonoverlapping(
+                                                        next,
+                                                        (*head.as_ptr()).extra.add(len as usize),
+                                                        (if len.wrapping_add(copy)
+                                                            > (*head.as_ptr()).extra_max
+                                                        {
+                                                            ((*head.as_ptr()).extra_max
+                                                                as ::core::ffi::c_uint)
+                                                                .wrapping_sub(len)
+                                                        } else {
+                                                            copy
+                                                        })
+                                                            as usize,
+                                                    );
                                                 }
                                             }
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -1928,7 +1936,10 @@ pub unsafe extern "C" fn inflate(
                                             {
                                                 (*state).check = crate::src::crc32::crc32_z(
                                                     (*state).check as crate::stdlib::uLong,
-                                                    Some(::core::slice::from_raw_parts(next, copy as usize)),
+                                                    Some(::core::slice::from_raw_parts(
+                                                        next,
+                                                        copy as usize,
+                                                    )),
                                                 )
                                                     as ::core::ffi::c_ulong;
                                             }
@@ -1986,10 +1997,10 @@ pub unsafe extern "C" fn inflate(
                                         if !(*head.as_ptr()).name.is_null()
                                             && (*state).length < (*head.as_ptr()).name_max
                                         {
-                                        let c2rust_fresh6 = (*state).length;
-                                        (*state).length = (*state).length.wrapping_add(1);
-                                        *(*head.as_ptr()).name.offset(c2rust_fresh6 as isize) =
-                                            len as crate::stdlib::Bytef;
+                                            let c2rust_fresh6 = (*state).length;
+                                            (*state).length = (*state).length.wrapping_add(1);
+                                            *(*head.as_ptr()).name.offset(c2rust_fresh6 as isize) =
+                                                len as crate::stdlib::Bytef;
                                         }
                                     }
                                     if !(len != 0 && copy < have) {
@@ -2019,12 +2030,15 @@ pub unsafe extern "C" fn inflate(
                             break 'c_2325;
                         }
                         loop {
-                            here = crate::src::inftrees::code::copied_from((*state).distcode.get(&(*state).codes,
-                                (hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint) << (*state).distbits)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    as isize,
-                            ));
+                            here = crate::src::inftrees::code::copied_from(
+                                (*state).distcode.get(
+                                    &(*state).codes,
+                                    (hold as ::core::ffi::c_uint
+                                        & ((1 as ::core::ffi::c_uint) << (*state).distbits)
+                                            .wrapping_sub(1 as ::core::ffi::c_uint))
+                                        as isize,
+                                ),
+                            );
                             if here.bits as ::core::ffi::c_uint <= bits {
                                 break;
                             }
@@ -2043,16 +2057,19 @@ pub unsafe extern "C" fn inflate(
                         {
                             last = crate::src::inftrees::code::copied_from(&here);
                             loop {
-                                here = crate::src::inftrees::code::copied_from((*state).distcode.get(&(*state).codes,
-                                    (last.val as ::core::ffi::c_uint).wrapping_add(
-                                        (hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << last.bits as ::core::ffi::c_int
-                                                    + last.op as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                                            >> last.bits as ::core::ffi::c_int,
-                                    ) as isize,
-                                ));
+                                here = crate::src::inftrees::code::copied_from(
+                                    (*state).distcode.get(
+                                        &(*state).codes,
+                                        (last.val as ::core::ffi::c_uint).wrapping_add(
+                                            (hold as ::core::ffi::c_uint
+                                                & ((1 as ::core::ffi::c_uint)
+                                                    << last.bits as ::core::ffi::c_int
+                                                        + last.op as ::core::ffi::c_int)
+                                                    .wrapping_sub(1 as ::core::ffi::c_uint))
+                                                >> last.bits as ::core::ffi::c_int,
+                                        ) as isize,
+                                    ),
+                                );
                                 if (last.bits as ::core::ffi::c_int
                                     + here.bits as ::core::ffi::c_int)
                                     as ::core::ffi::c_uint
@@ -2105,10 +2122,10 @@ pub unsafe extern "C" fn inflate(
                                 if !(*head.as_ptr()).comment.is_null()
                                     && (*state).length < (*head.as_ptr()).comm_max
                                 {
-                                let c2rust_fresh8 = (*state).length;
-                                (*state).length = (*state).length.wrapping_add(1);
-                                *(*head.as_ptr()).comment.offset(c2rust_fresh8 as isize) =
-                                    len as crate::stdlib::Bytef;
+                                    let c2rust_fresh8 = (*state).length;
+                                    (*state).length = (*state).length.wrapping_add(1);
+                                    *(*head.as_ptr()).comment.offset(c2rust_fresh8 as isize) =
+                                        len as crate::stdlib::Bytef;
                                 }
                             }
                             if !(len != 0 && copy < have) {
@@ -2187,8 +2204,8 @@ pub unsafe extern "C" fn inflate(
                     (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
                 (*head.as_ptr()).done = 1 as ::core::ffi::c_int;
             }
-            (*state).check = crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None)
-                as ::core::ffi::c_ulong;
+            (*state).check =
+                crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None) as ::core::ffi::c_ulong;
             (*strm).adler = (*state).check as crate::stdlib::uLong;
             (*state).mode = crate::src::inflate::TYPE;
             continue '_inf_leave;
@@ -2420,8 +2437,8 @@ pub unsafe extern "C" fn inflateSetDictionary(
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
-        dictid = crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None)
-            as ::core::ffi::c_ulong;
+        dictid =
+            crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None) as ::core::ffi::c_ulong;
         dictid = crate::src::adler32::adler32(
             dictid as crate::stdlib::uLong,
             ::core::slice::from_raw_parts(dictionary, dictLength as usize),
@@ -2476,10 +2493,7 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
 ) -> ::core::ffi::c_int {
     inflateGetHeader(strm, head)
 }
-fn syncsearch(
-    have: &mut ::core::ffi::c_uint,
-    buf: &[::core::ffi::c_uchar],
-) -> ::core::ffi::c_uint {
+fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> ::core::ffi::c_uint {
     let mut got: ::core::ffi::c_uint = 0;
     let mut next: ::core::ffi::c_uint = 0;
     got = *have;
@@ -2577,8 +2591,7 @@ fn inflate_sync_point(
     mode: crate::src::inflate::inflate_mode,
     bits: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    (mode
-        == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
+    (mode == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
         && bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int
 }
 
@@ -2624,12 +2637,13 @@ pub unsafe extern "C" fn inflateCopy(
     // Clearing it here would be dead work and only adds an unsafe foreign
     // memory call; the copy establishes every state byte before use.
     if (*state).window.is_some() {
-        window = ::core::ptr::NonNull::new(Some((*source).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*source).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar);
+        window =
+            ::core::ptr::NonNull::new(Some((*source).zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                (*source).opaque,
+                (1 as crate::stdlib::uInt) << (*state).wbits,
+                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            ) as *mut ::core::ffi::c_uchar);
         if window.is_none() {
             Some((*source).zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
@@ -2691,7 +2705,10 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     inflateUndermine(strm, subvert)
 }
 
-fn inflate_validate_wrap(wrap: &mut ::core::ffi::c_int, check: ::core::ffi::c_int) -> ::core::ffi::c_int {
+fn inflate_validate_wrap(
+    wrap: &mut ::core::ffi::c_int,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
     if check != 0 && *wrap != 0 {
         *wrap |= 4 as ::core::ffi::c_int;
     } else {
@@ -2727,13 +2744,9 @@ fn inflate_mark_value(
 ) -> ::core::ffi::c_long {
     ((back as ::core::ffi::c_long as ::core::ffi::c_ulong) << 16 as ::core::ffi::c_int)
         as ::core::ffi::c_long
-        + (if mode
-            == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
+        + (if mode == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint {
             length
-        } else if mode
-            == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
+        } else if mode == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint {
             was.wrapping_sub(length)
         } else {
             0 as ::core::ffi::c_uint

@@ -441,14 +441,7 @@ fn gz_reset(mut reset: GzResetState) -> GzResetState {
     reset
 }
 
-unsafe extern "C" fn gz_open(
-    mut path: *const ::core::ffi::c_void,
-    mut fd: ::core::ffi::c_int,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    if path.is_null() || mode.is_null() {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
+unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zlib_h::gzFile {
     // The gzip handle is opaque at the ABI.  Keep its allocation owned until
     // the handle is successfully returned, rather than using malloc/free for
     // the state record itself.
@@ -499,8 +492,7 @@ unsafe extern "C" fn gz_open(
             reserved: 0,
         },
     });
-    let mode_input = ::core::ffi::CStr::from_ptr(mode).to_bytes();
-    let Some(parsed_mode) = parse_gz_open_mode(mode_input) else {
+    let Some(parsed_mode) = parse_gz_open_mode(mode) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
     let mut oflag = parsed_mode.oflag;
@@ -528,8 +520,7 @@ unsafe extern "C" fn gz_open(
     } else if state_ref.direct == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    let path_cstr = ::core::ffi::CStr::from_ptr(path.cast::<::core::ffi::c_char>());
-    let path_input = path_cstr.to_bytes();
+    let path_input = path;
     let mut path_bytes = Vec::new();
     if path_bytes.try_reserve_exact(path_input.len()).is_err() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
@@ -555,7 +546,7 @@ unsafe extern "C" fn gz_open(
         });
     if fd == -1 as ::core::ffi::c_int {
         match rustix::fs::open(
-            path_cstr,
+            path,
             rustix::fs::OFlags::from_bits_retain(oflag as u32),
             rustix::fs::Mode::from_raw_mode(0o666),
         ) {
@@ -620,16 +611,20 @@ unsafe extern "C" fn gz_open(
     ::core::mem::forget(state_owner);
     return state as crate::zlib_h::gzFile;
 }
+
 #[export_name = "gzopen"]
 
 pub unsafe extern "C" fn gzopen_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
+    if path.is_null() || mode.is_null() {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
     gz_open(
-        path as *const ::core::ffi::c_void,
+        ::core::ffi::CStr::from_ptr(path).to_bytes(),
         -1 as ::core::ffi::c_int,
-        mode,
+        ::core::ffi::CStr::from_ptr(mode).to_bytes(),
     )
 }
 #[export_name = "gzopen64"]
@@ -638,31 +633,26 @@ pub unsafe extern "C" fn gzopen64_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
+    if path.is_null() || mode.is_null() {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
     gz_open(
-        path as *const ::core::ffi::c_void,
+        ::core::ffi::CStr::from_ptr(path).to_bytes(),
         -1 as ::core::ffi::c_int,
-        mode,
+        ::core::ffi::CStr::from_ptr(mode).to_bytes(),
     )
 }
-pub unsafe extern "C" fn gzdopen(
-    mut fd: ::core::ffi::c_int,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
+unsafe fn gzdopen(fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zlib_h::gzFile {
     if fd == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     // This is the same bound used by the C implementation: enough for the
     // literal label, every decimal digit of a C int, its sign, and the NUL.
-    let mut path = [0 as ::core::ffi::c_char; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()];
-    path[..4].copy_from_slice(&[
-        b'<' as ::core::ffi::c_char,
-        b'f' as ::core::ffi::c_char,
-        b'd' as ::core::ffi::c_char,
-        b':' as ::core::ffi::c_char,
-    ]);
+    let mut path = [0u8; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()];
+    path[..4].copy_from_slice(b"<fd:");
     let mut at = 4usize;
     if fd < 0 as ::core::ffi::c_int {
-        path[at] = b'-' as ::core::ffi::c_char;
+        path[at] = b'-';
         at += 1;
     }
     let mut digits = [0u8; 10];
@@ -678,11 +668,11 @@ pub unsafe extern "C" fn gzdopen(
     }
     while count != 0 {
         count -= 1;
-        path[at] = (b'0' + digits[count]) as ::core::ffi::c_char;
+        path[at] = b'0' + digits[count];
         at += 1;
     }
-    path[at] = b'>' as ::core::ffi::c_char;
-    gz_open(path.as_ptr().cast::<::core::ffi::c_void>(), fd, mode)
+    path[at] = b'>';
+    gz_open(&path[..at + 1], fd, mode)
 }
 #[export_name = "gzdopen"]
 
@@ -690,7 +680,10 @@ pub unsafe extern "C" fn gzdopen_ffi(
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzdopen(fd, mode)
+    if fd == -1 as ::core::ffi::c_int || mode.is_null() {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    gzdopen(fd, ::core::ffi::CStr::from_ptr(mode).to_bytes())
 }
 unsafe fn gzbuffer(
     mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,

@@ -414,10 +414,7 @@ unsafe fn gz_write(
     }
     return put;
 }
-unsafe fn gzwrite(
-    state: &mut crate::gzguts_h::gz_state,
-    input: &[u8],
-) -> ::core::ffi::c_int {
+unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> ::core::ffi::c_int {
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
