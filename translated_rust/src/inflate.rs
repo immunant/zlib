@@ -451,13 +451,13 @@ pub unsafe extern "C" fn inflatePrime_ffi(
 /// proved the window cursor and lengths are coherent.
 #[derive(Copy, Clone)]
 struct InflateWindowCopyPlan {
-    first_dest: ::core::ffi::c_uint,
-    first_from_end: ::core::ffi::c_uint,
-    first_len: ::core::ffi::c_uint,
-    second_from_end: ::core::ffi::c_uint,
-    second_len: ::core::ffi::c_uint,
-    next: ::core::ffi::c_uint,
-    have: ::core::ffi::c_uint,
+    first_dest: usize,
+    first_from_end: usize,
+    first_len: usize,
+    second_from_end: usize,
+    second_len: usize,
+    next: usize,
+    have: usize,
 }
 
 /// Compute the circular-window update without touching the ABI window
@@ -470,6 +470,10 @@ fn inflate_window_copy_plan(
     whave: ::core::ffi::c_uint,
     copy: ::core::ffi::c_uint,
 ) -> Option<InflateWindowCopyPlan> {
+    let wsize = usize::try_from(wsize).ok()?;
+    let wnext = usize::try_from(wnext).ok()?;
+    let whave = usize::try_from(whave).ok()?;
+    let copy = usize::try_from(copy).ok()?;
     if wsize == 0 || wnext > wsize || whave > wsize {
         return None;
     }
@@ -536,22 +540,31 @@ unsafe extern "C" fn updatewindow(
     else {
         return 1 as ::core::ffi::c_int;
     };
+    let (Ok(first_dest), Ok(first_from_end), Ok(second_from_end), Ok(next), Ok(have)) = (
+        isize::try_from(plan.first_dest),
+        isize::try_from(plan.first_from_end),
+        isize::try_from(plan.second_from_end),
+        ::core::ffi::c_uint::try_from(plan.next),
+        ::core::ffi::c_uint::try_from(plan.have),
+    ) else {
+        return 1 as ::core::ffi::c_int;
+    };
     if plan.first_len != 0 {
         crate::stdlib::memcpy(
-            (*state).window.offset(plan.first_dest as isize) as *mut ::core::ffi::c_void,
-            end.offset(-(plan.first_from_end as isize)) as *const ::core::ffi::c_void,
+            (*state).window.offset(first_dest) as *mut ::core::ffi::c_void,
+            end.offset(-first_from_end) as *const ::core::ffi::c_void,
             plan.first_len as crate::__stddef_size_t_h::size_t,
         );
     }
     if plan.second_len != 0 {
         crate::stdlib::memcpy(
             (*state).window as *mut ::core::ffi::c_void,
-            end.offset(-(plan.second_from_end as isize)) as *const ::core::ffi::c_void,
+            end.offset(-second_from_end) as *const ::core::ffi::c_void,
             plan.second_len as crate::__stddef_size_t_h::size_t,
         );
     }
-    (*state).wnext = plan.next;
-    (*state).whave = plan.have;
+    (*state).wnext = next;
+    (*state).whave = have;
     return 0 as ::core::ffi::c_int;
 }
 pub unsafe extern "C" fn inflate(
