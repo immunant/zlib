@@ -1005,10 +1005,40 @@ unsafe fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
+struct GzZeroPreparedChunk {
+    len: ::core::ffi::c_uint,
+    initialize_buffer: bool,
+}
+
+fn gz_zero_prepare_chunk(
+    state: &mut crate::gzguts_h::gz_state,
+    first: ::core::ffi::c_int,
+) -> GzZeroPreparedChunk {
+    let limits = gz_zero_chunk_limits();
+    let GzZeroStep::WriteChunk {
+        len,
+        initialize_buffer,
+    } = gz_zero_chunk_step(
+        first,
+        state.size,
+        state.skip,
+        limits.int_and_off64_are_same_size,
+        limits.int_max,
+    )
+    else {
+        unreachable!();
+    };
+    state.strm.avail_in = len as crate::stdlib::uInt;
+    state.strm.next_in = state.in_0;
+
+    GzZeroPreparedChunk {
+        len,
+        initialize_buffer,
+    }
+}
+
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut n: ::core::ffi::c_uint = 0;
     let limits = gz_zero_chunk_limits();
     match gz_zero_initial_step(
         state.strm.avail_in,
@@ -1027,33 +1057,17 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        let limits = gz_zero_chunk_limits();
-        let GzZeroStep::WriteChunk {
-            len,
-            initialize_buffer,
-        } = gz_zero_chunk_step(
-            first,
-            state.size,
-            state.skip,
-            limits.int_and_off64_are_same_size,
-            limits.int_max,
-        )
-        else {
-            unreachable!();
-        };
-        n = len;
-        if initialize_buffer {
-            let buffer = ::core::slice::from_raw_parts_mut(state.in_0, n as usize);
+        let chunk = gz_zero_prepare_chunk(state, first);
+        if chunk.initialize_buffer {
+            let buffer = ::core::slice::from_raw_parts_mut(state.in_0, chunk.len as usize);
             gz_zero_initialize_buffer(buffer);
             first = 0 as ::core::ffi::c_int;
         }
-        state.strm.avail_in = n as crate::stdlib::uInt;
-        state.strm.next_in = state.in_0;
-        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+        let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         match gz_zero_apply_comp_progress(
             &mut state.x.pos,
             &mut state.skip,
-            n,
+            chunk.len,
             state.strm.avail_in,
             ret,
         ) {

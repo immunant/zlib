@@ -63,6 +63,15 @@ struct GzLoadResult {
     failed: bool,
 }
 
+enum GzLoadStep {
+    Continue(::core::ffi::c_uint),
+    Return(GzLoadResult),
+    Error {
+        have: ::core::ffi::c_uint,
+        errno: ::core::ffi::c_int,
+    },
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum GzAvailLoadAction {
     Error,
@@ -161,16 +170,29 @@ fn gz_load_max_read_len() -> ::core::ffi::c_uint {
     (1 as ::core::ffi::c_uint) << (::core::ffi::c_uint::BITS - 2)
 }
 
-fn gz_load_apply_flags(
+fn gz_load_step(
     eof: &mut ::core::ffi::c_int,
     again: &mut ::core::ffi::c_int,
-    decision: &GzLoadDecision,
-) {
+    decision: GzLoadDecision,
+) -> GzLoadStep {
     if decision.eof {
         *eof = 1;
     }
     if decision.again {
         *again = 1;
+    }
+    if let Some(errno) = decision.error {
+        GzLoadStep::Error {
+            have: decision.have,
+            errno,
+        }
+    } else if decision.more {
+        GzLoadStep::Continue(decision.have)
+    } else {
+        GzLoadStep::Return(GzLoadResult {
+            have: decision.have,
+            failed: false,
+        })
     }
 }
 
@@ -702,23 +724,21 @@ unsafe fn gz_load(
         } else {
             0
         };
-        let read = gz_load_read_result(ret, errno);
-        let decision = gz_load_decision(have, len, read);
-        gz_load_apply_flags(&mut state.eof, &mut state.again, &decision);
-        have = decision.have;
-        if let Some(errno) = decision.error {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(errno),
-            );
-            return GzLoadResult { have, failed: true };
-        }
-        if !decision.more {
-            return GzLoadResult {
-                have,
-                failed: false,
-            };
+        match gz_load_step(
+            &mut state.eof,
+            &mut state.again,
+            gz_load_decision(have, len, gz_load_read_result(ret, errno)),
+        ) {
+            GzLoadStep::Continue(next_have) => have = next_have,
+            GzLoadStep::Return(result) => return result,
+            GzLoadStep::Error { have, errno } => {
+                crate::src::gzlib::gz_error(
+                    state as *mut crate::gzguts_h::gz_state,
+                    crate::zlib_h::Z_ERRNO,
+                    crate::stdlib::strerror(errno),
+                );
+                return GzLoadResult { have, failed: true };
+            }
         }
     }
 }
@@ -1513,37 +1533,53 @@ mod tests {
     }
 
     #[test]
-    fn gz_load_apply_flags_sets_only_requested_flags() {
+    fn gz_load_step_marks_eof_and_returns_success() {
         let mut eof = 0;
         let mut again = -1;
-        let decision = GzLoadDecision {
-            have: 0,
-            eof: true,
-            again: false,
-            more: false,
-            error: None,
-        };
 
-        gz_load_apply_flags(&mut eof, &mut again, &decision);
-
+        assert!(matches!(
+            gz_load_step(
+                &mut eof,
+                &mut again,
+                GzLoadDecision {
+                    have: 3,
+                    eof: true,
+                    again: false,
+                    more: false,
+                    error: None,
+                },
+            ),
+            GzLoadStep::Return(GzLoadResult {
+                have: 3,
+                failed: false,
+            })
+        ));
         assert_eq!(eof, 1);
         assert_eq!(again, -1);
     }
 
     #[test]
-    fn gz_load_apply_flags_preserves_flags_when_not_requested() {
+    fn gz_load_step_preserves_retryable_partial_reads() {
         let mut eof = -1;
         let mut again = 0;
-        let decision = GzLoadDecision {
-            have: 0,
-            eof: false,
-            again: true,
-            more: false,
-            error: None,
-        };
 
-        gz_load_apply_flags(&mut eof, &mut again, &decision);
-
+        assert!(matches!(
+            gz_load_step(
+                &mut eof,
+                &mut again,
+                GzLoadDecision {
+                    have: 3,
+                    eof: false,
+                    again: true,
+                    more: false,
+                    error: None,
+                },
+            ),
+            GzLoadStep::Return(GzLoadResult {
+                have: 3,
+                failed: false,
+            })
+        ));
         assert_eq!(eof, -1);
         assert_eq!(again, 1);
     }

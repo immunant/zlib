@@ -4111,14 +4111,13 @@ unsafe fn gen_codes(
     max_code: ::core::ffi::c_int,
     bl_count: &[crate::zutil_h::ush; 16],
 ) {
-    let mut lengths = Vec::with_capacity(max_code as usize + 1);
-    let mut n = 0;
-    while n <= max_code {
-        lengths.push((*tree.wrapping_add(n as usize)).dl.len);
-        n += 1;
+    let tree = &mut *::core::ptr::slice_from_raw_parts_mut(tree, max_code as usize + 1);
+    let mut lengths = Vec::with_capacity(tree.len());
+    for entry in tree.iter() {
+        lengths.push(entry.dl.len);
     }
     for (index, code) in canonical_code_assignments(&lengths, bl_count) {
-        (*tree.wrapping_add(index)).fc.value = code;
+        tree[index].fc.value = code;
     }
 }
 
