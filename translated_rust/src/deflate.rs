@@ -518,30 +518,71 @@ pub struct GzipHeader {
 
 static GZIP_HEADERS: OnceLock<Mutex<HashMap<u64, GzipHeader>>> = OnceLock::new();
 static NEXT_GZIP_HEADER_ID: AtomicU64 = AtomicU64::new(1);
-static DEFAULT_DEFLATE_STATES: OnceLock<Mutex<HashMap<usize, Box<internal_state>>>> =
-    OnceLock::new();
-
-fn default_deflate_states() -> &'static Mutex<HashMap<usize, Box<internal_state>>> {
-    DEFAULT_DEFLATE_STATES.get_or_init(|| Mutex::new(HashMap::new()))
+/// Retain the Rust state separately from any opaque callback allocation.
+///
+/// Custom `zalloc` storage belongs to the caller's allocator and is only a
+/// token that must later be returned to its paired `zfree`.  It must never be
+/// used as storage for a Rust value containing `Vec` and `Option` owners.
+enum DeflateStateOwner {
+    Default(Box<internal_state>),
+    Callback {
+        state: Box<internal_state>,
+        allocation_address: usize,
+    },
 }
 
-fn retain_default_deflate_state(state: Box<internal_state>) -> bool {
-    let address = core::ptr::from_ref(state.as_ref()).addr();
-    let mut states = default_deflate_states()
+static DEFLATE_STATE_OWNERS: OnceLock<Mutex<HashMap<usize, DeflateStateOwner>>> = OnceLock::new();
+
+fn deflate_state_owners() -> &'static Mutex<HashMap<usize, DeflateStateOwner>> {
+    DEFLATE_STATE_OWNERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn retain_deflate_state_owner(address: usize, owner: DeflateStateOwner) -> bool {
+    let mut states = deflate_state_owners()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if states.try_reserve(1).is_err() {
         return false;
     }
-    states.insert(address, state);
+    states.insert(address, owner);
     true
 }
 
-fn release_default_deflate_state(address: usize) {
-    default_deflate_states()
+fn retain_default_deflate_state(state: Box<internal_state>) -> bool {
+    let address = core::ptr::from_ref(state.as_ref()).addr();
+    retain_deflate_state_owner(address, DeflateStateOwner::Default(state))
+}
+
+fn retain_callback_deflate_state(state: Box<internal_state>, allocation_address: usize) -> bool {
+    let address = core::ptr::from_ref(state.as_ref()).addr();
+    retain_deflate_state_owner(
+        address,
+        DeflateStateOwner::Callback {
+            state,
+            allocation_address,
+        },
+    )
+}
+
+/// Drop the Rust state owner and return the optional opaque callback token.
+fn release_deflate_state_owner(address: usize) -> Option<usize> {
+    let owner = deflate_state_owners()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(&address);
+        .remove(&address)?;
+    match owner {
+        DeflateStateOwner::Default(state) => {
+            drop(state);
+            None
+        }
+        DeflateStateOwner::Callback {
+            state,
+            allocation_address,
+        } => {
+            drop(state);
+            Some(allocation_address)
+        }
+    }
 }
 
 fn gzip_headers() -> &'static Mutex<HashMap<u64, GzipHeader>> {
@@ -3335,14 +3376,38 @@ pub(crate) fn deflate_end_gzip(
 /// Tear down a validated state after checking that its ABI allocator pair is
 /// present. The init and end boundaries return the retained allocation through
 /// that pair after this safe cleanup finishes.
+struct DeflateEndResult {
+    code: ::core::ffi::c_int,
+    callback_allocation: Option<usize>,
+}
+
+/// Finish the codec and release its Rust owner.  A custom allocator token is
+/// returned for the ABI wrapper to convert back to the caller's pointer type.
 fn deflate_end_impl(
     state: &mut crate::src::deflate::deflate_state,
     allocators_present: bool,
-) -> ::core::ffi::c_int {
+    callback_allocator: bool,
+    state_address: usize,
+) -> DeflateEndResult {
     if !allocators_present {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return DeflateEndResult {
+            code: crate::zlib_h::Z_STREAM_ERROR,
+            callback_allocation: None,
+        };
     }
-    deflateEnd(state)
+    let code = deflateEnd(state);
+    let callback_allocation = if code == crate::zlib_h::Z_STREAM_ERROR {
+        None
+    } else if callback_allocator {
+        Some(release_deflate_state_owner(state_address).unwrap_or(state_address))
+    } else {
+        release_deflate_state_owner(state_address);
+        None
+    };
+    DeflateEndResult {
+        code,
+        callback_allocation,
+    }
 }
 
 #[export_name = "deflateEnd"]
@@ -3352,6 +3417,7 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let state_allocation = strm.state.cast::<::core::ffi::c_void>();
+    let state_address = state_allocation.addr();
     let zalloc = strm.zalloc;
     let zfree = strm.zfree;
     let opaque = strm.opaque;
@@ -3361,16 +3427,19 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     let end = deflate_end_impl(
         state,
         (zalloc.is_some() && zfree.is_some()) || (zalloc.is_none() && zfree.is_none()),
+        zfree.is_some(),
+        state_address,
     );
-    if end != crate::zlib_h::Z_STREAM_ERROR {
-        if let Some(zfree) = zfree {
-            zfree(opaque, state_allocation);
-        } else {
-            release_default_deflate_state(state_allocation.addr());
+    if end.code != crate::zlib_h::Z_STREAM_ERROR {
+        if let Some(allocation) = end.callback_allocation {
+            let zfree = zfree.expect("allocator pairing was validated");
+            let allocation =
+                core::ptr::with_exposed_provenance_mut::<::core::ffi::c_void>(allocation);
+            zfree(opaque, allocation);
         }
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
-    end
+    end.code
 }
 fn deflate_copy_state_is_valid(
     allocators_present: bool,
@@ -3597,22 +3666,29 @@ unsafe fn deflate_install_state(
         dest.state = state_memory.cast_mut();
         return crate::zlib_h::Z_OK;
     }
-    let (Some(zalloc), Some(_)) = (dest.zalloc, dest.zfree) else {
+    let (Some(zalloc), Some(zfree)) = (dest.zalloc, dest.zfree) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state_memory = unsafe {
+    let allocation = unsafe {
         zalloc(
             dest.opaque,
             1,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
         )
-        .cast::<crate::src::deflate::deflate_state>()
     };
-    if state_memory.is_null() {
+    if allocation.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    unsafe { core::ptr::write(state_memory, copied_state) };
-    dest.state = state_memory;
+    let state = Box::new(copied_state);
+    let state_memory = core::ptr::from_ref(state.as_ref());
+    if !retain_callback_deflate_state(state, allocation.addr()) {
+        unsafe { zfree(dest.opaque, allocation) };
+        if source.is_none() {
+            dest.state = core::ptr::null_mut();
+        }
+        return crate::zlib_h::Z_MEM_ERROR;
+    }
+    dest.state = state_memory.cast_mut();
     crate::zlib_h::Z_OK
 }
 #[export_name = "deflateCopy"]
