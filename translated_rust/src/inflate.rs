@@ -2883,12 +2883,25 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    // This is the C ABI boundary: validate and bind the stream before
-    // binding the caller-provided header storage.
-    let Some((_strm, state)) = inflateStateCheck(strm) else {
+    // Bind foreign arguments only. State validation stays in the named
+    // dispatcher, alongside the header transition it protects.
+    inflateGetHeader(strm.as_mut(), head.as_mut())
+}
+
+fn inflateGetHeader(
+    strm: Option<&mut crate::zlib_h::z_stream>,
+    head: Option<&mut crate::zlib_h::gz_header>,
+) -> ::core::ffi::c_int {
+    let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_get_header(state, &mut *head)
+    let Some(head) = head else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some((_strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_get_header(state, head)
 }
 
 fn inflate_get_header(

@@ -1201,9 +1201,12 @@ pub unsafe extern "C" fn deflateReset_ffi(
 // The named implementation stays entirely reference-bound. The public ABI
 // adapter below is limited to binding its two optional foreign pointers.
 fn deflateSetHeader(
-    strm: &mut crate::zlib_h::z_stream,
+    strm: Option<&mut crate::zlib_h::z_stream>,
     head: Option<&mut crate::zlib_h::gz_header>,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let Some((_strm, state)) = deflateStateCheck(strm as *mut _) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -1229,15 +1232,9 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let head = if head.is_null() {
-        None
-    } else {
-        Some(&mut *head)
-    };
-    deflateSetHeader(&mut *strm, head)
+    // Bind foreign arguments only. The named dispatcher preserves zlib's
+    // stream validation and header-clearing semantics.
+    deflateSetHeader(strm.as_mut(), head.as_mut())
 }
 fn deflate_pending(
     state: &crate::src::deflate::deflate_state,
