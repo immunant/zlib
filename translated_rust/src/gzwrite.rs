@@ -1398,46 +1398,6 @@ struct GzWriteStateOwner {
 }
 
 impl GzWriteStateOwner {
-    unsafe fn take_from_abi(state: &mut crate::gzguts_h::gz_state) -> Self {
-        Self {
-            buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
-            fd: state.fd.take(),
-            path: state.path.take(),
-            message: state.msg.take(),
-            error: ::core::mem::replace(&mut state.err, crate::zlib_h::Z_OK),
-            buffered: ::core::mem::replace(&mut state.x.have, 0),
-            position: ::core::mem::replace(&mut state.x.pos, 0),
-            mode: state.mode,
-            want: state.want,
-            direct: state.direct,
-            level: state.level,
-            strategy: state.strategy,
-            skip: state.skip,
-            again: state.again,
-            reset: state.reset,
-            input_available: state.strm.avail_in,
-        }
-    }
-
-    unsafe fn publish_into_abi(self, state: &mut crate::gzguts_h::gz_state) {
-        state.buffers = self.buffers;
-        state.fd = self.fd;
-        state.path = self.path;
-        state.msg = self.message;
-        state.err = self.error;
-        state.x.have = self.buffered;
-        state.x.pos = self.position;
-        state.mode = self.mode;
-        state.want = self.want;
-        state.direct = self.direct;
-        state.level = self.level;
-        state.strategy = self.strategy;
-        state.skip = self.skip;
-        state.again = self.again;
-        state.reset = self.reset;
-        state.strm.avail_in = self.input_available;
-    }
-
     // Preserve the established C4 boundary: publish the scalar/buffer owner,
     // run exactly one codec request, then recover the complete transaction.
     // `strm` and `x.next` remain projected only for this call.
@@ -1825,7 +1785,28 @@ pub(crate) unsafe fn gzip_write_state_adapter(
     state: &mut crate::gzguts_h::gz_state,
     operation: GzWriteOperation<'_>,
 ) -> crate::stdlib::z_size_t {
-    let mut owner = GzWriteStateOwner::take_from_abi(state);
+    // This adapter is already the one C6/C4 projection boundary. Transfer
+    // the pointer-free transaction directly here rather than through two
+    // ABI-shaped forwarding methods, while retaining the compressor call at
+    // its established C4 boundary below.
+    let mut owner = GzWriteStateOwner {
+        buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+        fd: state.fd.take(),
+        path: state.path.take(),
+        message: state.msg.take(),
+        error: ::core::mem::replace(&mut state.err, crate::zlib_h::Z_OK),
+        buffered: ::core::mem::replace(&mut state.x.have, 0),
+        position: ::core::mem::replace(&mut state.x.pos, 0),
+        mode: state.mode,
+        want: state.want,
+        direct: state.direct,
+        level: state.level,
+        strategy: state.strategy,
+        skip: state.skip,
+        again: state.again,
+        reset: state.reset,
+        input_available: state.strm.avail_in,
+    };
     let result = gzip_write_owner(
         &mut owner,
         operation,
@@ -1833,7 +1814,22 @@ pub(crate) unsafe fn gzip_write_state_adapter(
             owner.run_compressor(state, flush, input, retune, close, materialization)
         },
     );
-    owner.publish_into_abi(state);
+    state.buffers = owner.buffers;
+    state.fd = owner.fd;
+    state.path = owner.path;
+    state.msg = owner.message;
+    state.err = owner.error;
+    state.x.have = owner.buffered;
+    state.x.pos = owner.position;
+    state.mode = owner.mode;
+    state.want = owner.want;
+    state.direct = owner.direct;
+    state.level = owner.level;
+    state.strategy = owner.strategy;
+    state.skip = owner.skip;
+    state.again = owner.again;
+    state.reset = owner.reset;
+    state.strm.avail_in = owner.input_available;
     result
 }
 
