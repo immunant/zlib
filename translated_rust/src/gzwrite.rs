@@ -118,6 +118,16 @@ fn gz_write_buffered_copy_len(
     }
 }
 
+fn gz_buffered_have(
+    buffer_address: usize,
+    next_in_address: usize,
+    avail_in: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    next_in_address
+        .wrapping_sub(buffer_address)
+        .wrapping_add(avail_in as usize) as ::core::ffi::c_uint
+}
+
 fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
     if ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t > remaining {
         remaining as ::core::ffi::c_uint
@@ -389,12 +399,11 @@ unsafe extern "C" fn gz_write(
             if (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 (*state).strm.next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
             }
-            have = (*state)
-                .strm
-                .next_in
-                .offset((*state).strm.avail_in as isize)
-                .offset_from((*state).in_0) as ::core::ffi::c_long
-                as ::core::ffi::c_uint;
+            have = gz_buffered_have(
+                (*state).in_0 as usize,
+                (*state).strm.next_in as usize,
+                (*state).strm.avail_in,
+            );
             copy = gz_write_buffered_copy_len((*state).size, have, len);
             crate::stdlib::memcpy(
                 (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
@@ -554,11 +563,11 @@ pub unsafe extern "C" fn gzputc(
         if (*strm).avail_in == 0 as crate::stdlib::uInt {
             (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
         }
-        have = (*strm)
-            .next_in
-            .offset((*strm).avail_in as isize)
-            .offset_from((*state).in_0) as ::core::ffi::c_long
-            as ::core::ffi::c_uint;
+        have = gz_buffered_have(
+            (*state).in_0 as usize,
+            (*strm).next_in as usize,
+            (*strm).avail_in,
+        );
         if have < (*state).size {
             *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
             (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
@@ -762,10 +771,11 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_comp_needs_output_write, gz_comp_write_chunk_len, gz_write_buffered_copy_len,
-        gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_error_result,
-        gz_write_uses_buffered_path, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
-        gzputs_len_fits_int, gzputs_result, gzwrite_len_fits_int,
+        gz_buffered_have, gz_comp_needs_output_write, gz_comp_write_chunk_len,
+        gz_write_buffered_copy_len, gz_write_chunk_consumed_len, gz_write_chunk_len,
+        gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
+        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
+        gzwrite_len_fits_int,
     };
 
     #[test]
@@ -948,6 +958,23 @@ mod tests {
     #[test]
     fn gz_write_buffered_copy_len_preserves_wrapping_accounting() {
         assert_eq!(gz_write_buffered_copy_len(0, 1, 5), 5);
+    }
+
+    #[test]
+    fn gz_buffered_have_counts_buffered_bytes() {
+        let buffer = [0_u8; 8];
+        assert_eq!(
+            gz_buffered_have(buffer.as_ptr() as usize, buffer.as_ptr() as usize, 0),
+            0
+        );
+        assert_eq!(
+            gz_buffered_have(
+                buffer.as_ptr() as usize,
+                buffer.as_ptr().wrapping_add(3) as usize,
+                2,
+            ),
+            5
+        );
     }
 
     #[test]

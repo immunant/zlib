@@ -201,7 +201,7 @@ fn gz_read_progress(
     (
         len.wrapping_sub(chunk_len as crate::stdlib::z_size_t),
         got.wrapping_add(chunk_len as crate::stdlib::z_size_t),
-        pos + chunk_len as crate::stdlib::off64_t,
+        pos.wrapping_add(chunk_len as crate::stdlib::off64_t),
     )
 }
 
@@ -823,6 +823,14 @@ mod tests {
         assert_eq!(
             gz_read_progress(0, crate::stdlib::z_size_t::MAX, 0, 1),
             (crate::stdlib::z_size_t::MAX, 0, 1)
+        );
+    }
+
+    #[test]
+    fn gz_read_progress_wraps_position_at_off64_t_boundary() {
+        assert_eq!(
+            gz_read_progress(1, 0, crate::stdlib::off64_t::MAX, 1),
+            (0, 1, crate::stdlib::off64_t::MIN)
         );
     }
 
