@@ -2484,9 +2484,11 @@ pub unsafe extern "C" fn gz_error_ffi(
         // points to a nul-terminated string for the duration of the call.
         Some(unsafe { ::core::ffi::CStr::from_ptr(msg).to_bytes_with_nul() })
     };
-    // SAFETY: this ABI entry retains the original C contract that `state`
-    // points to a live gzip state.
-    gz_error(unsafe { &mut *state }, err, msg)
+    // Gzip states are registry-owned for their complete public lifetime.
+    // Resolve this internal ABI handle by address instead of reopening its
+    // raw pointer, keeping the message binding above as this entry point's
+    // only foreign-memory operation.
+    let _ = gz_with_owned_state(state.addr(), |state| gz_error(state, err, msg));
 }
 
 pub fn gz_skip_chunk(
