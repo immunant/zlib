@@ -208,6 +208,13 @@ fn gzbuffer_want(
     })
 }
 
+pub(crate) fn gz_buffer(size: ::core::ffi::c_uint) -> Option<Box<[u8]>> {
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(size as usize).ok()?;
+    bytes.resize(size as usize, 0);
+    Some(bytes.into_boxed_slice())
+}
+
 struct GzReadResetFields {
     eof: ::core::ffi::c_int,
     past: ::core::ffi::c_int,
@@ -286,13 +293,18 @@ unsafe extern "C" fn gz_open(
     }
     ::core::ptr::addr_of_mut!((*state).path).write(None);
     ::core::ptr::addr_of_mut!((*state).msg).write(None);
-    (*state).size = 0 as ::core::ffi::c_uint;
-    (*state).want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
-    (*state).err = crate::zlib_h::Z_OK;
-    (*state).mode = crate::gzguts_h::GZ_NONE;
-    (*state).level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
-    (*state).strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
-    (*state).direct = 0 as ::core::ffi::c_int;
+    ::core::ptr::addr_of_mut!((*state).in_0).write(None);
+    ::core::ptr::addr_of_mut!((*state).out).write(None);
+    {
+        let state_ref = &mut *state;
+        state_ref.size = 0 as ::core::ffi::c_uint;
+        state_ref.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
+        state_ref.err = crate::zlib_h::Z_OK;
+        state_ref.mode = crate::gzguts_h::GZ_NONE;
+        state_ref.level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
+        state_ref.strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
+        state_ref.direct = 0 as ::core::ffi::c_int;
+    }
     while *mode != 0 {
         if *mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
             && *mode as ::core::ffi::c_int <= '9' as ::core::ffi::c_int

@@ -47,8 +47,10 @@ pub mod gzguts_h {
         pub path: Option<Box<[u8]>>,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
-        pub in_0: *mut ::core::ffi::c_uchar,
-        pub out: *mut ::core::ffi::c_uchar,
+        // These buffers are opaque-handle resources.  Keep them owned so the
+        // cursors exposed through `x` and `strm` cannot outlive their storage.
+        pub in_0: Option<Box<[u8]>>,
+        pub out: Option<Box<[u8]>>,
         pub direct: ::core::ffi::c_int,
         pub junk: ::core::ffi::c_int,
         pub how: ::core::ffi::c_int,
