@@ -397,27 +397,6 @@ fn slide_hash_tables(
     }
 }
 
-unsafe extern "C" fn read_buf(
-    mut strm: crate::zlib_h::z_streamp,
-    mut buf: *mut crate::stdlib::Bytef,
-    mut size: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
-    let mut len: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-    if len > size {
-        len = size;
-    }
-    if len == 0 as ::core::ffi::c_uint {
-        return 0 as ::core::ffi::c_uint;
-    }
-    let stream = &mut *strm;
-    let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
-    let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
-    let wrap = (*stream.state).wrap;
-    let copied = read_buf_bytes(stream, output, input, wrap);
-    stream.next_in = stream.next_in.offset(copied as isize);
-    copied
-}
-
 fn read_buf_bytes(
     strm: &mut crate::zlib_h::z_stream,
     output: &mut [crate::stdlib::Bytef],
