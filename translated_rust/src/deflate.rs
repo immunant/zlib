@@ -97,7 +97,10 @@ pub struct internal_state {
     pub pending_out: usize,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
-    pub gzhead: crate::zlib_h::gz_headerp,
+    // `deflateSetHeader()` snapshots the caller-owned header at the FFI
+    // boundary.  The resumable stream engine therefore never needs to walk
+    // foreign header pointers while emitting a gzip member.
+    gzhead: Option<DeflateGzipHeader>,
     // `deflateBound()` only needs these stable header lengths.  Keep that
     // metadata in the stream state so its ABI wrapper does not need to walk
     // the retained caller header.
@@ -838,7 +841,7 @@ fn initialize_deflate_state_base(
     state.allocator_provenance = allocator_provenance;
     state.status = crate::src::deflate::INIT_STATE;
     state.wrap = wrap;
-    state.gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+    state.gzhead = None;
     state.gzhead_bound_set = false;
     state.w_bits = window_bits as crate::stdlib::uInt;
     state.w_size = (1 as crate::stdlib::uInt) << state.w_bits;
@@ -874,7 +877,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
         pending_out: 0,
         pending: 0,
         wrap: 0,
-        gzhead: ::core::ptr::null_mut(),
+        gzhead: None,
         gzhead_bound_set: false,
         gzhead_bound_has_extra: false,
         gzhead_bound_extra_len: 0,
@@ -973,7 +976,9 @@ fn initialize_allocated_deflate_state(
     unsafe {
         strm.state = state as *mut crate::src::deflate::internal_state;
         let state = &mut *state;
-        *state = empty_deflate_state();
+        // Callback allocation returns uninitialized storage.  Write the
+        // first Rust value into it without attempting to drop that storage.
+        ::core::ptr::write(state, empty_deflate_state());
         initialize_deflate_state_base(
             state,
             strm,
@@ -1568,13 +1573,13 @@ pub unsafe extern "C" fn deflateReset_ffi(
 }
 fn deflate_set_header(
     state: &mut crate::src::deflate::deflate_state,
-    head: &mut crate::zlib_h::gz_header_s,
+    head: DeflateGzipHeader,
     bound: DeflateBoundHeaderMetadata,
 ) -> ::core::ffi::c_int {
     if state.wrap != 2 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state.gzhead = head;
+    state.gzhead = Some(head);
     state.gzhead_bound_set = true;
     state.gzhead_bound_has_extra = bound.has_extra;
     state.gzhead_bound_extra_len = bound.extra_len;
@@ -1588,7 +1593,7 @@ fn deflate_clear_header(state: &mut crate::src::deflate::deflate_state) -> ::cor
     if state.wrap != 2 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state.gzhead = ::core::ptr::null_mut();
+    state.gzhead = None;
     state.gzhead_bound_set = false;
     crate::zlib_h::Z_OK
 }
@@ -1624,6 +1629,14 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
         } else {
             Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
         };
+        let extra = if header.extra.is_null() {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts(
+                header.extra,
+                (header.extra_len & 0xffff as crate::stdlib::uInt) as usize,
+            ))
+        };
         let bound = deflate_bound_header_metadata(
             !header.extra.is_null(),
             header.extra_len,
@@ -1631,7 +1644,18 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
             comment,
             header.hcrc,
         );
-        deflate_set_header(state, header, bound)
+        let Some(head) = DeflateGzipHeader::snapshot(
+            header.text,
+            header.time,
+            header.os,
+            extra,
+            name,
+            comment,
+            header.hcrc,
+        ) else {
+            return crate::zlib_h::Z_MEM_ERROR;
+        };
+        deflate_set_header(state, head, bound)
     }
 }
 
@@ -2156,20 +2180,59 @@ fn write_gzip_header_magic(
     true
 }
 
-struct DeflateGzipHeader<'a> {
+#[derive(Clone)]
+struct DeflateGzipHeader {
     text: ::core::ffi::c_int,
     time: crate::stdlib::uLong,
     os: ::core::ffi::c_int,
-    extra: Option<&'a [crate::stdlib::Bytef]>,
-    name: Option<&'a ::std::ffi::CStr>,
-    comment: Option<&'a ::std::ffi::CStr>,
+    extra: Option<Vec<crate::stdlib::Bytef>>,
+    name: Option<Vec<crate::stdlib::Bytef>>,
+    comment: Option<Vec<crate::stdlib::Bytef>>,
     hcrc: ::core::ffi::c_int,
+}
+
+impl DeflateGzipHeader {
+    fn snapshot(
+        text: ::core::ffi::c_int,
+        time: crate::stdlib::uLong,
+        os: ::core::ffi::c_int,
+        extra: Option<&[crate::stdlib::Bytef]>,
+        name: Option<&::std::ffi::CStr>,
+        comment: Option<&::std::ffi::CStr>,
+        hcrc: ::core::ffi::c_int,
+    ) -> Option<Self> {
+        fn copy(bytes: &[crate::stdlib::Bytef]) -> Option<Vec<crate::stdlib::Bytef>> {
+            let mut owned = Vec::new();
+            owned.try_reserve_exact(bytes.len()).ok()?;
+            owned.extend_from_slice(bytes);
+            Some(owned)
+        }
+
+        Some(Self {
+            text,
+            time,
+            os,
+            extra: match extra {
+                Some(extra) => Some(copy(extra)?),
+                None => None,
+            },
+            name: match name {
+                Some(name) => Some(copy(name.to_bytes_with_nul())?),
+                None => None,
+            },
+            comment: match comment {
+                Some(comment) => Some(copy(comment.to_bytes_with_nul())?),
+                None => None,
+            },
+            hcrc,
+        })
+    }
 }
 
 fn write_gzip_header_fixed(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
-    header: &DeflateGzipHeader<'_>,
+    header: &DeflateGzipHeader,
 ) -> bool {
     let Ok(start) = usize::try_from(state.pending) else {
         return false;
@@ -2198,7 +2261,7 @@ fn write_gzip_header_fixed(
         0,
     ];
     let length = if header.extra.is_none() { 7 } else { 9 };
-    if let Some(extra) = header.extra {
+    if let Some(extra) = header.extra.as_deref() {
         let extra_len = extra.len() as crate::stdlib::uInt;
         fixed[7] = extra_len as crate::stdlib::Bytef;
         fixed[8] = (extra_len >> 8) as crate::stdlib::Bytef;
@@ -2714,42 +2777,24 @@ pub fn deflate(
             return crate::zlib_h::Z_OK;
         }
     }
-    // A custom header is retained by the stream for the duration of a deflate
-    // call. Convert it once at this legacy boundary so all header phases below
-    // operate on ordinary borrowed Rust values.
-    let gzip_header = unsafe {
-        if state.gzhead.is_null() {
-            None
-        } else {
-            let header = &*state.gzhead;
-            let extra = if header.extra.is_null() {
-                None
-            } else {
-                Some(::core::slice::from_raw_parts(
-                    header.extra,
-                    (header.extra_len & 0xffff as crate::stdlib::uInt) as usize,
-                ))
-            };
-            let name = if header.name.is_null() {
-                None
-            } else {
-                Some(::std::ffi::CStr::from_ptr(header.name.cast()))
-            };
-            let comment = if header.comment.is_null() {
-                None
-            } else {
-                Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
-            };
-            Some(DeflateGzipHeader {
-                text: header.text,
-                time: header.time,
-                os: header.os,
-                extra,
-                name,
-                comment,
-                hcrc: header.hcrc,
-            })
-        }
+    // A custom header is copied at `deflateSetHeader`'s ABI boundary.  Header
+    // emission below consequently uses only owned Rust data and never needs
+    // to dereference a caller buffer while a stream is resumable.
+    // Keep the snapshot independent from the mutable stream state during the
+    // resumable header state machine below.  The original snapshot remains
+    // retained in `state` for subsequent calls and `deflateCopy`; once header
+    // emission is complete, avoid cloning it on ordinary compression calls.
+    let gzip_header = if matches!(
+        state.status,
+        crate::src::deflate::GZIP_STATE
+            | crate::src::deflate::EXTRA_STATE
+            | crate::src::deflate::NAME_STATE
+            | crate::src::deflate::COMMENT_STATE
+            | crate::src::deflate::HCRC_STATE
+    ) {
+        state.gzhead.clone()
+    } else {
+        None
     };
     // Gzip header emission may resume in any of these phases.  Keep its
     // pending-buffer conversion at this one legacy boundary, then reborrow
@@ -2805,7 +2850,7 @@ pub fn deflate(
         let Some(header) = gzip_header.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if let Some(extra) = header.extra {
+        if let Some(extra) = header.extra.as_deref() {
             let extra_len = extra.len();
             let Some(pending_buf) = gzip_pending_buf.as_deref_mut() else {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -2853,8 +2898,7 @@ pub fn deflate(
         let Some(header) = gzip_header.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if let Some(name) = header.name {
-            let name = name.to_bytes_with_nul();
+        if let Some(name) = header.name.as_deref() {
             let Some(pending_buf) = gzip_pending_buf.as_deref_mut() else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
@@ -2902,8 +2946,7 @@ pub fn deflate(
         let Some(header) = gzip_header.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if let Some(comment) = header.comment {
-            let comment = comment.to_bytes_with_nul();
+        if let Some(comment) = header.comment.as_deref() {
             let Some(pending_buf) = gzip_pending_buf.as_deref_mut() else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
@@ -3221,8 +3264,10 @@ pub fn deflateCopy(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     dest_stream.state = ds as *mut crate::src::deflate::internal_state;
+    // `ds` is fresh callback-allocated storage, so initialize rather than
+    // assign (assignment would try to drop an uninitialized header snapshot).
+    unsafe { ::core::ptr::write(ds, source_state.clone()) };
     let dest_state = unsafe { &mut *ds };
-    *dest_state = source_state.clone();
     dest_state.strm = stream_identity(dest_stream);
     let storage = DeflateStorageLayout::from_state(dest_state);
     dest_state.window = unsafe {
