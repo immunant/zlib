@@ -1411,10 +1411,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
             GzDecompInputAction::Inflate => {}
         }
-        ret = crate::src::inflate::inflate(
-            &raw mut state.strm,
-            crate::zlib_h::Z_NO_FLUSH,
-        );
+        ret = crate::src::inflate::inflate(&raw mut state.strm, crate::zlib_h::Z_NO_FLUSH);
         let stream_state = gz_decomp_stream_state(&state.strm);
         let decision = gz_decomp_decision(
             ret,
@@ -4020,9 +4017,7 @@ unsafe fn gz_read(
             }
             GzReadAction::StopAtEof => break,
             GzReadAction::Fetch => {
-                if let Some(fetch_error) =
-                    gz_read_fetch_error(gz_fetch(state), state.x.have)
-                {
+                if let Some(fetch_error) = gz_read_fetch_error(gz_fetch(state), state.x.have) {
                     err = fetch_error;
                 }
             }
@@ -4033,8 +4028,7 @@ unsafe fn gz_read(
             }
             GzReadAction::Decompress => {
                 state.strm.avail_out = n as crate::stdlib::uInt;
-                state.strm.next_out =
-                    buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
+                state.strm.next_out = buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
                 err = gz_decomp(state);
                 (n, state.x.have) = gz_read_take_decompressed(state.x.have);
             }

@@ -1371,7 +1371,6 @@ impl GzZeroCore {
     }
 }
 
-
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let buffer = if state.size == 0 {
         &mut []
@@ -1877,11 +1876,10 @@ mod tests {
         gz_comp_write_progress, gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip,
         gz_init_allocation_plan, gz_init_deflate_failed, gz_init_failed, gz_init_mode,
         gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_buffered_copy_plan,
-        gz_write_apply_buffered_progress,
-        gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
-        gz_write_buffered_comp_result, gz_write_buffered_copy_len, gz_write_buffered_copy_plan,
-        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
-        gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
+        gz_write_apply_buffered_progress, gz_write_apply_chunk_progress,
+        gz_write_apply_direct_progress, gz_write_buffered_comp_result, gz_write_buffered_copy_len,
+        gz_write_buffered_copy_plan, gz_write_buffered_input_action, gz_write_buffered_progress,
+        gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
         gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
         gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,

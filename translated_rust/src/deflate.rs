@@ -159,7 +159,7 @@ pub use crate::src::crc32::crc32;
 pub use crate::src::crc32::crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
-pub use crate::src::trees::_tr_align;
+pub use crate::src::trees::_tr_align_ffi as _tr_align;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
@@ -398,11 +398,7 @@ fn slide_hash_entries(entries: &mut [Posf], window_size: crate::stdlib::uInt) {
     }
 }
 
-fn slide_hash_core(
-    head: &mut [Posf],
-    prev: &mut [Posf],
-    window_size: crate::stdlib::uInt,
-) {
+fn slide_hash_core(head: &mut [Posf], prev: &mut [Posf], window_size: crate::stdlib::uInt) {
     slide_hash_entries(head, window_size);
     slide_hash_entries(prev, window_size);
 }
@@ -826,7 +822,9 @@ fn read_buf_core(
     output[..copied_len].copy_from_slice(&input[..copied_len]);
     let (avail_in, total_in) = read_buf_input_progress_after_copy(avail_in, total_in, copied);
     let adler = match read_buf_checksum(wrap) {
-        Some(ReadBufChecksum::Adler32) => crate::src::adler32::adler32_z(adler, &output[..copied_len]),
+        Some(ReadBufChecksum::Adler32) => {
+            crate::src::adler32::adler32_z(adler, &output[..copied_len])
+        }
         Some(ReadBufChecksum::Crc32) => crate::src::crc32::crc32_z(adler, &output[..copied_len]),
         None => adler,
     };
@@ -1244,7 +1242,8 @@ pub unsafe extern "C" fn deflateInit2_(
         || (*s).pending_buf.is_null()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
-        (*strm).msg = z_error_message(-4 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
+        (*strm).msg =
+            z_error_message(-4 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -2455,11 +2454,13 @@ pub unsafe extern "C" fn deflate(
         flush,
     ) {
         DeflatePreflight::StreamError => {
-            (*strm).msg = z_error_message(-2 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
+            (*strm).msg =
+                z_error_message(-2 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
             return -2 as ::core::ffi::c_int;
         }
         DeflatePreflight::BufError => {
-            (*strm).msg = z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
+            (*strm).msg =
+                z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
             return -5 as ::core::ffi::c_int;
         }
         DeflatePreflight::Continue => {}
@@ -2473,13 +2474,15 @@ pub unsafe extern "C" fn deflate(
             return crate::zlib_h::Z_OK;
         }
     } else if deflate_should_return_buf_error((*strm).avail_in, flush, old_flush) {
-        (*strm).msg = z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
+        (*strm).msg =
+            z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
     if (*s).status == crate::src::deflate::FINISH_STATE
         && (*strm).avail_in != 0 as crate::stdlib::uInt
     {
-        (*strm).msg = z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
+        (*strm).msg =
+            z_error_message(-5 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
     if (*s).status == crate::src::deflate::INIT_STATE && (*s).wrap == 0 as ::core::ffi::c_int {
@@ -2840,7 +2843,7 @@ pub unsafe extern "C" fn deflate(
         if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                crate::src::trees::_tr_align(s as *mut crate::src::deflate::internal_state);
+                crate::src::trees::_tr_align_ffi(s as *mut crate::src::deflate::internal_state);
             } else if flush != crate::zlib_h::Z_BLOCK {
                 crate::src::trees::_tr_stored_block(
                     s as *mut crate::src::deflate::internal_state,
@@ -4427,23 +4430,22 @@ mod tests {
         deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
         fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
-        fill_window_lookahead_after_read,
-        fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
-        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_reset_plan, lm_init_plan,
-        lm_initial_state, lm_match_parameters, lm_reset_plan, longest_match_candidate_update,
-        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
-        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_checksum, read_buf_core,
-        read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
-        stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
-        stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
-        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
-        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
-        DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
-        ReadBufResult,
+        fill_window_lookahead_after_read, fill_window_should_refill, fill_window_should_slide,
+        fill_window_state_after_slide, fill_window_zero_range, flush_pending_accounting,
+        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
+        longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
+        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
+        read_buf_core, read_buf_input_progress_after_copy, read_buf_len,
+        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_core, slide_hash_entry,
+        stored_block_available_output, stored_block_buffered_len, stored_block_can_emit,
+        stored_block_copy_lengths, stored_block_header_bytes, stored_block_is_last,
+        stored_block_length_bytes, stored_block_min_size, stored_block_payload_len,
+        stored_block_should_wait, stored_insert_after_input, symbol_buffer_is_full,
+        symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress, DeflateFinalFlushAction,
+        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
+        ReadBufChecksum, ReadBufResult,
     };
 
     #[test]
@@ -4491,9 +4493,15 @@ mod tests {
         );
 
         assert_eq!(good_match, ::core::ffi::c_int::MIN as crate::stdlib::uInt);
-        assert_eq!(max_lazy_match, (-1 as ::core::ffi::c_int) as crate::stdlib::uInt);
+        assert_eq!(
+            max_lazy_match,
+            (-1 as ::core::ffi::c_int) as crate::stdlib::uInt
+        );
         assert_eq!(nice_match, ::core::ffi::c_int::MIN);
-        assert_eq!(max_chain_length, ::core::ffi::c_int::MAX as crate::stdlib::uInt);
+        assert_eq!(
+            max_chain_length,
+            ::core::ffi::c_int::MAX as crate::stdlib::uInt
+        );
     }
 
     #[test]

@@ -842,11 +842,11 @@ mod tests {
         fast_window_distance_back, fast_window_distance_is_invalid, finish_fast_distance,
         input_bytes_needed, input_remaining_after_read, low_bits, output_cursor_after_write,
         output_cursor_after_writes, output_produced_at_fast_path_start, refill_input_byte,
-        subtable_index, table_index,
-        trailing_match_copy_byte_count, trailing_match_copy_needs_second_byte, unread_input_state,
-        validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDecodeFailure,
-        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
-        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
+        subtable_index, table_index, trailing_match_copy_byte_count,
+        trailing_match_copy_needs_second_byte, unread_input_state, validate_fast_window_distance,
+        FastCodeEntry, FastDecodeError, FastDecodeFailure, FastDistAction, FastDistance,
+        FastDistanceSource, FastLitLenAction, FastMatchCopyLayout, FastWindowContinuationSource,
+        FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -1147,7 +1147,10 @@ mod tests {
             output_cursor_after_writes(::core::ffi::c_uint::MAX, 1, 3),
             (2, ::core::ffi::c_uint::MAX - 1)
         );
-        assert_eq!(output_cursor_after_write(7, 10), output_cursor_after_writes(7, 10, 1));
+        assert_eq!(
+            output_cursor_after_write(7, 10),
+            output_cursor_after_writes(7, 10, 1)
+        );
     }
 
     #[test]

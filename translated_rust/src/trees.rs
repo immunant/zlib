@@ -5113,64 +5113,54 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     }
     (*s).pending = pending_cursor_after_bytes(pending, count);
 }
-pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-    if bit_buffer_would_overflow((*s).bi_valid, len) {
-        let mut val: ::core::ffi::c_int = (1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int;
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-            as crate::zutil_h::ush;
-        let c2rust_fresh62 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh62 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let c2rust_fresh63 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh63 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
-            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-            as crate::zutil_h::ush;
-        (*s).bi_valid += len - crate::src::deflate::Buf_size;
-    } else {
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | (((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) as crate::zutil_h::ush
-                as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush;
-        (*s).bi_valid += len;
+fn tr_align_core(
+    pending_buffer: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+) -> bool {
+    let mut writer = PendingBitWriter {
+        pending_buffer,
+        pending,
+        bi_buf,
+        bi_valid,
+    };
+    let end_code = &static_ltree[256];
+    if !writer.write_bits(block_header_bits(1, 0), 3)
+        || !writer.write_bits(
+            end_code.fc.value as ::core::ffi::c_int,
+            end_code.dl.value as ::core::ffi::c_int,
+        )
+    {
+        return false;
     }
-    let mut len_0: ::core::ffi::c_int =
-        static_ltree[256 as ::core::ffi::c_int as usize].dl.value as ::core::ffi::c_int;
-    if bit_buffer_would_overflow((*s).bi_valid, len_0) {
-        let mut val_0: ::core::ffi::c_int =
-            static_ltree[256 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int;
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-            as crate::zutil_h::ush;
-        let c2rust_fresh64 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh64 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let c2rust_fresh65 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh65 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        (*s).bi_buf = (val_0 as crate::zutil_h::ush as ::core::ffi::c_int
-            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-            as crate::zutil_h::ush;
-        (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
-    } else {
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | (static_ltree[256 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush;
-        (*s).bi_valid += len_0;
-    }
-    _tr_flush_bits_ffi(s);
+
+    let (count, bytes) = bi_flush_core(writer.bi_buf, writer.bi_valid);
+    let Ok(start) = usize::try_from(*writer.pending) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(count) else {
+        return false;
+    };
+    let Some(output) = writer.pending_buffer.get_mut(start..end) else {
+        return false;
+    };
+    output.copy_from_slice(&bytes[..count]);
+    *writer.pending = pending_cursor_after_bytes(*writer.pending, count);
+    true
 }
 #[export_name = "_tr_align"]
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_align(s)
+    let state = &mut *s;
+    let pending_buffer =
+        core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let _ = tr_align_core(
+        pending_buffer,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+    );
 }
 
 fn compress_block(
@@ -5398,10 +5388,8 @@ fn tr_tally_core(
             distance_index,
         } => {
             *matches = matches.wrapping_add(1);
-            dyn_ltree[length_index].fc.value =
-                dyn_ltree[length_index].fc.value.wrapping_add(1);
-            dyn_dtree[distance_index].fc.value =
-                dyn_dtree[distance_index].fc.value.wrapping_add(1);
+            dyn_ltree[length_index].fc.value = dyn_ltree[length_index].fc.value.wrapping_add(1);
+            dyn_dtree[distance_index].fc.value = dyn_dtree[distance_index].fc.value.wrapping_add(1);
         }
     }
     symbol_buffer_is_full(next_sym_next, sym_end) as ::core::ffi::c_int
@@ -5416,7 +5404,9 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     let state = &mut *s;
     let symbols = core::slice::from_raw_parts_mut(
         state.sym_buf,
-        state.pending_buf_size.wrapping_sub(state.lit_bufsize as crate::zutil_h::ulg) as usize,
+        state
+            .pending_buf_size
+            .wrapping_sub(state.lit_bufsize as crate::zutil_h::ulg) as usize,
     );
     tr_tally_core(
         symbols,
@@ -5448,7 +5438,7 @@ mod tests {
         supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
-        tree_bit_emissions, tree_bit_length_cost, tree_bit_length_totals_after_node,
+        tr_align_core, tree_bit_emissions, tree_bit_length_cost, tree_bit_length_totals_after_node,
         tree_code_count, tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor,
         tree_parent_depth, tree_run_continues, tree_run_emissions, tree_run_extra_bits,
         tree_run_limits, tree_run_step, tree_run_step_after_increment, BlockEncoding,
@@ -6146,6 +6136,24 @@ mod tests {
             (1, 2, [0x34, 0x12])
         );
         assert_eq!((buffer, valid), (0, 0));
+    }
+
+    #[test]
+    fn align_core_emits_an_empty_fixed_block_and_flushes_bits() {
+        let mut pending_buffer = [0; 8];
+        let mut pending = 0;
+        let mut bi_buf = 0;
+        let mut bi_valid = 0;
+
+        assert!(tr_align_core(
+            &mut pending_buffer,
+            &mut pending,
+            &mut bi_buf,
+            &mut bi_valid,
+        ));
+        assert_eq!(pending, 1);
+        assert_eq!(pending_buffer[0], 0x02);
+        assert_eq!((bi_buf, bi_valid), (0, 2));
     }
 
     #[test]
