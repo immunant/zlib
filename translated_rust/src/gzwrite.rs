@@ -562,14 +562,14 @@ pub unsafe extern "C" fn gzputs_ffi(
         text,
     )
 }
-pub unsafe extern "C" fn gzflush(
-    mut file: crate::zlib_h::gzFile,
+unsafe fn gzflush(
+    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if file.is_null() {
+    let Some(mut state) = state else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    };
+    let state = state.as_mut();
     if state.mode != crate::gzguts_h::GZ_WRITE
         || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
@@ -595,7 +595,10 @@ pub unsafe extern "C" fn gzflush_ffi(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzflush(file, flush)
+    gzflush(
+        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
+        flush,
+    )
 }
 pub unsafe extern "C" fn gzsetparams(
     mut file: crate::zlib_h::gzFile,
