@@ -665,8 +665,14 @@ unsafe fn updatewindow(
         let Some(requested_wsize) = 1_u32.checked_shl(state.wbits) else {
             return 1 as ::core::ffi::c_int;
         };
-        state.window = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+        // `inflate()` normally reaches this boundary only after init has
+        // installed zalloc.  Treat a malformed compatibility stream as the
+        // same allocation failure that a null allocator result represents,
+        // rather than panicking across the C ABI.
+        let Some(zalloc) = strm.zalloc else {
+            return 1 as ::core::ffi::c_int;
+        };
+        state.window = zalloc(
             strm.opaque,
             requested_wsize,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
