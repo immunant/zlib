@@ -110,6 +110,10 @@ pub struct internal_state {
     // stream never retains an interior raw pointer into the allocation.
     pub pending_out: usize,
     pub pending: crate::zutil_h::ulg,
+    // Keep callback pairing as scalar ownership rather than deriving it from
+    // raw allocation views during teardown. This distinguishes a partially
+    // constructed copy's inherited source views from its own allocations.
+    callback_ownership: DeflateCallbackOwnership,
     pub wrap: ::core::ffi::c_int,
     gzhead: Option<GzipHeader>,
     pub gzindex: usize,
@@ -422,11 +426,89 @@ struct DeflateStorageLayout {
 // Name that order independently of the raw allocation handles so the future
 // owner can retain the same transaction without reconstructing it from state
 // fields.
+#[derive(Clone, Copy)]
 enum DeflateStorageSlot {
     Window,
     Prev,
     Head,
     Pending,
+}
+
+// Callback-owned storage has two representations at the ABI boundary: the
+// provenance-carrying handles in `internal_state`, and this pointer-free
+// ownership ledger. The ledger decides which handles a stream may release,
+// including during partial initialization and failed deep-copy setup.
+#[derive(Clone, Copy)]
+struct DeflateCallbackOwnership {
+    state: bool,
+    window: bool,
+    prev: bool,
+    head: bool,
+    pending: bool,
+}
+
+impl DeflateCallbackOwnership {
+    fn new_state() -> Self {
+        Self {
+            state: true,
+            window: false,
+            prev: false,
+            head: false,
+            pending: false,
+        }
+    }
+
+    fn record_storage(&mut self, slot: DeflateStorageSlot, allocated: bool) {
+        if !allocated {
+            return;
+        }
+        match slot {
+            DeflateStorageSlot::Window => self.window = true,
+            DeflateStorageSlot::Prev => self.prev = true,
+            DeflateStorageSlot::Head => self.head = true,
+            DeflateStorageSlot::Pending => self.pending = true,
+        }
+    }
+
+    fn take_release_plan(&mut self, status: ::core::ffi::c_int) -> DeflateReleasePlan {
+        let plan = DeflateReleasePlan {
+            status,
+            pending: self.pending,
+            head: self.head,
+            prev: self.prev,
+            window: self.window,
+            state: self.state,
+        };
+        self.pending = false;
+        self.head = false;
+        self.prev = false;
+        self.window = false;
+        self.state = false;
+        plan
+    }
+}
+
+// This complete decision is pointer-free. The one callback boundary pairs
+// each marked slot with its original handle in pending/head/prev/window/state
+// order, preserving zlib's observable callback lifecycle.
+#[derive(Clone, Copy)]
+struct DeflateReleasePlan {
+    status: ::core::ffi::c_int,
+    pending: bool,
+    head: bool,
+    prev: bool,
+    window: bool,
+    state: bool,
+}
+
+impl DeflateReleasePlan {
+    fn result(&self) -> ::core::ffi::c_int {
+        if self.status == crate::src::deflate::BUSY_STATE {
+            crate::zlib_h::Z_DATA_ERROR
+        } else {
+            crate::zlib_h::Z_OK
+        }
+    }
 }
 
 // Allocation success is independent of the callback-owned handles that are
@@ -1085,6 +1167,7 @@ pub unsafe fn deflateInit2_(
         pending_buf_size: initial_state.pending_buf_size,
         pending_out: initial_state.pending_out,
         pending: initial_state.pending,
+        callback_ownership: DeflateCallbackOwnership::new_state(),
         wrap: initial_state.wrap,
         gzhead: None,
         gzindex: initial_state.gzindex,
@@ -1184,6 +1267,7 @@ pub unsafe fn deflateInit2_(
                 state.pending_buf = ::core::ptr::NonNull::new(allocation.cast());
             }
         }
+        state.callback_ownership.record_storage(*slot, allocated);
         allocated
     });
     let state = &mut *s;
@@ -4139,19 +4223,39 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     // Besides retaining zlib's pending/head/prev/window/state release order,
     // this ends the mutable state projection before a re-entrant zfree()
     // callback can observe the stream.
-    let (status, allocations) = {
-        let status = state.status;
+    let (release_plan, allocations) = {
+        let release_plan = state.callback_ownership.take_release_plan(state.status);
         // The state itself is released through the caller's zfree callback,
         // so drop the owned gzip-header snapshot before that allocation.
         drop(state.gzhead.take());
         (
-            status,
+            release_plan,
             [
-                state.pending_buf.map(|allocation| allocation.cast()),
-                state.head.map(|allocation| allocation.cast()),
-                state.prev.map(|allocation| allocation.cast()),
-                state.window.map(|allocation| allocation.cast()),
-                ::core::ptr::NonNull::new(state_ptr.cast()),
+                if release_plan.pending {
+                    state.pending_buf.map(|allocation| allocation.cast())
+                } else {
+                    None
+                },
+                if release_plan.head {
+                    state.head.map(|allocation| allocation.cast())
+                } else {
+                    None
+                },
+                if release_plan.prev {
+                    state.prev.map(|allocation| allocation.cast())
+                } else {
+                    None
+                },
+                if release_plan.window {
+                    state.window.map(|allocation| allocation.cast())
+                } else {
+                    None
+                },
+                if release_plan.state {
+                    ::core::ptr::NonNull::new(state_ptr.cast())
+                } else {
+                    None
+                },
             ],
         )
     };
@@ -4159,11 +4263,7 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         zfree(opaque, allocation.as_ptr());
     }
     strm.state = None;
-    return if status == crate::src::deflate::BUSY_STATE {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        crate::zlib_h::Z_OK
-    };
+    return release_plan.result();
 }
 #[export_name = "deflateEnd"]
 
@@ -4309,6 +4409,7 @@ unsafe fn deflate_copy_from_abi_boundary(
         pending_buf_size: payload.pending_buf_size,
         pending_out: payload.pending_out,
         pending: payload.pending,
+        callback_ownership: DeflateCallbackOwnership::new_state(),
         wrap: payload.wrap,
         gzhead: payload.gzhead,
         gzindex: payload.gzindex,
@@ -4388,7 +4489,9 @@ unsafe fn deflate_copy_from_abi_boundary(
                 ds.pending_buf = ::core::ptr::NonNull::new(allocation.cast());
             }
         }
-        !allocation.is_null()
+        let allocated = !allocation.is_null();
+        ds.callback_ownership.record_storage(*slot, allocated);
+        allocated
     });
     if !storage_results.is_complete()
         || ds.window.is_none()
