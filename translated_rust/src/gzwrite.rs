@@ -6,6 +6,7 @@ pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::src::gzlib::gz_clamped_uint;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
+pub(crate) use crate::src::gzlib::gz_error_with_os_error;
 pub(crate) use crate::src::gzlib::gz_file_completed_items;
 pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
@@ -147,11 +148,7 @@ unsafe fn gz_comp(
                 }
                 GzWriteSyscallResult::Error { errno, again } => {
                     state.again = again;
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(errno),
-                    );
+                    gz_error_with_os_error(state, crate::zlib_h::Z_ERRNO, errno);
                     return -1 as ::core::ffi::c_int;
                 }
             }
@@ -192,11 +189,7 @@ unsafe fn gz_comp(
                     }
                     GzWriteSyscallResult::Error { errno, again } => {
                         state.again = again;
-                        crate::src::gzlib::gz_error(
-                            state,
-                            crate::zlib_h::Z_ERRNO,
-                            crate::stdlib::strerror(errno),
-                        );
+                        gz_error_with_os_error(state, crate::zlib_h::Z_ERRNO, errno);
                         return -1 as ::core::ffi::c_int;
                     }
                 }

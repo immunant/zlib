@@ -946,6 +946,22 @@ pub fn gz_error(
     }
 }
 
+pub(crate) fn gz_error_with_os_error(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    errno: ::core::ffi::c_int,
+) {
+    let message = ::std::io::Error::from_raw_os_error(errno).to_string();
+    match ::std::ffi::CString::new(message) {
+        Ok(message) => gz_error(state, err, message.as_ptr()),
+        Err(_) => gz_error(
+            state,
+            err,
+            b"unknown error\0".as_ptr() as *const ::core::ffi::c_char,
+        ),
+    }
+}
+
 fn gz_error_should_clear_buffer(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {
     err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0
 }

@@ -9,6 +9,7 @@ pub use crate::gzguts_h::LOOK;
 pub use crate::src::gzlib::gz_consume_buffered_read_cursor;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
+pub(crate) use crate::src::gzlib::gz_error_with_os_error;
 pub(crate) use crate::src::gzlib::gz_file_completed_items;
 pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
@@ -129,8 +130,7 @@ fn gz_load(
             if retryable {
                 state.again = 1 as ::core::ffi::c_int;
             }
-            let msg = unsafe { crate::stdlib::strerror(errno) };
-            crate::src::gzlib::gz_error(&mut *state, crate::zlib_h::Z_ERRNO, msg);
+            gz_error_with_os_error(state, crate::zlib_h::Z_ERRNO, errno);
             return -1 as ::core::ffi::c_int;
         }
         GzLoadReadResult::Eof => {
