@@ -2021,9 +2021,15 @@ pub unsafe extern "C" fn deflate_ffi(
                 let c2rust_fresh19 = (*s).gzindex;
                 (*s).gzindex = (*s).gzindex.wrapping_add(1);
                 val = *(*(*s).gzhead).name.offset(c2rust_fresh19 as isize) as ::core::ffi::c_int;
-                let c2rust_fresh20 = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh20 as isize) = val as crate::stdlib::Bytef;
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    (*s).pending_buf,
+                    (*s).pending_buf_size as usize,
+                );
+                append_deflate_pending_bytes(
+                    pending_buf,
+                    &mut (*s).pending,
+                    &[val as crate::stdlib::Byte],
+                );
                 if !(val != 0 as ::core::ffi::c_int) {
                     break;
                 }
@@ -2067,9 +2073,15 @@ pub unsafe extern "C" fn deflate_ffi(
                 (*s).gzindex = (*s).gzindex.wrapping_add(1);
                 val_0 =
                     *(*(*s).gzhead).comment.offset(c2rust_fresh21 as isize) as ::core::ffi::c_int;
-                let c2rust_fresh22 = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh22 as isize) = val_0 as crate::stdlib::Bytef;
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    (*s).pending_buf,
+                    (*s).pending_buf_size as usize,
+                );
+                append_deflate_pending_bytes(
+                    pending_buf,
+                    &mut (*s).pending,
+                    &[val_0 as crate::stdlib::Byte],
+                );
                 if !(val_0 != 0 as ::core::ffi::c_int) {
                     break;
                 }
