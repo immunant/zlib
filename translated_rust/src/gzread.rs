@@ -562,13 +562,9 @@ unsafe fn gz_read(
     return got;
 }
 unsafe fn gzread(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     output: &mut [u8],
 ) -> ::core::ffi::c_int {
-    let Some(mut state) = state else {
-        return -1 as ::core::ffi::c_int;
-    };
-    let state = state.as_mut();
     if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
@@ -620,22 +616,18 @@ pub unsafe extern "C" fn gzread_ffi(
     } else {
         ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize)
     };
-    gzread(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        output,
-    )
+    let Some(mut state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    gzread(state.as_mut(), output)
 }
 unsafe fn gzfread(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     output: &mut [u8],
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let mut len: crate::stdlib::z_size_t = 0;
-    let Some(mut state) = state else {
-        return 0 as crate::stdlib::z_size_t;
-    };
-    let state = state.as_mut();
     if state.mode != crate::gzguts_h::GZ_READ {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -677,12 +669,10 @@ pub unsafe extern "C" fn gzfread_ffi(
         Some(0) | None => &mut [],
         Some(len) => ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len),
     };
-    gzfread(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        output,
-        size,
-        nitems,
-    )
+    let Some(mut state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
+        return 0 as crate::stdlib::z_size_t;
+    };
+    gzfread(state.as_mut(), output, size, nitems)
 }
 pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
