@@ -85,14 +85,18 @@ struct GzOffsetQuery<'a> {
 // read/seek policy with an index and a slice only.  Keep this small view in
 // gzlib so the remaining buffered read paths can adopt the same proof without
 // teaching their cores about `gzFile_s::next`.
-struct GzBufferedCursor<'a> {
+pub(crate) struct GzBufferedCursor<'a> {
     buffer: &'a [u8],
     start: usize,
     have: usize,
 }
 
 impl<'a> GzBufferedCursor<'a> {
-    fn from_owned_buffer(buffer: &'a [u8], cursor_address: usize, have: u32) -> Option<Self> {
+    pub(crate) fn from_owned_buffer(
+        buffer: &'a [u8],
+        cursor_address: usize,
+        have: u32,
+    ) -> Option<Self> {
         let start = cursor_address.checked_sub(buffer.as_ptr().addr())?;
         let have = have as usize;
         let end = start.checked_add(have)?;
@@ -107,6 +111,14 @@ impl<'a> GzBufferedCursor<'a> {
     fn unread(&self) -> &'a [u8] {
         // Construction checked this exact range against `buffer`.
         &self.buffer[self.start..self.start + self.have]
+    }
+
+    // Return one buffered byte together with the next checked buffer index.
+    // Keeping cursor advancement as an index lets read-side policy consume
+    // buffered output without retaining the ABI cursor pointer.
+    pub(crate) fn consume_one(&self) -> Option<(u8, usize)> {
+        let byte = *self.unread().first()?;
+        Some((byte, self.start.checked_add(1)?))
     }
 }
 

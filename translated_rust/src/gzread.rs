@@ -801,19 +801,25 @@ unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     if state.x.have != 0 {
-        // `x.next` is an ABI cursor into the owned output buffer here.  Do
-        // not construct a raw slice from its advertised `have` length: a
-        // corrupt cursor must not extend the view past that allocation.
-        let cursor = state.x.next;
-        let Some(byte) = state.out.as_deref().and_then(|buffer| {
-            let offset = cursor.addr().checked_sub(buffer.as_ptr().addr())?;
-            buffer.get(offset).copied()
+        // Convert the ABI cursor once at this boundary.  The cursor view
+        // checks the complete advertised unread range before the safe read
+        // policy consumes its first byte.
+        let Some((byte, next)) = state.out.as_deref().and_then(|buffer| {
+            crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                buffer,
+                state.x.next.addr(),
+                state.x.have,
+            )
+            .and_then(|cursor| cursor.consume_one())
         }) else {
+            return -1 as ::core::ffi::c_int;
+        };
+        let Some(buffer) = state.out.as_deref() else {
             return -1 as ::core::ffi::c_int;
         };
         state.x.have = state.x.have.wrapping_sub(1);
         state.x.pos += 1;
-        state.x.next = state.x.next.wrapping_add(1);
+        state.x.next = buffer.as_ptr().wrapping_add(next).cast_mut();
         return byte as ::core::ffi::c_int;
     }
     return if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
