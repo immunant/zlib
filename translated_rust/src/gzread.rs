@@ -737,7 +737,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         if !matches!(action, Ok(GzLookAction::ResetGzip)) {
             return -1;
         }
-        crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
+        crate::src::inflate::inflateReset(&mut state.strm);
         return 0;
     }
     let Some(mut input_cursor) = state.buffers.input_cursor.take() else {
@@ -783,9 +783,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     });
     match action {
         Ok(GzLookAction::ResetGzip) => {
-            crate::src::inflate::inflateReset(
-                &raw mut state.strm as *mut crate::zlib_h::z_stream_s,
-            );
+            crate::src::inflate::inflateReset(&mut state.strm);
             0
         }
         Ok(GzLookAction::NeedInput) => 0,

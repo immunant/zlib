@@ -370,36 +370,51 @@ pub(crate) unsafe fn inflate_stream_and_state<'stream>(
     Some((stream, state))
 }
 
-pub unsafe extern "C" fn inflateResetKeep(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+struct InflateResetUpdate {
+    adler: Option<crate::stdlib::uLong>,
+}
+
+// Resetting the resumable decoder state is independent of the ABI stream.
+// Keep the stream publication at the state projection boundary, while the
+// scalar reset itself remains usable by all reset variants.
+fn inflate_reset_keep_core(normal: &mut InflateNormalState) -> InflateResetUpdate {
+    normal.total = 0;
+    let adler = (normal.wrap != 0).then_some((normal.wrap & 1) as crate::stdlib::uLong);
+    normal.mode = crate::src::inflate::HEAD;
+    normal.last = 0;
+    normal.havedict = 0;
+    normal.flags = -1;
+    normal.dmax = 32768;
+    normal.hold = 0;
+    normal.bits = 0;
+    normal.next = 0;
+    normal.distcode = crate::src::inflate::CodeTableRef::Dynamic(0);
+    normal.lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
+    normal.sane = 1;
+    normal.back = -1;
+    InflateResetUpdate { adler }
+}
+
+fn inflate_reset_core(normal: &mut InflateNormalState) -> InflateResetUpdate {
+    normal.wsize = 0;
+    normal.whave = 0;
+    normal.wnext = 0;
+    inflate_reset_keep_core(normal)
+}
+
+pub unsafe fn inflateResetKeep(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    state.normal.total = 0 as ::core::ffi::c_ulong;
-    strm.total_out = state.normal.total as crate::stdlib::uLong;
+    let update = inflate_reset_keep_core(&mut state.normal);
+    strm.total_out = 0;
     strm.total_in = strm.total_out;
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    strm.data_type = 0 as ::core::ffi::c_int;
-    if state.normal.wrap != 0 {
-        strm.adler = (state.normal.wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong;
+    strm.data_type = 0;
+    if let Some(adler) = update.adler {
+        strm.adler = adler;
     }
-    state.normal.mode = crate::src::inflate::HEAD;
-    state.normal.last = 0 as ::core::ffi::c_int;
-    state.normal.havedict = 0 as ::core::ffi::c_int;
-    state.normal.flags = -1 as ::core::ffi::c_int;
-    state.normal.dmax = 32768 as ::core::ffi::c_uint;
     state.head = None;
-    state.normal.hold = 0 as ::core::ffi::c_ulong;
-    state.normal.bits = 0 as ::core::ffi::c_uint;
-    state.normal.next = 0;
-    state.normal.distcode = crate::src::inflate::CodeTableRef::Dynamic(0);
-    state.normal.lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
-    state.normal.sane = 1 as ::core::ffi::c_int;
-    state.normal.back = -1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateResetKeep"]
@@ -407,25 +422,34 @@ pub unsafe extern "C" fn inflateResetKeep(
 pub unsafe extern "C" fn inflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateResetKeep(strm)
-}
-pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    inflateResetKeep(strm)
+}
+pub unsafe fn inflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    state.normal.wsize = 0 as ::core::ffi::c_uint;
-    state.normal.whave = 0 as ::core::ffi::c_uint;
-    state.normal.wnext = 0 as ::core::ffi::c_uint;
-    return inflateResetKeep(strm);
+    let update = inflate_reset_core(&mut state.normal);
+    strm.total_out = 0;
+    strm.total_in = strm.total_out;
+    strm.msg = ::core::ptr::null_mut();
+    strm.data_type = 0;
+    if let Some(adler) = update.adler {
+        strm.adler = adler;
+    }
+    state.head = None;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateReset"]
 
 pub unsafe extern "C" fn inflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateReset(strm)
 }
 pub unsafe extern "C" fn inflateReset2(
@@ -3080,14 +3104,17 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
         }
         (state.normal.flags, strm_ref.total_in, strm_ref.total_out)
     };
-    inflateReset(strm);
+    let update = inflate_reset_core(&mut state.normal);
+    strm_ref.total_out = 0;
+    strm_ref.total_in = strm_ref.total_out;
+    strm_ref.msg = ::core::ptr::null_mut();
+    strm_ref.data_type = 0;
+    if let Some(adler) = update.adler {
+        strm_ref.adler = adler;
+    }
+    state.head = None;
     strm_ref.total_in = in_0;
     strm_ref.total_out = out;
-    let state = strm_ref
-        .state
-        .expect("inflateSync reset retained initialized state")
-        .cast::<crate::src::inflate::inflate_state>();
-    let state = &mut *state.as_ptr();
     state.normal.flags = flags;
     state.normal.mode = crate::src::inflate::TYPE;
     return crate::zlib_h::Z_OK;
