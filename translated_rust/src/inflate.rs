@@ -1077,6 +1077,20 @@ pub(crate) fn inflate_back_remove_history(state: &mut crate::src::inflate::infla
     state.window_storage = ::std::vec::Vec::new();
 }
 
+// The decoder only accepts views that exactly describe the stream's current
+// cursors.  Keep that preflight in one safe helper so every caller reaches the
+// translated loop with the same reference-bound input/output contract.
+fn inflate_cursor_storage_matches(
+    strm: &crate::zlib_h::z_stream,
+    input_storage: Option<&[crate::stdlib::Bytef]>,
+    output_storage: &[crate::stdlib::Bytef],
+) -> bool {
+    !strm.next_out.is_null()
+        && !(strm.next_in.is_null() && strm.avail_in != 0)
+        && input_storage.is_none_or(|input| input.len() == strm.avail_in as usize)
+        && output_storage.len() == strm.avail_out as usize
+}
+
 // The checked stream/state binding below, followed by the null cursor guard,
 // keeps the implementation's Rust-facing contract reference-bound. Its raw
 // decoder operations stay internal to this implementation.
@@ -1144,11 +1158,7 @@ pub fn inflate(
     let Some((strm, state)) = inflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if strm.next_out.is_null()
-        || strm.next_in.is_null() && strm.avail_in != 0 as crate::stdlib::uInt
-        || input_storage.is_some_and(|input| input.len() != strm.avail_in as usize)
-        || output_storage.len() != strm.avail_out as usize
-    {
+    if !inflate_cursor_storage_matches(strm, input_storage, output_storage) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if state.mode as ::core::ffi::c_uint
