@@ -3044,9 +3044,12 @@ pub(crate) unsafe fn inflate_from_stream(
     if strm.next_out.is_null() || (strm.next_in.is_null() && strm.avail_in != 0) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let registered_header = state.head;
-    let header = registered_header.map(|registered| {
-        let header = &mut *registered.as_ptr();
+    // Convert the registered handle once for this entire request.  The
+    // resulting borrow carries the original caller provenance through both
+    // the bounded header-output view and its later scalar publication; do
+    // not reconstruct a second reference from the handle after decoding.
+    let mut registered_header = state.head.map(|registered| &mut *registered.as_ptr());
+    let header = registered_header.as_deref_mut().map(|header| {
         let extra = if header.extra.is_none() || header.extra_max == 0 {
             None
         } else {
@@ -3123,8 +3126,7 @@ pub(crate) unsafe fn inflate_from_stream(
                 .cast(),
         };
     }
-    if let (Some(registered), Some(publication)) = (registered_header, result.publication) {
-        let header = &mut *registered.as_ptr();
+    if let (Some(header), Some(publication)) = (registered_header, result.publication) {
         if let Some(value) = publication.text {
             header.text = value;
         }
