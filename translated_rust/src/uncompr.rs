@@ -1,6 +1,7 @@
 pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
+use crate::src::compress::OneShotCursor;
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd;
@@ -26,14 +27,17 @@ pub use crate::zlib_h::Z_NULL;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-use crate::src::compress::OneShotCursor;
 
-pub unsafe extern "C" fn uncompress2_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
+struct UncompressProgress {
+    status: ::core::ffi::c_int,
+    source_remaining: crate::stdlib::z_size_t,
+    output_remaining: crate::stdlib::z_size_t,
+}
+
+fn uncompress2_z(
+    dest: &mut [crate::stdlib::Bytef],
+    source: &[crate::stdlib::Bytef],
+) -> Result<UncompressProgress, ::core::ffi::c_int> {
     let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
         next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
         avail_in: 0,
@@ -50,37 +54,32 @@ pub unsafe extern "C" fn uncompress2_z(
         adler: 0,
         reserved: 0,
     };
-    let mut err: ::core::ffi::c_int = 0;
+    let mut err: ::core::ffi::c_int;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    if sourceLen.is_null() || destLen.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let source_capacity = *sourceLen;
-    let dest_capacity = *destLen;
-    if source_capacity > 0 as crate::stdlib::z_size_t && source.is_null()
-        || dest_capacity > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let mut input = OneShotCursor::new(source_capacity);
-    let mut output = OneShotCursor::new(dest_capacity);
-    if output.remaining() == 0 as crate::stdlib::z_size_t && dest.is_null() {
-        dest = &raw mut stream.reserved as *mut crate::stdlib::Bytef;
-    }
-    stream.next_in = source as *mut crate::stdlib::Bytef;
+    let mut input = OneShotCursor::new(source.len());
+    let mut output = OneShotCursor::new(dest.len());
+    stream.next_in = source.as_ptr().cast_mut();
     stream.avail_in = 0 as crate::stdlib::uInt;
     stream.zalloc = None;
     stream.zfree = None;
     stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    err = crate::src::inflate::inflateInit_(
-        &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        crate::zlib_h::ZLIB_VERSION.as_ptr(),
-        ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-    );
-    if err != crate::zlib_h::Z_OK {
-        return err;
+    // The stream is an ABI mirror used only while this slice-backed loop is
+    // active.  Empty output still needs a non-null cursor for inflate's ABI.
+    unsafe {
+        err = crate::src::inflate::inflateInit_(
+            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+            crate::zlib_h::ZLIB_VERSION.as_ptr(),
+            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+        );
     }
-    stream.next_out = dest;
+    if err != crate::zlib_h::Z_OK {
+        return Err(err);
+    }
+    stream.next_out = if dest.is_empty() {
+        &raw mut stream.reserved as *mut crate::stdlib::Bytef
+    } else {
+        dest.as_mut_ptr()
+    };
     stream.avail_out = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
@@ -89,10 +88,12 @@ pub unsafe extern "C" fn uncompress2_z(
         if stream.avail_in == 0 as crate::stdlib::uInt {
             stream.avail_in = input.next_chunk(max);
         }
-        err = crate::src::inflate::inflate(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            crate::zlib_h::Z_NO_FLUSH,
-        );
+        unsafe {
+            err = crate::src::inflate::inflate(
+                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+                crate::zlib_h::Z_NO_FLUSH,
+            );
+        }
         if err != crate::zlib_h::Z_OK {
             break;
         }
@@ -103,23 +104,24 @@ pub unsafe extern "C" fn uncompress2_z(
     let left = output
         .remaining()
         .wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
-    if sourceLen == destLen {
-        // Preserve the C write order when callers alias the two length outputs.
-        *sourceLen = source_capacity.wrapping_sub(len).wrapping_sub(left);
-    } else {
-        *sourceLen = source_capacity.wrapping_sub(len);
-        *destLen = dest_capacity.wrapping_sub(left);
+    unsafe {
+        crate::src::inflate::inflateEnd(
+            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+        );
     }
-    crate::src::inflate::inflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
-    return if err == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else if err == crate::zlib_h::Z_NEED_DICT {
-        crate::zlib_h::Z_DATA_ERROR
-    } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        err
-    };
+    Ok(UncompressProgress {
+        status: if err == crate::zlib_h::Z_STREAM_END {
+            crate::zlib_h::Z_OK
+        } else if err == crate::zlib_h::Z_NEED_DICT {
+            crate::zlib_h::Z_DATA_ERROR
+        } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
+            crate::zlib_h::Z_DATA_ERROR
+        } else {
+            err
+        },
+        source_remaining: len,
+        output_remaining: left,
+    })
 }
 #[export_name = "uncompress2_z"]
 
@@ -129,21 +131,45 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: *mut crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    uncompress2_z(dest, destLen, source, sourceLen)
+    if sourceLen.is_null() || destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source_capacity = *sourceLen;
+    let dest_capacity = *destLen;
+    if source_capacity != 0 && source.is_null() || dest_capacity != 0 && dest.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source = if source_capacity == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, source_capacity)
+    };
+    let dest = if dest_capacity == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, dest_capacity)
+    };
+    let progress = match uncompress2_z(dest, source) {
+        Ok(progress) => progress,
+        Err(err) => return err,
+    };
+    if sourceLen == destLen {
+        // Preserve the existing alias case: C length publication is an ABI
+        // boundary operation, so the core returns both progress values.
+        *sourceLen = source_capacity
+            .wrapping_sub(progress.source_remaining)
+            .wrapping_sub(progress.output_remaining);
+    } else {
+        *sourceLen = source_capacity.wrapping_sub(progress.source_remaining);
+        *destLen = dest_capacity.wrapping_sub(progress.output_remaining);
+    }
+    progress.status
 }
-pub unsafe extern "C" fn uncompress2(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::uLong,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    let mut used: crate::stdlib::z_size_t = *sourceLen as crate::stdlib::z_size_t;
-    ret = uncompress2_z(dest, &raw mut got, source, &raw mut used);
-    *sourceLen = used as crate::stdlib::uLong;
-    *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    return ret;
+fn uncompress2(
+    dest: &mut [crate::stdlib::Bytef],
+    source: &[crate::stdlib::Bytef],
+) -> Result<UncompressProgress, ::core::ffi::c_int> {
+    uncompress2_z(dest, source)
 }
 #[export_name = "uncompress2"]
 
@@ -153,16 +179,37 @@ pub unsafe extern "C" fn uncompress2_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: *mut crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    uncompress2(dest, destLen, source, sourceLen)
+    if sourceLen.is_null() || destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source_capacity = *sourceLen as crate::stdlib::z_size_t;
+    let dest_capacity = *destLen as crate::stdlib::z_size_t;
+    if source_capacity != 0 && source.is_null() || dest_capacity != 0 && dest.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source = if source_capacity == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, source_capacity)
+    };
+    let dest = if dest_capacity == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, dest_capacity)
+    };
+    let progress = match uncompress2(dest, source) {
+        Ok(progress) => progress,
+        Err(err) => return err,
+    };
+    *sourceLen = source_capacity.wrapping_sub(progress.source_remaining) as crate::stdlib::uLong;
+    *destLen = dest_capacity.wrapping_sub(progress.output_remaining) as crate::stdlib::uLongf;
+    progress.status
 }
-pub unsafe extern "C" fn uncompress_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
-    let mut used: crate::stdlib::z_size_t = sourceLen;
-    return uncompress2_z(dest, destLen, source, &raw mut used);
+fn uncompress_z(
+    dest: &mut [crate::stdlib::Bytef],
+    source: &[crate::stdlib::Bytef],
+) -> Result<UncompressProgress, ::core::ffi::c_int> {
+    uncompress2_z(dest, source)
 }
 #[export_name = "uncompress_z"]
 
@@ -172,16 +219,35 @@ pub unsafe extern "C" fn uncompress_z_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    uncompress_z(dest, destLen, source, sourceLen)
+    if destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dest_capacity = *destLen;
+    if sourceLen != 0 && source.is_null() || dest_capacity != 0 && dest.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source = if sourceLen == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, sourceLen)
+    };
+    let dest = if dest_capacity == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, dest_capacity)
+    };
+    let progress = match uncompress_z(dest, source) {
+        Ok(progress) => progress,
+        Err(err) => return err,
+    };
+    *destLen = dest_capacity.wrapping_sub(progress.output_remaining);
+    progress.status
 }
-pub unsafe extern "C" fn uncompress(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::uLong,
-) -> ::core::ffi::c_int {
-    let mut used: crate::stdlib::uLong = sourceLen;
-    return uncompress2(dest, destLen, source, &raw mut used);
+fn uncompress(
+    dest: &mut [crate::stdlib::Bytef],
+    source: &[crate::stdlib::Bytef],
+) -> Result<UncompressProgress, ::core::ffi::c_int> {
+    uncompress2(dest, source)
 }
 #[export_name = "uncompress"]
 
@@ -191,5 +257,28 @@ pub unsafe extern "C" fn uncompress_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    uncompress(dest, destLen, source, sourceLen)
+    if destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dest_capacity = *destLen as crate::stdlib::z_size_t;
+    let source_capacity = sourceLen as crate::stdlib::z_size_t;
+    if source_capacity != 0 && source.is_null() || dest_capacity != 0 && dest.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source = if source_capacity == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, source_capacity)
+    };
+    let dest = if dest_capacity == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, dest_capacity)
+    };
+    let progress = match uncompress(dest, source) {
+        Ok(progress) => progress,
+        Err(err) => return err,
+    };
+    *destLen = dest_capacity.wrapping_sub(progress.output_remaining) as crate::stdlib::uLongf;
+    progress.status
 }
