@@ -2162,6 +2162,114 @@ fn deflate_version_matches(
         && stream_size as usize == ::core::mem::size_of::<crate::zlib_h::z_stream>()
 }
 
+/// The checked, scalar portion of `deflateInit2_`.
+///
+/// Allocation callbacks still belong to the ABI-facing setup path, but their
+/// requests and all state metadata are ordinary Rust values.  Keeping those
+/// values together avoids re-deriving C-sized allocation geometry after a
+/// callback has handed us storage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeflateInitPlan {
+    level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    window_bits: crate::stdlib::uInt,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+    window_size: crate::stdlib::uInt,
+    hash_bits: crate::stdlib::uInt,
+    hash_size: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    lit_bufsize: crate::stdlib::uInt,
+    pending: PendingStorageAllocationPlan,
+}
+
+fn deflate_init_plan(
+    mut level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    mut window_bits: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> Option<DeflateInitPlan> {
+    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
+        level = 6;
+    }
+    let wrap = if window_bits < 0 {
+        if window_bits < -15 {
+            return None;
+        }
+        window_bits = -window_bits;
+        0
+    } else if window_bits > 15 {
+        window_bits -= 16;
+        2
+    } else {
+        1
+    };
+    if mem_level < 1
+        || mem_level > crate::stdlib::MAX_MEM_LEVEL
+        || method != crate::zlib_h::Z_DEFLATED
+        || !(8..=15).contains(&window_bits)
+        || !(0..=9).contains(&level)
+        || !(0..=crate::zlib_h::Z_FIXED).contains(&strategy)
+        || (window_bits == 8 && wrap != 1)
+    {
+        return None;
+    }
+    if window_bits == 8 {
+        window_bits = 9;
+    }
+
+    let window_bits = window_bits as crate::stdlib::uInt;
+    let hash_bits = mem_level as crate::stdlib::uInt + 7;
+    let window_size = 1_u32.checked_shl(window_bits)?;
+    let hash_size = 1_u32.checked_shl(hash_bits)?;
+    let lit_bufsize = 1_u32.checked_shl((mem_level + 6) as u32)?;
+    Some(DeflateInitPlan {
+        level,
+        method,
+        window_bits,
+        mem_level,
+        strategy,
+        wrap,
+        window_size,
+        hash_bits,
+        hash_size,
+        hash_shift: (hash_bits + crate::zutil_h::MIN_MATCH as crate::stdlib::uInt - 1)
+            / crate::zutil_h::MIN_MATCH as crate::stdlib::uInt,
+        lit_bufsize,
+        pending: pending_storage_allocation_plan(lit_bufsize)?,
+    })
+}
+
+fn deflate_apply_init_plan(state: &mut internal_state, plan: DeflateInitPlan) {
+    state.status = crate::src::deflate::INIT_STATE;
+    state.wrap = plan.wrap;
+    state.gzhead = ::core::ptr::null_mut();
+    state.w_bits = plan.window_bits;
+    state.w_size = plan.window_size;
+    state.w_mask = plan.window_size - 1;
+    state.hash_bits = plan.hash_bits;
+    state.hash_size = plan.hash_size;
+    state.hash_mask = plan.hash_size - 1;
+    state.hash_shift = plan.hash_shift;
+    state.high_water = 0;
+    state.lit_bufsize = plan.lit_bufsize;
+    state.level = plan.level;
+    state.strategy = plan.strategy;
+    state.method = plan.method as crate::stdlib::Byte;
+}
+
+fn deflate_apply_init_storage(state: &mut internal_state, plan: DeflateInitPlan) -> bool {
+    state.pending_buf_size = plan.pending.layout().total_len as crate::zutil_h::ulg;
+    state.sym_buf_offset = plan.pending.layout().symbol_offset;
+    state.sym_end = plan.pending.layout().symbol_flush_threshold;
+    !state.window.is_null()
+        && !state.prev.is_null()
+        && !state.head.is_null()
+        && state.pending_buf.is_some()
+}
+
 pub unsafe extern "C" fn deflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
@@ -2174,7 +2282,6 @@ pub unsafe extern "C" fn deflateInit2_(
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
     if version.is_null() || !deflate_version_matches(*version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
@@ -2199,35 +2306,9 @@ pub unsafe extern "C" fn deflateInit2_(
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
-        level = 6 as ::core::ffi::c_int;
-    }
-    if windowBits < 0 as ::core::ffi::c_int {
-        wrap = 0 as ::core::ffi::c_int;
-        if windowBits < -15 as ::core::ffi::c_int {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        windowBits = -windowBits;
-    } else if windowBits > 15 as ::core::ffi::c_int {
-        wrap = 2 as ::core::ffi::c_int;
-        windowBits -= 16 as ::core::ffi::c_int;
-    }
-    if memLevel < 1 as ::core::ffi::c_int
-        || memLevel > crate::stdlib::MAX_MEM_LEVEL
-        || method != crate::zlib_h::Z_DEFLATED
-        || windowBits < 8 as ::core::ffi::c_int
-        || windowBits > 15 as ::core::ffi::c_int
-        || level < 0 as ::core::ffi::c_int
-        || level > 9 as ::core::ffi::c_int
-        || strategy < 0 as ::core::ffi::c_int
-        || strategy > crate::zlib_h::Z_FIXED
-        || windowBits == 8 as ::core::ffi::c_int && wrap != 1 as ::core::ffi::c_int
-    {
+    let Some(plan) = deflate_init_plan(level, method, windowBits, memLevel, strategy) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if windowBits == 8 as ::core::ffi::c_int {
-        windowBits = 9 as ::core::ffi::c_int;
-    }
+    };
     s = Some((*strm).zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
         (*strm).opaque,
         1 as crate::stdlib::uInt,
@@ -2238,77 +2319,48 @@ pub unsafe extern "C" fn deflateInit2_(
     }
     core::ptr::write(s, internal_state::newly_allocated());
     (*strm).state = s as *mut ::core::ffi::c_void;
-    (*s).strm = strm;
-    (*s).status = crate::src::deflate::INIT_STATE;
-    (*s).wrap = wrap;
-    (*s).gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
-    (*s).w_bits = windowBits as crate::stdlib::uInt;
-    (*s).w_size = ((1 as ::core::ffi::c_int) << (*s).w_bits) as crate::stdlib::uInt;
-    (*s).w_mask = (*s).w_size.wrapping_sub(1 as crate::stdlib::uInt);
-    (*s).hash_bits = (memLevel as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
-    (*s).hash_size = ((1 as ::core::ffi::c_int) << (*s).hash_bits) as crate::stdlib::uInt;
-    (*s).hash_mask = (*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt);
-    (*s).hash_shift = (*s)
-        .hash_bits
-        .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
-        .wrapping_sub(1 as crate::stdlib::uInt)
-        .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-    (*s).window = Some((*strm).zalloc.expect("non-null function pointer"))
+    let stream = &mut *strm;
+    let state = &mut *s;
+    state.strm = strm;
+    deflate_apply_init_plan(state, plan);
+    state.window = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
-        (*s).w_size,
+        stream.opaque,
+        state.w_size,
         (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>() as usize)
             as crate::stdlib::uInt,
     ) as *mut crate::stdlib::Bytef;
-    (*s).prev = Some((*strm).zalloc.expect("non-null function pointer"))
+    state.prev = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
-        (*s).w_size,
+        stream.opaque,
+        state.w_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*s).head = Some((*strm).zalloc.expect("non-null function pointer"))
+    state.head = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
-        (*s).hash_size,
+        stream.opaque,
+        state.hash_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*s).high_water = 0 as crate::zutil_h::ulg;
-    let lit_bufsize =
-        ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).lit_bufsize = lit_bufsize;
     // The pending bytes and symbol triplets share exactly one callback
     // allocation.  Derive both its request and its safe view geometry from
     // one checked plan before crossing the allocator boundary.
     // `memLevel` was constrained to 1..=MAX_MEM_LEVEL above, so this fixed
     // C-width request is representable.  Keep the checked-plan derivation as
     // the single allocation/layout source of truth.
-    let pending_plan =
-        pending_storage_allocation_plan(lit_bufsize).expect("validated deflate pending allocation");
-    let pending_layout = pending_plan.layout();
-    let pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
+    let pending_buf = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
-        pending_plan.items,
-        pending_plan.item_size,
+        stream.opaque,
+        plan.pending.items,
+        plan.pending.item_size,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    (*s).pending_buf = ::core::ptr::NonNull::new(pending_buf);
-    (*s).pending_buf_size = pending_layout.total_len as crate::zutil_h::ulg;
-    if (*s).window.is_null()
-        || (*s).prev.is_null()
-        || (*s).head.is_null()
-        || (*s).pending_buf.is_none()
-    {
-        (*s).status = crate::src::deflate::FINISH_STATE;
-        (*strm).msg =
-            z_error_message(-4 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
+    state.pending_buf = ::core::ptr::NonNull::new(pending_buf);
+    if !deflate_apply_init_storage(state, plan) {
+        state.status = crate::src::deflate::FINISH_STATE;
+        stream.msg = z_error_message(-4 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
         deflateEnd_ffi(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf_offset = pending_layout.symbol_offset;
-    (*s).sym_end = pending_layout.symbol_flush_threshold;
-    (*s).level = level;
-    (*s).strategy = strategy;
-    (*s).method = method as crate::stdlib::Byte;
     return deflateReset_ffi(strm);
 }
 #[export_name = "deflateInit2_"]
@@ -6325,7 +6377,7 @@ mod tests {
         deflate_rle_scan_match, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
         deflate_should_return_buf_error, deflate_slow_can_search_match,
         deflate_slow_insert_hash_core, deflate_state_is_usable, deflate_state_status_valid,
-        deflate_tally_literal, deflate_tally_match, deflate_version_matches,
+        deflate_init_plan, deflate_tally_literal, deflate_tally_match, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
         fill_window_has_insertable_match, fill_window_hash_update,
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
@@ -9345,6 +9397,45 @@ mod tests {
             b'1' as ::core::ffi::c_char,
             expected_size.wrapping_add(1),
         ));
+    }
+
+    #[test]
+    fn deflate_init_plan_normalizes_default_and_eight_bit_zlib_windows() {
+        let plan = deflate_init_plan(
+            crate::zlib_h::Z_DEFAULT_COMPRESSION,
+            crate::zlib_h::Z_DEFLATED,
+            8,
+            crate::zutil_h::DEF_MEM_LEVEL,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+        )
+        .expect("valid default deflate parameters");
+
+        assert_eq!(plan.level, 6);
+        assert_eq!(plan.wrap, 1);
+        assert_eq!(plan.window_bits, 9);
+        assert_eq!(plan.window_size, 512);
+        assert_eq!(plan.hash_bits, crate::zutil_h::DEF_MEM_LEVEL as u32 + 7);
+        assert_eq!(plan.pending.items, plan.lit_bufsize);
+    }
+
+    #[test]
+    fn deflate_init_plan_preserves_raw_and_gzip_wrappers() {
+        let raw = deflate_init_plan(1, crate::zlib_h::Z_DEFLATED, -15, 8, 0)
+            .expect("valid raw deflate parameters");
+        let gzip = deflate_init_plan(1, crate::zlib_h::Z_DEFLATED, 31, 8, 0)
+            .expect("valid gzip deflate parameters");
+
+        assert_eq!((raw.wrap, raw.window_bits), (0, 15));
+        assert_eq!((gzip.wrap, gzip.window_bits), (2, 15));
+    }
+
+    #[test]
+    fn deflate_init_plan_rejects_invalid_wrapper_and_scalar_combinations() {
+        assert!(deflate_init_plan(1, crate::zlib_h::Z_DEFLATED, -8, 8, 0).is_none());
+        assert!(deflate_init_plan(1, crate::zlib_h::Z_DEFLATED, 15, 0, 0).is_none());
+        assert!(deflate_init_plan(10, crate::zlib_h::Z_DEFLATED, 15, 8, 0).is_none());
+        assert!(deflate_init_plan(1, crate::zlib_h::Z_DEFLATED, 15, 8, crate::zlib_h::Z_FIXED + 1)
+            .is_none());
     }
 
     #[test]
