@@ -340,7 +340,11 @@ pub mod zlib_h {
 
     pub struct gzFile_s {
         pub have: ::core::ffi::c_uint,
-        pub next: *mut ::core::ffi::c_uchar,
+        /// Byte offset of the next buffered byte in `gz_state::out_buf`.
+        /// `gzFile_s` is opaque at the C boundary, so the cursor can retain
+        /// Rust's bounds and provenance guarantees instead of storing a raw
+        /// pointer into the vector.
+        pub next: usize,
         pub pos: crate::stdlib::off64_t,
     }
 }

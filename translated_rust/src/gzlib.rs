@@ -122,7 +122,7 @@ unsafe extern "C" fn gz_open(
     state = Box::into_raw(Box::new(crate::gzguts_h::gz_state {
         x: crate::zlib_h::gzFile_s {
             have: 0,
-            next: ::core::ptr::null_mut(),
+            next: 0,
             pos: 0,
         },
         mode: crate::gzguts_h::GZ_NONE,
@@ -525,18 +525,19 @@ pub unsafe extern "C" fn gzseek64(
         }
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
+        let state = &mut *state;
         n = if ::core::mem::size_of::<::core::ffi::c_int>()
             == ::core::mem::size_of::<crate::stdlib::off64_t>()
-            && (*state).x.have > gz_intmax()
-            || (*state).x.have as crate::stdlib::off64_t > offset
+            && state.x.have > gz_intmax()
+            || state.x.have as crate::stdlib::off64_t > offset
         {
             offset as ::core::ffi::c_uint
         } else {
-            (*state).x.have
+            state.x.have
         };
-        (*state).x.have = (*state).x.have.wrapping_sub(n);
-        (*state).x.next = (*state).x.next.offset(n as isize);
-        (*state).x.pos += n as crate::stdlib::off64_t;
+        state.x.have = state.x.have.wrapping_sub(n);
+        state.x.next += n as usize;
+        state.x.pos += n as crate::stdlib::off64_t;
         offset -= n as crate::stdlib::off64_t;
     }
     (*state).skip = offset;

@@ -134,7 +134,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     state.out_start = 0;
     state.strm.avail_out = state.size as crate::stdlib::uInt;
     state.strm.next_out = state.out_buf.as_mut_ptr();
-    state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
+    state.x.next = 0;
     return 0 as ::core::ffi::c_int;
 }
 
@@ -189,7 +189,7 @@ fn gz_comp(
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
                 state.strm.avail_out = state.size as crate::stdlib::uInt;
                 state.strm.next_out = state.out_buf.as_mut_ptr();
-                state.x.next = state.out_buf.as_mut_ptr();
+                state.x.next = 0;
                 state.out_start = 0;
             }
         }
