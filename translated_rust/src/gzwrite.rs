@@ -189,17 +189,9 @@ fn gz_comp(
                             as ::core::ffi::c_int;
                     (written, *crate::stdlib::__errno_location())
                 };
-                if let Err(errno) = crate::src::gzlib::gz_io_result(state, written, errno) {
-                    unsafe {
-                        crate::src::gzlib::gz_error(
-                            state,
-                            crate::zlib_h::Z_ERRNO,
-                            Some(
-                                ::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno))
-                                    .to_bytes_with_nul(),
-                            ),
-                        );
-                    }
+                if let Err(_) = crate::src::gzlib::gz_io_result(state, written, errno) {
+                    let message = crate::src::gzlib::gz_errno_message();
+                    crate::src::gzlib::gz_error(state, crate::zlib_h::Z_ERRNO, Some(&message));
                     return -1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_direct_write_progress(state, written as ::core::ffi::c_uint);
@@ -238,17 +230,9 @@ fn gz_comp(
                             as ::core::ffi::c_int;
                     (written, *crate::stdlib::__errno_location())
                 };
-                if let Err(errno) = crate::src::gzlib::gz_io_result(state, written, errno) {
-                    unsafe {
-                        crate::src::gzlib::gz_error(
-                            state,
-                            crate::zlib_h::Z_ERRNO,
-                            Some(
-                                ::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno))
-                                    .to_bytes_with_nul(),
-                            ),
-                        );
-                    }
+                if let Err(_) = crate::src::gzlib::gz_io_result(state, written, errno) {
+                    let message = crate::src::gzlib::gz_errno_message();
+                    crate::src::gzlib::gz_error(state, crate::zlib_h::Z_ERRNO, Some(&message));
                     return -1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_comp_output_write_progress(

@@ -2062,6 +2062,27 @@ pub(crate) fn gz_error_needs_message_allocation(
     has_message && err != crate::zlib_h::Z_MEM_ERROR
 }
 
+// `std::io::Error` obtains the platform's strerror text without exposing its
+// raw C-string pointer to the gzip state machine. Its display suffix is Rust
+// metadata, not part of zlib's `strerror()` message, so remove it before
+// adding the C-compatible terminator expected by `gz_error()`.
+pub(crate) fn gz_errno_message() -> Vec<u8> {
+    let error = ::std::io::Error::last_os_error();
+    let message = error.to_string();
+    let message = if let Some(errno) = error.raw_os_error() {
+        let mut suffix = String::from(" (os error ");
+        suffix.push_str(&errno.to_string());
+        suffix.push(')');
+        message.strip_suffix(&suffix).unwrap_or(&message)
+    } else {
+        &message
+    };
+    let mut bytes = Vec::with_capacity(message.len().saturating_add(1));
+    bytes.extend_from_slice(message.as_bytes());
+    bytes.push(0);
+    bytes
+}
+
 // This coordinator receives an already-bound state and either no message or
 // a nul-terminated byte slice. Its safe backing storage keeps the C-facing
 // message pointer valid until the next error transition or stream close.

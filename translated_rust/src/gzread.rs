@@ -112,18 +112,17 @@ fn gz_load(
                 break;
             }
         }
-        if let Err(errno) = crate::src::gzlib::gz_load_result(
+        if let Err(_) = crate::src::gzlib::gz_load_result(
             state,
             ret,
             loaded,
             *crate::stdlib::__errno_location(),
         ) {
+            let message = crate::src::gzlib::gz_errno_message();
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_ERRNO,
-                Some(
-                    ::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno)).to_bytes_with_nul(),
-                ),
+                Some(&message),
             );
             return GzLoadResult {
                 received: loaded,
@@ -610,20 +609,8 @@ fn gzread(
         crate::src::gzlib::GzReadResult::Count => {}
         crate::src::gzlib::GzReadResult::Error => return -1 as ::core::ffi::c_int,
         crate::src::gzlib::GzReadResult::WouldBlock => {
-            // SAFETY: the errno slot and strerror result are used only to
-            // record this would-block error immediately in the bound state.
-            unsafe {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_ERRNO,
-                    Some(
-                        ::core::ffi::CStr::from_ptr(crate::stdlib::strerror(
-                            *crate::stdlib::__errno_location(),
-                        ))
-                        .to_bytes_with_nul(),
-                    ),
-                );
-            }
+            let message = crate::src::gzlib::gz_errno_message();
+            crate::src::gzlib::gz_error(state, crate::zlib_h::Z_ERRNO, Some(&message));
             return -1 as ::core::ffi::c_int;
         }
     }
