@@ -35,19 +35,19 @@ pub const BUSY_STATE: ::core::ffi::c_int = 113 as ::core::ffi::c_int;
 pub const FINISH_STATE: ::core::ffi::c_int = 666 as ::core::ffi::c_int;
 
 pub type ct_data = crate::src::deflate::ct_data_s;
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 
 pub struct ct_data_s {
     pub fc: crate::src::deflate::C2Rust_Unnamed_1,
     pub dl: crate::src::deflate::C2Rust_Unnamed_0,
 }
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 pub struct C2Rust_Unnamed_1 {
     pub freq: crate::zutil_h::ush,
 }
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 pub struct C2Rust_Unnamed_0 {
     // The Huffman builder uses this one `ush` slot first for parent links and
@@ -62,7 +62,7 @@ pub const STATIC_DISTANCE: StaticTreeKind = 2;
 pub const STATIC_BIT_LENGTH: StaticTreeKind = 3;
 
 pub type tree_desc = crate::src::deflate::tree_desc_s;
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 
 pub struct tree_desc_s {
@@ -77,7 +77,7 @@ pub type Posf = crate::src::deflate::Pos;
 pub type IPos = ::core::ffi::c_uint;
 
 pub type deflate_state = crate::src::deflate::internal_state;
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 
 pub struct internal_state {
@@ -2886,7 +2886,7 @@ pub fn deflateCopy(
     }
     dest_stream.state = ds as *mut crate::src::deflate::internal_state;
     let dest_state = unsafe { &mut *ds };
-    *dest_state = *source_state;
+    *dest_state = source_state.clone();
     dest_state.strm = ::core::ptr::from_mut(dest_stream);
     dest_state.window = unsafe {
         Some(dest_stream.zalloc.expect("non-null function pointer"))

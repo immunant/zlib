@@ -4294,8 +4294,8 @@ fn send_all_trees(
 
     // `send_tree` mutates the bit state, so retain value snapshots of the
     // source trees while it does so.
-    let ltree = state.dyn_ltree;
-    let dtree = state.dyn_dtree;
+    let ltree = state.dyn_ltree.clone();
+    let dtree = state.dyn_dtree.clone();
     send_tree(state, pending_buf, &ltree, lcodes - 1);
     send_tree(state, pending_buf, &dtree, dcodes - 1);
 }
@@ -4524,8 +4524,8 @@ pub fn tr_flush_block(
             dcodes,
             max_blindex + 1 as ::core::ffi::c_int,
         );
-        let ltree = state.dyn_ltree;
-        let dtree = state.dyn_dtree;
+        let ltree = state.dyn_ltree.clone();
+        let dtree = state.dyn_dtree.clone();
         compress_block(
             state,
             pending_buf,
