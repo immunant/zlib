@@ -2703,7 +2703,7 @@ impl DeflateCopyPreparation {
         source: &DeflateOwnedStorage,
     ) -> Option<DeflateOwnedStorage> {
         let mut destination = self.plan.storage.allocate_owned()?;
-        copy_deflate_storage_views(
+        deflateCopy(
             source.source_views(),
             destination.destination_views(),
             &self.plan.layout,
@@ -2770,7 +2770,10 @@ impl DeflateOwnedStorage {
 // Copy exactly the initialized logical ranges of a deflate state.  Both
 // source and destination are already bounded typed views, so this remains
 // usable by the eventual custom-allocation owner without raw projections.
-fn copy_deflate_storage_views(
+// This is the pointer-free deflateCopy core.  The ABI adapter below is
+// responsible only for callback-paired allocation and for projecting its
+// callback-owned regions into this same operation.
+fn deflateCopy(
     source: DeflateCopySourceViews<'_>,
     destination: DeflateCopyDestinationViews<'_>,
     layout: &DeflateCopyLayout,
@@ -3828,7 +3831,10 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     deflateEnd(strm)
 }
-pub unsafe extern "C" fn deflateCopy(
+// The C ABI still gives us callback-owned allocations and opaque stream
+// pointers.  Keep that projection out of `deflateCopy()` itself: its safe
+// typed-slice core is also the path used by the eventual allocation owner.
+unsafe fn deflate_copy_from_abi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -4088,7 +4094,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateCopy(dest, source)
+    deflate_copy_from_abi(dest, source)
 }
 struct LongestMatchInput {
     max_chain_length: crate::stdlib::uInt,
