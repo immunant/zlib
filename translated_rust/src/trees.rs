@@ -2526,7 +2526,7 @@ fn pqdownheap_for_kind(
     }
 }
 
-unsafe fn gen_bitlen(s: &mut crate::src::deflate::deflate_state, tree_kind: u8) {
+fn gen_bitlen(s: &mut crate::src::deflate::deflate_state, tree_kind: u8) {
     let max_code = match tree_kind {
         crate::src::deflate::STATIC_TREE_LITERAL => s.l_desc.max_code,
         crate::src::deflate::STATIC_TREE_DISTANCE => s.d_desc.max_code,
@@ -2640,7 +2640,7 @@ fn selected_tree(
     }
 }
 
-unsafe fn build_tree_impl(s: &mut crate::src::deflate::deflate_state, tree_kind: u8) {
+fn build_tree_impl(s: &mut crate::src::deflate::deflate_state, tree_kind: u8) {
     let stat_desc = static_desc(tree_kind);
     let stree = stat_desc.static_tree;
     let elems: ::core::ffi::c_int = stat_desc.elems;
@@ -2839,7 +2839,7 @@ fn send_code(s: &mut crate::src::deflate::deflate_state, symbol: usize) {
     );
 }
 
-unsafe fn send_tree(
+fn send_tree(
     s: &mut crate::src::deflate::deflate_state,
     tree: &[crate::src::deflate::ct_data],
     max_code: ::core::ffi::c_int,
@@ -2900,7 +2900,7 @@ unsafe fn send_tree(
     }
 }
 
-unsafe fn build_bl_tree(s: &mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
+fn build_bl_tree(s: &mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     let mut max_blindex: ::core::ffi::c_int = 0;
     let l_max_code = s.l_desc.max_code;
     scan_tree(&mut s.bl_tree, &mut s.dyn_ltree, l_max_code);
@@ -2928,7 +2928,7 @@ unsafe fn build_bl_tree(s: &mut crate::src::deflate::deflate_state) -> ::core::f
     return max_blindex;
 }
 
-unsafe fn send_all_trees(
+fn send_all_trees(
     s: &mut crate::src::deflate::deflate_state,
     lcodes: ::core::ffi::c_int,
     dcodes: ::core::ffi::c_int,
@@ -3038,7 +3038,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     };
     tr_stored_block(s, buf, stored_len, last);
 }
-pub unsafe fn _tr_flush_bits(s: &mut crate::src::deflate::deflate_state) {
+pub fn _tr_flush_bits(s: &mut crate::src::deflate::deflate_state) {
     flush_bits_impl(s);
 }
 #[export_name = "_tr_flush_bits"]
@@ -3050,7 +3050,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     // The exported boundary validates and converts the opaque state once.
     flush_bits_impl(&mut *s);
 }
-unsafe fn tr_align(s: &mut crate::src::deflate::deflate_state) {
+fn tr_align(s: &mut crate::src::deflate::deflate_state) {
     let len: ::core::ffi::c_int = 3;
     if s.bi_valid > crate::src::deflate::Buf_size - len {
         let val: ::core::ffi::c_int = 1 << 1;
@@ -3474,7 +3474,7 @@ pub(crate) unsafe fn tr_flush_block_impl(
         }
         build_tree_impl(s, crate::src::deflate::STATIC_TREE_LITERAL);
         build_tree_impl(s, crate::src::deflate::STATIC_TREE_DISTANCE);
-        max_blindex = unsafe { build_bl_tree(s) };
+        max_blindex = build_bl_tree(s);
         opt_lenb = s
             .opt_len
             .wrapping_add(3 as crate::zutil_h::ulg)
@@ -3545,12 +3545,12 @@ pub(crate) unsafe fn tr_flush_block_impl(
                     << s.bi_valid) as crate::zutil_h::ush;
             s.bi_valid += len_0;
         }
-        unsafe { send_all_trees(
+        send_all_trees(
             s,
             s.l_desc.max_code + 1 as ::core::ffi::c_int,
             s.d_desc.max_code + 1 as ::core::ffi::c_int,
             max_blindex + 1 as ::core::ffi::c_int,
-        ) };
+        );
         let ltree = s.dyn_ltree;
         let dtree = s.dyn_dtree;
         compress_block_impl(s, &ltree, &dtree);
