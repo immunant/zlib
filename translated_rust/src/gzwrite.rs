@@ -1146,6 +1146,38 @@ fn gzsetparams_buffer_action(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzSetParamsAction {
+    ReturnOk,
+    SetOnly,
+    DeflateOnly,
+    FlushThenDeflate,
+}
+
+fn gzsetparams_action(
+    requested_level: ::core::ffi::c_int,
+    current_level: ::core::ffi::c_int,
+    requested_strategy: ::core::ffi::c_int,
+    current_strategy: ::core::ffi::c_int,
+    size: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+) -> GzSetParamsAction {
+    if gzsetparams_settings_match(
+        requested_level,
+        current_level,
+        requested_strategy,
+        current_strategy,
+    ) {
+        GzSetParamsAction::ReturnOk
+    } else {
+        match gzsetparams_buffer_action(size, avail_in) {
+            GzSetParamsBufferAction::SetOnly => GzSetParamsAction::SetOnly,
+            GzSetParamsBufferAction::DeflateOnly => GzSetParamsAction::DeflateOnly,
+            GzSetParamsBufferAction::FlushThenDeflate => GzSetParamsAction::FlushThenDeflate,
+        }
+    }
+}
+
 fn gzclose_mode_is_writable(mode: ::core::ffi::c_int) -> bool {
     mode == crate::gzguts_h::GZ_WRITE
 }
@@ -1392,19 +1424,26 @@ pub unsafe extern "C" fn gzsetparams(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if gzsetparams_settings_match(level, (*state).level, strategy, (*state).strategy) {
+    let action = gzsetparams_action(
+        level,
+        state.level,
+        strategy,
+        state.strategy,
+        state.size,
+        (*strm).avail_in,
+    );
+    if matches!(action, GzSetParamsAction::ReturnOk) {
         return crate::zlib_h::Z_OK;
     }
     if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
         return (*state).err;
     }
-    let action = gzsetparams_buffer_action((*state).size, (*strm).avail_in);
-    if matches!(action, GzSetParamsBufferAction::FlushThenDeflate)
+    if matches!(action, GzSetParamsAction::FlushThenDeflate)
         && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
     {
         return (*state).err;
     }
-    if !matches!(action, GzSetParamsBufferAction::SetOnly) {
+    if !matches!(action, GzSetParamsAction::SetOnly) {
         crate::src::deflate::deflateParams(strm as *mut crate::zlib_h::z_stream_s, level, strategy);
     }
     (*state).level = level;
@@ -1493,12 +1532,12 @@ mod tests {
         gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
         gzclose_buffer_action, gzclose_mode_is_writable, gzclose_w_result, gzflush_action,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
-        GzCompOutputBufferAction, GzCompResetAction, GzCompWriteFailure, GzCompWriteResult,
-        GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
-        GzSetParamsBufferAction, GzWriteBufferedInputAction, GzWriteDirectAction,
-        GzWritePreparation, GzZeroAction, GzZeroChunkLimits, GzZeroStep,
+        gzputs_len_fits_int, gzputs_result, gzsetparams_action, gzsetparams_buffer_action,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
+        GzCloseBufferAction, GzCompDeflateAction, GzCompOutputBufferAction, GzCompResetAction,
+        GzCompWriteFailure, GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode,
+        GzPutcWriteAction, GzSetParamsAction, GzSetParamsBufferAction, GzWriteBufferedInputAction,
+        GzWriteDirectAction, GzWritePreparation, GzZeroAction, GzZeroChunkLimits, GzZeroStep,
     };
 
     #[test]
@@ -1858,6 +1897,30 @@ mod tests {
             ::core::ffi::c_int::MAX,
             ::core::ffi::c_int::MAX
         ));
+    }
+
+    #[test]
+    fn gzsetparams_action_prioritizes_matching_settings() {
+        assert_eq!(
+            gzsetparams_action(1, 1, 2, 2, 1, 1),
+            GzSetParamsAction::ReturnOk
+        );
+    }
+
+    #[test]
+    fn gzsetparams_action_selects_the_required_buffer_handling() {
+        assert_eq!(
+            gzsetparams_action(1, 2, 3, 4, 0, 1),
+            GzSetParamsAction::SetOnly
+        );
+        assert_eq!(
+            gzsetparams_action(1, 2, 3, 4, 1, 0),
+            GzSetParamsAction::DeflateOnly
+        );
+        assert_eq!(
+            gzsetparams_action(1, 2, 3, 4, 1, 1),
+            GzSetParamsAction::FlushThenDeflate
+        );
     }
 
     #[test]

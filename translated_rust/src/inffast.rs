@@ -200,6 +200,26 @@ fn fast_window_distance_is_invalid(
     distance_from_window > window_available && sane
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum FastWindowDistance {
+    Valid { distance_back: ::core::ffi::c_uint },
+    Invalid,
+}
+
+fn validate_fast_window_distance(
+    distance: ::core::ffi::c_uint,
+    output_produced: crate::stdlib::uInt,
+    window_available: ::core::ffi::c_uint,
+    sane: bool,
+) -> FastWindowDistance {
+    let distance_back = distance.wrapping_sub(output_produced);
+    if fast_window_distance_is_invalid(distance_back, window_available, sane) {
+        FastWindowDistance::Invalid
+    } else {
+        FastWindowDistance::Valid { distance_back }
+    }
+}
+
 fn fast_match_uses_window(
     distance: ::core::ffi::c_uint,
     output_produced: crate::stdlib::uInt,
@@ -534,15 +554,22 @@ pub unsafe extern "C" fn inflate_fast(
                         }
                     }
                     _ => {
-                        op = dist.wrapping_sub(output_produced);
-                        if fast_window_distance_is_invalid(op, whave, (*state).sane != 0) {
-                            (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
-                            break;
-                        }
-                        let copy_plan = fast_window_copy_plan(wsize, wnext, op, len);
+                        let distance_back = match validate_fast_window_distance(
+                            dist,
+                            output_produced,
+                            whave,
+                            (*state).sane != 0,
+                        ) {
+                            FastWindowDistance::Valid { distance_back } => distance_back,
+                            FastWindowDistance::Invalid => {
+                                (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
+                                (*state).mode = crate::src::inflate::BAD;
+                                break;
+                            }
+                        };
+                        let copy_plan = fast_window_copy_plan(wsize, wnext, distance_back, len);
                         from = window.wrapping_add(copy_plan.first_window_start as usize);
                         if copy_plan.first_window_length != 0 {
                             op = copy_plan.first_window_length;
@@ -671,8 +698,9 @@ mod tests {
         fast_dist_action, fast_litlen_action, fast_match_uses_window, fast_window_copy_plan,
         fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
         input_remaining_after_read, low_bits, match_copy_layout, output_cursor_after_write,
-        subtable_index, table_index, unread_input_state, FastDistAction, FastDistance,
-        FastDistanceSource, FastLitLenAction, FastWindowContinuationSource, FastWindowCopyPlan,
+        subtable_index, table_index, unread_input_state, validate_fast_window_distance,
+        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction,
+        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -689,6 +717,28 @@ mod tests {
         assert!(!fast_window_distance_is_invalid(3, 4, true));
         assert!(fast_window_distance_is_invalid(5, 4, true));
         assert!(!fast_window_distance_is_invalid(5, 4, false));
+    }
+
+    #[test]
+    fn fast_window_distance_validation_preserves_wrapping_and_error_boundaries() {
+        assert_eq!(
+            validate_fast_window_distance(9, 4, 5, true),
+            FastWindowDistance::Valid { distance_back: 5 }
+        );
+        assert_eq!(
+            validate_fast_window_distance(10, 4, 5, true),
+            FastWindowDistance::Invalid
+        );
+        assert_eq!(
+            validate_fast_window_distance(10, 4, 5, false),
+            FastWindowDistance::Valid { distance_back: 6 }
+        );
+        assert_eq!(
+            validate_fast_window_distance(0, 1, ::core::ffi::c_uint::MAX, true),
+            FastWindowDistance::Valid {
+                distance_back: ::core::ffi::c_uint::MAX
+            }
+        );
     }
 
     #[test]

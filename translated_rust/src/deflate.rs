@@ -591,32 +591,18 @@ fn can_search_hash_match(
 }
 
 unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut m: ::core::ffi::c_uint = 0;
-    let mut p: *mut crate::src::deflate::Posf =
-        ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
-    n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.wrapping_add(n as usize);
-    loop {
-        p = p.wrapping_sub(1);
-        m = *p as ::core::ffi::c_uint;
-        *p = slide_hash_entry(m, wsize);
-        n = n.wrapping_sub(1);
-        if !(n != 0) {
-            break;
-        }
+    let wsize = (*s).w_size;
+    let mut index = (*s).hash_size;
+    while index != 0 {
+        index = index.wrapping_sub(1);
+        let entry = (*s).head.wrapping_add(index as usize);
+        *entry = slide_hash_entry(*entry as ::core::ffi::c_uint, wsize);
     }
-    n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.wrapping_add(n as usize);
-    loop {
-        p = p.wrapping_sub(1);
-        m = *p as ::core::ffi::c_uint;
-        *p = slide_hash_entry(m, wsize);
-        n = n.wrapping_sub(1);
-        if !(n != 0) {
-            break;
-        }
+    index = wsize;
+    while index != 0 {
+        index = index.wrapping_sub(1);
+        let entry = (*s).prev.wrapping_add(index as usize);
+        *entry = slide_hash_entry(*entry as ::core::ffi::c_uint, wsize);
     }
     (*s).slid = 1 as ::core::ffi::c_int;
 }
@@ -4730,6 +4716,16 @@ mod tests {
         assert_eq!(slide_hash_entry(31, window_size), 0);
         assert_eq!(slide_hash_entry(32, window_size), 0);
         assert_eq!(slide_hash_entry(47, window_size), 15);
+    }
+
+    #[test]
+    fn slide_hash_entry_handles_all_boundary_positions() {
+        let window_size = 32 as crate::stdlib::uInt;
+        let entries: [crate::src::deflate::Posf; 4] = [0, 31, 32, 47];
+        let rebased =
+            entries.map(|entry| slide_hash_entry(entry as ::core::ffi::c_uint, window_size));
+
+        assert_eq!(rebased, [0, 0, 0, 15]);
     }
 
     #[test]
