@@ -106,83 +106,6 @@ fn clear_buffered_input(buffer: &mut [u8]) {
     buffer.fill(0);
 }
 
-// Keep the temporary write-buffer transition independent of `gz_state`.
-// The caller owns the buffer and replaces its cursor only after this borrow
-// ends, so a later `gz_write()` observes the same complete pending prefix as
-// the original direct state update.
-fn gzputc_buffer_byte(
-    buffer: Option<&mut [u8]>,
-    size: usize,
-    cursor: Option<crate::src::gzlib::GzCodecInput>,
-    byte: u8,
-) -> Option<(usize, crate::src::gzlib::GzCodecInput)> {
-    let buffer = buffer?.get_mut(..size)?;
-    let cursor = cursor.unwrap_or_else(crate::src::gzlib::GzCodecInput::empty);
-    let mut buffered = crate::src::gzlib::GzBufferedInput::from_index(
-        buffer,
-        cursor.cursor(),
-        cursor.available(),
-    )?;
-    let copied = buffered.append(&[byte]);
-    let (start, available) = buffered.cursor()?;
-    let cursor = crate::src::gzlib::GzCodecInput::from_index(buffer, start, available)?;
-    Some((copied, cursor))
-}
-
-// The single-byte write transition owns only gzip's scalar and bounded-buffer
-// state.  It deliberately has no embedded stream: zero filling and deflate
-// dispatch remain at the state/codec boundary, while the common buffered-byte
-// decision is reusable by a future pointer-free gzip owner.
-struct GzPutcOwner<'a> {
-    policy: GzWritePolicy,
-    size: crate::stdlib::uInt,
-    input: Option<&'a mut [u8]>,
-    input_cursor: &'a mut Option<crate::src::gzlib::GzCodecInput>,
-    available_input: &'a mut crate::stdlib::uInt,
-    position: &'a mut crate::stdlib::off64_t,
-}
-
-enum GzPutcAction {
-    Reject,
-    Buffered,
-    WriteByte,
-}
-
-impl GzPutcOwner<'_> {
-    fn put_byte(&mut self, byte: u8) -> GzPutcAction {
-        if !self.policy.accepts_write() {
-            return GzPutcAction::Reject;
-        }
-        if self.size == 0 {
-            return GzPutcAction::WriteByte;
-        }
-        let size = self.size as usize;
-        let Some(buffer) = self.input.as_deref_mut() else {
-            return GzPutcAction::Reject;
-        };
-        if buffer.get(..size).is_none() {
-            return GzPutcAction::Reject;
-        }
-        let cursor = self.input_cursor.take();
-        let Some((copied, cursor)) = gzputc_buffer_byte(Some(buffer), size, cursor, byte) else {
-            return GzPutcAction::Reject;
-        };
-        // Keep the complete pending prefix after a full buffer.  The write
-        // fallback must flush it before adding this byte.
-        *self.input_cursor = Some(cursor);
-        if copied == 0 {
-            return GzPutcAction::WriteByte;
-        }
-        *self.available_input = self
-            .input_cursor
-            .as_ref()
-            .expect("owned write cursor")
-            .available();
-        *self.position += 1;
-        GzPutcAction::Buffered
-    }
-}
-
 // A forward seek on a write handle is materialized as zero-filled input fed
 // through the normal compression path.  Keep the byte-range proof and the
 // scalar accounting outside the ABI-shaped gzip state so the eventual owned
@@ -897,7 +820,7 @@ unsafe fn gzputc(
     state: &mut crate::gzguts_h::gz_state,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
+    let buf = [c as ::core::ffi::c_uchar];
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
@@ -915,26 +838,11 @@ unsafe fn gzputc(
         path: state.path.as_deref(),
     }
     .clear();
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
-    let action = {
-        let mut owner = GzPutcOwner {
-            policy,
-            size: state.buffers.size,
-            input: state.buffers.input.as_deref_mut(),
-            input_cursor: &mut state.buffers.input_cursor,
-            available_input: &mut state.strm.avail_in,
-            position: &mut state.x.pos,
-        };
-        owner.put_byte(c as ::core::ffi::c_uchar)
-    };
-    match action {
-        GzPutcAction::Reject => return -1 as ::core::ffi::c_int,
-        GzPutcAction::Buffered => return c & 0xff as ::core::ffi::c_int,
-        GzPutcAction::WriteByte => {}
-    }
-    buf[0 as usize] = c as ::core::ffi::c_uchar;
+    // `gz_write()` owns the whole write transaction: initialization, pending
+    // forward-seek zero fill, bounded input buffering, and the embedded
+    // deflate dispatch.  Feeding it the one-byte slice preserves the full
+    // buffer fallback (flush the old prefix before appending this byte)
+    // without giving this entry point a second cursor transition.
     if gz_write(state, &buf) != 1 as crate::stdlib::z_size_t {
         return -1 as ::core::ffi::c_int;
     }
