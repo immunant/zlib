@@ -264,6 +264,16 @@ fn inflate_reset(
     state.wnext = 0 as ::core::ffi::c_uint;
     inflate_reset_keep(strm, state)
 }
+
+// Callers that have already validated and bound an inflater can reset it
+// without routing through the raw C-ABI entry point.  This keeps ordinary
+// reset state changes reference-bound at internal call sites.
+pub(crate) fn inflate_reset_bound(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_int {
+    inflate_reset(strm, state)
+}
 #[export_name = "inflateResetKeep"]
 
 pub unsafe extern "C" fn inflateResetKeep_ffi(
@@ -286,7 +296,7 @@ pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
     }
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
-    inflate_reset(strm, state)
+    inflate_reset_bound(strm, state)
 }
 #[export_name = "inflateReset"]
 
