@@ -4715,7 +4715,7 @@ pub const N: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
 
 pub const W: ::core::ffi::c_int = 8 as ::core::ffi::c_int;
 
-unsafe extern "C" fn byte_swap(mut word: z_word_t) -> z_word_t {
+fn byte_swap(mut word: z_word_t) -> z_word_t {
     return (word & 0xff00000000000000 as z_word_t) >> 56 as ::core::ffi::c_int
         | (word & 0xff000000000000 as ::core::ffi::c_long as z_word_t) >> 40 as ::core::ffi::c_int
         | (word & 0xff0000000000 as ::core::ffi::c_long as z_word_t) >> 24 as ::core::ffi::c_int
@@ -4728,7 +4728,7 @@ unsafe extern "C" fn byte_swap(mut word: z_word_t) -> z_word_t {
 
 pub const POLY: ::core::ffi::c_uint = 0xedb88320 as ::core::ffi::c_uint;
 
-unsafe extern "C" fn multmodp(
+fn multmodp(
     mut a: crate::stdlib::uLong,
     mut b: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {

@@ -284,7 +284,7 @@ pub unsafe extern "C" fn adler32_ffi(
 ) -> crate::stdlib::uLong {
     adler32(adler, buf, len)
 }
-unsafe extern "C" fn adler32_combine_(
+fn adler32_combine_(
     mut adler1: crate::stdlib::uLong,
     mut adler2: crate::stdlib::uLong,
     mut len2: crate::stdlib::off64_t,

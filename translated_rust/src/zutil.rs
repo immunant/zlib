@@ -27,7 +27,7 @@ pub unsafe extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
     zlibVersion()
 }
-pub unsafe extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
+pub extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
     let mut flags: crate::stdlib::uLong = 0;
     flags = 0 as crate::stdlib::uLong;
     match ::core::mem::size_of::<crate::stdlib::uInt>() as ::core::ffi::c_int {

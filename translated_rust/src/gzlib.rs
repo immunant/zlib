@@ -718,7 +718,7 @@ pub unsafe extern "C" fn gz_error_ffi(
 ) {
     gz_error(state, err, msg)
 }
-pub unsafe extern "C" fn gz_intmax() -> ::core::ffi::c_uint {
+pub extern "C" fn gz_intmax() -> ::core::ffi::c_uint {
     return crate::limits_h::INT_MAX as ::core::ffi::c_uint;
 }
 #[export_name = "gz_intmax"]
