@@ -635,6 +635,25 @@ fn inflate_window_copy(
     Some(())
 }
 
+/// Resolve the physical history-window length before the ABI boundary lends
+/// the allocation as a slice.  A zero `wsize` is the pre-allocation state;
+/// once a window exists, its recorded size must still fit in `usize`.
+///
+/// zlib only supports 8--15 window bits.  Keeping that bound here prevents a
+/// malformed opaque state from requesting a wrapped or impractically large
+/// compatibility allocation before the safe copy core gets a chance to
+/// validate it.
+fn inflate_window_len(wbits: ::core::ffi::c_uint, wsize: ::core::ffi::c_uint) -> Option<usize> {
+    if !(8..=15).contains(&wbits) {
+        return None;
+    }
+    if wsize == 0 {
+        usize::try_from(1_u32.checked_shl(wbits)?).ok()
+    } else {
+        usize::try_from(wsize).ok()
+    }
+}
+
 /// Update the circular history window after a decoder call.  Allocation and
 /// ABI-owned buffer lending stay at the codec boundary; this core owns the
 /// window sizing, cursor planning, and bounded copies.
@@ -645,11 +664,11 @@ fn inflate_window_update(
     copy: ::core::ffi::c_uint,
 ) -> Option<()> {
     if state.wsize == 0 {
-        state.wsize = 1_u32.checked_shl(state.wbits)?;
+        state.wsize = ::core::ffi::c_uint::try_from(inflate_window_len(state.wbits, 0)?).ok()?;
         state.wnext = 0;
         state.whave = 0;
     }
-    let wsize = usize::try_from(state.wsize).ok()?;
+    let wsize = inflate_window_len(state.wbits, state.wsize)?;
     if window.len() != wsize || produced.len() != usize::try_from(copy).ok()? {
         return None;
     }
@@ -725,7 +744,10 @@ unsafe fn updatewindow(
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     if state.window.is_null() {
-        let Some(requested_wsize) = 1_u32.checked_shl(state.wbits) else {
+        let Some(window_len) = inflate_window_len(state.wbits, 0) else {
+            return 1 as ::core::ffi::c_int;
+        };
+        let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(window_len) else {
             return 1 as ::core::ffi::c_int;
         };
         // `inflate()` normally reaches this boundary only after init has
@@ -744,17 +766,7 @@ unsafe fn updatewindow(
             return 1 as ::core::ffi::c_int;
         }
     }
-    let window_len = if state.wsize == 0 {
-        let Some(wsize) = 1_u32.checked_shl(state.wbits) else {
-            return 1 as ::core::ffi::c_int;
-        };
-        let Ok(window_len) = usize::try_from(wsize) else {
-            return 1 as ::core::ffi::c_int;
-        };
-        window_len
-    } else if let Ok(window_len) = usize::try_from(state.wsize) {
-        window_len
-    } else {
+    let Some(window_len) = inflate_window_len(state.wbits, state.wsize) else {
         return 1 as ::core::ffi::c_int;
     };
     let Ok(copy_len) = usize::try_from(copy) else {
