@@ -3795,6 +3795,44 @@ fn tree_bit_length_totals_after_node(
     (opt_len, static_len)
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct GenBitlenNodePlan {
+    bit_length: ::core::ffi::c_int,
+    overflowed: bool,
+    count_index: Option<usize>,
+    totals: Option<(crate::zutil_h::ulg, crate::zutil_h::ulg)>,
+}
+
+fn gen_bitlen_node_plan(
+    parent_length: ::core::ffi::c_int,
+    max_length: ::core::ffi::c_int,
+    counts_toward_tree: bool,
+    frequency: crate::zutil_h::ush,
+    extra_bits: ::core::ffi::c_int,
+    static_bit_length: Option<::core::ffi::c_int>,
+    opt_len: crate::zutil_h::ulg,
+    static_len: crate::zutil_h::ulg,
+) -> GenBitlenNodePlan {
+    let (bit_length, overflowed) = clamped_tree_bit_length(parent_length, max_length);
+    let totals = counts_toward_tree.then(|| {
+        tree_bit_length_totals_after_node(
+            opt_len,
+            static_len,
+            frequency,
+            bit_length,
+            extra_bits,
+            static_bit_length,
+        )
+    });
+
+    GenBitlenNodePlan {
+        bit_length,
+        overflowed,
+        count_index: counts_toward_tree.then_some(bit_length as usize),
+        totals,
+    }
+}
+
 fn tally_symbol_bytes(
     dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
@@ -4079,8 +4117,6 @@ unsafe fn gen_bitlen(
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
     let mut bits: ::core::ffi::c_int = 0;
-    let mut xbits: ::core::ffi::c_int = 0;
-    let mut f: crate::zutil_h::ush = 0;
     let mut overflow: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     bits = 0 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
@@ -4093,36 +4129,47 @@ unsafe fn gen_bitlen(
     h = (*s).heap_max + 1 as ::core::ffi::c_int;
     while h < crate::src::deflate::HEAP_SIZE {
         n = (*s).heap[h as usize];
-        let (bits, overflowed) = clamped_tree_bit_length(
-            (*tree.offset((*tree.offset(n as isize)).dl.dad as isize))
-                .dl
-                .len as ::core::ffi::c_int,
-            max_length,
-        );
-        if overflowed {
-            overflow += 1;
-        }
-        (*tree.offset(n as isize)).dl.len = bits as crate::zutil_h::ush;
-        if !(n > max_code) {
-            (*s).bl_count[bits as usize] = (*s).bl_count[bits as usize].wrapping_add(1);
-            xbits = 0 as ::core::ffi::c_int;
-            if n >= base {
-                xbits = *extra.offset((n - base) as isize) as ::core::ffi::c_int;
-            }
-            f = (*tree.offset(n as isize)).fc.value;
+        let counts_toward_tree = n <= max_code;
+        let (frequency, extra_bits, static_bit_length) = if counts_toward_tree {
+            let extra_bits = if n >= base {
+                *extra.offset((n - base) as isize) as ::core::ffi::c_int
+            } else {
+                0
+            };
             let static_bit_length = if stree.is_null() {
                 None
             } else {
                 Some((*stree.offset(n as isize)).dl.len as ::core::ffi::c_int)
             };
-            ((*s).opt_len, (*s).static_len) = tree_bit_length_totals_after_node(
-                (*s).opt_len,
-                (*s).static_len,
-                f,
-                bits,
-                xbits,
+            (
+                (*tree.offset(n as isize)).fc.value,
+                extra_bits,
                 static_bit_length,
-            );
+            )
+        } else {
+            (0, 0, None)
+        };
+        let node_plan = gen_bitlen_node_plan(
+            (*tree.offset((*tree.offset(n as isize)).dl.dad as isize))
+                .dl
+                .len as ::core::ffi::c_int,
+            max_length,
+            counts_toward_tree,
+            frequency,
+            extra_bits,
+            static_bit_length,
+            (*s).opt_len,
+            (*s).static_len,
+        );
+        if node_plan.overflowed {
+            overflow += 1;
+        }
+        (*tree.offset(n as isize)).dl.len = node_plan.bit_length as crate::zutil_h::ush;
+        if let Some(bits) = node_plan.count_index {
+            (*s).bl_count[bits] = (*s).bl_count[bits].wrapping_add(1);
+        }
+        if let Some((opt_len, static_len)) = node_plan.totals {
+            ((*s).opt_len, (*s).static_len) = (opt_len, static_len);
         }
         h += 1;
     }
@@ -5381,10 +5428,11 @@ mod tests {
         bi_flush_core, bi_reverse, bi_windup_core, bit_buffer_would_overflow,
         bit_length_correction, bl_order, bl_tree_header_bit_length, block_bit_length_bytes,
         block_header_bits, canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
-        combined_tree_frequency, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
-        last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes,
-        pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
-        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        combined_tree_frequency, detect_data_type_from_ltree, dist_code_index,
+        gen_bitlen_node_plan, heap_node_precedes, last_nonzero_bl_code_rank,
+        mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
+        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_block_trees,
+        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
@@ -5452,6 +5500,36 @@ mod tests {
         assert_eq!(static_l_desc.extra_bits.len(), 29);
         assert_eq!(static_d_desc.extra_bits.len(), 30);
         assert_eq!(static_bl_desc.extra_bits.len(), 19);
+    }
+
+    #[test]
+    fn gen_bitlen_node_plan_clamps_counts_and_accumulates_costs() {
+        let plan = gen_bitlen_node_plan(15, 15, true, 3, 2, Some(7), 10, 20);
+
+        assert_eq!(plan.bit_length, 15);
+        assert!(plan.overflowed);
+        assert_eq!(plan.count_index, Some(15));
+        assert_eq!(plan.totals, Some((61, 47)));
+    }
+
+    #[test]
+    fn gen_bitlen_node_plan_skips_non_symbol_nodes() {
+        let plan = gen_bitlen_node_plan(-2, 15, false, 99, 4, Some(8), 10, 20);
+
+        assert_eq!(plan.bit_length, -1);
+        assert!(!plan.overflowed);
+        assert_eq!(plan.count_index, None);
+        assert_eq!(plan.totals, None);
+    }
+
+    #[test]
+    fn gen_bitlen_node_plan_preserves_missing_static_tree() {
+        let plan = gen_bitlen_node_plan(4, 15, true, 2, 1, None, 10, 20);
+
+        assert_eq!(plan.bit_length, 5);
+        assert!(!plan.overflowed);
+        assert_eq!(plan.count_index, Some(5));
+        assert_eq!(plan.totals, Some((22, 20)));
     }
 
     #[test]
