@@ -5327,7 +5327,7 @@ pub unsafe extern "C" fn _tr_flush_block(
             );
         }
         drop(writer);
-        let symbol_start = state.sym_buf.offset_from(state.pending_buf) as usize;
+        let symbol_start = state.lit_bufsize as usize;
         let mut writer = PendingBitWriter {
             pending_buffer,
             pending: &mut state.pending,
