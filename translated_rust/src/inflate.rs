@@ -620,6 +620,73 @@ struct WindowMetadata {
     whave: ::core::ffi::c_uint,
 }
 
+/// The initialized portion of an inflate history window.
+///
+/// The C state still carries these values separately while its allocation is
+/// callback-backed.  Keeping their validation and update together here makes
+/// the eventual owned-window conversion independent of raw cursor arithmetic.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct WindowHistory {
+    size: ::core::ffi::c_uint,
+    next: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+}
+
+impl WindowHistory {
+    fn new(
+        size: ::core::ffi::c_uint,
+        next: ::core::ffi::c_uint,
+        have: ::core::ffi::c_uint,
+    ) -> Option<Self> {
+        if size == 0 {
+            (next == 0 && have == 0).then_some(Self { size, next, have })
+        } else if next < size && have <= size {
+            Some(Self { size, next, have })
+        } else {
+            None
+        }
+    }
+
+    fn apply(
+        &mut self,
+        window: &mut [crate::stdlib::Bytef],
+        produced: &[crate::stdlib::Bytef],
+    ) -> Option<WindowUpdate> {
+        if window.len() != self.size as usize {
+            return None;
+        }
+        let plan = window_update_plan(
+            self.size,
+            self.next,
+            self.have,
+            produced.len() as ::core::ffi::c_uint,
+        );
+
+        if plan.replace {
+            let start = produced.len().checked_sub(window.len())?;
+            window.copy_from_slice(produced.get(start..)?);
+        } else {
+            let first = plan.first as usize;
+            let second = plan.second as usize;
+            let copy = produced.len();
+            let next = self.next as usize;
+
+            window
+                .get_mut(next..next.checked_add(first)?)?
+                .copy_from_slice(produced.get(..first)?);
+            if second != 0 {
+                window
+                    .get_mut(..second)?
+                    .copy_from_slice(produced.get(copy.checked_sub(second)?..)?);
+            }
+        }
+
+        self.next = plan.wnext;
+        self.have = plan.whave;
+        Some(plan)
+    }
+}
+
 fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> WindowMetadata {
     WindowMetadata {
         wsize: (1 as ::core::ffi::c_uint) << wbits,
@@ -737,30 +804,9 @@ fn apply_window_update(
     wnext: ::core::ffi::c_uint,
     whave: ::core::ffi::c_uint,
     produced: &[crate::stdlib::Bytef],
-) -> WindowUpdate {
-    let plan = window_update_plan(
-        window.len() as ::core::ffi::c_uint,
-        wnext,
-        whave,
-        produced.len() as ::core::ffi::c_uint,
-    );
-
-    if plan.replace {
-        let start = produced.len() - window.len();
-        window.copy_from_slice(&produced[start..]);
-    } else {
-        let first = plan.first as usize;
-        let second = plan.second as usize;
-        let copy = produced.len();
-        let next = wnext as usize;
-
-        window[next..next + first].copy_from_slice(&produced[..first]);
-        if second != 0 {
-            window[..second].copy_from_slice(&produced[copy - second..]);
-        }
-    }
-
-    plan
+) -> Option<WindowUpdate> {
+    let mut history = WindowHistory::new(window.len() as ::core::ffi::c_uint, wnext, whave)?;
+    history.apply(window, produced)
 }
 
 fn copy_dictionary_from_window(
@@ -1165,28 +1211,16 @@ fn inflate_gzip_trailer_length_is_valid(
     wrap & 4 == 0 || received_length == total_length & 0xffffffff as crate::stdlib::uLong
 }
 
-fn update_window_metadata(
-    wbits: ::core::ffi::c_uint,
-    wsize: &mut ::core::ffi::c_uint,
-    wnext: &mut ::core::ffi::c_uint,
-    whave: &mut ::core::ffi::c_uint,
-) {
-    if let Some(metadata) = window_metadata_update_plan(*wsize, wbits) {
-        *wsize = metadata.wsize;
-        *wnext = metadata.wnext;
-        *whave = metadata.whave;
-    }
-}
-
 fn update_window_history(
     window: &mut [crate::stdlib::Bytef],
     wnext: &mut ::core::ffi::c_uint,
     whave: &mut ::core::ffi::c_uint,
     produced: &[crate::stdlib::Bytef],
-) {
-    let plan = apply_window_update(window, *wnext, *whave, produced);
+) -> Option<()> {
+    let plan = apply_window_update(window, *wnext, *whave, produced)?;
     *wnext = plan.wnext;
     *whave = plan.whave;
+    Some(())
 }
 
 fn update_window_core(
@@ -1196,9 +1230,21 @@ fn update_window_core(
     whave: &mut ::core::ffi::c_uint,
     window: &mut [crate::stdlib::Bytef],
     produced: &[crate::stdlib::Bytef],
-) {
-    update_window_metadata(wbits, wsize, wnext, whave);
-    update_window_history(window, wnext, whave, produced);
+) -> Option<()> {
+    let metadata = window_metadata_update_plan(*wsize, wbits);
+    let expected_size = metadata.map(|metadata| metadata.wsize).unwrap_or(*wsize);
+    if window.len() != expected_size as usize {
+        return None;
+    }
+    let (next, have) = metadata
+        .map(|metadata| (metadata.wnext, metadata.whave))
+        .unwrap_or((*wnext, *whave));
+    let mut history = WindowHistory::new(expected_size, next, have)?;
+    let plan = history.apply(window, produced)?;
+    *wsize = expected_size;
+    *wnext = plan.wnext;
+    *whave = plan.whave;
+    Some(())
 }
 
 fn update_window_buffer_len(wsize: ::core::ffi::c_uint) -> usize {
@@ -1276,7 +1322,7 @@ fn update_window_state_core(
     state: &mut crate::src::inflate::inflate_state,
     window: &mut [crate::stdlib::Bytef],
     produced: &[crate::stdlib::Bytef],
-) {
+) -> Option<()> {
     update_window_core(
         state.wbits,
         &mut state.wsize,
@@ -1284,7 +1330,7 @@ fn update_window_state_core(
         &mut state.whave,
         window,
         produced,
-    );
+    )
 }
 
 fn updatewindow(
@@ -1312,8 +1358,10 @@ fn updatewindow(
             }
             None => update_window_produced_slice(None),
         };
-        update_window_state_core(state, window, produced);
-        0
+        match update_window_state_core(state, window, produced) {
+            Some(()) => 0,
+            None => 1,
+        }
     }
 }
 
@@ -4986,19 +5034,19 @@ mod tests {
     #[test]
     fn window_update_copies_replace_append_and_wrap_data() {
         let mut replace_window = [0; 8];
-        let replace = apply_window_update(&mut replace_window, 3, 5, b"0123456789");
+        let replace = apply_window_update(&mut replace_window, 3, 5, b"0123456789").unwrap();
         assert_eq!(replace.wnext, 0);
         assert_eq!(replace.whave, 8);
         assert_eq!(replace_window, *b"23456789");
 
         let mut append_window = *b"abcdefgh";
-        let append = apply_window_update(&mut append_window, 3, 5, b"XY");
+        let append = apply_window_update(&mut append_window, 3, 5, b"XY").unwrap();
         assert_eq!(append.wnext, 5);
         assert_eq!(append.whave, 7);
         assert_eq!(append_window, *b"abcXYfgh");
 
         let mut wrap_window = *b"abcdefgh";
-        let wrap = apply_window_update(&mut wrap_window, 6, 8, b"WXYZ");
+        let wrap = apply_window_update(&mut wrap_window, 6, 8, b"WXYZ").unwrap();
         assert_eq!(wrap.wnext, 2);
         assert_eq!(wrap.whave, 8);
         assert_eq!(wrap_window, *b"YZcdefWX");
@@ -5007,10 +5055,36 @@ mod tests {
     #[test]
     fn window_update_ignores_empty_output() {
         let mut window = *b"abcdefgh";
-        let update = apply_window_update(&mut window, 3, 5, b"");
+        let update = apply_window_update(&mut window, 3, 5, b"").unwrap();
         assert_eq!(update.wnext, 3);
         assert_eq!(update.whave, 5);
         assert_eq!(window, *b"abcdefgh");
+    }
+
+    #[test]
+    fn window_history_rejects_invalid_cursors_without_mutating_output() {
+        let mut window = *b"abcdefgh";
+
+        assert_eq!(apply_window_update(&mut window, 8, 5, b"XY"), None);
+        assert_eq!(window, *b"abcdefgh");
+        assert_eq!(super::WindowHistory::new(8, 3, 9), None);
+        assert!(super::WindowHistory::new(0, 0, 0).is_some());
+        assert_eq!(super::WindowHistory::new(0, 1, 0), None);
+    }
+
+    #[test]
+    fn window_update_core_rejects_a_mismatched_window_without_state_changes() {
+        let mut window = [0; 7];
+        let mut wsize = 8;
+        let mut wnext = 3;
+        let mut whave = 5;
+
+        assert_eq!(
+            update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b"XY"),
+            None
+        );
+        assert_eq!((wsize, wnext, whave), (8, 3, 5));
+        assert_eq!(window, [0; 7]);
     }
 
     #[test]
@@ -5019,7 +5093,10 @@ mod tests {
         let mut wnext = 6;
         let mut whave = 8;
 
-        update_window_history(&mut window, &mut wnext, &mut whave, b"WXYZ");
+        assert_eq!(
+            update_window_history(&mut window, &mut wnext, &mut whave, b"WXYZ"),
+            Some(())
+        );
 
         assert_eq!((wnext, whave), (2, 8));
         assert_eq!(window, *b"YZcdefWX");
@@ -5031,7 +5108,10 @@ mod tests {
         let mut wnext = 3;
         let mut whave = 5;
 
-        update_window_history(&mut window, &mut wnext, &mut whave, b"");
+        assert_eq!(
+            update_window_history(&mut window, &mut wnext, &mut whave, b""),
+            Some(())
+        );
 
         assert_eq!((wnext, whave), (3, 5));
         assert_eq!(window, *b"abcdefgh");
@@ -5044,7 +5124,10 @@ mod tests {
         let mut wnext = 5;
         let mut whave = 4;
 
-        update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b"xyz");
+        assert_eq!(
+            update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b"xyz"),
+            Some(())
+        );
 
         assert_eq!(wsize, 8);
         assert_eq!(wnext, 3);
@@ -5130,7 +5213,10 @@ mod tests {
             crate::src::inftrees::fixed_dist_code(0).val
         );
 
-        super::update_window_state_core(&mut state, &mut window, b"xyz");
+        assert_eq!(
+            super::update_window_state_core(&mut state, &mut window, b"xyz"),
+            Some(())
+        );
 
         assert_eq!((state.wsize, state.wnext, state.whave), (8, 3, 3));
         assert_eq!(&window[..3], b"xyz");
@@ -5145,7 +5231,10 @@ mod tests {
         let mut wnext = 3;
         let mut whave = 5;
 
-        update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b"");
+        assert_eq!(
+            update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b""),
+            Some(())
+        );
 
         assert_eq!((wsize, wnext, whave), (8, 3, 5));
         assert_eq!(window, *b"abcdefgh");
@@ -5158,7 +5247,10 @@ mod tests {
         let mut wnext = 6;
         let mut whave = 8;
 
-        update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b"WXYZ");
+        assert_eq!(
+            update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b"WXYZ"),
+            Some(())
+        );
 
         assert_eq!((wsize, wnext, whave), (8, 2, 8));
         assert_eq!(window, *b"YZcdefWX");
@@ -5171,13 +5263,16 @@ mod tests {
         let mut wnext = 5;
         let mut whave = 4;
 
-        update_window_core(
-            3,
-            &mut wsize,
-            &mut wnext,
-            &mut whave,
-            &mut window,
-            b"0123456789",
+        assert_eq!(
+            update_window_core(
+                3,
+                &mut wsize,
+                &mut wnext,
+                &mut whave,
+                &mut window,
+                b"0123456789",
+            ),
+            Some(())
         );
 
         assert_eq!((wsize, wnext, whave), (8, 0, 8));
