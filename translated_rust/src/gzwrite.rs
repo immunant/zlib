@@ -446,39 +446,8 @@ unsafe fn gzputc(
     state: &mut crate::gzguts_h::gz_state,
     c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None, None);
-    if state.skip != 0 && gz_zero(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.size != 0 {
-        let strm = &mut state.strm;
-        if strm.avail_in == 0 as crate::stdlib::uInt {
-            strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
-        }
-        let have = strm
-            .next_in
-            .offset(strm.avail_in as isize)
-            .offset_from(state.in_0) as ::core::ffi::c_uint;
-        if have < state.size {
-            *state.in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
-            strm.avail_in = strm.avail_in.wrapping_add(1);
-            state.x.pos += 1;
-            return c & 0xff as ::core::ffi::c_int;
-        }
-    }
-    buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
-    if gz_write(
-        state as *mut crate::gzguts_h::gz_state,
-        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidpc,
-        1 as crate::stdlib::z_size_t,
-    ) != 1 as crate::stdlib::z_size_t
-    {
+    let buf = [c as ::core::ffi::c_uchar];
+    if gzwrite(state, &buf) != 1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
