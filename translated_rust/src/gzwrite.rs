@@ -348,14 +348,53 @@ fn gz_write(
             if state.strm.avail_in == 0 as crate::stdlib::uInt {
                 state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
             }
-            let have_len = (state.strm.next_in as usize)
-                .wrapping_sub(state.in_0.as_ptr() as usize)
-                .wrapping_add(state.strm.avail_in as usize);
-            let copy_len = (state.size as usize)
-                .wrapping_sub(have_len)
-                .min(buf.len());
-            let in_0 = &mut state.in_0[..state.size as usize];
-            let Some(dest) = in_0.get_mut(have_len..have_len.wrapping_add(copy_len)) else {
+            let Some(cursor) = state
+                .strm
+                .next_in
+                .addr()
+                .checked_sub(state.in_0.as_ptr().addr())
+            else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return 0 as crate::stdlib::z_size_t;
+            };
+            let Some(have_len) = cursor.checked_add(state.strm.avail_in as usize) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return 0 as crate::stdlib::z_size_t;
+            };
+            let Some(remaining) = (state.size as usize).checked_sub(have_len) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return 0 as crate::stdlib::z_size_t;
+            };
+            let copy_len = remaining.min(buf.len());
+            let Some(end) = have_len.checked_add(copy_len) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return 0 as crate::stdlib::z_size_t;
+            };
+            let Some(in_0) = state.in_0.get_mut(..state.size as usize) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return 0 as crate::stdlib::z_size_t;
+            };
+            let Some(dest) = in_0.get_mut(have_len..end) else {
                 crate::src::gzlib::gz_static_error(
                     state,
                     crate::zlib_h::Z_STREAM_ERROR,
