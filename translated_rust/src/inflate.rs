@@ -605,17 +605,17 @@ pub unsafe extern "C" fn inflateInit__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit_(strm, version, stream_size)
 }
-pub unsafe extern "C" fn inflatePrime(
+#[export_name = "inflatePrime"]
+
+pub unsafe extern "C" fn inflatePrime_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     match inflate_prime_update((*state).hold, (*state).bits, bits, value) {
         InflatePrimeUpdate::Keep => crate::zlib_h::Z_OK,
         InflatePrimeUpdate::Clear => {
@@ -630,15 +630,6 @@ pub unsafe extern "C" fn inflatePrime(
         }
         InflatePrimeUpdate::StreamError => crate::zlib_h::Z_STREAM_ERROR,
     }
-}
-#[export_name = "inflatePrime"]
-
-pub unsafe extern "C" fn inflatePrime_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflatePrime(strm, bits, value)
 }
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
@@ -2111,12 +2102,7 @@ pub unsafe extern "C" fn inflate(
     (*state).hold = hold;
     (*state).bits = bits;
     if inflate_should_update_window((*state).wsize, out, left, (*state).mode, flush) {
-        if updatewindow(
-            strm,
-            (*strm).next_out,
-            out.wrapping_sub(left),
-        ) != 0
-        {
+        if updatewindow(strm, (*strm).next_out, out.wrapping_sub(left)) != 0 {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2587,25 +2573,17 @@ fn inflate_undermine_core(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
     crate::zlib_h::Z_DATA_ERROR
 }
 
-pub unsafe extern "C" fn inflateUndermine(
-    mut strm: crate::zlib_h::z_streamp,
-    mut _subvert: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_undermine_core(&mut (*state).sane);
-}
 #[export_name = "inflateUndermine"]
 
 pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
-    mut subvert: ::core::ffi::c_int,
+    mut _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateUndermine(strm, subvert)
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    inflate_undermine_core(&mut (*state).sane)
 }
 fn inflate_validate_wrap(
     wrap: ::core::ffi::c_int,
@@ -2618,26 +2596,18 @@ fn inflate_validate_wrap(
     }
 }
 
-pub unsafe extern "C" fn inflateValidate(
-    mut strm: crate::zlib_h::z_streamp,
-    mut check: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).wrap = inflate_validate_wrap((*state).wrap, check);
-    return crate::zlib_h::Z_OK;
-}
 #[export_name = "inflateValidate"]
 
 pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateValidate(strm, check)
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    (*state).wrap = inflate_validate_wrap((*state).wrap, check);
+    crate::zlib_h::Z_OK
 }
 pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_long {
     let mut state: *mut crate::src::inflate::inflate_state =
@@ -2681,16 +2651,14 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
-        dynamic_header_counts, inflate_copy_limit,
-        inflate_data_type_value, inflate_header_wrap_allows_capture, inflate_mark_value,
-        inflate_mark_progress,
-        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update, inflate_undermine_core,
-        inflate_reset2_params, inflate_state_metadata_is_valid, inflate_sync_point_value,
-        inflate_sync_search_core, inflate_should_update_window, inflate_validate_wrap, initial_window_metadata,
-        stored_block_lengths_are_valid, syncsearch_safe, window_update_plan, inflateSyncPoint_ffi,
-        InflatePrimeUpdate,
-        InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC,
-        TYPE,
+        dynamic_header_counts, inflateSyncPoint_ffi, inflate_copy_limit, inflate_data_type_value,
+        inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
+        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update,
+        inflate_reset2_params, inflate_should_update_window, inflate_state_metadata_is_valid,
+        inflate_sync_point_value, inflate_sync_search_core, inflate_undermine_core,
+        inflate_validate_wrap, initial_window_metadata, stored_block_lengths_are_valid,
+        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2762,7 +2730,10 @@ mod tests {
     fn inflate_undermine_core_marks_stream_sane_and_returns_data_error() {
         let mut sane = 0;
 
-        assert_eq!(inflate_undermine_core(&mut sane), crate::zlib_h::Z_DATA_ERROR);
+        assert_eq!(
+            inflate_undermine_core(&mut sane),
+            crate::zlib_h::Z_DATA_ERROR
+        );
         assert_eq!(sane, 1);
     }
 
@@ -2784,12 +2755,48 @@ mod tests {
 
     #[test]
     fn inflate_window_update_gate_preserves_mode_and_flush_boundaries() {
-        assert!(inflate_should_update_window(1, 8, 8, BAD, crate::zlib_h::Z_FINISH));
-        assert!(!inflate_should_update_window(0, 8, 8, TYPE, crate::zlib_h::Z_NO_FLUSH));
-        assert!(inflate_should_update_window(0, 8, 7, TYPE, crate::zlib_h::Z_FINISH));
-        assert!(!inflate_should_update_window(0, 8, 7, BAD, crate::zlib_h::Z_NO_FLUSH));
-        assert!(!inflate_should_update_window(0, 8, 7, CHECK, crate::zlib_h::Z_FINISH));
-        assert!(inflate_should_update_window(0, 8, 7, CHECK, crate::zlib_h::Z_NO_FLUSH));
+        assert!(inflate_should_update_window(
+            1,
+            8,
+            8,
+            BAD,
+            crate::zlib_h::Z_FINISH
+        ));
+        assert!(!inflate_should_update_window(
+            0,
+            8,
+            8,
+            TYPE,
+            crate::zlib_h::Z_NO_FLUSH
+        ));
+        assert!(inflate_should_update_window(
+            0,
+            8,
+            7,
+            TYPE,
+            crate::zlib_h::Z_FINISH
+        ));
+        assert!(!inflate_should_update_window(
+            0,
+            8,
+            7,
+            BAD,
+            crate::zlib_h::Z_NO_FLUSH
+        ));
+        assert!(!inflate_should_update_window(
+            0,
+            8,
+            7,
+            CHECK,
+            crate::zlib_h::Z_FINISH
+        ));
+        assert!(inflate_should_update_window(
+            0,
+            8,
+            7,
+            CHECK,
+            crate::zlib_h::Z_NO_FLUSH
+        ));
     }
 
     #[test]
@@ -3017,10 +3024,7 @@ mod tests {
         assert_eq!(inflate_mark_progress(COPY_1, 7, 99), 7);
         assert_eq!(inflate_mark_progress(MATCH, 7, 10), 3);
         assert_eq!(inflate_mark_progress(HEAD, 7, 10), 0);
-        assert_eq!(
-            inflate_mark_progress(MATCH, 5, 2),
-            2_u32.wrapping_sub(5)
-        );
+        assert_eq!(inflate_mark_progress(MATCH, 5, 2), 2_u32.wrapping_sub(5));
     }
 
     #[test]

@@ -3699,7 +3699,7 @@ fn next_codes(bl_count: &[crate::zutil_h::ush; 16]) -> [crate::zutil_h::ush; 16]
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
         code = code.wrapping_add(
-            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint
+            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint,
         ) << 1 as ::core::ffi::c_int;
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;

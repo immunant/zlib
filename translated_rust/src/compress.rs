@@ -186,10 +186,8 @@ pub unsafe extern "C" fn compress2_z_ffi(
         };
         stream.avail_out = output.len() as crate::stdlib::uInt;
 
-        let status = crate::src::deflate::deflate(
-            &mut stream,
-            source_progress.flush_mode(input_len),
-        );
+        let status =
+            crate::src::deflate::deflate(&mut stream, source_progress.flush_mode(input_len));
         source_progress.record_available(input_len, stream.avail_in);
         dest_progress.record_available(output_len, stream.avail_out);
 

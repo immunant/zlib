@@ -965,11 +965,11 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 mod tests {
     use super::{
         gz_buffer_is_initialized, gz_buffered_have, gz_comp_deflate_stream_is_corrupt,
-        gz_comp_has_output, gz_comp_max_write_chunk,
-        gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write, gz_comp_needs_reset,
-        gz_comp_output_produced, gz_comp_output_write_chunk_len, gz_comp_remaining_direct_input,
-        gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_skips_empty_flush,
-        gz_comp_write_chunk_len, gz_comp_write_failed, gz_has_pending_input, gz_has_pending_skip,
+        gz_comp_has_output, gz_comp_max_write_chunk, gz_comp_needs_output_buffer_reset,
+        gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
+        gz_comp_output_write_chunk_len, gz_comp_remaining_direct_input, gz_comp_reset_action,
+        gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
+        gz_comp_write_failed, gz_has_pending_input, gz_has_pending_skip,
         gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_step,
         gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
         gz_write_error_result, gz_write_is_empty, gz_write_needs_input_reset,

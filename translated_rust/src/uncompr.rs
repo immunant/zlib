@@ -33,16 +33,12 @@ struct ChunkedProgress {
     unassigned: crate::stdlib::z_size_t,
 }
 
-fn replenish_scalar(
-    unassigned: &mut crate::stdlib::z_size_t,
-    available: &mut crate::stdlib::uInt,
-) {
+fn replenish_scalar(unassigned: &mut crate::stdlib::z_size_t, available: &mut crate::stdlib::uInt) {
     if *available != 0 {
         return;
     }
 
-    *available = (*unassigned)
-        .min(crate::stdlib::uInt::MAX as crate::stdlib::z_size_t)
+    *available = (*unassigned).min(crate::stdlib::uInt::MAX as crate::stdlib::z_size_t)
         as crate::stdlib::uInt;
     *unassigned = (*unassigned).wrapping_sub(*available as crate::stdlib::z_size_t);
 }
@@ -375,13 +371,7 @@ mod tests {
         input.replenish(&mut input_available);
         output.replenish(&mut output_available);
 
-        let outcome = uncompress_outcome(
-            crate::zlib_h::Z_STREAM_END,
-            input,
-            4,
-            output,
-            3,
-        );
+        let outcome = uncompress_outcome(crate::zlib_h::Z_STREAM_END, input, 4, output, 3);
 
         assert_eq!(outcome.status, crate::zlib_h::Z_OK);
         assert_eq!(outcome.source_len, 6);

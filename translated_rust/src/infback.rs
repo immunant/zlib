@@ -84,8 +84,7 @@ fn inflate_back_init_metadata_is_valid(
     version_first_byte: Option<::core::ffi::c_int>,
     stream_size: ::core::ffi::c_int,
 ) -> bool {
-    version_first_byte
-        == Some(crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int)
+    version_first_byte == Some(crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int)
         && stream_size == ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
 }
 
@@ -1067,13 +1066,7 @@ mod tests {
 
     #[test]
     fn inflate_back_window_size_rejects_unsupported_bit_widths() {
-        for window_bits in [
-            ::core::ffi::c_int::MIN,
-            -1,
-            7,
-            16,
-            ::core::ffi::c_int::MAX,
-        ] {
+        for window_bits in [::core::ffi::c_int::MIN, -1, 7, 16, ::core::ffi::c_int::MAX] {
             assert_eq!(inflate_back_window_size(window_bits), None);
         }
     }

@@ -57,9 +57,7 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
     let mode = if file.is_null() {
         None
     } else {
-        Some(unsafe {
-            (*(file as *const crate::gzguts_h::gz_state)).mode
-        })
+        Some(unsafe { (*(file as *const crate::gzguts_h::gz_state)).mode })
     };
 
     match gz_close_action(mode) {

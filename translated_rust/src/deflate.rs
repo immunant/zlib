@@ -2484,8 +2484,7 @@ fn stored_block_min_size(
     pending_buf_size: crate::zutil_h::ulg,
     window_size: crate::stdlib::uInt,
 ) -> ::core::ffi::c_uint {
-    (if pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
-        > window_size as crate::zutil_h::ulg
+    (if pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg) > window_size as crate::zutil_h::ulg
     {
         window_size as crate::zutil_h::ulg
     } else {
@@ -3627,9 +3626,10 @@ unsafe extern "C" fn deflate_huff(
 mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
-        deflate_prime_bits_valid, deflate_state_status_valid, deflate_version_matches, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
-        pending_output_len, read_buf_len, slide_hash_entry, stored_block_min_size, zlib_header,
+        deflate_prime_bits_valid, deflate_state_status_valid, deflate_version_matches,
+        gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        normalize_deflate_params, pending_output_len, read_buf_len, slide_hash_entry,
+        stored_block_min_size, zlib_header,
     };
 
     #[test]
@@ -3649,10 +3649,7 @@ mod tests {
         assert_eq!(deflate_dictionary_len(10, 5, 32), 15);
         assert_eq!(deflate_dictionary_len(27, 5, 32), 32);
         assert_eq!(deflate_dictionary_len(30, 5, 32), 32);
-        assert_eq!(
-            deflate_dictionary_len(crate::stdlib::uInt::MAX, 1, 32),
-            0
-        );
+        assert_eq!(deflate_dictionary_len(crate::stdlib::uInt::MAX, 1, 32), 0);
     }
 
     #[test]
@@ -3852,6 +3849,8 @@ mod tests {
 
         assert!(!deflate_state_status_valid(0));
         assert!(!deflate_state_status_valid(-1));
-        assert!(!deflate_state_status_valid(crate::src::deflate::FINISH_STATE - 1));
+        assert!(!deflate_state_status_valid(
+            crate::src::deflate::FINISH_STATE - 1
+        ));
     }
 }
