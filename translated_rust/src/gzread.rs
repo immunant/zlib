@@ -182,42 +182,33 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
         crate::src::inflate::inflateReset(&mut state.strm);
-        state.how = crate::gzguts_h::GZIP;
-        state.junk = (state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
-        state.direct = 0 as ::core::ffi::c_int;
+        crate::src::gzlib::gz_set_gzip_input(state, state.junk != -1 as ::core::ffi::c_int);
         return 0 as ::core::ffi::c_int;
     }
     if gz_avail(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if state.strm.avail_in == 0 as crate::stdlib::uInt
-        || state.again != 0 && state.strm.avail_in < 4 as crate::stdlib::uInt
-    {
-        return 0 as ::core::ffi::c_int;
+    match crate::src::gzlib::gz_look_input_plan(state) {
+        crate::src::gzlib::GzLookInputPlan::NeedMore => return 0 as ::core::ffi::c_int,
+        crate::src::gzlib::GzLookInputPlan::InspectHeader => {
+            let input = state.strm.next_in;
+            let header = [*input, *input.offset(1), *input.offset(2), *input.offset(3)];
+            if crate::src::gzlib::gz_is_gzip_header(header) {
+                crate::src::inflate::inflateReset(&mut state.strm);
+                crate::src::gzlib::gz_set_gzip_input(state, true);
+                return 0 as ::core::ffi::c_int;
+            }
+        }
+        crate::src::gzlib::GzLookInputPlan::Copy(_) => {}
     }
-    if state.strm.avail_in > 3 as crate::stdlib::uInt
-        && *state.strm.next_in.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 31 as ::core::ffi::c_int
-        && *state.strm.next_in.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 139 as ::core::ffi::c_int
-        && *state.strm.next_in.offset(2 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 8 as ::core::ffi::c_int
-        && (*state.strm.next_in.offset(3 as ::core::ffi::c_int as isize) as ::core::ffi::c_int)
-            < 32 as ::core::ffi::c_int
-    {
-        crate::src::inflate::inflateReset(&mut state.strm);
-        state.how = crate::gzguts_h::GZIP;
-        state.junk = 1 as ::core::ffi::c_int;
-        state.direct = 0 as ::core::ffi::c_int;
-        return 0 as ::core::ffi::c_int;
-    }
+    let available = state.strm.avail_in;
     state.x.next = state.out;
     crate::stdlib::memcpy(
         state.x.next as *mut ::core::ffi::c_void,
         state.strm.next_in as *const ::core::ffi::c_void,
-        state.strm.avail_in as crate::__stddef_size_t_h::size_t,
+        available as crate::__stddef_size_t_h::size_t,
     );
-    crate::src::gzlib::gz_set_copy_input(state, state.strm.avail_in);
+    crate::src::gzlib::gz_set_copy_input(state, available);
     return 0 as ::core::ffi::c_int;
 }
 
