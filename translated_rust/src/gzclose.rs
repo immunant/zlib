@@ -20,21 +20,58 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe extern "C" fn gzclose(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    return if (*state).mode == crate::gzguts_h::GZ_READ {
-        crate::src::gzread::gzclose_r(file as *mut crate::zlib_h::gzFile_s)
+pub enum GzClose {
+    Read(crate::src::gzread::GzCloseRead),
+    Write(crate::src::gzwrite::GzCloseWrite),
+}
+
+pub fn gzclose(state: &mut crate::gzguts_h::gz_state) -> GzClose {
+    if state.mode == crate::gzguts_h::GZ_READ {
+        GzClose::Read(crate::src::gzread::gzclose_r(state))
     } else {
-        crate::src::gzwrite::gzclose_w(file as *mut crate::zlib_h::gzFile_s)
-    };
+        GzClose::Write(crate::src::gzwrite::gzclose_w(state))
+    }
 }
 #[export_name = "gzclose"]
 
-pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose(file)
+pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    match gzclose(state) {
+        GzClose::Read(close) => {
+            if !close.valid {
+                return close.result;
+            }
+            if close.end_inflater {
+                crate::src::inflate::inflateEnd(&mut state.strm);
+            }
+            crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_OK, None);
+            let ret = crate::stdlib::close(state.fd);
+            drop(Box::from_raw(state));
+            if ret != 0 {
+                crate::zlib_h::Z_ERRNO
+            } else {
+                close.result
+            }
+        }
+        GzClose::Write(close) => {
+            if !close.valid {
+                return close.result;
+            }
+            if close.end_deflater {
+                crate::src::deflate::deflateEnd(&mut state.strm);
+            }
+            crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_OK, None);
+            let mut result = close.result;
+            if let Some(file) = state.write_file.take() {
+                drop(file);
+            } else if crate::stdlib::close(state.fd) == -1 {
+                result = crate::zlib_h::Z_ERRNO;
+            }
+            drop(Box::from_raw(state));
+            result
+        }
+    }
 }

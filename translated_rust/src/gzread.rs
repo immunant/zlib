@@ -811,43 +811,51 @@ pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ff
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     gzdirect(file)
 }
-pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
+pub struct GzCloseRead {
+    pub result: ::core::ffi::c_int,
+    pub valid: bool,
+    pub end_inflater: bool,
+}
+
+pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> GzCloseRead {
+    if state.mode != crate::gzguts_h::GZ_READ {
+        return GzCloseRead {
+            result: crate::zlib_h::Z_STREAM_ERROR,
+            valid: false,
+            end_inflater: false,
+        };
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if (*state).size != 0 {
-        crate::src::inflate::inflateEnd(
-            &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
-    }
-    err = if (*state).err == crate::zlib_h::Z_BUF_ERROR {
+    let result = if state.err == crate::zlib_h::Z_BUF_ERROR {
         crate::zlib_h::Z_BUF_ERROR
     } else {
         crate::zlib_h::Z_OK
     };
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    ret = crate::stdlib::close((*state).fd);
-    drop(Box::from_raw(state));
-    return if ret != 0 {
-        crate::zlib_h::Z_ERRNO
-    } else {
-        err
-    };
+    GzCloseRead {
+        result,
+        valid: true,
+        end_inflater: state.size != 0,
+    }
 }
 #[export_name = "gzclose_r"]
 
-pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_r(file)
+pub unsafe extern "C" fn gzclose_r_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    let close = gzclose_r(state);
+    if !close.valid {
+        return close.result;
+    }
+    if close.end_inflater {
+        crate::src::inflate::inflateEnd(&mut state.strm);
+    }
+    crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_OK, None);
+    let ret = crate::stdlib::close(state.fd);
+    drop(Box::from_raw(state));
+    if ret != 0 {
+        crate::zlib_h::Z_ERRNO
+    } else {
+        close.result
+    }
 }
