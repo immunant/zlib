@@ -35,6 +35,14 @@ fn compress_chunk(remaining: &mut crate::stdlib::z_size_t) -> crate::stdlib::uIn
     chunk
 }
 
+fn compress2_final_status(err: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if err == crate::zlib_h::Z_STREAM_END {
+        crate::zlib_h::Z_OK
+    } else {
+        err
+    }
+}
+
 #[export_name = "compress2_z"]
 pub unsafe extern "C" fn compress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -108,11 +116,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
     crate::src::deflate::deflateEnd_ffi(
         &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
     );
-    return if err == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else {
-        err
-    };
+    return compress2_final_status(err);
 }
 #[export_name = "compress2"]
 pub unsafe extern "C" fn compress2_ffi(

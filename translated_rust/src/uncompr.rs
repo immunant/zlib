@@ -37,6 +37,21 @@ fn uncompress_chunk(remaining: &mut crate::stdlib::z_size_t) -> crate::stdlib::u
     chunk
 }
 
+fn uncompress2_final_status(
+    err: ::core::ffi::c_int,
+    remaining_input: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_int {
+    if err == crate::zlib_h::Z_STREAM_END {
+        crate::zlib_h::Z_OK
+    } else if err == crate::zlib_h::Z_NEED_DICT {
+        crate::zlib_h::Z_DATA_ERROR
+    } else if err == crate::zlib_h::Z_BUF_ERROR && remaining_input == 0 as crate::stdlib::z_size_t {
+        crate::zlib_h::Z_DATA_ERROR
+    } else {
+        err
+    }
+}
+
 #[export_name = "uncompress2_z"]
 pub unsafe extern "C" fn uncompress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -112,15 +127,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     crate::src::inflate::inflateEnd_ffi(
         &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
     );
-    return if err == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else if err == crate::zlib_h::Z_NEED_DICT {
-        crate::zlib_h::Z_DATA_ERROR
-    } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        err
-    };
+    return uncompress2_final_status(err, len);
 }
 #[export_name = "uncompress2"]
 pub unsafe extern "C" fn uncompress2_ffi(

@@ -53,7 +53,7 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     (*state).in_0 = crate::stdlib::malloc(
@@ -111,7 +111,7 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_comp(
+unsafe fn gz_comp(
     mut state: crate::gzguts_h::gz_statep,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -211,7 +211,7 @@ unsafe extern "C" fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
@@ -244,7 +244,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_write(
+unsafe fn gz_write(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: crate::stdlib::voidpc,
     mut len: crate::stdlib::z_size_t,
@@ -583,6 +583,17 @@ fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
         && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
 }
 
+fn gzputs_return_value(
+    len: crate::stdlib::z_size_t,
+    put: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_int {
+    if len != 0 && put == 0 as crate::stdlib::z_size_t {
+        -1 as ::core::ffi::c_int
+    } else {
+        put as ::core::ffi::c_int
+    }
+}
+
 #[export_name = "gzputs"]
 
 pub unsafe extern "C" fn gzputs_ffi(
@@ -615,11 +626,7 @@ pub unsafe extern "C" fn gzputs_ffi(
         return -1 as ::core::ffi::c_int;
     }
     put = gz_write(state, s as crate::stdlib::voidpc, len);
-    return if len != 0 && put == 0 as crate::stdlib::z_size_t {
-        -1 as ::core::ffi::c_int
-    } else {
-        put as ::core::ffi::c_int
-    };
+    return gzputs_return_value(len, put);
 }
 fn gzflush_valid_flush(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 as ::core::ffi::c_int && flush <= crate::zlib_h::Z_FINISH

@@ -4796,6 +4796,19 @@ pub fn crc32_update(
     crc32_slice(crc, buf)
 }
 
+enum Crc32InputPlan {
+    Initial,
+    Slice { len: usize },
+}
+
+fn crc32_input_plan(buf_is_null: bool, len: crate::stdlib::z_size_t) -> Crc32InputPlan {
+    if buf_is_null {
+        Crc32InputPlan::Initial
+    } else {
+        Crc32InputPlan::Slice { len: len as usize }
+    }
+}
+
 #[export_name = "crc32_z"]
 
 pub unsafe extern "C" fn crc32_z_ffi(
@@ -4803,10 +4816,10 @@ pub unsafe extern "C" fn crc32_z_ffi(
     mut buf: *const ::core::ffi::c_uchar,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return 0 as crate::stdlib::uLong;
+    match crc32_input_plan(buf.is_null(), len) {
+        Crc32InputPlan::Initial => 0 as crate::stdlib::uLong,
+        Crc32InputPlan::Slice { len } => crc32_slice(crc, ::core::slice::from_raw_parts(buf, len)),
     }
-    crc32_slice(crc, ::core::slice::from_raw_parts(buf, len as usize))
 }
 #[export_name = "crc32"]
 
