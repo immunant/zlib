@@ -185,31 +185,6 @@ pub(crate) fn inflate_state_values_are_valid(
         && (crate::src::inflate::HEAD..=crate::src::inflate::SYNC).contains(&mode)
 }
 
-// The large legacy decoder still calls this transitional adapter. Every
-// other stream validation site uses `inflate_state_check_at_boundary!`, which
-// keeps its raw adoptions in the FFI boundary that owns the stream.
-pub(crate) unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return 1;
-    }
-    let strm_ref = &*strm;
-    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return 1;
-    }
-    let state = &*state;
-    if inflate_state_values_are_valid(
-        strm_ref.zalloc.is_some(),
-        strm_ref.zfree.is_some(),
-        state.strm == strm,
-        state.mode,
-    ) {
-        0
-    } else {
-        1
-    }
-}
-
 /// Bound one stored-block transfer by the decoder's remaining input and
 /// output. The ABI loops keep their cursors at the boundary; this core owns
 /// only the scalar progress calculation.
@@ -787,24 +762,42 @@ pub unsafe fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if inflateStateCheck(strm) != 0
-        || (*strm).next_out.is_null()
-        || (*strm).next_in.is_null() && (*strm).avail_in != 0 as crate::stdlib::uInt
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // This is the legacy decoder's one stream/state adoption.  Keep the
+    // pointer checks here, then hand the scalar relationship to the safe
+    // validator shared by the smaller inflate boundaries.
+    let strm_ref = &mut *strm;
+    let state_ref = {
+        let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+        if state.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        &mut *state
+    };
+    if !inflate_state_values_are_valid(
+        strm_ref.zalloc.is_some(),
+        strm_ref.zfree.is_some(),
+        state_ref.strm == strm,
+        state_ref.mode,
+    ) || strm_ref.next_out.is_null()
+        || strm_ref.next_in.is_null() && strm_ref.avail_in != 0 as crate::stdlib::uInt
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).mode as ::core::ffi::c_uint
+    state = state_ref as *mut crate::src::inflate::inflate_state;
+    if state_ref.mode as ::core::ffi::c_uint
         == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
     {
-        (*state).mode = crate::src::inflate::TYPEDO;
+        state_ref.mode = crate::src::inflate::TYPEDO;
     }
-    put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    left = (*strm).avail_out as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    have = (*strm).avail_in as ::core::ffi::c_uint;
-    hold = (*state).hold;
-    bits = (*state).bits;
+    put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
+    left = strm_ref.avail_out as ::core::ffi::c_uint;
+    next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
+    have = strm_ref.avail_in as ::core::ffi::c_uint;
+    hold = state_ref.hold;
+    bits = state_ref.bits;
     in_0 = have;
     out = left;
     ret = crate::zlib_h::Z_OK;
