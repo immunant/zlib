@@ -1040,27 +1040,48 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         stream_size,
     )
 }
+fn deflate_state_values_are_valid(
+    has_zalloc: bool,
+    has_zfree: bool,
+    state_matches_stream: bool,
+    status: ::core::ffi::c_int,
+) -> bool {
+    has_zalloc
+        && has_zfree
+        && state_matches_stream
+        && matches!(
+            status,
+            crate::src::deflate::INIT_STATE
+                | crate::src::deflate::GZIP_STATE
+                | crate::src::deflate::EXTRA_STATE
+                | crate::src::deflate::NAME_STATE
+                | crate::src::deflate::COMMENT_STATE
+                | crate::src::deflate::HCRC_STATE
+                | crate::src::deflate::BUSY_STATE
+                | crate::src::deflate::FINISH_STATE
+        )
+}
+
 unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
+    if strm.is_null() {
+        return 1;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null()
-        || (*s).strm != strm
-        || (*s).status != crate::src::deflate::INIT_STATE
-            && (*s).status != crate::src::deflate::GZIP_STATE
-            && (*s).status != crate::src::deflate::EXTRA_STATE
-            && (*s).status != crate::src::deflate::NAME_STATE
-            && (*s).status != crate::src::deflate::COMMENT_STATE
-            && (*s).status != crate::src::deflate::HCRC_STATE
-            && (*s).status != crate::src::deflate::BUSY_STATE
-            && (*s).status != crate::src::deflate::FINISH_STATE
-    {
-        return 1 as ::core::ffi::c_int;
+    let strm_ref = &*strm;
+    let state = strm_ref.state as *mut crate::src::deflate::deflate_state;
+    if state.is_null() {
+        return 1;
     }
-    return 0 as ::core::ffi::c_int;
+    let state = &*state;
+    if deflate_state_values_are_valid(
+        strm_ref.zalloc.is_some(),
+        strm_ref.zfree.is_some(),
+        state.strm == strm,
+        state.status,
+    ) {
+        0
+    } else {
+        1
+    }
 }
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
