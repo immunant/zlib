@@ -2296,10 +2296,6 @@ static bl_order: [crate::zutil_h::uch; 19] = [
     15 as ::core::ffi::c_int as crate::zutil_h::uch,
 ];
 
-const STATIC_BL_DESC_KIND: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-const STATIC_L_DESC_KIND: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-const STATIC_D_DESC_KIND: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-
 static static_l_desc: crate::src::deflate::static_tree_desc = static_tree_desc_s {
     extra_base: crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int,
     elems: crate::src::deflate::L_CODES,
@@ -2318,27 +2314,27 @@ static static_bl_desc: crate::src::deflate::static_tree_desc = static_tree_desc_
     max_length: MAX_BL_BITS,
 };
 
-fn static_desc(kind: ::core::ffi::c_int) -> &'static crate::src::deflate::static_tree_desc {
+fn static_desc(kind: TreeKind) -> &'static crate::src::deflate::static_tree_desc {
     match kind {
-        STATIC_L_DESC_KIND => &static_l_desc,
-        STATIC_D_DESC_KIND => &static_d_desc,
-        _ => &static_bl_desc,
+        TreeKind::Literal => &static_l_desc,
+        TreeKind::Distance => &static_d_desc,
+        TreeKind::BitLength => &static_bl_desc,
     }
 }
 
-fn static_tree(kind: ::core::ffi::c_int) -> Option<&'static [crate::src::deflate::ct_data]> {
+fn static_tree(kind: TreeKind) -> Option<&'static [crate::src::deflate::ct_data]> {
     match kind {
-        STATIC_L_DESC_KIND => Some(&static_ltree),
-        STATIC_D_DESC_KIND => Some(&static_dtree),
-        _ => None,
+        TreeKind::Literal => Some(&static_ltree),
+        TreeKind::Distance => Some(&static_dtree),
+        TreeKind::BitLength => None,
     }
 }
 
-fn static_extra_bits(kind: ::core::ffi::c_int) -> &'static [crate::stdlib::intf] {
+fn static_extra_bits(kind: TreeKind) -> &'static [crate::stdlib::intf] {
     match kind {
-        STATIC_L_DESC_KIND => &extra_lbits,
-        STATIC_D_DESC_KIND => &extra_dbits,
-        _ => &extra_blbits,
+        TreeKind::Literal => &extra_lbits,
+        TreeKind::Distance => &extra_dbits,
+        TreeKind::BitLength => &extra_blbits,
     }
 }
 
@@ -2650,9 +2646,6 @@ fn init_block(s: &mut crate::src::deflate::deflate_state) {
     s.sym_next = s.matches;
 }
 pub(crate) fn tr_init(state: &mut crate::src::deflate::deflate_state) {
-    state.l_desc.stat_desc_kind = STATIC_L_DESC_KIND;
-    state.d_desc.stat_desc_kind = STATIC_D_DESC_KIND;
-    state.bl_desc.stat_desc_kind = STATIC_BL_DESC_KIND;
     state.bi_buf = 0 as crate::zutil_h::ush;
     state.bi_valid = 0 as ::core::ffi::c_int;
     state.bi_used = 0 as ::core::ffi::c_int;
@@ -2719,16 +2712,16 @@ enum TreeKind {
 fn gen_bitlen(
     tree: &mut [crate::src::deflate::ct_data],
     max_code: ::core::ffi::c_int,
-    desc_kind: ::core::ffi::c_int,
+    kind: TreeKind,
     heap: &[::core::ffi::c_int; 573],
     heap_max: ::core::ffi::c_int,
     bl_count: &mut [crate::zutil_h::ush; 16],
     opt_len: &mut crate::zutil_h::ulg,
     static_len: &mut crate::zutil_h::ulg,
 ) {
-    let stat_desc = static_desc(desc_kind);
-    let stree = static_tree(desc_kind);
-    let extra = static_extra_bits(desc_kind);
+    let stat_desc = static_desc(kind);
+    let stree = static_tree(kind);
+    let extra = static_extra_bits(kind);
     let mut base: ::core::ffi::c_int = stat_desc.extra_base;
     let mut max_length: ::core::ffi::c_int = stat_desc.max_length;
     let mut h: ::core::ffi::c_int = 0;
@@ -2819,7 +2812,7 @@ fn gen_bitlen(
 fn build_tree_inner(
     tree: &mut [crate::src::deflate::ct_data],
     max_code_out: &mut ::core::ffi::c_int,
-    desc_kind: ::core::ffi::c_int,
+    kind: TreeKind,
     heap: &mut [::core::ffi::c_int; 573],
     heap_len: &mut ::core::ffi::c_int,
     heap_max: &mut ::core::ffi::c_int,
@@ -2828,8 +2821,8 @@ fn build_tree_inner(
     opt_len: &mut crate::zutil_h::ulg,
     static_len: &mut crate::zutil_h::ulg,
 ) {
-    let stat_desc = static_desc(desc_kind);
-    let stree = static_tree(desc_kind);
+    let stat_desc = static_desc(kind);
+    let stree = static_tree(kind);
     let mut elems: ::core::ffi::c_int = stat_desc.elems;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
@@ -2909,7 +2902,7 @@ fn build_tree_inner(
     gen_bitlen(
         tree,
         *max_code_out,
-        desc_kind,
+        kind,
         heap,
         *heap_max,
         bl_count,
@@ -2924,7 +2917,7 @@ fn build_tree(state: &mut crate::src::deflate::deflate_state, kind: TreeKind) {
         TreeKind::Literal => build_tree_inner(
             &mut state.dyn_ltree,
             &mut state.l_desc.max_code,
-            state.l_desc.stat_desc_kind,
+            kind,
             &mut state.heap,
             &mut state.heap_len,
             &mut state.heap_max,
@@ -2936,7 +2929,7 @@ fn build_tree(state: &mut crate::src::deflate::deflate_state, kind: TreeKind) {
         TreeKind::Distance => build_tree_inner(
             &mut state.dyn_dtree,
             &mut state.d_desc.max_code,
-            state.d_desc.stat_desc_kind,
+            kind,
             &mut state.heap,
             &mut state.heap_len,
             &mut state.heap_max,
@@ -2948,7 +2941,7 @@ fn build_tree(state: &mut crate::src::deflate::deflate_state, kind: TreeKind) {
         TreeKind::BitLength => build_tree_inner(
             &mut state.bl_tree,
             &mut state.bl_desc.max_code,
-            state.bl_desc.stat_desc_kind,
+            kind,
             &mut state.heap,
             &mut state.heap_len,
             &mut state.heap_max,

@@ -52,7 +52,6 @@ pub type tree_desc = crate::src::deflate::tree_desc_s;
 
 pub struct tree_desc_s {
     pub max_code: ::core::ffi::c_int,
-    pub stat_desc_kind: ::core::ffi::c_int,
 }
 
 pub type Pos = crate::zutil_h::ush;

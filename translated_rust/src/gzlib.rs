@@ -151,6 +151,36 @@ fn gz_open_oflag_for_mode(
 
 const GZDOPEN_PATH_CAPACITY: usize = 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>();
 
+struct GzFdPath {
+    bytes: [u8; GZDOPEN_PATH_CAPACITY],
+    len: usize,
+}
+
+impl ::core::fmt::Write for GzFdPath {
+    fn write_str(&mut self, s: &str) -> ::core::fmt::Result {
+        let Some(end) = self.len.checked_add(s.len()) else {
+            return Err(::core::fmt::Error);
+        };
+        if end >= self.bytes.len() {
+            return Err(::core::fmt::Error);
+        }
+        self.bytes[self.len..end].copy_from_slice(s.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+fn gz_fd_path(fd: ::core::ffi::c_int) -> Option<GzFdPath> {
+    let mut path = GzFdPath {
+        bytes: [0; GZDOPEN_PATH_CAPACITY],
+        len: 0,
+    };
+    use ::core::fmt::Write;
+    write!(&mut path, "<fd:{}>", fd).ok()?;
+    path.bytes[path.len] = 0;
+    Some(path)
+}
+
 fn gz_reset_before_error(state: &mut crate::gzguts_h::gz_state) {
     state.x.have = 0 as ::core::ffi::c_uint;
     if state.mode == crate::gzguts_h::GZ_READ {
@@ -322,14 +352,13 @@ pub unsafe extern "C" fn gzdopen_ffi(
     let Some(parsed_mode) = gz_parse_open_mode(::core::ffi::CStr::from_ptr(mode).to_bytes()) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    let mut path = [0 as ::core::ffi::c_char; GZDOPEN_PATH_CAPACITY];
-    crate::stdlib::snprintf(
-        path.as_mut_ptr(),
-        GZDOPEN_PATH_CAPACITY as crate::__stddef_size_t_h::size_t,
-        b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
-        fd,
-    );
-    return gz_open(::core::ffi::CStr::from_ptr(path.as_ptr()), fd, parsed_mode);
+    let Some(path) = gz_fd_path(fd) else {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    };
+    let Ok(path) = ::core::ffi::CStr::from_bytes_with_nul(&path.bytes[..=path.len]) else {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    };
+    return gz_open(path, fd, parsed_mode);
 }
 fn gz_state_open(state: &crate::gzguts_h::gz_state) -> bool {
     state.mode == crate::gzguts_h::GZ_READ || state.mode == crate::gzguts_h::GZ_WRITE
