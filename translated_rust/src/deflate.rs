@@ -2639,30 +2639,43 @@ pub unsafe extern "C" fn deflateCopy(
         deflateEnd(&mut *dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    // All allocation callbacks are complete. Bind the two independently
+    // owned state allocations once so the rebinding and copies below are
+    // ordinary reference and slice operations instead of repeated raw-state
+    // dereferences. The initial state copy intentionally remains before the
+    // callbacks above, where zlib makes it observable through `dest->state`.
+    let source_state = &*ss;
+    let destination_state = &mut *ds;
     // `pending_out` is an offset into the source pending allocation. Retain
     // that byte offset while rebinding it to the destination allocation
     // without requiring raw-pointer in-bounds arithmetic.
-    (*ds).window = window;
-    (*ds).prev = prev;
-    (*ds).head = head;
-    (*ds).pending_buf = pending_buf;
-    (*ds).pending_out = pending_buf.wrapping_add(pending_offset);
-    (*ds).sym_buf =
-        pending_buf.wrapping_add((*ds).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
+    destination_state.window = window;
+    destination_state.prev = prev;
+    destination_state.head = head;
+    destination_state.pending_buf = pending_buf;
+    destination_state.pending_out = pending_buf.wrapping_add(pending_offset);
+    destination_state.sym_buf = pending_buf.wrapping_add(destination_state.lit_bufsize as usize)
+        as *mut crate::zutil_h::uchf;
     // These allocations are all owned by the validated source deflater and
     // have the lengths captured in `plan`. Bind the window, chain table, and
     // pending allocation once, then make four C memory copies ordinary
     // bounded slice copies. The head-table copy stays on the existing raw
     // path, avoiding an additional unsafe allocation bind here.
-    let source_window = ::core::slice::from_raw_parts((*ss).window, plan.window_len);
-    let destination_window = ::core::slice::from_raw_parts_mut((*ds).window, plan.window_len);
+    let source_window = ::core::slice::from_raw_parts(source_state.window, plan.window_len);
+    let destination_window =
+        ::core::slice::from_raw_parts_mut(destination_state.window, plan.window_len);
     let source_prev =
-        ::core::slice::from_raw_parts((*ss).prev as *const crate::stdlib::Bytef, plan.prev_len);
-    let destination_prev =
-        ::core::slice::from_raw_parts_mut((*ds).prev as *mut crate::stdlib::Bytef, plan.prev_len);
-    let source_pending = ::core::slice::from_raw_parts((*ss).pending_buf, plan.pending_buf_len);
-    let destination_pending =
-        ::core::slice::from_raw_parts_mut((*ds).pending_buf, plan.pending_buf_len);
+        ::core::slice::from_raw_parts(source_state.prev as *const crate::stdlib::Bytef, plan.prev_len);
+    let destination_prev = ::core::slice::from_raw_parts_mut(
+        destination_state.prev as *mut crate::stdlib::Bytef,
+        plan.prev_len,
+    );
+    let source_pending =
+        ::core::slice::from_raw_parts(source_state.pending_buf, plan.pending_buf_len);
+    let destination_pending = ::core::slice::from_raw_parts_mut(
+        destination_state.pending_buf,
+        plan.pending_buf_len,
+    );
     deflate_copy_buffers(
         &plan,
         source_window,
@@ -2673,15 +2686,15 @@ pub unsafe extern "C" fn deflateCopy(
         destination_pending,
     );
     crate::stdlib::memcpy(
-        (*ds).head as *mut ::core::ffi::c_void,
-        (*ss).head as *const ::core::ffi::c_void,
+        destination_state.head as *mut ::core::ffi::c_void,
+        source_state.head as *const ::core::ffi::c_void,
         plan.head_len,
     );
-    (*ds).l_desc.dyn_tree = &raw mut (*ds).dyn_ltree as *mut crate::src::deflate::ct_data_s
+    destination_state.l_desc.dyn_tree = &raw mut destination_state.dyn_ltree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    (*ds).d_desc.dyn_tree = &raw mut (*ds).dyn_dtree as *mut crate::src::deflate::ct_data_s
+    destination_state.d_desc.dyn_tree = &raw mut destination_state.dyn_dtree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    (*ds).bl_desc.dyn_tree = &raw mut (*ds).bl_tree as *mut crate::src::deflate::ct_data_s
+    destination_state.bl_desc.dyn_tree = &raw mut destination_state.bl_tree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
 }
