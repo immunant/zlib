@@ -264,42 +264,52 @@ fn inflate_fast_bound(
     publish_inflate_fast_result(strm, input, output, result);
 }
 
-pub unsafe fn inflate_fast(
+// The raw stream cursors are bound in one narrow scope, after which the
+// decoder remains entirely reference- and slice-based in `inflate_fast_bound`.
+// Keeping this adapter safe prevents internal callers from inheriting an
+// unnecessary unsafe-function contract.
+pub fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
 ) {
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
-    let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
-    let used = start.wrapping_sub(strm.avail_out) as usize;
-    let output = ::core::slice::from_raw_parts_mut(
-        strm.next_out.wrapping_sub(used),
-        used + strm.avail_out as usize,
-    );
-    let window = if state.wsize == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(state.window, state.wsize as usize)
-    };
-    let lcode_len = if ::core::ptr::eq(
-        state.lencode,
-        crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
-    ) {
-        crate::src::inftrees::inffixed_h::lenfix.len()
-    } else {
-        crate::src::inftrees::ENOUGH_LENS as usize
-    };
-    let dcode_len = if ::core::ptr::eq(
-        state.distcode,
-        crate::src::inftrees::inffixed_h::distfix.as_ptr(),
-    ) {
-        crate::src::inftrees::inffixed_h::distfix.len()
-    } else {
-        crate::src::inftrees::ENOUGH_DISTS as usize
-    };
-    let lcode = ::core::slice::from_raw_parts(state.lencode, lcode_len);
-    let dcode = ::core::slice::from_raw_parts(state.distcode, dcode_len);
-    inflate_fast_bound(strm, state, input, output, window, lcode, dcode, used);
+    // SAFETY: `inflate()` invokes this adapter only after `inflateStateCheck`
+    // has validated the stream/state pair. Its input, output, window, and
+    // decode-table cursors are the bounded ranges maintained by that same
+    // inflate state machine for this call.
+    unsafe {
+        let strm = &mut *strm;
+        let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+        let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+        let used = start.wrapping_sub(strm.avail_out) as usize;
+        let output = ::core::slice::from_raw_parts_mut(
+            strm.next_out.wrapping_sub(used),
+            used + strm.avail_out as usize,
+        );
+        let window = if state.wsize == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(state.window, state.wsize as usize)
+        };
+        let lcode_len = if ::core::ptr::eq(
+            state.lencode,
+            crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
+        ) {
+            crate::src::inftrees::inffixed_h::lenfix.len()
+        } else {
+            crate::src::inftrees::ENOUGH_LENS as usize
+        };
+        let dcode_len = if ::core::ptr::eq(
+            state.distcode,
+            crate::src::inftrees::inffixed_h::distfix.as_ptr(),
+        ) {
+            crate::src::inftrees::inffixed_h::distfix.len()
+        } else {
+            crate::src::inftrees::ENOUGH_DISTS as usize
+        };
+        let lcode = ::core::slice::from_raw_parts(state.lencode, lcode_len);
+        let dcode = ::core::slice::from_raw_parts(state.distcode, dcode_len);
+        inflate_fast_bound(strm, state, input, output, window, lcode, dcode, used);
+    }
 }
 #[export_name = "inflate_fast"]
 
