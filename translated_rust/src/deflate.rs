@@ -689,25 +689,52 @@ fn clear_owned_full_flush_hash(state: &mut crate::src::deflate::deflate_state) -
     result
 }
 
-/// Borrow a custom-allocator hash table only for one typed operation.
+/// The callback storage needed for a synchronous deflate operation.
 ///
-/// Callback-owned deflate buffers still use ABI pointer handles, but reset
-/// policy should not need to construct a raw slice itself.  This narrow
-/// adapter is deliberately the single conversion point for the callback head
-/// table; an eventual allocator owner can replace it without changing reset
-/// behavior or its callers.
-fn with_callback_deflate_head<R>(
+/// Reset needs only the hash table, while strategy updates need all three
+/// work areas. Keeping that distinction here avoids making reset borrow
+/// unrelated callback allocations.
+enum CallbackDeflateStorageNeed {
+    HeadOnly,
+    Workspace,
+}
+
+/// Borrow callback-owned deflate storage for exactly one typed operation.
+///
+/// The ABI allocator owns these buffers, so their raw handles remain at this
+/// boundary. Both reset and update reuse it: a head-only request never forms
+/// views of the window or previous-chain allocation.
+fn with_callback_deflate_storage<R>(
     state: &mut crate::src::deflate::deflate_state,
+    need: CallbackDeflateStorageNeed,
     action: impl FnOnce(
         &mut crate::src::deflate::deflate_state,
-        &mut [crate::src::deflate::Posf],
+        Option<&mut [crate::stdlib::Bytef]>,
+        Option<&mut [crate::src::deflate::Posf]>,
+        Option<&mut [crate::src::deflate::Posf]>,
     ) -> R,
 ) -> Option<R> {
-    if state.head.is_null() {
+    // Preserve the legacy workspace boundary's validation order: an update
+    // with no window must fail before it tries to view either hash table.
+    if matches!(need, CallbackDeflateStorageNeed::Workspace) && state.window.is_null() {
         return None;
     }
-    let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
-    Some(action(state, head))
+    let head = (!state.head.is_null()).then(|| unsafe {
+        ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
+    });
+    let (window, prev) = match need {
+        CallbackDeflateStorageNeed::HeadOnly => (None, None),
+        CallbackDeflateStorageNeed::Workspace => {
+            let window = unsafe {
+                ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize)
+            };
+            let prev = (!state.prev.is_null()).then(|| unsafe {
+                ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize)
+            });
+            (Some(window), prev)
+        }
+    };
+    Some(action(state, window, head, prev))
 }
 
 fn read_buf(
@@ -1775,8 +1802,13 @@ pub(crate) fn deflate_reset_state(
     // their one raw borrowing boundary in the named adapter until the
     // allocator facade can represent that ownership without changing callback
     // observations.
-    with_callback_deflate_head(state, |state, head| deflate_reset(stream, state, head))
-        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+    with_callback_deflate_storage(
+        state,
+        CallbackDeflateStorageNeed::HeadOnly,
+        |state, _, head, _| head.map(|head| deflate_reset(stream, state, head)),
+    )
+    .flatten()
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
 /// Reset a gzip-owned ABI stream that does not yet retain a typed state.
@@ -3056,22 +3088,17 @@ fn with_callback_deflate_workspace<R>(
         ::core::ffi::c_int,
     ) -> Option<R>,
 ) -> Option<R> {
-    if state.window.is_null() {
-        return None;
-    }
-    // Callback-owned allocations remain foreign storage.  Keep their three
-    // raw-to-slice conversions together at this type-specific boundary.
-    let (window, head, prev) = unsafe {
-        (
-            ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize),
-            (!state.head.is_null())
-                .then(|| ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)),
-            (!state.prev.is_null())
-                .then(|| ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize)),
-        )
-    };
-    let mut workspace = callback_deflate_workspace(window, head, prev, input, output, pending_buf);
-    action(state, strm, &mut workspace, flush)
+    with_callback_deflate_storage(
+        state,
+        CallbackDeflateStorageNeed::Workspace,
+        |state, window, head, prev| {
+            let window = window?;
+            let mut workspace =
+                callback_deflate_workspace(window, head, prev, input, output, pending_buf);
+            action(state, strm, &mut workspace, flush)
+        },
+    )
+    .flatten()
 }
 
 /// Emit and drain the initial zlib wrapper through already-borrowed buffers.
@@ -3534,9 +3561,14 @@ pub fn deflate(
                     let cleared = if using_owned_workspace {
                         clear_owned_full_flush_hash(state)
                     } else {
-                        with_callback_deflate_head(state, |state, head| {
-                            clear_full_flush_hash(state, head)
-                        })
+                        with_callback_deflate_storage(
+                            state,
+                            CallbackDeflateStorageNeed::HeadOnly,
+                            |state, _, head, _| {
+                                head.map(|head| clear_full_flush_hash(state, head))
+                            },
+                        )
+                        .flatten()
                         .unwrap_or(false)
                     };
                     if !cleared {
