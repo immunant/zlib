@@ -6245,18 +6245,9 @@ mod tests {
     #[test]
     fn checksum_cursor_preserves_the_adler_output_range() {
         let output = *b"hello";
-        let first_checksum =
-            unsafe { crate::src::adler32::adler32_ffi(1, output[..2].as_ptr(), 2) };
-        let checksum_cursor = output[2..].as_ptr();
-        let cursor_checksum =
-            unsafe { crate::src::adler32::adler32_ffi(first_checksum, checksum_cursor, 3) };
-        let whole_output_checksum = unsafe {
-            crate::src::adler32::adler32_ffi(
-                1,
-                output.as_ptr(),
-                output.len() as crate::stdlib::uInt,
-            )
-        };
+        let first_checksum = crate::src::adler32::adler32(1, &output[..2]);
+        let cursor_checksum = crate::src::adler32::adler32(first_checksum, &output[2..]);
+        let whole_output_checksum = crate::src::adler32::adler32(1, &output);
 
         assert_eq!(cursor_checksum, whole_output_checksum);
         assert_eq!(cursor_checksum, 0x062c_0215);
