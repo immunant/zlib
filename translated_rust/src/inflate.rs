@@ -2585,21 +2585,12 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     };
     inflate_get_dictionary(state, window, dictionary, dict_length)
 }
-pub unsafe extern "C" fn inflateSetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
+pub fn inflateSetDictionary(
+    strm: &mut crate::zlib_h::z_stream,
+    dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm) else {
+    let Some((strm, state)) = inflateStateCheck(strm as *mut _) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !inflate_dictionary_input_is_valid(dictionary.is_null(), dictLength) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let dictionary = if dictLength == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
     inflate_set_dictionary(strm, state, dictionary)
 }
@@ -2661,7 +2652,21 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    inflateSetDictionary(strm, dictionary, dictLength)
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !inflate_dictionary_input_is_valid(dictionary.is_null(), dictLength) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: a non-empty dictionary is required to have caller-provided
+    // backing storage for `dictLength` bytes; an empty dictionary needs no
+    // pointer binding.
+    let dictionary = if dictLength == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(dictionary, dictLength as usize) }
+    };
+    inflateSetDictionary(strm, dictionary)
 }
 #[export_name = "inflateGetHeader"]
 
