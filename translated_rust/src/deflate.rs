@@ -2929,7 +2929,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     deflateCopy(dest, source)
 }
-unsafe fn longest_match(
+fn longest_match(
     s: &mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
