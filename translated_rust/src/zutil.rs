@@ -5,7 +5,19 @@ pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
-use ::core::sync::atomic::{AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicPtr, Ordering};
+use std::collections::HashMap;
+use std::mem::MaybeUninit;
+use std::sync::{Mutex, OnceLock};
+
+#[repr(align(16))]
+#[derive(Clone)]
+struct ZAllocationByte([u8; 16]);
+
+enum ZAllocation {
+    Uninitialized(Vec<MaybeUninit<ZAllocationByte>>),
+    Zeroed(Vec<ZAllocationByte>),
+}
 #[no_mangle]
 
 pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; 10] = [
@@ -116,19 +128,51 @@ pub fn zError(mut err: ::core::ffi::c_int) -> &'static AtomicPtr<::core::ffi::c_
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     zError(err).load(Ordering::Relaxed)
 }
-pub unsafe extern "C" fn zcalloc(
+fn zallocations() -> &'static Mutex<HashMap<usize, ZAllocation>> {
+    static ALLOCATIONS: OnceLock<Mutex<HashMap<usize, ZAllocation>>> = OnceLock::new();
+    ALLOCATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub extern "C" fn zcalloc(
     _opaque: crate::stdlib::voidpf,
     mut items: ::core::ffi::c_uint,
     mut size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    return if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 as usize {
-        crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
-    } else {
-        crate::stdlib::calloc(
-            items as crate::__stddef_size_t_h::size_t,
-            size as crate::__stddef_size_t_h::size_t,
-        )
+    let len = items.wrapping_mul(size) as usize;
+    let Some(units) = len
+        .checked_add(::core::mem::size_of::<ZAllocationByte>() - 1)
+        .map(|rounded| rounded / ::core::mem::size_of::<ZAllocationByte>())
+    else {
+        return ::core::ptr::null_mut();
     };
+    let mut allocations = zallocations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if allocations.try_reserve(1).is_err() {
+        return ::core::ptr::null_mut();
+    }
+    let mut allocation = if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 {
+        let mut allocation = Vec::new();
+        if allocation.try_reserve_exact(units).is_err() {
+            return ::core::ptr::null_mut();
+        }
+        ZAllocation::Uninitialized(allocation)
+    } else {
+        let mut allocation = Vec::new();
+        if allocation.try_reserve_exact(units).is_err() {
+            return ::core::ptr::null_mut();
+        }
+        allocation.resize(units, ZAllocationByte([0; 16]));
+        ZAllocation::Zeroed(allocation)
+    };
+    let pointer = match &mut allocation {
+        ZAllocation::Uninitialized(bytes) => bytes.as_mut_ptr().cast::<::core::ffi::c_void>(),
+        ZAllocation::Zeroed(bytes) => bytes.as_mut_ptr().cast::<::core::ffi::c_void>(),
+    };
+    if len != 0 {
+        allocations.insert(pointer.addr(), allocation);
+    }
+    pointer
 }
 #[export_name = "zcalloc"]
 
@@ -139,8 +183,15 @@ pub unsafe extern "C" fn zcalloc_ffi(
 ) -> crate::stdlib::voidpf {
     zcalloc(opaque, items, size)
 }
-pub unsafe extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
-    crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
+pub extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
+    if ptr.is_null() {
+        return;
+    }
+    let allocation = zallocations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&ptr.addr());
+    drop(allocation);
 }
 #[export_name = "zcfree"]
 
