@@ -1160,57 +1160,26 @@ fn fill_window_from_input(
     }
 }
 
-pub unsafe extern "C" fn deflateInit_(
-    strm: crate::zlib_h::z_streamp,
-    mut level: ::core::ffi::c_int,
-    version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return deflate_init2_from_raw(
-        strm,
-        level,
-        crate::zlib_h::Z_DEFLATED,
-        crate::stdlib::MAX_WBITS,
-        crate::zutil_h::DEF_MEM_LEVEL,
-        crate::zlib_h::Z_DEFAULT_STRATEGY,
-        version,
-        stream_size,
-    );
-}
 #[export_name = "deflateInit_"]
-
 pub unsafe extern "C" fn deflateInit__ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateInit_(strm, level, version, stream_size)
-}
-
-/// Convert the ABI's nullable stream and version pointers once before the
-/// borrowed-stream initializer performs validation and state construction.
-unsafe fn deflate_init2_from_raw(
-    strm: crate::zlib_h::z_streamp,
-    level: ::core::ffi::c_int,
-    method: ::core::ffi::c_int,
-    window_bits: ::core::ffi::c_int,
-    mem_level: ::core::ffi::c_int,
-    strategy: ::core::ffi::c_int,
-    version: *const ::core::ffi::c_char,
-    stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
     deflateInit2_(
         strm.as_mut(),
         level,
-        method,
-        window_bits,
-        mem_level,
-        strategy,
+        crate::zlib_h::Z_DEFLATED,
+        crate::stdlib::MAX_WBITS,
+        crate::zutil_h::DEF_MEM_LEVEL,
+        crate::zlib_h::Z_DEFAULT_STRATEGY,
         version.as_ref().copied(),
         stream_size,
     )
 }
+
+pub use deflateInit__ffi as deflateInit_;
 
 pub unsafe fn deflateInit2_(
     strm: Option<&mut crate::zlib_h::z_stream_s>,
@@ -1359,14 +1328,14 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflate_init2_from_raw(
-        strm,
+    deflateInit2_(
+        strm.as_mut(),
         level,
         method,
         windowBits,
         memLevel,
         strategy,
-        version,
+        version.as_ref().copied(),
         stream_size,
     )
 }
