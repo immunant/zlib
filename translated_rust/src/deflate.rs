@@ -2485,6 +2485,51 @@ fn longest_match_bytes(
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
+fn stored_block_length_bytes(output: &mut [crate::stdlib::Bytef], len: ::core::ffi::c_uint) {
+    output[0] = len as crate::stdlib::Bytef;
+    output[1] = (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+    output[2] = !len as crate::stdlib::Bytef;
+    output[3] = (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+}
+
+fn stored_output_progress(stream: &mut crate::zlib_h::z_stream, len: ::core::ffi::c_uint) {
+    stream.avail_out = stream.avail_out.wrapping_sub(len);
+    stream.total_out = stream.total_out.wrapping_add(len as crate::stdlib::uLong);
+}
+
+fn stored_block_size(
+    min_block: ::core::ffi::c_uint,
+    bi_valid: ::core::ffi::c_int,
+    avail_out: crate::stdlib::uInt,
+    left: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> Option<(::core::ffi::c_uint, ::core::ffi::c_int)> {
+    let header = (bi_valid as ::core::ffi::c_uint).wrapping_add(42) >> 3;
+    if avail_out < header {
+        return None;
+    }
+    let available = avail_out.wrapping_sub(header);
+    let total = left.wrapping_add(avail_in);
+    let len = ::core::cmp::min(MAX_STORED as ::core::ffi::c_uint, total);
+    let len = ::core::cmp::min(len, available);
+    if len < min_block
+        && (len == 0 && flush != crate::zlib_h::Z_FINISH
+            || flush == crate::zlib_h::Z_NO_FLUSH
+            || len != total)
+    {
+        return None;
+    }
+    Some((
+        len,
+        if flush == crate::zlib_h::Z_FINISH && len == total {
+            1
+        } else {
+            0
+        },
+    ))
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -2503,60 +2548,31 @@ unsafe extern "C" fn deflate_stored(
     let mut have: ::core::ffi::c_uint = 0;
     let mut used: ::core::ffi::c_uint = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     loop {
-        len = MAX_STORED as ::core::ffi::c_uint;
-        have = ((*s).bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
-            >> 3 as ::core::ffi::c_int;
-        if (*(*s).strm).avail_out < have {
-            break;
-        }
-        have = ((*(*s).strm).avail_out as ::core::ffi::c_uint).wrapping_sub(have);
         left = ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as ::core::ffi::c_uint;
-        if len as crate::zutil_h::ulg
-            > (left as crate::zutil_h::ulg)
-                .wrapping_add((*(*s).strm).avail_in as crate::zutil_h::ulg)
-        {
-            len = (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in)
-                as ::core::ffi::c_uint;
-        }
-        if len > have {
-            len = have;
-        }
-        if len < min_block
-            && (len == 0 as ::core::ffi::c_uint && flush != crate::zlib_h::Z_FINISH
-                || flush == crate::zlib_h::Z_NO_FLUSH
-                || len != (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in))
-        {
+        let Some((block_len, is_last)) = stored_block_size(
+            min_block,
+            (*s).bi_valid,
+            (*(*s).strm).avail_out,
+            left,
+            (*(*s).strm).avail_in,
+            flush,
+        ) else {
             break;
-        }
-        last = if flush == crate::zlib_h::Z_FINISH
-            && len == (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in)
-        {
-            1 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
         };
+        len = block_len;
+        last = is_last;
         crate::src::trees::_tr_stored_block(
             s as *mut crate::src::deflate::internal_state,
             ::core::ptr::null_mut::<crate::stdlib::charf>(),
             0 as crate::zutil_h::ulg,
             last,
         );
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            !len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+        let pending = ::core::slice::from_raw_parts_mut(
+            (*s).pending_buf,
+            (*s).pending_buf_size as usize,
+        );
+        let header_start = (*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as usize;
+        stored_block_length_bytes(&mut pending[header_start..header_start + 4], len);
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {
@@ -2568,20 +2584,14 @@ unsafe extern "C" fn deflate_stored(
                 left as crate::__stddef_size_t_h::size_t,
             );
             (*(*s).strm).next_out = (*(*s).strm).next_out.offset(left as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(left);
-            (*(*s).strm).total_out = (*(*s).strm)
-                .total_out
-                .wrapping_add(left as crate::stdlib::uLong);
+            stored_output_progress(&mut *(*s).strm, left);
             (*s).block_start += left as ::core::ffi::c_long;
             len = len.wrapping_sub(left);
         }
         if len != 0 {
             read_buf((*s).strm, (*(*s).strm).next_out, len);
             (*(*s).strm).next_out = (*(*s).strm).next_out.offset(len as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
-            (*(*s).strm).total_out = (*(*s).strm)
-                .total_out
-                .wrapping_add(len as crate::stdlib::uLong);
+            stored_output_progress(&mut *(*s).strm, len);
         }
         if last != 0 as ::core::ffi::c_int {
             break;
