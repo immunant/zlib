@@ -451,6 +451,10 @@ pub fn gz_io_chunk_len(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     }
 }
 
+pub fn gz_uInt_fits_int(len: crate::stdlib::uInt) -> bool {
+    (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
+}
+
 pub fn gz_z_size_to_uInt_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
     let max = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
     if max as crate::stdlib::z_size_t > len {

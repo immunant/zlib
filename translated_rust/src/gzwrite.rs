@@ -8,6 +8,7 @@ pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_io_chunk_limit;
+pub use crate::src::gzlib::gz_uInt_fits_int;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
 pub use crate::stdlib::EAGAIN;
@@ -426,7 +427,7 @@ fn gz_store_buffered_byte(
 }
 
 fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
-    (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
+    gz_uInt_fits_int(len)
 }
 
 #[export_name = "gzwrite"]

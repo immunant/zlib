@@ -2822,6 +2822,16 @@ pub(crate) fn inflate_fixed_tables() -> InflateFixedTables {
     }
 }
 
+fn inflate_table_used_exceeds(
+    type_0: crate::src::inftrees::codetype,
+    used: ::core::ffi::c_uint,
+) -> bool {
+    type_0 == crate::src::inftrees::LENS
+        && used > crate::src::inftrees::ENOUGH_LENS as ::core::ffi::c_uint
+        || type_0 == crate::src::inftrees::DISTS
+            && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
+}
+
 #[no_mangle]
 
 pub static inflate_copyright: [::core::ffi::c_char; 49] =
@@ -3100,13 +3110,7 @@ pub unsafe extern "C" fn inflate_table_ffi(
     low = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
     used = (1 as ::core::ffi::c_uint) << root;
     mask = used.wrapping_sub(1 as ::core::ffi::c_uint);
-    if type_0 as ::core::ffi::c_uint
-        == crate::src::inftrees::LENS as ::core::ffi::c_int as ::core::ffi::c_uint
-        && used > crate::src::inftrees::ENOUGH_LENS as ::core::ffi::c_uint
-        || type_0 as ::core::ffi::c_uint
-            == crate::src::inftrees::DISTS as ::core::ffi::c_int as ::core::ffi::c_uint
-            && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
-    {
+    if inflate_table_used_exceeds(type_0, used) {
         return 1 as ::core::ffi::c_int;
     }
     loop {
@@ -3172,13 +3176,7 @@ pub unsafe extern "C" fn inflate_table_ffi(
                 left <<= 1 as ::core::ffi::c_int;
             }
             used = used.wrapping_add((1 as ::core::ffi::c_uint) << curr);
-            if type_0 as ::core::ffi::c_uint
-                == crate::src::inftrees::LENS as ::core::ffi::c_int as ::core::ffi::c_uint
-                && used > crate::src::inftrees::ENOUGH_LENS as ::core::ffi::c_uint
-                || type_0 as ::core::ffi::c_uint
-                    == crate::src::inftrees::DISTS as ::core::ffi::c_int as ::core::ffi::c_uint
-                    && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
-            {
+            if inflate_table_used_exceeds(type_0, used) {
                 return 1 as ::core::ffi::c_int;
             }
             low = huff & mask;

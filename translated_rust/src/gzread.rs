@@ -10,6 +10,7 @@ pub use crate::src::gzlib::gz_consume_buffered_read_cursor;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_io_chunk_len;
+pub use crate::src::gzlib::gz_uInt_fits_int;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
 pub use crate::stdlib::EAGAIN;
@@ -171,6 +172,13 @@ fn gz_prepare_fetch_output(state: &mut crate::gzguts_h::gz_state) {
     state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
 }
 
+fn gz_look_needs_more_header_input(
+    avail_in: crate::stdlib::uInt,
+    again: ::core::ffi::c_int,
+) -> bool {
+    avail_in == 0 as crate::stdlib::uInt || again != 0 && avail_in < 4 as crate::stdlib::uInt
+}
+
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
@@ -222,9 +230,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     if gz_avail(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*strm).avail_in == 0 as crate::stdlib::uInt
-        || (*state).again != 0 && (*strm).avail_in < 4 as crate::stdlib::uInt
-    {
+    if gz_look_needs_more_header_input((*strm).avail_in, (*state).again) {
         return 0 as ::core::ffi::c_int;
     }
     if (*strm).avail_in > 3 as crate::stdlib::uInt {
@@ -477,7 +483,7 @@ unsafe extern "C" fn gz_read(
 }
 
 fn gzread_len_fits_int(len: ::core::ffi::c_uint) -> bool {
-    (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
+    gz_uInt_fits_int(len)
 }
 
 fn gz_read_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
