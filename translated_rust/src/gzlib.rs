@@ -81,6 +81,7 @@ impl crate::gzguts_h::GzBuffers {
             input: Some(input),
             output,
             input_cursor: None,
+            output_cursor: None,
         })
     }
 
@@ -96,6 +97,7 @@ impl crate::gzguts_h::GzBuffers {
             input: Some(input),
             output: Some(output),
             input_cursor: Some(GzCodecInput::empty()),
+            output_cursor: None,
         })
     }
 
@@ -106,6 +108,7 @@ impl crate::gzguts_h::GzBuffers {
         self.input = None;
         self.output = None;
         self.input_cursor = None;
+        self.output_cursor = None;
         self.size = 0;
     }
 }
@@ -1422,6 +1425,7 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
             input: None,
             output: None,
             input_cursor: None,
+            output_cursor: None,
         },
         direct: initial.direct,
         junk: initial.reset.junk,

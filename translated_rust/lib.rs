@@ -47,6 +47,12 @@ pub mod gzguts_h {
         // input bytes.  Keep it as a checked index/count rather than relying
         // on the ABI stream cursor between refill and inflate calls.
         pub input_cursor: Option<crate::src::gzlib::GzCodecInput>,
+        // A completed inflate pass produces bytes in `output`.  Retain that
+        // checked output cursor with its owner as well, rather than making
+        // the ABI `x.next` pointer the only record of where those bytes are.
+        // Existing read entry points still publish and consume `x` while the
+        // full gzip owner facade is being built.
+        pub(crate) output_cursor: Option<crate::src::gzlib::GzCodecOutputCursor>,
     }
 
     #[repr(C)]

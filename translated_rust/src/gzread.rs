@@ -901,14 +901,21 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     // The core transition returns the checked start of its owned output span,
     // not the ABI cursor that `inflate()` advanced. Rebuild that cursor only
     // while publishing the completed result back to the handle.
+    let output_start_index = finish.output.start();
+    let output_have = finish.output.have();
     let Some(output_start) = state.buffers.output.as_deref_mut().and_then(|buffer| {
         buffer
-            .get_mut(finish.output.start()..)
+            .get_mut(output_start_index..)
             .map(|output| output.as_mut_ptr())
     }) else {
         return -1 as ::core::ffi::c_int;
     };
-    state.x.have = finish.output.have();
+    // Keep the completed, bounds-checked cursor with the output allocation.
+    // `x.next` is still the ABI publication for current callers; later read
+    // transitions can consume this owned cursor instead of revalidating it
+    // from that raw pointer.
+    state.buffers.output_cursor = Some(finish.output);
+    state.x.have = output_have;
     state.x.next = output_start;
     state.buffers.input_cursor = Some(finish.input);
     let Some(buffer) = state.buffers.input.as_deref_mut() else {
