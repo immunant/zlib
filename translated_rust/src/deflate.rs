@@ -1815,13 +1815,13 @@ impl DeflateResetCore<'_> {
     }
 }
 
-pub unsafe extern "C" fn deflateResetKeep(
-    mut strm: crate::zlib_h::z_streamp,
+// The FFI wrapper validates and borrows the stream handle.  This adapter
+// retains the opaque-state projection, so reset policy remains outside the
+// export boundary while the implementation no longer accepts a raw handle.
+pub unsafe fn deflateResetKeep(
+    strm: &mut crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
-    else {
+    let Some((strm, state)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     strm.total_out = 0;
@@ -1856,13 +1856,18 @@ pub unsafe extern "C" fn deflateResetKeep(
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateResetKeep(strm)
 }
-pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    ret = deflateResetKeep(strm);
+// As with `deflateResetKeep`, the raw stream handle belongs exclusively to
+// the export wrapper.  The reset extension keeps its state/table projection
+// here, after that handle has been validated and borrowed.
+pub unsafe fn deflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    let ret = deflateResetKeep(strm);
     if ret == crate::zlib_h::Z_OK {
-        let state = (*strm)
+        let state = strm
             .state
             .expect("deflateResetKeep accepted initialized state")
             .cast::<crate::src::deflate::deflate_state>();
@@ -1900,6 +1905,9 @@ pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
 pub unsafe extern "C" fn deflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateReset(strm)
 }
 // Header registration is ordinary owned-state policy once the ABI header has

@@ -325,7 +325,7 @@ unsafe fn gz_comp(
         if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
+        crate::src::deflate::deflateReset(&mut state.strm);
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
