@@ -127,6 +127,35 @@ fn gzseek_read_buffer_consumed(
     }
 }
 
+fn gzseek_request_is_valid(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    whence: ::core::ffi::c_int,
+) -> bool {
+    gz_is_read_or_write_mode(mode)
+        && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR)
+        && (whence == crate::stdlib::SEEK_SET || whence == crate::stdlib::SEEK_CUR)
+}
+
+fn gzseek_adjust_offset(
+    offset: crate::stdlib::off64_t,
+    whence: ::core::ffi::c_int,
+    position: crate::stdlib::off64_t,
+    past: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    if whence == crate::stdlib::SEEK_SET {
+        offset - position
+    } else {
+        offset
+            + if past != 0 {
+                0 as crate::stdlib::off64_t
+            } else {
+                skip
+            }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GzOpenOptions {
     mode: ::core::ffi::c_int,
@@ -509,23 +538,11 @@ pub unsafe extern "C" fn gzseek64(
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_is_read_or_write_mode((*state).mode) {
+    if !gzseek_request_is_valid((*state).mode, (*state).err, whence) {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
-    if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
-        return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
-    }
-    if whence != crate::stdlib::SEEK_SET && whence != crate::stdlib::SEEK_CUR {
-        return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
-    }
-    if whence == crate::stdlib::SEEK_SET {
-        offset -= (*state).x.pos;
-    } else {
-        offset += if (*state).past != 0 {
-            0 as crate::stdlib::off64_t
-        } else {
-            (*state).skip
-        };
+    offset = gzseek_adjust_offset(offset, whence, (*state).x.pos, (*state).past, (*state).skip);
+    if whence == crate::stdlib::SEEK_CUR {
         (*state).skip = 0 as crate::stdlib::off64_t;
     }
     if (*state).mode == crate::gzguts_h::GZ_READ
@@ -860,8 +877,8 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
-        gz_prepare_open, gzerror_core, gzoffset64_adjust_for_buffered_read,
-        gzseek_read_buffer_consumed, gztell64_core, GzErrorMessage,
+        gz_prepare_open, gzerror_core, gzoffset64_adjust_for_buffered_read, gzseek_adjust_offset,
+        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
     };
 
     #[test]
@@ -947,6 +964,51 @@ mod tests {
     fn gzseek_preserves_matching_width_large_buffer_rule() {
         assert_eq!(gzseek_read_buffer_consumed(9, 20, true, 8), 20);
         assert_eq!(gzseek_read_buffer_consumed(8, 20, true, 8), 8);
+    }
+
+    #[test]
+    fn gzseek_request_validation_requires_active_mode_recoverable_error_and_supported_whence() {
+        assert!(gzseek_request_is_valid(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_OK,
+            crate::stdlib::SEEK_SET
+        ));
+        assert!(gzseek_request_is_valid(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_BUF_ERROR,
+            crate::stdlib::SEEK_CUR
+        ));
+        assert!(!gzseek_request_is_valid(
+            crate::gzguts_h::GZ_NONE,
+            crate::zlib_h::Z_OK,
+            crate::stdlib::SEEK_SET
+        ));
+        assert!(!gzseek_request_is_valid(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_MEM_ERROR,
+            crate::stdlib::SEEK_SET
+        ));
+        assert!(!gzseek_request_is_valid(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_OK,
+            crate::stdlib::SEEK_END
+        ));
+    }
+
+    #[test]
+    fn gzseek_adjusts_set_and_current_offsets_using_pending_skip_only_before_eof() {
+        assert_eq!(
+            gzseek_adjust_offset(30, crate::stdlib::SEEK_SET, 12, 0, 7),
+            18
+        );
+        assert_eq!(
+            gzseek_adjust_offset(30, crate::stdlib::SEEK_CUR, 12, 0, 7),
+            37
+        );
+        assert_eq!(
+            gzseek_adjust_offset(30, crate::stdlib::SEEK_CUR, 12, 1, 7),
+            30
+        );
     }
 
     #[test]

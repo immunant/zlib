@@ -78,6 +78,25 @@ fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0
 }
 
+fn gzfwrite_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<crate::stdlib::z_size_t> {
+    size.checked_mul(nitems)
+}
+
+fn gz_write_error_result(
+    again: ::core::ffi::c_int,
+    requested: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    if again != 0 {
+        requested.wrapping_sub(remaining)
+    } else {
+        0
+    }
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     state.in_0 = crate::stdlib::malloc(
@@ -340,11 +359,7 @@ unsafe extern "C" fn gz_write(
                 break;
             }
             if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return gz_write_error_result((*state).again, put, len);
             }
         }
     } else {
@@ -365,11 +380,7 @@ unsafe extern "C" fn gz_write(
             (*state).x.pos += n as crate::stdlib::off64_t;
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return gz_write_error_result((*state).again, put, len);
             }
             if !(len != 0) {
                 break;
@@ -424,7 +435,6 @@ pub unsafe extern "C" fn gzfwrite(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -441,15 +451,14 @@ pub unsafe extern "C" fn gzfwrite(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
+    let Some(len) = gzfwrite_len(size, nitems) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
         );
         return 0 as crate::stdlib::z_size_t;
-    }
+    };
     return if len != 0 {
         gz_write(state, buf, len).wrapping_div(size)
     } else {
@@ -708,7 +717,10 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 
 #[cfg(test)]
 mod tests {
-    use super::{gz_zero_chunk_len, gzputs_len_fits_int, gzwrite_len_fits_int};
+    use super::{
+        gz_write_error_result, gz_zero_chunk_len, gzfwrite_len, gzputs_len_fits_int,
+        gzwrite_len_fits_int,
+    };
 
     #[test]
     fn gz_zero_chunk_len_limits_to_remaining_skip() {
@@ -762,5 +774,27 @@ mod tests {
             (::core::ffi::c_int::MAX as ::core::ffi::c_uint) + 1
         ));
         assert!(!gzwrite_len_fits_int(::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn gzfwrite_len_returns_requested_byte_count() {
+        assert_eq!(gzfwrite_len(4, 3), Some(12));
+        assert_eq!(gzfwrite_len(0, crate::stdlib::z_size_t::MAX), Some(0));
+    }
+
+    #[test]
+    fn gzfwrite_len_rejects_overflow() {
+        assert_eq!(gzfwrite_len(crate::stdlib::z_size_t::MAX, 2), None);
+    }
+
+    #[test]
+    fn gz_write_error_result_returns_partial_count_when_retryable() {
+        assert_eq!(gz_write_error_result(1, 10, 4), 6);
+        assert_eq!(gz_write_error_result(-1, 10, 4), 6);
+    }
+
+    #[test]
+    fn gz_write_error_result_discards_partial_count_when_not_retryable() {
+        assert_eq!(gz_write_error_result(0, 10, 4), 0);
     }
 }

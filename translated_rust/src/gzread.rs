@@ -87,6 +87,20 @@ fn gzread_request_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0
 }
 
+fn gz_read_chunk_len(
+    len: crate::stdlib::z_size_t,
+    buffered: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let mut chunk = ::core::ffi::c_uint::MAX;
+    if chunk as crate::stdlib::z_size_t > len {
+        chunk = len as ::core::ffi::c_uint;
+    }
+    if buffered != 0 && buffered < chunk {
+        chunk = buffered;
+    }
+    chunk
+}
+
 unsafe extern "C" fn gz_load(
     state: crate::gzguts_h::gz_statep,
     buf: *mut ::core::ffi::c_uchar,
@@ -476,6 +490,28 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_chunk_len_limits_requests_to_remaining_length() {
+        assert_eq!(gz_read_chunk_len(17, 0), 17);
+    }
+
+    #[test]
+    fn gz_read_chunk_len_limits_requests_to_buffered_data() {
+        assert_eq!(gz_read_chunk_len(17, 5), 5);
+        assert_eq!(gz_read_chunk_len(5, 17), 5);
+    }
+
+    #[test]
+    fn gz_read_chunk_len_caps_requests_at_uint_max() {
+        let max = ::core::ffi::c_uint::MAX;
+        let request = (max as crate::stdlib::z_size_t).checked_add(1);
+
+        assert_eq!(
+            gz_read_chunk_len(request.unwrap_or(max as crate::stdlib::z_size_t), 0),
+            max
+        );
+    }
+
+    #[test]
     fn gz_is_gzip_header_accepts_valid_header() {
         assert!(gz_is_gzip_header(31, 139, 8, 31));
     }
@@ -543,14 +579,8 @@ unsafe extern "C" fn gz_read(
     err = 0 as ::core::ffi::c_int;
     let mut c2rust_current_block_30: u64;
     loop {
-        n = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-        if n as crate::stdlib::z_size_t > len {
-            n = len as ::core::ffi::c_uint;
-        }
+        n = gz_read_chunk_len(len, (*state).x.have);
         if (*state).x.have != 0 {
-            if (*state).x.have < n {
-                n = (*state).x.have;
-            }
             crate::stdlib::memcpy(
                 buf as *mut ::core::ffi::c_void,
                 (*state).x.next as *const ::core::ffi::c_void,
