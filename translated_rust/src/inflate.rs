@@ -1833,22 +1833,25 @@ pub unsafe fn inflate(
                                                                                 state_ref.mode = crate::src::inflate::OS;
                                                                                 break 's_519;
                                                                             }
-                                                                            (*state).mode = crate::src::inflate::COPY_1;
+                                                                            state_ref.mode = crate::src::inflate::COPY_1;
                                                                             break 'c_2356;
                                                                         }
-                                                                        while (*state).have
-                                                                            < (*state)
+                                                                        // This no-callback transition uses the decoder
+                                                                        // entry's validated stream/state records for its
+                                                                        // code-length cursor and error publication.
+                                                                        while state_ref.have
+                                                                            < state_ref
                                                                                 .nlen
                                                                                 .wrapping_add(
-                                                                                    (*state).ndist,
+                                                                                    state_ref.ndist,
                                                                                 )
                                                                         {
                                                                             loop {
-                                                                                here = *(*state)
+                                                                                here = *state_ref
                                                                                     .lencode
                                                                                     .wrapping_add(
                                                                                         (hold as ::core::ffi::c_uint
-                                                                                            & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
+                                                                                            & ((1 as ::core::ffi::c_uint) << state_ref.lenbits)
                                                                                                 .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
                                                                                     );
                                                                                 if here.bits as ::core::ffi::c_uint <= bits {
@@ -1878,9 +1881,9 @@ pub unsafe fn inflate(
                                                                             {
                                                                                 hold >>= here.bits as ::core::ffi::c_int;
                                                                                 bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                                                                let c2rust_fresh18 = (*state).have;
-                                                                                (*state).have = (*state).have.wrapping_add(1);
-                                                                                (*state).lens[c2rust_fresh18 as usize] = here.val;
+                                                                                let c2rust_fresh18 = state_ref.have;
+                                                                                state_ref.have = state_ref.have.wrapping_add(1);
+                                                                                state_ref.lens[c2rust_fresh18 as usize] = here.val;
                                                                             } else {
                                                                                 if here.val as ::core::ffi::c_int
                                                                                     == 16 as ::core::ffi::c_int
@@ -1903,14 +1906,14 @@ pub unsafe fn inflate(
                                                                                     }
                                                                                     hold >>= here.bits as ::core::ffi::c_int;
                                                                                     bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                                                                    if (*state).have == 0 as ::core::ffi::c_uint {
-                                                                                        (*strm).msg = INFLATE_ERROR_MESSAGES[9].as_ptr()
+                                                                                    if state_ref.have == 0 as ::core::ffi::c_uint {
+                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[9].as_ptr()
                                                                                             as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                        (*state).mode = crate::src::inflate::BAD;
+                                                                                        state_ref.mode = crate::src::inflate::BAD;
                                                                                         break;
                                                                                     } else {
-                                                                                        len = (*state)
-                                                                                            .lens[(*state).have.wrapping_sub(1 as ::core::ffi::c_uint)
+                                                                                        len = state_ref
+                                                                                            .lens[state_ref.have.wrapping_sub(1 as ::core::ffi::c_uint)
                                                                                             as usize] as ::core::ffi::c_uint;
                                                                                         copy = (3 as ::core::ffi::c_uint)
                                                                                             .wrapping_add(
@@ -1989,12 +1992,12 @@ pub unsafe fn inflate(
                                                                                             7 as ::core::ffi::c_int as ::core::ffi::c_uint,
                                                                                         );
                                                                                 }
-                                                                                if (*state).have.wrapping_add(copy)
-                                                                                    > (*state).nlen.wrapping_add((*state).ndist)
+                                                                                if state_ref.have.wrapping_add(copy)
+                                                                                    > state_ref.nlen.wrapping_add(state_ref.ndist)
                                                                                 {
-                                                                                    (*strm).msg = INFLATE_ERROR_MESSAGES[9].as_ptr()
+                                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[9].as_ptr()
                                                                                         as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                    (*state).mode = crate::src::inflate::BAD;
+                                                                                    state_ref.mode = crate::src::inflate::BAD;
                                                                                     break;
                                                                                 } else {
                                                                                     loop {
@@ -2003,9 +2006,9 @@ pub unsafe fn inflate(
                                                                                         if c2rust_fresh22 == 0 {
                                                                                             break;
                                                                                         }
-                                                                                        let c2rust_fresh23 = (*state).have;
-                                                                                        (*state).have = (*state).have.wrapping_add(1);
-                                                                                        (*state).lens[c2rust_fresh23 as usize] = len
+                                                                                        let c2rust_fresh23 = state_ref.have;
+                                                                                        state_ref.have = state_ref.have.wrapping_add(1);
+                                                                                        state_ref.lens[c2rust_fresh23 as usize] = len
                                                                                             as ::core::ffi::c_ushort;
                                                                                     }
                                                                                 }
