@@ -2,7 +2,6 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::gzguts_h::gz_state;
 pub use crate::gzguts_h::gz_statep;
 pub use crate::gzguts_h::GZ_WRITE;
-pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_intmax;
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;
@@ -148,10 +147,12 @@ unsafe fn gz_comp(
                 {
                     state.again = 1 as ::core::ffi::c_int;
                 }
-                crate::src::gzlib::gz_error(
+                crate::src::gzlib::gz_error_state(
                     state,
                     crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                    Some(::std::ffi::CStr::from_ptr(crate::stdlib::strerror(
+                        *crate::stdlib::__errno_location(),
+                    ))),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -194,10 +195,12 @@ unsafe fn gz_comp(
                     {
                         state.again = 1 as ::core::ffi::c_int;
                     }
-                    crate::src::gzlib::gz_error(
+                    crate::src::gzlib::gz_error_state(
                         state,
                         crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                        Some(::std::ffi::CStr::from_ptr(crate::stdlib::strerror(
+                            *crate::stdlib::__errno_location(),
+                        ))),
                     );
                     return -1 as ::core::ffi::c_int;
                 }
@@ -618,11 +621,7 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         }
         crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
     ::core::mem::ManuallyDrop::drop(&mut (*state).path);
     if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;

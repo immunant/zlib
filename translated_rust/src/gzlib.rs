@@ -762,15 +762,6 @@ pub fn gz_static_error(
     gz_error_state(state, err, ::std::ffi::CStr::from_bytes_with_nul(message).ok());
 }
 
-pub unsafe fn gz_error(
-    mut state: crate::gzguts_h::gz_statep,
-    mut err: ::core::ffi::c_int,
-    mut msg: *const ::core::ffi::c_char,
-) {
-    let state = &mut *state;
-    let message = (!msg.is_null()).then(|| ::std::ffi::CStr::from_ptr(msg));
-    gz_error_state(state, err, message);
-}
 #[export_name = "gz_error"]
 
 pub unsafe extern "C" fn gz_error_ffi(
@@ -778,7 +769,11 @@ pub unsafe extern "C" fn gz_error_ffi(
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    gz_error(state, err, msg)
+    let Some(state) = state.as_mut() else {
+        return;
+    };
+    let message = (!msg.is_null()).then(|| ::std::ffi::CStr::from_ptr(msg));
+    gz_error_state(state, err, message);
 }
 pub fn gz_intmax() -> ::core::ffi::c_uint {
     return crate::limits_h::INT_MAX as ::core::ffi::c_uint;

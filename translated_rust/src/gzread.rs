@@ -5,7 +5,6 @@ pub use crate::gzguts_h::COPY;
 pub use crate::gzguts_h::GZIP;
 pub use crate::gzguts_h::GZ_READ;
 pub use crate::gzguts_h::LOOK;
-pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_intmax;
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;
@@ -86,10 +85,12 @@ unsafe extern "C" fn gz_load(
                 return 0 as ::core::ffi::c_int;
             }
         }
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        crate::src::gzlib::gz_error_state(
+            &mut *state,
             crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+            Some(::std::ffi::CStr::from_ptr(crate::stdlib::strerror(
+                *crate::stdlib::__errno_location(),
+            ))),
         );
         return -1 as ::core::ffi::c_int;
     }
@@ -152,10 +153,10 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         if (*state).in_0.is_null() || (*state).out.is_null() {
             crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
             crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+            crate::src::gzlib::gz_static_error(
+                &mut *state,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                b"out of memory\0",
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -175,10 +176,10 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
             crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
             (*state).size = 0 as ::core::ffi::c_uint;
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+            crate::src::gzlib::gz_static_error(
+                &mut *state,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                b"out of memory\0",
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -239,10 +240,10 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
             break;
         } else if (*strm).avail_in == 0 as crate::stdlib::uInt {
             if (*state).again == 0 {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
+                crate::src::gzlib::gz_static_error(
+                    &mut *state,
                     crate::zlib_h::Z_BUF_ERROR,
-                    b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"unexpected end of file\0",
                 );
             }
             break;
@@ -255,18 +256,17 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
                 (*state).junk = 0 as ::core::ffi::c_int;
             }
             if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
+                crate::src::gzlib::gz_static_error(
+                    &mut *state,
                     crate::zlib_h::Z_STREAM_ERROR,
-                    b"internal error: inflate stream corrupt\0".as_ptr()
-                        as *const ::core::ffi::c_char,
+                    b"internal error: inflate stream corrupt\0",
                 );
                 break;
             } else if ret == crate::zlib_h::Z_MEM_ERROR {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
+                crate::src::gzlib::gz_static_error(
+                    &mut *state,
                     crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"out of memory\0",
                 );
                 break;
             } else if ret == crate::zlib_h::Z_DATA_ERROR {
@@ -277,14 +277,15 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
                     ret = crate::zlib_h::Z_OK;
                     break;
                 } else {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
+                    let message = if (*strm).msg.is_null() {
+                        ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0").ok()
+                    } else {
+                        Some(::std::ffi::CStr::from_ptr((*strm).msg))
+                    };
+                    crate::src::gzlib::gz_error_state(
+                        &mut *state,
                         crate::zlib_h::Z_DATA_ERROR,
-                        if (*strm).msg.is_null() {
-                            b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                        } else {
-                            (*strm).msg as *const ::core::ffi::c_char
-                        },
+                        message,
                     );
                     break;
                 }
@@ -343,10 +344,10 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 }
             }
             _ => {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
+                crate::src::gzlib::gz_static_error(
+                    &mut *state,
                     crate::zlib_h::Z_STREAM_ERROR,
-                    b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+                    b"state corrupt\0",
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -486,16 +487,12 @@ pub unsafe extern "C" fn gzread(
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        crate::src::gzlib::gz_static_error(
+            &mut *state,
             crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in an int\0".as_ptr() as *const ::core::ffi::c_char,
+            b"request does not fit in an int\0",
         );
         return -1 as ::core::ffi::c_int;
     }
@@ -505,10 +502,12 @@ pub unsafe extern "C" fn gzread(
             return -1 as ::core::ffi::c_int;
         }
         if (*state).again != 0 {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+            crate::src::gzlib::gz_error_state(
+                &mut *state,
                 crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                Some(::std::ffi::CStr::from_ptr(crate::stdlib::strerror(
+                    *crate::stdlib::__errno_location(),
+                ))),
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -546,17 +545,13 @@ pub unsafe extern "C" fn gzfread(
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
     len = nitems.wrapping_mul(size);
     if size != 0 && len.wrapping_div(size) != nitems {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        crate::src::gzlib::gz_static_error(
+            &mut *state,
             crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            b"request does not fit in a size_t\0",
         );
         return 0 as crate::stdlib::z_size_t;
     }
@@ -593,11 +588,7 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
     if (*state).x.have != 0 {
         (*state).x.have = (*state).x.have.wrapping_sub(1);
         (*state).x.pos += 1;
@@ -648,11 +639,7 @@ pub unsafe extern "C" fn gzungetc(
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
     if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
@@ -671,10 +658,10 @@ pub unsafe extern "C" fn gzungetc(
         return c;
     }
     if (*state).x.have == (*state).size << 1 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        crate::src::gzlib::gz_static_error(
+            &mut *state,
             crate::zlib_h::Z_DATA_ERROR,
-            b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
+            b"out of room to push characters\0",
         );
         return -1 as ::core::ffi::c_int;
     }
@@ -729,11 +716,7 @@ pub unsafe extern "C" fn gzgets(
     {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
     if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
@@ -835,11 +818,7 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
     } else {
         crate::zlib_h::Z_OK
     };
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
     ::core::mem::ManuallyDrop::drop(&mut (*state).path);
     ret = crate::stdlib::close((*state).fd);
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
