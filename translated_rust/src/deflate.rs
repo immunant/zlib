@@ -833,6 +833,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         }
     }
 }
+
 #[export_name = "deflateInit_"]
 
 pub unsafe extern "C" fn deflateInit__ffi(
@@ -2669,6 +2670,14 @@ pub unsafe extern "C" fn deflate_ffi(
 ) -> ::core::ffi::c_int {
     deflate(strm, flush)
 }
+fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if status == crate::src::deflate::BUSY_STATE {
+        crate::zlib_h::Z_DATA_ERROR
+    } else {
+        crate::zlib_h::Z_OK
+    }
+}
+
 pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut status: ::core::ffi::c_int = 0;
     if deflateStateCheck(strm) != 0 {
@@ -2704,11 +2713,7 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         (*strm).state as crate::stdlib::voidpf,
     );
     (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return if status == crate::src::deflate::BUSY_STATE {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        crate::zlib_h::Z_OK
-    };
+    deflate_end_status(status)
 }
 #[export_name = "deflateEnd"]
 
