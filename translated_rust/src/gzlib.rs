@@ -609,6 +609,34 @@ struct GzOpenConfig {
     path: Box<[u8]>,
 }
 
+// The resource-owning portion of a freshly opened gzip handle.  This is the
+// first complete pointer-free owner projection for gzip open: the ABI cursor
+// and embedded codec stream are assembled only at the boundary below.  Keep
+// the initial reset values here as well, so a later opaque gzip owner can use
+// this constructor without reintroducing ABI-shaped state mutation.
+struct GzOpenState {
+    mode: ::core::ffi::c_int,
+    fd: rustix::fd::OwnedFd,
+    path: Box<[u8]>,
+    size: ::core::ffi::c_uint,
+    want: ::core::ffi::c_uint,
+    direct: ::core::ffi::c_int,
+    junk: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    start: crate::stdlib::off64_t,
+    eof: ::core::ffi::c_int,
+    past: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    reset: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+    err: ::core::ffi::c_int,
+    buffered: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    avail_in: crate::stdlib::uInt,
+}
+
 impl GzOpenConfig {
     // Callers normalize the parsed mode before path allocation, matching
     // gz_open's existing failure ordering for invalid mode combinations.
@@ -641,6 +669,57 @@ impl GzOpenConfig {
                         crate::stdlib::O_APPEND
                     }
             }
+    }
+
+    fn into_open_state(mut self, fd: rustix::fd::OwnedFd) -> GzOpenState {
+        if self.mode.mode == crate::gzguts_h::GZ_APPEND {
+            let _ = rustix::fs::seek(&fd, rustix::fs::SeekFrom::End(0));
+            self.mode.mode = crate::gzguts_h::GZ_WRITE;
+        }
+        let start = if self.mode.mode == crate::gzguts_h::GZ_READ {
+            rustix::fs::tell(&fd)
+                .map(|position| position as crate::stdlib::off64_t)
+                .unwrap_or(0 as crate::stdlib::off64_t)
+        } else {
+            0 as crate::stdlib::off64_t
+        };
+        let reset = gz_reset(GzResetState {
+            mode: self.mode.mode,
+            have: 0,
+            eof: 0,
+            past: 0,
+            how: crate::gzguts_h::LOOK,
+            junk: 0,
+            reset: 0,
+            again: 0,
+            skip: 0,
+            err: crate::zlib_h::Z_OK,
+            msg: None,
+            pos: 0,
+            avail_in: 0,
+        });
+        GzOpenState {
+            mode: reset.mode,
+            fd,
+            path: self.path,
+            size: 0,
+            want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
+            direct: self.mode.direct,
+            junk: reset.junk,
+            how: reset.how,
+            again: reset.again,
+            start,
+            eof: reset.eof,
+            past: reset.past,
+            level: self.mode.level,
+            strategy: self.mode.strategy,
+            reset: reset.reset,
+            skip: reset.skip,
+            err: reset.err,
+            buffered: reset.have,
+            pos: reset.pos,
+            avail_in: reset.avail_in,
+        }
     }
 }
 
@@ -713,35 +792,69 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
     if state_owner.try_reserve_exact(1).is_err() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
+    let Some(mode) = parse_gz_open_mode(mode).and_then(GzOpenMode::normalize) else {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    };
+    let Some(config) = GzOpenConfig::new(path, mode) else {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    };
+    let oflag = config.open_flags();
+    let fd = if fd == -1 as ::core::ffi::c_int {
+        match rustix::fs::open(
+            path,
+            rustix::fs::OFlags::from_bits_retain(oflag as u32),
+            rustix::fs::Mode::from_raw_mode(0o666),
+        ) {
+            Ok(opened) => opened,
+            Err(error) => {
+                errno::set_errno(errno::Errno(error.raw_os_error()));
+                return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+            }
+        }
+    } else {
+        let fd = <rustix::fd::OwnedFd as rustix::fd::FromRawFd>::from_raw_fd(fd);
+        if oflag & crate::stdlib::O_NONBLOCK != 0 {
+            if let Ok(flags) = rustix::fs::fcntl_getfl(&fd) {
+                let _ = rustix::fs::fcntl_setfl(&fd, flags | rustix::fs::OFlags::NONBLOCK);
+            }
+        }
+        if oflag & crate::stdlib::O_CLOEXEC != 0 {
+            if let Ok(flags) = rustix::io::fcntl_getfd(&fd) {
+                let _ = rustix::io::fcntl_setfd(&fd, flags | rustix::io::FdFlags::CLOEXEC);
+            }
+        }
+        fd
+    };
+    let initial = config.into_open_state(fd);
     state_owner.push(crate::gzguts_h::gz_state {
         x: crate::zlib_h::gzFile_s {
-            have: 0,
+            have: initial.buffered,
             next: ::core::ptr::null_mut(),
-            pos: 0,
+            pos: initial.pos,
         },
-        mode: crate::gzguts_h::GZ_NONE,
-        fd: None,
-        path: None,
-        size: 0,
-        want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
+        mode: initial.mode,
+        fd: Some(initial.fd),
+        path: Some(initial.path),
+        size: initial.size,
+        want: initial.want,
         in_0: None,
         out: None,
-        direct: 0,
-        junk: 0,
-        how: crate::gzguts_h::LOOK,
-        again: 0,
-        start: 0,
-        eof: 0,
-        past: 0,
-        level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
-        strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
-        reset: 0,
-        skip: 0,
-        err: crate::zlib_h::Z_OK,
+        direct: initial.direct,
+        junk: initial.junk,
+        how: initial.how,
+        again: initial.again,
+        start: initial.start,
+        eof: initial.eof,
+        past: initial.past,
+        level: initial.level,
+        strategy: initial.strategy,
+        reset: initial.reset,
+        skip: initial.skip,
+        err: initial.err,
         msg: None,
         strm: crate::zlib_h::z_stream {
             next_in: ::core::ptr::null_mut(),
-            avail_in: 0,
+            avail_in: initial.avail_in,
             total_in: 0,
             next_out: ::core::ptr::null_mut(),
             avail_out: 0,
@@ -756,87 +869,6 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
             reserved: 0,
         },
     });
-    let Some(mode) = parse_gz_open_mode(mode).and_then(GzOpenMode::normalize) else {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    };
-    let Some(config) = GzOpenConfig::new(path, mode) else {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    };
-    let oflag = config.open_flags();
-    let state_ref = state_owner
-        .first_mut()
-        .expect("gzip state owner contains its reserved state");
-    state_ref.size = 0 as ::core::ffi::c_uint;
-    state_ref.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
-    state_ref.err = crate::zlib_h::Z_OK;
-    state_ref.mode = config.mode.mode;
-    state_ref.level = config.mode.level;
-    state_ref.strategy = config.mode.strategy;
-    state_ref.direct = config.mode.direct;
-    state_ref.path = Some(config.path);
-    if fd == -1 as ::core::ffi::c_int {
-        match rustix::fs::open(
-            path,
-            rustix::fs::OFlags::from_bits_retain(oflag as u32),
-            rustix::fs::Mode::from_raw_mode(0o666),
-        ) {
-            Ok(opened) => state_ref.fd = Some(opened),
-            Err(error) => errno::set_errno(errno::Errno(error.raw_os_error())),
-        }
-    } else {
-        state_ref.fd = Some(<rustix::fd::OwnedFd as rustix::fd::FromRawFd>::from_raw_fd(
-            fd,
-        ));
-        if oflag & crate::stdlib::O_NONBLOCK != 0 {
-            if let Ok(flags) = rustix::fs::fcntl_getfl(state_ref.fd.as_ref().unwrap()) {
-                let _ = rustix::fs::fcntl_setfl(
-                    state_ref.fd.as_ref().unwrap(),
-                    flags | rustix::fs::OFlags::NONBLOCK,
-                );
-            }
-        }
-        if oflag & crate::stdlib::O_CLOEXEC != 0 {
-            if let Ok(flags) = rustix::io::fcntl_getfd(state_ref.fd.as_ref().unwrap()) {
-                let _ = rustix::io::fcntl_setfd(
-                    state_ref.fd.as_ref().unwrap(),
-                    flags | rustix::io::FdFlags::CLOEXEC,
-                );
-            }
-        }
-    }
-    if state_ref.fd.is_none() {
-        state_ref.path = None;
-        state_ref.msg = None;
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    if state_ref.mode == crate::gzguts_h::GZ_APPEND {
-        let _ = rustix::fs::seek(state_ref.fd.as_ref().unwrap(), rustix::fs::SeekFrom::End(0));
-        state_ref.mode = crate::gzguts_h::GZ_WRITE;
-    }
-    if state_ref.mode == crate::gzguts_h::GZ_READ {
-        state_ref.start = rustix::fs::tell(state_ref.fd.as_ref().unwrap())
-            .map(|position| position as crate::stdlib::off64_t)
-            .unwrap_or(0 as crate::stdlib::off64_t);
-    }
-    let state_ref = state_owner.first_mut().unwrap();
-    let mode = state_ref.mode;
-    reset_gz_target(
-        mode,
-        GzResetTarget {
-            have: &mut state_ref.x.have,
-            eof: &mut state_ref.eof,
-            past: &mut state_ref.past,
-            how: &mut state_ref.how,
-            junk: &mut state_ref.junk,
-            reset: &mut state_ref.reset,
-            again: &mut state_ref.again,
-            skip: &mut state_ref.skip,
-            err: &mut state_ref.err,
-            msg: &mut state_ref.msg,
-            pos: &mut state_ref.x.pos,
-            avail_in: &mut state_ref.strm.avail_in,
-        },
-    );
     let state = state_owner.as_mut_ptr();
     ::core::mem::forget(state_owner);
     return state as crate::zlib_h::gzFile;
