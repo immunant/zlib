@@ -98,7 +98,10 @@ fn copy_gzip_header(header: &GzipHeader) -> GzipHeader {
 pub struct internal_state {
     pub strm: crate::zlib_h::z_streamp,
     pub status: ::core::ffi::c_int,
-    pub pending_buf: *mut crate::stdlib::Bytef,
+    // This allocation is released through the stream's zfree callback, so it
+    // cannot yet become a Box. NonNull makes the initialized-owner invariant
+    // explicit without retaining a raw pointer in the state layout.
+    pub pending_buf: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
     pub pending_buf_size: crate::zutil_h::ulg,
     // Cursor within `pending_buf`.  Keep this as an offset so copying/resetting a
     // stream never retains an interior raw pointer into the allocation.
@@ -808,17 +811,17 @@ pub unsafe extern "C" fn deflateInit2_(
     ) as *mut crate::src::deflate::Posf;
     (*s).high_water = 0 as crate::zutil_h::ulg;
     (*s).lit_bufsize = layout.lit_bufsize;
-    (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).pending_buf = ::core::ptr::NonNull::new(Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
         storage.pending.items,
         storage.pending.size,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef);
     (*s).pending_buf_size = layout.pending_buf_size;
     if (*s).window.is_null()
         || (*s).prev.is_null()
         || (*s).head.is_null()
-        || (*s).pending_buf.is_null()
+        || (*s).pending_buf.is_none()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
         (*strm).msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
@@ -1371,7 +1374,7 @@ pub unsafe extern "C" fn deflatePrime(
     }
     let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
     deflate_prime_bits(
         pending_buf,
         &mut state.pending,
@@ -1895,7 +1898,7 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate:
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
     crate::src::trees::flush_pending_bits(
         pending_buf,
         &mut state.pending,
@@ -2044,7 +2047,7 @@ pub unsafe extern "C" fn deflate(
             // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
             // `deflateInit2_()` and copied at that extent in `deflateCopy()`).
             let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
+                state.pending_buf.expect("initialized pending buffer").as_ptr(),
                 state.pending_buf_size as usize,
             );
             put_short_msb_bytes(pending_buf, &mut state.pending, header);
@@ -2075,7 +2078,7 @@ pub unsafe extern "C" fn deflate(
         // This initial gzip header always fits in the pending allocation. Keep
         // a single exact-capacity view for the contiguous write sequence.
         let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+            ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
         push_pending_byte(pending_buf, &mut state.pending, 31);
         push_pending_byte(pending_buf, &mut state.pending, 139);
         push_pending_byte(pending_buf, &mut state.pending, 8);
@@ -2173,7 +2176,7 @@ pub unsafe extern "C" fn deflate(
                 let mut copy: crate::zutil_h::ulg =
                     (*s).pending_buf_size.wrapping_sub((*s).pending);
                 let pending_buf = ::core::slice::from_raw_parts_mut(
-                    (*s).pending_buf,
+                    (*s).pending_buf.expect("initialized pending buffer").as_ptr(),
                     (*s).pending_buf_size as usize,
                 );
                 append_pending_bytes(pending_buf, &mut (*s).pending, &extra[..copy as usize]);
@@ -2191,7 +2194,7 @@ pub unsafe extern "C" fn deflate(
             }
             if left != 0 {
                 let pending_buf = ::core::slice::from_raw_parts_mut(
-                    (*s).pending_buf,
+                    (*s).pending_buf.expect("initialized pending buffer").as_ptr(),
                     (*s).pending_buf_size as usize,
                 );
                 append_pending_bytes(pending_buf, &mut (*s).pending, &extra[..left]);
@@ -2218,7 +2221,7 @@ pub unsafe extern "C" fn deflate(
                     if hcrc && (*s).pending > beg_0 {
                         let state = &mut *s;
                         let pending_buf = ::core::slice::from_raw_parts(
-                            state.pending_buf,
+                            state.pending_buf.expect("initialized pending buffer").as_ptr(),
                             state.pending_buf_size as usize,
                         );
                         (*strm).adler = crate::src::crc32::crc32_z(
@@ -2237,7 +2240,7 @@ pub unsafe extern "C" fn deflate(
                     let state = &mut *s;
                     let mut source_index = state.gzindex;
                     let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state.pending_buf,
+                        state.pending_buf.expect("initialized pending buffer").as_ptr(),
                         state.pending_buf_size as usize,
                     );
                     let complete = append_gzip_cstring_bytes(
@@ -2256,7 +2259,7 @@ pub unsafe extern "C" fn deflate(
             if hcrc && (*s).pending > beg_0 {
                 let state = &mut *s;
                 let pending_buf = ::core::slice::from_raw_parts(
-                    state.pending_buf,
+                    state.pending_buf.expect("initialized pending buffer").as_ptr(),
                     state.pending_buf_size as usize,
                 );
                 (*strm).adler = crate::src::crc32::crc32_z(
@@ -2283,7 +2286,7 @@ pub unsafe extern "C" fn deflate(
                     if hcrc && (*s).pending > beg_1 {
                         let state = &mut *s;
                         let pending_buf = ::core::slice::from_raw_parts(
-                            state.pending_buf,
+                            state.pending_buf.expect("initialized pending buffer").as_ptr(),
                             state.pending_buf_size as usize,
                         );
                         (*strm).adler = crate::src::crc32::crc32_z(
@@ -2302,7 +2305,7 @@ pub unsafe extern "C" fn deflate(
                     let state = &mut *s;
                     let mut source_index = state.gzindex;
                     let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state.pending_buf,
+                        state.pending_buf.expect("initialized pending buffer").as_ptr(),
                         state.pending_buf_size as usize,
                     );
                     let complete = append_gzip_cstring_bytes(
@@ -2321,7 +2324,7 @@ pub unsafe extern "C" fn deflate(
             if hcrc && (*s).pending > beg_1 {
                 let state = &mut *s;
                 let pending_buf = ::core::slice::from_raw_parts(
-                    state.pending_buf,
+                    state.pending_buf.expect("initialized pending buffer").as_ptr(),
                     state.pending_buf_size as usize,
                 );
                 (*strm).adler = crate::src::crc32::crc32_z(
@@ -2350,7 +2353,7 @@ pub unsafe extern "C" fn deflate(
             // The preceding capacity check ensures that both HCRC bytes fit
             // in this exact pending allocation.
             let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
+                state.pending_buf.expect("initialized pending buffer").as_ptr(),
                 state.pending_buf_size as usize,
             );
             append_pending_bytes(
@@ -2452,7 +2455,7 @@ pub unsafe extern "C" fn deflate(
         // pending allocation has exactly `pending_buf_size` bytes, established
         // by `deflateInit2_()` or `deflateCopy()`.
         let pending_buf =
-            ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+            ::core::slice::from_raw_parts_mut((*s).pending_buf.expect("initialized pending buffer").as_ptr(), (*s).pending_buf_size as usize);
         append_pending_bytes(
             pending_buf,
             &mut (*s).pending,
@@ -2480,7 +2483,7 @@ pub unsafe extern "C" fn deflate(
             // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
             // `deflateInit2_()` and copied at that extent in `deflateCopy()`).
             let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
+                state.pending_buf.expect("initialized pending buffer").as_ptr(),
                 state.pending_buf_size as usize,
             );
             put_short_msb_bytes(
@@ -2522,10 +2525,10 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     // The state itself is released through the caller's zfree callback, so
     // drop the owned gzip-header snapshot before releasing that allocation.
     ::core::ptr::drop_in_place(::core::ptr::addr_of_mut!((*(*strm).state).gzhead));
-    if !(*(*strm).state).pending_buf.is_null() {
+    if let Some(pending_buf) = (*(*strm).state).pending_buf {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*(*strm).state).pending_buf as crate::stdlib::voidpf,
+            pending_buf.as_ptr() as crate::stdlib::voidpf,
         );
     }
     if !(*(*strm).state).head.is_null() {
@@ -2621,16 +2624,16 @@ pub unsafe extern "C" fn deflateCopy(
         storage.head.items,
         storage.head.size,
     ) as *mut crate::src::deflate::Posf;
-    (*ds).pending_buf = Some((*dest).zalloc.expect("non-null function pointer"))
+    (*ds).pending_buf = ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
         storage.pending.items,
         storage.pending.size,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef);
     if (*ds).window.is_null()
         || (*ds).prev.is_null()
         || (*ds).head.is_null()
-        || (*ds).pending_buf.is_null()
+        || (*ds).pending_buf.is_none()
     {
         deflateEnd(dest);
         return crate::zlib_h::Z_MEM_ERROR;
@@ -2667,9 +2670,15 @@ pub unsafe extern "C" fn deflateCopy(
     // each bounded view once and keep the two logical-region copies in the
     // pointer-free kernel.
     let source_pending =
-        ::core::slice::from_raw_parts((*ss).pending_buf, (*ss).pending_buf_size as usize);
+        ::core::slice::from_raw_parts(
+            (*ss).pending_buf.expect("initialized pending buffer").as_ptr(),
+            (*ss).pending_buf_size as usize,
+        );
     let destination_pending =
-        ::core::slice::from_raw_parts_mut((*ds).pending_buf, (*ds).pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(
+            (*ds).pending_buf.expect("initialized pending buffer").as_ptr(),
+            (*ds).pending_buf_size as usize,
+        );
     copy_pending_regions(
         source_pending,
         destination_pending,
@@ -2877,7 +2886,7 @@ unsafe extern "C" fn deflate_stored(
             last,
         );
         let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+            ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
         set_stored_block_length(pending_buf, state.pending, len);
         flush_pending(state.strm);
         if left != 0 {
@@ -3088,7 +3097,7 @@ unsafe extern "C" fn deflate_fast(
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
     let pending_buf =
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut((*s).pending_buf.expect("initialized pending buffer").as_ptr(), (*s).pending_buf_size as usize);
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
@@ -3282,7 +3291,7 @@ unsafe extern "C" fn deflate_slow(
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
     let pending_buf =
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut((*s).pending_buf.expect("initialized pending buffer").as_ptr(), (*s).pending_buf_size as usize);
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
@@ -3579,7 +3588,7 @@ unsafe extern "C" fn deflate_rle(
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
     let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
@@ -3716,7 +3725,7 @@ unsafe extern "C" fn deflate_huff(
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
     let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if state.lookahead == 0 as crate::stdlib::uInt {

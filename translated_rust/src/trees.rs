@@ -2471,7 +2471,7 @@ pub(crate) unsafe fn bi_flush_or_windup(
 ) {
     let state = &mut *s;
     let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
     match action {
         BitOutputAction::Flush => bi_flush_bytes(
             pending_buf,
@@ -3199,7 +3199,7 @@ pub unsafe extern "C" fn _tr_stored_block(
     // `deflateInit2_()` and `deflateCopy()`.  The payload is present only
     // for a nonzero stored block, matching zlib's null-with-zero rule.
     let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
     let input = if stored_len == 0 {
         &[]
     } else {
@@ -3518,7 +3518,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         BlockPlan::Stored => {
             _tr_stored_block(s, buf, stored_len, last);
             let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
+                state.pending_buf.expect("initialized pending buffer").as_ptr(),
                 state.pending_buf_size as usize,
             );
             finish_block(
@@ -3539,7 +3539,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         }
         plan => {
             let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
+                state.pending_buf.expect("initialized pending buffer").as_ptr(),
                 state.pending_buf_size as usize,
             );
             emit_nonstored_block(
@@ -3633,7 +3633,7 @@ pub unsafe extern "C" fn _tr_tally(
     // The symbol region starts after the literal portion of `pending_buf`.
     // Its remaining capacity is three bytes per literal slot.
     let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(state.pending_buf.expect("initialized pending buffer").as_ptr(), state.pending_buf_size as usize);
     let sym_buf = &mut pending_buf[state.sym_buf_start..];
     tally_symbol(
         sym_buf,
