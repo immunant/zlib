@@ -344,9 +344,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
                 (*state).ncode = counts.ncode;
                 hold = counts.hold;
                 bits = counts.bits;
-                if (*state).nlen > 286 as ::core::ffi::c_uint
-                    || (*state).ndist > 30 as ::core::ffi::c_uint
-                {
+                if !crate::src::inflate::inflate_dynamic_counts_are_valid(
+                    (*state).nlen,
+                    (*state).ndist,
+                ) {
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;

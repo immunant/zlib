@@ -158,10 +158,7 @@ unsafe extern "C" fn gz_comp(
     }
     ret = crate::zlib_h::Z_OK;
     loop {
-        if (*strm).avail_out == 0 as crate::stdlib::uInt
-            || flush != crate::zlib_h::Z_NO_FLUSH
-                && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
-        {
+        if gz_comp_should_write_pending((*strm).avail_out, flush, ret) {
             while let Some(chunk) = gz_pending_output_chunk(&*state, max) {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 (*state).again = 0 as ::core::ffi::c_int;
@@ -326,6 +323,16 @@ fn gz_write_error_return(
     } else {
         0 as crate::stdlib::z_size_t
     }
+}
+
+fn gz_comp_should_write_pending(
+    avail_out: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+) -> bool {
+    avail_out == 0 as crate::stdlib::uInt
+        || flush != crate::zlib_h::Z_NO_FLUSH
+            && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
 }
 
 fn gz_note_buffered_input(state: &mut crate::gzguts_h::gz_state, count: ::core::ffi::c_uint) {

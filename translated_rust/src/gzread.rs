@@ -286,7 +286,7 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
             if (*strm).avail_out < had {
                 (*state).junk = 0 as ::core::ffi::c_int;
             }
-            if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
+            if gz_inflate_stream_corrupt(ret) {
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_STREAM_ERROR,
@@ -497,6 +497,10 @@ fn gz_decomp_should_continue(avail_out: crate::stdlib::uInt, ret: ::core::ffi::c
     avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END
 }
 
+fn gz_inflate_stream_corrupt(ret: ::core::ffi::c_int) -> bool {
+    ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT
+}
+
 fn gz_fetch_needs_more_output(
     have: ::core::ffi::c_uint,
     eof: ::core::ffi::c_int,
@@ -555,6 +559,14 @@ fn gzgets_copy_len(
     match buffered[..limit].iter().position(|&byte| byte == b'\n') {
         Some(pos) => pos.wrapping_add(1) as ::core::ffi::c_uint,
         None => limit as ::core::ffi::c_uint,
+    }
+}
+
+fn gzclose_read_status(err: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if err == crate::zlib_h::Z_BUF_ERROR {
+        crate::zlib_h::Z_BUF_ERROR
+    } else {
+        crate::zlib_h::Z_OK
     }
 }
 
@@ -852,11 +864,7 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
         crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
     }
-    err = if (*state).err == crate::zlib_h::Z_BUF_ERROR {
-        crate::zlib_h::Z_BUF_ERROR
-    } else {
-        crate::zlib_h::Z_OK
-    };
+    err = gzclose_read_status((*state).err);
     crate::src::gzlib::gz_error(
         state as *mut crate::gzguts_h::gz_state,
         crate::zlib_h::Z_OK,

@@ -1623,19 +1623,31 @@ fn gzip_trailer_bytes(
     ]
 }
 
+fn deflate_pending_copy_len(
+    pending: crate::zutil_h::ulg,
+    avail_out: crate::stdlib::uInt,
+) -> Option<::core::ffi::c_uint> {
+    let len = if pending > avail_out as crate::zutil_h::ulg {
+        avail_out as ::core::ffi::c_uint
+    } else {
+        pending as ::core::ffi::c_uint
+    };
+    if len == 0 as ::core::ffi::c_uint {
+        None
+    } else {
+        Some(len)
+    }
+}
+
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
     crate::src::trees::_tr_flush_bits_ffi(s as *mut crate::src::deflate::internal_state);
-    len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
-        (*strm).avail_out as ::core::ffi::c_uint
-    } else {
-        (*s).pending as ::core::ffi::c_uint
-    };
-    if len == 0 as ::core::ffi::c_uint {
+    let Some(copy_len) = deflate_pending_copy_len((*s).pending, (*strm).avail_out) else {
         return;
-    }
+    };
+    len = copy_len;
     crate::stdlib::memcpy(
         (*strm).next_out as *mut ::core::ffi::c_void,
         (*s).pending_out as *const ::core::ffi::c_void,

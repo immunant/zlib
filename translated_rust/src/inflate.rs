@@ -194,6 +194,13 @@ pub(crate) fn inflate_dynamic_counts(
     }
 }
 
+pub(crate) fn inflate_dynamic_counts_are_valid(
+    nlen: ::core::ffi::c_uint,
+    ndist: ::core::ffi::c_uint,
+) -> bool {
+    nlen <= 286 as ::core::ffi::c_uint && ndist <= 30 as ::core::ffi::c_uint
+}
+
 pub(crate) fn inflate_stored_block_length(
     hold: ::core::ffi::c_ulong,
 ) -> Option<::core::ffi::c_uint> {
@@ -1045,9 +1052,7 @@ pub unsafe extern "C" fn inflate_ffi(
                 (*state).ncode = counts.ncode;
                 hold = counts.hold;
                 bits = counts.bits;
-                if (*state).nlen > 286 as ::core::ffi::c_uint
-                    || (*state).ndist > 30 as ::core::ffi::c_uint
-                {
+                if !inflate_dynamic_counts_are_valid((*state).nlen, (*state).ndist) {
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
