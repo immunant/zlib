@@ -1530,6 +1530,10 @@ struct DeflateDictionaryStorage<'stream> {
 
 enum DeflateStorageProjection<'request> {
     None,
+    // Bit priming needs only the callback-owned pending bytes.  Project that
+    // view at the shared stream/state boundary so the bit operation itself
+    // never reconstructs a slice from an allocation handle.
+    Pending,
     // A full reset only clears the hash table.  Keep that bounded callback
     // view in the shared stream/state projection, rather than reconstructing
     // it at the reset adapter after the opaque state has been borrowed.
@@ -1574,6 +1578,21 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             prev: None,
             head: None,
             pending: None,
+        },
+        DeflateStorageProjection::Pending => DeflateCallbackStorage {
+            window: None,
+            prev: None,
+            head: None,
+            pending: Some(::core::slice::from_raw_parts_mut(
+                state
+                    .pending_buf
+                    .expect("initialized pending buffer")
+                    .as_ptr(),
+                storage_layout
+                    .pending
+                    .byte_len()
+                    .expect("validated pending allocation geometry"),
+            )),
         },
         DeflateStorageProjection::Hash => DeflateCallbackStorage {
             window: None,
@@ -2507,18 +2526,12 @@ pub unsafe fn deflatePrime(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    let Some((_strm, state, storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::Pending)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
+    let pending_buf = storage.pending.expect("initialized pending buffer");
     deflate_prime_bits(
         pending_buf,
         &mut state.pending,
