@@ -488,9 +488,13 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
         1,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
-    let Some(state) = state.as_mut() else {
+    if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
-    };
+    }
+    // The allocation callback supplies uninitialized storage.  Initialize the
+    // complete opaque state before converting it to a mutable reference.
+    core::ptr::write(state, crate::src::inflate::inflate_state::newly_allocated());
+    let state = &mut *state;
     let window = core::slice::from_raw_parts_mut(window, plan.window_size as usize);
     inflate_back_initialize_state(stream, state, window, plan.window_bits);
     crate::zlib_h::Z_OK
@@ -1258,6 +1262,7 @@ mod tests {
         inflate_back_copy_count, inflate_back_copy_match, inflate_back_discard_bits,
         inflate_back_distance_exceeds_window, inflate_back_fill_code_length_run,
         inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
+        inflate_back_initialize_state,
         inflate_back_init_plan, inflate_back_initial_input_count, inflate_back_litlen_action,
         inflate_back_low_bits, inflate_back_match_copy_plan, inflate_back_root_table_index,
         inflate_back_stored_block_length, inflate_back_subtable_index, inflate_back_take_bits,
@@ -1411,6 +1416,49 @@ mod tests {
             stream_size.wrapping_sub(1),
         ));
         assert!(!inflate_back_init_metadata_is_valid(None, stream_size));
+    }
+
+    #[test]
+    fn inflate_back_initialization_overwrites_a_complete_safe_state() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+        let mut state = crate::src::inflate::inflate_state::newly_allocated();
+        let state_address = (&mut state as *mut crate::src::inflate::inflate_state)
+            as *mut crate::src::deflate::internal_state;
+        let mut window = [0_u8; 256];
+
+        inflate_back_initialize_state(&mut stream, &mut state, &mut window, 8);
+
+        assert_eq!(stream.state, state_address);
+        assert_eq!(state.dmax, 32768);
+        assert_eq!(state.wbits, 8);
+        assert_eq!(state.wsize, 256);
+        assert_eq!(state.window, window.as_mut_ptr());
+        assert_eq!(
+            state.window_ownership,
+            crate::src::inflate::WindowOwnership::CallerBorrowed.raw()
+        );
+        assert_eq!(state.wnext, 0);
+        assert_eq!(state.whave, 0);
+        assert_eq!(state.sane, 1);
+        assert!(state.strm.is_null());
+        assert!(state.head.is_null());
+        assert_eq!(state.wrap, 0);
+        assert_eq!(state.check, 0);
     }
 
     #[test]

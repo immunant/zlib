@@ -175,7 +175,7 @@ impl inflate_state {
     /// The allocation itself remains at the FFI boundary, where callback
     /// allocation semantics are observable.  Keeping initialization here
     /// avoids relying on a foreign whole-struct `memset` after allocation.
-    fn newly_allocated() -> Self {
+    pub(crate) fn newly_allocated() -> Self {
         Self {
             strm: ::core::ptr::null_mut(),
             mode: HEAD,
