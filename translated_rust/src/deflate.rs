@@ -749,14 +749,8 @@ pub unsafe extern "C" fn deflateInit2_(
         || (*s).pending_buf.is_null()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
-        (*strm).msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
-            < -6 as ::core::ffi::c_int
-            || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-        {
-            9 as ::core::ffi::c_int
-        } else {
-            2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
-        }) as usize];
+        (*strm).msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
+            .load(::core::sync::atomic::Ordering::Relaxed);
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -1480,25 +1474,13 @@ pub unsafe extern "C" fn deflate(
         || (*strm).avail_in != 0 as crate::stdlib::uInt && (*strm).next_in.is_null()
         || (*s).status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
     {
-        (*strm).msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
-            < -6 as ::core::ffi::c_int
-            || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-        {
-            9 as ::core::ffi::c_int
-        } else {
-            2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
-        }) as usize];
+        (*strm).msg = crate::src::zutil::zError(-2 as ::core::ffi::c_int)
+            .load(::core::sync::atomic::Ordering::Relaxed);
         return -2 as ::core::ffi::c_int;
     }
     if (*strm).avail_out == 0 as crate::stdlib::uInt {
-        (*strm).msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-            < -6 as ::core::ffi::c_int
-            || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-        {
-            9 as ::core::ffi::c_int
-        } else {
-            2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-        }) as usize];
+        (*strm).msg = crate::src::zutil::zError(-5 as ::core::ffi::c_int)
+            .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
     old_flush = (*s).last_flush;
@@ -1524,27 +1506,15 @@ pub unsafe extern "C" fn deflate(
                 })
         && flush != crate::zlib_h::Z_FINISH
     {
-        (*strm).msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-            < -6 as ::core::ffi::c_int
-            || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-        {
-            9 as ::core::ffi::c_int
-        } else {
-            2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-        }) as usize];
+        (*strm).msg = crate::src::zutil::zError(-5 as ::core::ffi::c_int)
+            .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
     if (*s).status == crate::src::deflate::FINISH_STATE
         && (*strm).avail_in != 0 as crate::stdlib::uInt
     {
-        (*strm).msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-            < -6 as ::core::ffi::c_int
-            || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-        {
-            9 as ::core::ffi::c_int
-        } else {
-            2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-        }) as usize];
+        (*strm).msg = crate::src::zutil::zError(-5 as ::core::ffi::c_int)
+            .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
     if (*s).status == crate::src::deflate::INIT_STATE && (*s).wrap == 0 as ::core::ffi::c_int {
