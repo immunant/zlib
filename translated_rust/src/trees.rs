@@ -5526,33 +5526,31 @@ unsafe extern "C" fn compress_block(
     };
 }
 
-unsafe extern "C" fn detect_data_type(
-    mut s: *mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
+fn detect_data_type(tree: &[crate::src::deflate::ct_data]) -> ::core::ffi::c_int {
     let mut block_mask: ::core::ffi::c_ulong = 0xf3ffc07f as ::core::ffi::c_ulong;
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
     while n <= 31 as ::core::ffi::c_int {
         if block_mask & 1 as ::core::ffi::c_ulong != 0
-            && (*s).dyn_ltree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+            && tree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int
         {
             return crate::zlib_h::Z_BINARY;
         }
         n += 1;
         block_mask >>= 1 as ::core::ffi::c_int;
     }
-    if (*s).dyn_ltree[9 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+    if tree[9 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
         != 0 as ::core::ffi::c_int
-        || (*s).dyn_ltree[10 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+        || tree[10 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
-        || (*s).dyn_ltree[13 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+        || tree[13 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_TEXT;
     }
     n = 32 as ::core::ffi::c_int;
     while n < crate::src::deflate::LITERALS {
-        if (*s).dyn_ltree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+        if tree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             return crate::zlib_h::Z_TEXT;
         }
         n += 1;
@@ -5569,8 +5567,9 @@ pub unsafe extern "C" fn _tr_flush_block(
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     if (*s).level > 0 as ::core::ffi::c_int {
-        if (*(*s).strm).data_type == crate::zlib_h::Z_UNKNOWN {
-            (*(*s).strm).data_type = detect_data_type(s);
+        let strm = (*s).strm;
+        if (*strm).data_type == crate::zlib_h::Z_UNKNOWN {
+            (*strm).data_type = detect_data_type(&(*s).dyn_ltree);
         }
         build_tree(
             s,
