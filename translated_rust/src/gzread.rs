@@ -827,29 +827,25 @@ fn gz_read_buffer(
     return got;
 }
 
-pub unsafe extern "C" fn gzread(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: crate::stdlib::voidp,
-    mut len: ::core::ffi::c_uint,
+/// Read a checked caller buffer through a read-mode gzip handle.
+///
+/// Pointer and length conversion is confined to `gzread_ffi`; stream
+/// validation and all resulting state changes stay here with the read state.
+fn gzread_impl(
+    state: &mut crate::gzguts_h::gz_state,
+    buf: &mut [u8],
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
-    let state = &mut *state;
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
+    if (buf.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 {
         crate::src::gzlib::gz_error_state(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -857,24 +853,21 @@ pub unsafe extern "C" fn gzread(
         );
         return -1 as ::core::ffi::c_int;
     }
-    len = if len == 0 {
+    let len = if buf.is_empty() {
         0
     } else {
-        gz_read_buffer(
-            state,
-            ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as crate::stdlib::z_size_t),
-        ) as ::core::ffi::c_uint
+        gz_read_buffer(state, buf) as ::core::ffi::c_uint
     };
     if len == 0 as ::core::ffi::c_uint {
-        if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
+        if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
             return -1 as ::core::ffi::c_int;
         }
-        if (*state).again != 0 {
-            let message = crate::stdlib::strerror(*crate::stdlib::__errno_location());
+        if state.again != 0 {
+            let message = std::ffi::CString::new(errno::errno().to_string()).ok();
             crate::src::gzlib::gz_error_state(
                 state,
                 crate::zlib_h::Z_ERRNO,
-                (!message.is_null()).then(|| ::core::ffi::CStr::from_ptr(message)),
+                message.as_deref(),
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -884,11 +877,22 @@ pub unsafe extern "C" fn gzread(
 #[export_name = "gzread"]
 
 pub unsafe extern "C" fn gzread_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: crate::stdlib::voidp,
-    mut len: ::core::ffi::c_uint,
+    file: crate::zlib_h::gzFile,
+    buf: crate::stdlib::voidp,
+    len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzread(file, buf, len)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1;
+    };
+    let output = if len == 0 {
+        &mut []
+    } else {
+        if buf.is_null() {
+            return -1;
+        }
+        ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize)
+    };
+    gzread_impl(state, output)
 }
 enum GzfreadBuffer<'a> {
     Empty,
