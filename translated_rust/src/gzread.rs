@@ -820,6 +820,21 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     }
     gzdirect(&mut *(file as crate::gzguts_h::gz_statep))
 }
+
+// Closing a read stream has a small state-only tail after its raw inflater,
+// allocation, and descriptor cleanup. Keep the error result selection and
+// error-record reset reference-bound so the exported cleanup boundary does
+// not also own ordinary gzip state transitions.
+fn gz_close_read_finish(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    let err = if state.err == crate::zlib_h::Z_BUF_ERROR {
+        crate::zlib_h::Z_BUF_ERROR
+    } else {
+        crate::zlib_h::Z_OK
+    };
+    crate::src::gzlib::gzclearerr(state);
+    err
+}
+
 pub unsafe extern "C" fn gzclose_r(
     state: &mut crate::gzguts_h::gz_state,
     mut file: crate::zlib_h::gzFile,
@@ -836,12 +851,7 @@ pub unsafe extern "C" fn gzclose_r(
         crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
         crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
     }
-    err = if state.err == crate::zlib_h::Z_BUF_ERROR {
-        crate::zlib_h::Z_BUF_ERROR
-    } else {
-        crate::zlib_h::Z_OK
-    };
-    crate::src::gzlib::gzclearerr(state);
+    err = gz_close_read_finish(state);
     let path = state.path;
     let fd = state.fd;
     crate::stdlib::free(path as *mut ::core::ffi::c_void);

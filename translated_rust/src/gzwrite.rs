@@ -600,6 +600,22 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         strategy,
     )
 }
+
+// Once a write handle is known to be valid, finishing sparse output and the
+// deflater only changes the bound gzip state. Keep that decision separate
+// from the raw allocator/descriptor cleanup performed by the exported close
+// boundary.
+fn gz_close_write_prepare(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    let mut ret = crate::zlib_h::Z_OK;
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+        ret = state.err;
+    }
+    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
+        ret = state.err;
+    }
+    ret
+}
+
 pub unsafe extern "C" fn gzclose_w(
     state: &mut crate::gzguts_h::gz_state,
     mut file: crate::zlib_h::gzFile,
@@ -608,12 +624,7 @@ pub unsafe extern "C" fn gzclose_w(
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_WRITE) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        ret = state.err;
-    }
-    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
-        ret = state.err;
-    }
+    ret = gz_close_write_prepare(state);
     if state.size != 0 {
         if state.direct == 0 {
             crate::src::deflate::deflateEnd(
