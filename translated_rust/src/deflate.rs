@@ -1859,6 +1859,12 @@ enum DeflateStorageProjection<'request> {
     // six bounded views at the one ABI/state projection boundary, then lend
     // only ordinary slices to the pointer-free state machine.
     Dispatch,
+    // `deflateParams()` first decides whether it can update scalars directly
+    // or must issue its required block-flush dispatch.  Keep that decision at
+    // the existing stream/state projection: the direct-update path must not
+    // validate or borrow caller cursors, while the flush path needs the same
+    // complete view as an ordinary dispatch.
+    ParameterDispatch(DeflateParameterPlan),
     // Dictionary installation is a complete pointer-free operation once the
     // shared boundary has lent it the callback-owned views.  Keep its status
     // slot in the request so the FFI export can dispatch directly without
@@ -1900,11 +1906,21 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         return None;
     }
     let storage_layout = state.callback_storage.storage();
+    let parameter_requires_flush = match &projection {
+        DeflateStorageProjection::ParameterDispatch(plan) => {
+            let algorithm = configuration_table[state.level as usize].algorithm;
+            (plan.strategy != state.strategy
+                || algorithm != configuration_table[plan.level as usize].algorithm)
+                && state.last_flush != -2 as ::core::ffi::c_int
+        }
+        _ => false,
+    };
     let complete_storage = matches!(
         &projection,
         DeflateStorageProjection::Complete | DeflateStorageProjection::Dispatch
-    );
-    let dispatch_cursors = matches!(&projection, DeflateStorageProjection::Dispatch);
+    ) || parameter_requires_flush;
+    let dispatch_cursors = matches!(&projection, DeflateStorageProjection::Dispatch)
+        || parameter_requires_flush;
     let mut storage = match projection {
         DeflateStorageProjection::None => DeflateCallbackStorage {
             window: None,
@@ -1936,6 +1952,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         DeflateStorageProjection::Dictionary
         | DeflateStorageProjection::Complete
         | DeflateStorageProjection::Dispatch
+        | DeflateStorageProjection::ParameterDispatch(_)
         | DeflateStorageProjection::DictionaryInstall { .. }
         | DeflateStorageProjection::DictionaryQuery { .. } => DeflateCallbackStorage {
             window: Some(::core::slice::from_raw_parts_mut(
@@ -5543,70 +5560,56 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
     let Some(flush) = DeflateFlush::parse(flush) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if let Some(plan) = parameter_update {
-        // A parameter update either completes without a block flush or
-        // continues into the normal dispatch below. The flush can re-enter
-        // the dispatcher, so end this first ABI/state transaction before
-        // building the dispatch view.
-        let no_flush_result = {
-            let Some((_stream, state, storage)) =
-                deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary)
-            else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            let algorithm = configuration_table[state.level as usize].algorithm;
-            let needs_flush = (plan.strategy != state.strategy
-                || algorithm != configuration_table[plan.level as usize].algorithm)
-                && state.last_flush != -2 as ::core::ffi::c_int;
-            if needs_flush {
-                None
-            } else {
-                let needs_table_cleanup =
-                    state.level != plan.level && state.level == 0 && state.matches != 0;
-                let tables = if needs_table_cleanup {
-                    let prev = if state.matches == 1 {
-                        Some(storage.prev.expect("parameter previous-table projection"))
-                    } else {
-                        None
-                    };
-                    Some(DeflateCallbackHashStorage {
-                        head: storage.head.expect("parameter hash-table projection"),
-                        prev,
-                    })
-                } else {
-                    None
-                };
-                let scalars = DeflateParameterScalars {
-                    current_level: &mut state.level,
-                    current_strategy: &mut state.strategy,
-                    matches: &mut state.matches,
-                    slid: &mut state.slid,
-                    max_lazy_match: &mut state.max_lazy_match,
-                    good_match: &mut state.good_match,
-                    nice_match: &mut state.nice_match,
-                    max_chain_length: &mut state.max_chain_length,
-                    w_size: state.w_size,
-                };
-                Some(deflateParams(
-                    DeflateParameterOwner::from_callback_storage(scalars, tables),
-                    plan.level,
-                    plan.strategy,
-                ))
-            }
-        };
-        if let Some(result) = no_flush_result {
-            return result;
-        }
-    }
-    // Dispatch needs the same three bounded history views as dictionary
-    // handling, plus pending bytes and the caller cursors.  Reuse the single
-    // complete projection so this adapter never rebuilds an ABI slice after
-    // associating the opaque state.
-    let Some((strm, state, storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Dispatch)
+    // Parameter changes share the same projection as normal dispatch.  The
+    // projection decides whether a block flush is necessary before forming
+    // any caller cursor views, preserving the direct-update path's original
+    // cursor-insensitive behavior.
+    let projection = match parameter_update {
+        Some(plan) => DeflateStorageProjection::ParameterDispatch(plan),
+        None => DeflateStorageProjection::Dispatch,
+    };
+    let Some((strm, state, storage)) = deflate_stream_and_state(strm, projection)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    if let Some(plan) = parameter_update {
+        if storage.cursors.is_none() {
+            let needs_table_cleanup =
+                state.level != plan.level && state.level == 0 && state.matches != 0;
+            let tables = if needs_table_cleanup {
+                let prev = if state.matches == 1 {
+                    Some(storage.prev.expect("parameter previous-table projection"))
+                } else {
+                    None
+                };
+                Some(DeflateCallbackHashStorage {
+                    head: storage.head.expect("parameter hash-table projection"),
+                    prev,
+                })
+            } else {
+                None
+            };
+            let scalars = DeflateParameterScalars {
+                current_level: &mut state.level,
+                current_strategy: &mut state.strategy,
+                matches: &mut state.matches,
+                slid: &mut state.slid,
+                max_lazy_match: &mut state.max_lazy_match,
+                good_match: &mut state.good_match,
+                nice_match: &mut state.nice_match,
+                max_chain_length: &mut state.max_chain_length,
+                w_size: state.w_size,
+            };
+            return deflateParams(
+                DeflateParameterOwner::from_callback_storage(scalars, tables),
+                plan.level,
+                plan.strategy,
+            );
+        }
+    }
+    // Dispatch needs the same three bounded history views as dictionary
+    // handling, plus pending bytes and the caller cursors. The parameter
+    // projection has formed those only after it admitted the block flush.
     let Some((storage, DeflateAbiCursors { input, output })) =
         state.callback_storage.dispatch_request(storage)
     else {
