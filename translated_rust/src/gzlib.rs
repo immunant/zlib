@@ -383,8 +383,7 @@ fn parse_gz_open_mode(mode: &[u8]) -> Option<GzOpenMode> {
     Some(parsed)
 }
 
-unsafe fn gz_reset(state: crate::gzguts_h::gz_statep) {
-    let state = &mut *state;
+unsafe fn gz_reset(state: &mut crate::gzguts_h::gz_state) {
     let mut reset = GzResetState {
         mode: state.mode,
         have: state.x.have,
@@ -573,7 +572,7 @@ unsafe extern "C" fn gz_open(
             .unwrap_or(0 as crate::stdlib::off64_t);
     }
     let state = state_owner.as_mut_ptr();
-    gz_reset(state);
+    gz_reset(state_owner.first_mut().unwrap());
     ::core::mem::forget(state_owner);
     return state as crate::zlib_h::gzFile;
 }
@@ -696,7 +695,7 @@ unsafe fn gzrewind(
     {
         return -1 as ::core::ffi::c_int;
     }
-    gz_reset(state as *mut crate::gzguts_h::gz_state);
+    gz_reset(state);
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzrewind"]
