@@ -275,12 +275,10 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         if first != 0 {
             // SAFETY: `gz_init` allocated `in_0` with at least `size` bytes,
             // and this first sparse-write chunk is bounded by that size.
+            // `write_bytes` does not form references to malloc's still-
+            // uninitialized storage.
             unsafe {
-                crate::stdlib::memset(
-                    state.in_0 as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
+                ::core::ptr::write_bytes(state.in_0, 0, n as usize);
             }
             first = 0 as ::core::ffi::c_int;
         }
