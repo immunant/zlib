@@ -3252,34 +3252,22 @@ pub(crate) fn inflate_table_bound(
     inflate_table_impl(type_0, lens, codes, table, bits, work)
 }
 
-pub unsafe extern "C" fn inflate_table(
+// Building a table and advancing its cursor are ordinary slice operations.
+// Keep the C cursor conversion in the export adapter so Rust callers cannot
+// accidentally enter this implementation with unbounded raw ranges.
+pub fn inflate_table<'a>(
     type_0: crate::src::inftrees::codetype,
-    lens: *mut ::core::ffi::c_ushort,
+    lens: &[::core::ffi::c_ushort],
     codes: ::core::ffi::c_uint,
-    table: *mut *mut crate::src::inftrees::code,
-    bits: *mut ::core::ffi::c_uint,
-    work: *mut ::core::ffi::c_ushort,
-) -> ::core::ffi::c_int {
-    let lens = ::core::slice::from_raw_parts(lens, codes as usize);
-    let work = ::core::slice::from_raw_parts_mut(work, codes as usize);
-    let bits = &mut *bits;
-    let table_start = *table;
-    let table_len = match inflate_table_capacity(type_0, lens, *bits) {
-        Ok(table_len) => table_len,
-        Err(error) => return error,
-    };
-    let table_entries = ::core::slice::from_raw_parts_mut(table_start, table_len);
-    match inflate_table_bound(type_0, lens, codes, table_entries, bits, work) {
-        Ok(used) => {
-            // `inflate_table_impl()` only reports entries it initialized in
-            // the bounded table view above. Publish its cursor through that
-            // checked slice rather than rebuilding it with raw-pointer
-            // arithmetic.
-            *table = table_entries[used..].as_mut_ptr();
-            0
-        }
-        Err(error) => error,
-    }
+    table: &'a mut [crate::src::inftrees::code],
+    bits: &mut ::core::ffi::c_uint,
+    work: &mut [::core::ffi::c_ushort],
+) -> Result<&'a mut [crate::src::inftrees::code], ::core::ffi::c_int> {
+    let used = inflate_table_bound(type_0, lens, codes, table, bits, work)?;
+    // `inflate_table_bound()` reports only initialized entries within the
+    // supplied table, making the remaining construction cursor a checked
+    // subslice rather than a reconstructed raw address.
+    Ok(&mut table[used..])
 }
 #[export_name = "inflate_table"]
 
@@ -3291,7 +3279,23 @@ pub unsafe extern "C" fn inflate_table_ffi(
     mut bits: *mut ::core::ffi::c_uint,
     mut work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
-    inflate_table(type_0, lens, codes, table, bits, work)
+    // SAFETY: this internal C ABI has the same workspace contract as zlib:
+    // `lens` and `work` contain `codes` elements, and `*table` starts an
+    // ENOUGH-entry decode-table workspace. All construction after binding
+    // those foreign ranges is handled by the slice-only implementation.
+    unsafe {
+        let lens = ::core::slice::from_raw_parts(lens, codes as usize);
+        let work = ::core::slice::from_raw_parts_mut(work, codes as usize);
+        let bits = &mut *bits;
+        let table_entries = ::core::slice::from_raw_parts_mut(*table, ENOUGH as usize);
+        match inflate_table(type_0, lens, codes, table_entries, bits, work) {
+            Ok(cursor) => {
+                *table = cursor.as_mut_ptr();
+                0
+            }
+            Err(error) => error,
+        }
+    }
 }
 pub fn inflate_fixed(state: &mut crate::src::inflate::inflate_state) {
     state.lencode = &raw const lenfix as *const crate::src::inftrees::code;
