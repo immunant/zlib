@@ -142,10 +142,17 @@ macro_rules! compress2_z_at_boundary {
             } else {
                 ::core::slice::from_raw_parts_mut((*state).pending_buf, pending_len)
             };
+            let Some(mut window_hash) =
+                crate::src::deflate::deflate_window_hash_buffers_at_boundary!(&mut *state)
+            else {
+                err = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            };
             err = crate::src::deflate::deflate(
                 &mut stream,
                 &mut input,
                 pending_buf,
+                &mut window_hash,
                 &mut output,
                 crate::src::deflate::DeflateGzipPayloads::empty(),
                 if sourceLen != 0 {

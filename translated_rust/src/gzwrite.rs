@@ -290,10 +290,16 @@ macro_rules! gz_comp_at_boundary {
                 } else {
                     ::core::slice::from_raw_parts_mut((*pending_state).pending_buf, pending_len)
                 };
+                let Some(mut window_hash) =
+                    crate::src::deflate::deflate_window_hash_buffers_at_boundary!(&mut *pending_state)
+                else {
+                    break 'gz_comp_result -1;
+                };
                 ret = crate::src::deflate::deflate(
                     strm,
                     &mut input,
                     pending_buf,
+                    &mut window_hash,
                     &mut output,
                     crate::src::deflate::DeflateGzipPayloads::empty(),
                     flush,

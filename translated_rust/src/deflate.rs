@@ -843,11 +843,62 @@ fn fill_window_write_span(
 /// The callback allocator owns these three deflate work buffers.  Keep their
 /// lends together at the compatibility boundary so the refill state machine
 /// below only manipulates checked Rust slices.
-struct DeflateWindowHashBuffers<'a> {
+pub struct DeflateWindowHashBuffers<'a> {
     window: &'a mut [crate::stdlib::Byte],
     head: &'a mut [crate::src::deflate::Posf],
     prev: &'a mut [crate::src::deflate::Posf],
 }
+
+impl<'a> DeflateWindowHashBuffers<'a> {
+    pub fn new(
+        window: &'a mut [crate::stdlib::Byte],
+        head: &'a mut [crate::src::deflate::Posf],
+        prev: &'a mut [crate::src::deflate::Posf],
+    ) -> Self {
+        Self { window, head, prev }
+    }
+}
+
+// The window and hash tables are callback-owned allocations.  Construct these
+// exact lends only at ABI boundaries; the ordinary compressor merely threads
+// the bundle through refill transitions.
+macro_rules! deflate_window_hash_buffers_at_boundary {
+    ($state:expr $(,)?) => {{
+        let state = $state;
+        match (
+            usize::try_from(state.window_size),
+            usize::try_from(state.hash_size),
+            usize::try_from(state.w_size),
+        ) {
+            (Ok(window_len), Ok(head_len), Ok(prev_len))
+                if window_len == 0 || !state.window.is_null() => {
+                // Missing hash tables remain empty lends so
+                // `fill_window_state()` rejects them at the legacy
+                // slide/insertion transition.
+                let window = if window_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.window, window_len)
+                };
+                let head = if state.head.is_null() {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.head, head_len)
+                };
+                let prev = if state.prev.is_null() {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                };
+                Some(crate::src::deflate::DeflateWindowHashBuffers::new(
+                    window, head, prev,
+                ))
+            }
+            _ => None,
+        }
+    }};
+}
+pub(crate) use deflate_window_hash_buffers_at_boundary;
 
 fn fill_window_hash_lends_match_state(
     state: &crate::src::deflate::deflate_state,
@@ -963,51 +1014,6 @@ fn fill_window_state(
             return;
         }
         break;
-    }
-}
-
-fn fill_window(
-    s: &mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream,
-    input: &mut &[crate::stdlib::Byte],
-) {
-    unsafe {
-        let Ok(window_len) = usize::try_from(s.window_size) else {
-            return;
-        };
-        let Ok(head_len) = usize::try_from(s.hash_size) else {
-            return;
-        };
-        let Ok(prev_len) = usize::try_from(s.w_size) else {
-            return;
-        };
-        if window_len != 0 && s.window.is_null() {
-            return;
-        }
-        // A missing hash table remains observable only when a slide or an
-        // insertion reaches it.  Represent it with an empty safe lend here so
-        // `fill_window_state()` retains that historical admission point.
-        let window = if window_len == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(s.window, window_len)
-        };
-        let head = if s.head.is_null() {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(s.head, head_len)
-        };
-        let prev = if s.prev.is_null() {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(s.prev, prev_len)
-        };
-        fill_window_state(
-            s,
-            strm,
-            input,
-            &mut DeflateWindowHashBuffers { window, head, prev },
-        );
     }
 }
 
@@ -1439,7 +1445,10 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
         strm_ref.next_in = dictionary as *mut crate::stdlib::Bytef;
     }
     let mut dictionary_input = core::slice::from_raw_parts(dictionary, dictLength as usize);
-    fill_window(&mut *s, &mut *strm, &mut dictionary_input);
+    let Some(mut window_hash) = deflate_window_hash_buffers_at_boundary!(&mut *s) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    fill_window_state(&mut *s, &mut *strm, &mut dictionary_input, &mut window_hash);
     while {
         let state_ref = &mut *s;
         state_ref.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -1480,7 +1489,10 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
         }
-        fill_window(&mut *s, &mut *strm, &mut dictionary_input);
+        let Some(mut window_hash) = deflate_window_hash_buffers_at_boundary!(&mut *s) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        fill_window_state(&mut *s, &mut *strm, &mut dictionary_input, &mut window_hash);
     }
     {
         let strm_ref = &mut *strm;
@@ -2001,6 +2013,11 @@ macro_rules! deflate_params_at_boundary {
                 } else {
                     ::core::slice::from_raw_parts_mut((&*s).pending_buf, pending_len)
                 };
+                let Some(mut window_hash) =
+                    crate::src::deflate::deflate_window_hash_buffers_at_boundary!(&mut *s)
+                else {
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                };
                 let Some(gzip_payloads) =
                     crate::src::deflate::deflate_gzip_payloads_at_boundary!(strm)
                 else {
@@ -2010,6 +2027,7 @@ macro_rules! deflate_params_at_boundary {
                     &mut *strm,
                     &mut input,
                     pending_buf,
+                    &mut window_hash,
                     &mut output,
                     gzip_payloads,
                     crate::zlib_h::Z_BLOCK,
@@ -3042,6 +3060,7 @@ pub fn deflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     mut input: &mut &[crate::stdlib::Byte],
     pending_buf: &mut [crate::stdlib::Byte],
+    window_hash: &mut DeflateWindowHashBuffers<'_>,
     output: &mut DeflateOutput<'_>,
     gzip_payloads: DeflateGzipPayloads<'_>,
     mut flush: ::core::ffi::c_int,
@@ -3519,19 +3538,59 @@ pub fn deflate(
                 };
                 match compressor {
                     DeflateCompressor::Stored => {
-                        deflate_stored(state, strm_ref, &mut input, pending_buf, output, flush)
+                        deflate_stored(
+                            state,
+                            strm_ref,
+                            &mut input,
+                            pending_buf,
+                            window_hash,
+                            output,
+                            flush,
+                        )
                     }
                     DeflateCompressor::Huffman => {
-                        deflate_huff(state, strm_ref, &mut input, pending_buf, output, flush)
+                        deflate_huff(
+                            state,
+                            strm_ref,
+                            &mut input,
+                            pending_buf,
+                            window_hash,
+                            output,
+                            flush,
+                        )
                     }
                     DeflateCompressor::Rle => {
-                        deflate_rle(state, strm_ref, &mut input, pending_buf, output, flush)
+                        deflate_rle(
+                            state,
+                            strm_ref,
+                            &mut input,
+                            pending_buf,
+                            window_hash,
+                            output,
+                            flush,
+                        )
                     }
                     DeflateCompressor::Fast => {
-                        deflate_fast(state, strm_ref, &mut input, pending_buf, output, flush)
+                        deflate_fast(
+                            state,
+                            strm_ref,
+                            &mut input,
+                            pending_buf,
+                            window_hash,
+                            output,
+                            flush,
+                        )
                     }
                     DeflateCompressor::Slow => {
-                        deflate_slow(state, strm_ref, &mut input, pending_buf, output, flush)
+                        deflate_slow(
+                            state,
+                            strm_ref,
+                            &mut input,
+                            pending_buf,
+                            window_hash,
+                            output,
+                            flush,
+                        )
                     }
                 }
             };
@@ -3730,10 +3789,15 @@ pub unsafe extern "C" fn deflate_ffi(
         } else {
             ::core::slice::from_raw_parts_mut((*state).pending_buf, pending_len)
         };
+        let Some(mut window_hash) = deflate_window_hash_buffers_at_boundary!(&mut *state)
+        else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         deflate(
             &mut *strm,
             &mut input,
             pending_buf,
+            &mut window_hash,
             &mut output,
             gzip_payloads,
             flush,
@@ -4497,6 +4561,7 @@ fn deflate_stored(
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
     pending_buf: &mut [crate::stdlib::Byte],
+    _window_hash: &mut DeflateWindowHashBuffers<'_>,
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -4748,6 +4813,7 @@ fn deflate_fast(
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
     pending_buf: &mut [crate::stdlib::Byte],
+    window_hash: &mut DeflateWindowHashBuffers<'_>,
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -4761,7 +4827,7 @@ fn deflate_fast(
             let needs_input =
                 s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
             if needs_input {
-                fill_window(s, strm, input);
+                fill_window_state(s, strm, input, window_hash);
                 if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
@@ -5020,6 +5086,7 @@ fn deflate_slow(
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
     pending_buf: &mut [crate::stdlib::Byte],
+    window_hash: &mut DeflateWindowHashBuffers<'_>,
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -5033,7 +5100,7 @@ fn deflate_slow(
             let needs_input =
                 { s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt };
             if needs_input {
-                fill_window(s, strm, input);
+                fill_window_state(s, strm, input, window_hash);
                 if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
@@ -5655,6 +5722,7 @@ fn deflate_rle(
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
     pending_buf: &mut [crate::stdlib::Byte],
+    window_hash: &mut DeflateWindowHashBuffers<'_>,
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -5665,7 +5733,7 @@ fn deflate_rle(
         loop {
             let needs_input = s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt;
             if needs_input {
-                fill_window(s, strm, input);
+                fill_window_state(s, strm, input, window_hash);
                 if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
@@ -5765,6 +5833,7 @@ fn deflate_huff(
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
     pending_buf: &mut [crate::stdlib::Byte],
+    window_hash: &mut DeflateWindowHashBuffers<'_>,
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -5776,7 +5845,7 @@ fn deflate_huff(
         loop {
             let needs_input = s.lookahead == 0 as crate::stdlib::uInt;
             if needs_input {
-                fill_window(s, strm, input);
+                fill_window_state(s, strm, input, window_hash);
                 if s.lookahead == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
                 }
