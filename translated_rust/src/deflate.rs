@@ -871,7 +871,8 @@ macro_rules! deflate_window_hash_buffers_at_boundary {
             usize::try_from(state.w_size),
         ) {
             (Ok(window_len), Ok(head_len), Ok(prev_len))
-                if window_len == 0 || !state.window.is_null() => {
+                if window_len == 0 || !state.window.is_null() =>
+            {
                 // Missing hash tables remain empty lends so
                 // `fill_window_state()` rejects them at the legacy
                 // slide/insertion transition.
@@ -3537,61 +3538,51 @@ pub fn deflate(
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
                 match compressor {
-                    DeflateCompressor::Stored => {
-                        deflate_stored(
-                            state,
-                            strm_ref,
-                            &mut input,
-                            pending_buf,
-                            window_hash,
-                            output,
-                            flush,
-                        )
-                    }
-                    DeflateCompressor::Huffman => {
-                        deflate_huff(
-                            state,
-                            strm_ref,
-                            &mut input,
-                            pending_buf,
-                            window_hash,
-                            output,
-                            flush,
-                        )
-                    }
-                    DeflateCompressor::Rle => {
-                        deflate_rle(
-                            state,
-                            strm_ref,
-                            &mut input,
-                            pending_buf,
-                            window_hash,
-                            output,
-                            flush,
-                        )
-                    }
-                    DeflateCompressor::Fast => {
-                        deflate_fast(
-                            state,
-                            strm_ref,
-                            &mut input,
-                            pending_buf,
-                            window_hash,
-                            output,
-                            flush,
-                        )
-                    }
-                    DeflateCompressor::Slow => {
-                        deflate_slow(
-                            state,
-                            strm_ref,
-                            &mut input,
-                            pending_buf,
-                            window_hash,
-                            output,
-                            flush,
-                        )
-                    }
+                    DeflateCompressor::Stored => deflate_stored(
+                        state,
+                        strm_ref,
+                        &mut input,
+                        pending_buf,
+                        window_hash,
+                        output,
+                        flush,
+                    ),
+                    DeflateCompressor::Huffman => deflate_huff(
+                        state,
+                        strm_ref,
+                        &mut input,
+                        pending_buf,
+                        window_hash,
+                        output,
+                        flush,
+                    ),
+                    DeflateCompressor::Rle => deflate_rle(
+                        state,
+                        strm_ref,
+                        &mut input,
+                        pending_buf,
+                        window_hash,
+                        output,
+                        flush,
+                    ),
+                    DeflateCompressor::Fast => deflate_fast(
+                        state,
+                        strm_ref,
+                        &mut input,
+                        pending_buf,
+                        window_hash,
+                        output,
+                        flush,
+                    ),
+                    DeflateCompressor::Slow => deflate_slow(
+                        state,
+                        strm_ref,
+                        &mut input,
+                        pending_buf,
+                        window_hash,
+                        output,
+                        flush,
+                    ),
                 }
             };
             if bstate as ::core::ffi::c_uint
@@ -3789,8 +3780,7 @@ pub unsafe extern "C" fn deflate_ffi(
         } else {
             ::core::slice::from_raw_parts_mut((*state).pending_buf, pending_len)
         };
-        let Some(mut window_hash) = deflate_window_hash_buffers_at_boundary!(&mut *state)
-        else {
+        let Some(mut window_hash) = deflate_window_hash_buffers_at_boundary!(&mut *state) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         deflate(
@@ -5826,88 +5816,53 @@ fn deflate_huff(
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    // The Huffman-only loop still owns transitional raw state, window, and
-    // pending-buffer lends. Keep that boundary explicit so dispatch callers
-    // do not inherit an unsafe-function requirement.
-    unsafe {
-        let mut bflush: ::core::ffi::c_int = 0;
-        loop {
-            let needs_input = s.lookahead == 0 as crate::stdlib::uInt;
-            if needs_input {
-                fill_window_state(s, strm, input, window_hash);
-                if s.lookahead == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
-                    return need_more;
+    // The caller already lends the callback-owned window and pending buffer.
+    // Keep this parser entirely in those bounded views, so ordinary dispatch
+    // does not inherit a raw-pointer compatibility boundary.
+    let mut bflush: ::core::ffi::c_int = 0;
+    loop {
+        let needs_input = s.lookahead == 0 as crate::stdlib::uInt;
+        if needs_input {
+            fill_window_state(s, strm, input, window_hash);
+            if s.lookahead == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
+                return need_more;
+            }
+        }
+        let state: &mut crate::src::deflate::deflate_state = s;
+        let Ok(window_len) = usize::try_from(state.window_size) else {
+            return need_more;
+        };
+        if window_len != 0 && state.window.is_null() {
+            return need_more;
+        }
+        if window_hash.window.len() != window_len {
+            return need_more;
+        }
+        let window = &*window_hash.window;
+        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            return need_more;
+        };
+        if pending_buf.len() != pending_len {
+            return need_more;
+        }
+        // `sym_start` is initialized as the literal-buffer offset within
+        // `pending_buf`. Lend that one callback-owned allocation once,
+        // then split its symbol storage with checked slice arithmetic.
+        let pending_and_symbols = &mut *pending_buf;
+        if state.lookahead == 0 as crate::stdlib::uInt {
+            let tail_action = deflate_tail_action_state(state, flush);
+            if matches!(tail_action, DeflateTailAction::Finish) {
+                flush_tree_window_block_state(state, pending_and_symbols, window, 1);
+                let avail_out = {
+                    state.block_start = state.strstart as ::core::ffi::c_long;
+                    flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
+                };
+                if let Some(result) = deflate_post_flush_result(avail_out, true) {
+                    return result;
                 }
+                return finish_done;
             }
-            let state: &mut crate::src::deflate::deflate_state = s;
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return need_more;
-            };
-            if window_len != 0 && state.window.is_null() {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                return need_more;
-            };
-            if pending_buf.len() != pending_len {
-                return need_more;
-            }
-            // `sym_start` is initialized as the literal-buffer offset within
-            // `pending_buf`. Lend that one callback-owned allocation once,
-            // then split its symbol storage with checked slice arithmetic.
-            let pending_and_symbols = &mut *pending_buf;
-            if state.lookahead == 0 as crate::stdlib::uInt {
-                let tail_action = deflate_tail_action_state(state, flush);
-                if matches!(tail_action, DeflateTailAction::Finish) {
-                    flush_tree_window_block_state(state, pending_and_symbols, window, 1);
-                    let avail_out = {
-                        state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
-                    };
-                    if let Some(result) = deflate_post_flush_result(avail_out, true) {
-                        return result;
-                    }
-                    return finish_done;
-                }
-                if matches!(tail_action, DeflateTailAction::FlushSymbols) {
-                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
-                    let avail_out = {
-                        state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
-                    };
-                    if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                        return result;
-                    }
-                }
-                return block_done;
-            }
-            let Some(literal) = huff_literal_plan_state(state, window) else {
-                return need_more;
-            };
-            {
-                let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
-                    return need_more;
-                };
-                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                    return need_more;
-                };
-                let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
-                    return need_more;
-                };
-                let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
-                    return need_more;
-                };
-                let Some(flush_now) = huff_tally_literal_state(state, symbols, literal) else {
-                    return need_more;
-                };
-                bflush = flush_now as ::core::ffi::c_int;
-            }
-            if bflush != 0 {
+            if matches!(tail_action, DeflateTailAction::FlushSymbols) {
                 flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                 let avail_out = {
                     state.block_start = state.strstart as ::core::ffi::c_long;
@@ -5916,6 +5871,38 @@ fn deflate_huff(
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
                 }
+            }
+            return block_done;
+        }
+        let Some(literal) = huff_literal_plan_state(state, window) else {
+            return need_more;
+        };
+        {
+            let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                return need_more;
+            };
+            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                return need_more;
+            };
+            let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+                return need_more;
+            };
+            let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
+                return need_more;
+            };
+            let Some(flush_now) = huff_tally_literal_state(state, symbols, literal) else {
+                return need_more;
+            };
+            bflush = flush_now as ::core::ffi::c_int;
+        }
+        if bflush != 0 {
+            flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+            let avail_out = {
+                state.block_start = state.strstart as ::core::ffi::c_long;
+                flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
+            };
+            if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                return result;
             }
         }
     }
