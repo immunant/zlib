@@ -208,6 +208,31 @@ fn gz_comp_skips_empty_flush(
     reset != 0 && avail_in == 0 && flush == crate::zlib_h::Z_NO_FLUSH
 }
 
+fn gz_comp_reset_action(
+    reset: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if gz_comp_skips_empty_flush(reset, avail_in, flush) {
+        -1
+    } else if reset != 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn gz_comp_reset_after_flush(
+    flush: ::core::ffi::c_int,
+    current_reset: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if flush == crate::zlib_h::Z_FINISH {
+        1
+    } else {
+        current_reset
+    }
+}
+
 fn gz_comp_max_write_chunk() -> ::core::ffi::c_uint {
     (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint)
@@ -343,13 +368,15 @@ unsafe extern "C" fn gz_comp(
         }
         return 0 as ::core::ffi::c_int;
     }
-    let reset = (*state).reset;
-    if gz_comp_skips_empty_flush(reset, (*strm).avail_in, flush) {
+    let mut reset = (*state).reset;
+    let reset_action = gz_comp_reset_action(reset, (*strm).avail_in, flush);
+    if reset_action < 0 {
         return 0 as ::core::ffi::c_int;
     }
-    if reset != 0 {
+    if reset_action != 0 {
         crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
         (*state).reset = 0 as ::core::ffi::c_int;
+        reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
     loop {
@@ -400,9 +427,7 @@ unsafe extern "C" fn gz_comp(
             break;
         }
     }
-    if flush == crate::zlib_h::Z_FINISH {
-        (*state).reset = 1 as ::core::ffi::c_int;
-    }
+    (*state).reset = gz_comp_reset_after_flush(flush, reset);
     return 0 as ::core::ffi::c_int;
 }
 
@@ -863,13 +888,14 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 mod tests {
     use super::{
         gz_buffered_have, gz_comp_max_write_chunk, gz_comp_needs_output_write, gz_comp_needs_reset,
-        gz_comp_output_produced, gz_comp_remaining_direct_input, gz_comp_skips_empty_flush,
-        gz_comp_write_chunk_len, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
-        gz_write_buffered_progress, gz_write_chunk_consumed_len, gz_write_chunk_len,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_needs_pending_flush,
-        gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
-        gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzwrite_len_fits_int,
+        gz_comp_output_produced, gz_comp_remaining_direct_input, gz_comp_reset_action,
+        gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
+        gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_progress,
+        gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
+        gz_write_error_result, gz_write_needs_pending_flush, gz_write_uses_buffered_path,
+        gz_zero_apply_progress, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
+        gzputc_result, gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
+        gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1021,6 +1047,22 @@ mod tests {
     fn gz_comp_skips_empty_no_flush_when_reset_is_pending() {
         assert!(gz_comp_skips_empty_flush(1, 0, crate::zlib_h::Z_NO_FLUSH));
         assert!(gz_comp_skips_empty_flush(-1, 0, crate::zlib_h::Z_NO_FLUSH));
+    }
+
+    #[test]
+    fn gz_comp_reset_action_preserves_skip_and_reset_priority() {
+        assert_eq!(gz_comp_reset_action(1, 0, crate::zlib_h::Z_NO_FLUSH), -1);
+        assert_eq!(gz_comp_reset_action(0, 0, crate::zlib_h::Z_NO_FLUSH), 0);
+        assert_eq!(gz_comp_reset_action(1, 1, crate::zlib_h::Z_NO_FLUSH), 1);
+        assert_eq!(gz_comp_reset_action(1, 0, crate::zlib_h::Z_BLOCK), 1);
+    }
+
+    #[test]
+    fn gz_comp_reset_after_flush_only_marks_finished_streams() {
+        assert_eq!(gz_comp_reset_after_flush(crate::zlib_h::Z_FINISH, 0), 1);
+        assert_eq!(gz_comp_reset_after_flush(crate::zlib_h::Z_FINISH, -1), 1);
+        assert_eq!(gz_comp_reset_after_flush(crate::zlib_h::Z_NO_FLUSH, -1), -1);
+        assert_eq!(gz_comp_reset_after_flush(crate::zlib_h::Z_BLOCK, 0), 0);
     }
 
     #[test]

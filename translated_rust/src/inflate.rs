@@ -163,6 +163,27 @@ fn inflate_state_metadata_is_valid(stream_matches: bool, mode: inflate_mode) -> 
     stream_matches && inflate_mode_is_valid(mode)
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DynamicHeaderCounts {
+    pub nlen: ::core::ffi::c_uint,
+    pub ndist: ::core::ffi::c_uint,
+    pub ncode: ::core::ffi::c_uint,
+}
+
+impl DynamicHeaderCounts {
+    pub(crate) fn is_valid(self) -> bool {
+        self.nlen <= 286 && self.ndist <= 30
+    }
+}
+
+pub(crate) fn dynamic_header_counts(low_14_bits: ::core::ffi::c_uint) -> DynamicHeaderCounts {
+    DynamicHeaderCounts {
+        nlen: (low_14_bits & 0x1f).wrapping_add(257),
+        ndist: ((low_14_bits >> 5) & 0x1f).wrapping_add(1),
+        ncode: ((low_14_bits >> 10) & 0x0f).wrapping_add(4),
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum InflatePrimeUpdate {
     Keep,
@@ -913,27 +934,13 @@ pub unsafe extern "C" fn inflate(
                     hold = hold.wrapping_add((*c2rust_fresh13 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                (*state).nlen = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(257 as ::core::ffi::c_uint);
-                hold >>= 5 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                (*state).ndist = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(1 as ::core::ffi::c_uint);
-                hold >>= 5 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(5 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                (*state).ncode = (hold as ::core::ffi::c_uint
-                    & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                .wrapping_add(4 as ::core::ffi::c_uint);
-                hold >>= 4 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                if (*state).nlen > 286 as ::core::ffi::c_uint
-                    || (*state).ndist > 30 as ::core::ffi::c_uint
-                {
+                let counts = dynamic_header_counts(hold as ::core::ffi::c_uint);
+                (*state).nlen = counts.nlen;
+                (*state).ndist = counts.ndist;
+                (*state).ncode = counts.ncode;
+                hold >>= 14 as ::core::ffi::c_int;
+                bits = bits.wrapping_sub(14 as ::core::ffi::c_uint);
+                if !counts.is_valid() {
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
@@ -2595,10 +2602,10 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_window_update, inflate_mark_value, inflate_mode_is_valid, inflate_prime_update,
-        inflate_state_metadata_is_valid, inflate_sync_search_core, initial_window_metadata,
-        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD,
-        CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, SYNC,
+        apply_window_update, dynamic_header_counts, inflate_mark_value, inflate_mode_is_valid,
+        inflate_prime_update, inflate_state_metadata_is_valid, inflate_sync_search_core,
+        initial_window_metadata, syncsearch_safe, window_update_plan, InflatePrimeUpdate,
+        InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, SYNC,
     };
 
     #[test]
@@ -2607,6 +2614,33 @@ mod tests {
             CODE_LENGTH_ORDER,
             [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
         );
+    }
+
+    #[test]
+    fn dynamic_header_counts_decode_the_valid_range() {
+        assert_eq!(
+            dynamic_header_counts(0),
+            super::DynamicHeaderCounts {
+                nlen: 257,
+                ndist: 1,
+                ncode: 4,
+            }
+        );
+        assert_eq!(
+            dynamic_header_counts(29 | (29 << 5) | (15 << 10)),
+            super::DynamicHeaderCounts {
+                nlen: 286,
+                ndist: 30,
+                ncode: 19,
+            }
+        );
+    }
+
+    #[test]
+    fn dynamic_header_counts_reject_invalid_length_or_distance_counts() {
+        assert!(!dynamic_header_counts(30).is_valid());
+        assert!(!dynamic_header_counts(30 << 5).is_valid());
+        assert!(dynamic_header_counts(15 << 10).is_valid());
     }
 
     #[test]
