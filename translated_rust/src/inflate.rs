@@ -2206,12 +2206,18 @@ pub unsafe fn inflate(
                                                         ret = crate::zlib_h::Z_STREAM_END;
                                                         break '_inf_leave;
                                                     }
-                                                    if (*state).last != 0 {
+                                                    // The decoder entry has already validated both
+                                                    // compatibility records. Keep the block-header
+                                                    // state transition on those short-lived borrows
+                                                    // instead of repeatedly traversing raw pointers.
+                                                    let strm_ref = &mut *strm;
+                                                    let state_ref = &mut *state;
+                                                    if state_ref.last != 0 {
                                                         hold >>= bits & 7 as ::core::ffi::c_uint;
                                                         bits = bits.wrapping_sub(
                                                             bits & 7 as ::core::ffi::c_uint,
                                                         );
-                                                        (*state).mode = crate::src::inflate::CHECK;
+                                                        state_ref.mode = crate::src::inflate::CHECK;
                                                         continue '_inf_leave;
                                                     } else {
                                                         while bits
@@ -2233,7 +2239,7 @@ pub unsafe fn inflate(
                                                                 8 as ::core::ffi::c_uint,
                                                             );
                                                         }
-                                                        (*state).last = (hold
+                                                        state_ref.last = (hold
                                                             as ::core::ffi::c_uint
                                                             & ((1 as ::core::ffi::c_uint)
                                                                 << 1 as ::core::ffi::c_int)
@@ -2253,13 +2259,14 @@ pub unsafe fn inflate(
                                                                     1 as ::core::ffi::c_uint,
                                                                 ) {
                                                             0 => {
-                                                                (*state).mode =
+                                                                state_ref.mode =
                                                                     crate::src::inflate::STORED;
                                                             }
                                                             1 => {
-                                                                let state = &mut *state;
-                                                                crate::src::inftrees::inflate_fixed_state(state);
-                                                                state.mode =
+                                                                crate::src::inftrees::inflate_fixed_state(
+                                                                    state_ref,
+                                                                );
+                                                                state_ref.mode =
                                                                     crate::src::inflate::LEN_;
                                                                 if flush == crate::zlib_h::Z_TREES {
                                                                     hold >>=
@@ -2272,16 +2279,16 @@ pub unsafe fn inflate(
                                                                 }
                                                             }
                                                             2 => {
-                                                                (*state).mode =
+                                                                state_ref.mode =
                                                                     crate::src::inflate::TABLE;
                                                             }
                                                             _ => {
-                                                                (*strm).msg = INFLATE_ERROR_MESSAGES
+                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES
                                                                     [13]
                                                                 .as_ptr()
                                                                     as *const ::core::ffi::c_char
                                                                     as *mut ::core::ffi::c_char;
-                                                                (*state).mode =
+                                                                state_ref.mode =
                                                                     crate::src::inflate::BAD;
                                                             }
                                                         }
