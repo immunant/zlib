@@ -77,6 +77,49 @@ enum GzLoadTransition {
     },
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct GzLoadError {
+    have: ::core::ffi::c_uint,
+    errno: ::core::ffi::c_int,
+}
+
+struct GzLoadLoop {
+    len: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+}
+
+impl GzLoadLoop {
+    fn new(len: ::core::ffi::c_uint, eof: ::core::ffi::c_int, again: ::core::ffi::c_int) -> Self {
+        Self {
+            len,
+            have: 0,
+            eof,
+            again,
+        }
+    }
+
+    fn read_request(&self) -> (::core::ffi::c_uint, ::core::ffi::c_uint) {
+        (
+            self.have,
+            gz_load_read_len(self.len, self.have, gz_load_max_read_len()),
+        )
+    }
+
+    fn apply_read(
+        &mut self,
+        read: Result<::core::ffi::c_uint, ::core::ffi::c_int>,
+    ) -> GzLoadTransition {
+        let transition =
+            gz_load_transition(self.len, self.have, &mut self.eof, &mut self.again, read);
+        if let GzLoadTransition::Continue { have } = transition {
+            self.have = have;
+        }
+        transition
+    }
+}
+
 fn gz_load_checked_have(
     have: ::core::ffi::c_uint,
     failed: bool,
@@ -119,6 +162,15 @@ fn gz_avail_apply_load_transition(
             Some(GzAvailNextInAction::ResetToInputStart)
         }
     }
+}
+
+fn gz_avail_finish_refill(
+    prior_avail_in: crate::stdlib::uInt,
+    load: &GzLoadResult,
+    avail_in: &mut crate::stdlib::uInt,
+) -> Result<GzAvailNextInAction, ()> {
+    gz_avail_apply_load_transition(avail_in, gz_avail_load_transition(prior_avail_in, load))
+        .ok_or(())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -196,6 +248,32 @@ fn gz_load_transition(
         },
         Ok(()) if load.more => GzLoadTransition::Continue { have: load.have },
         Ok(()) => GzLoadTransition::Complete { have: load.have },
+    }
+}
+
+fn gz_load_read_loop<F>(
+    len: ::core::ffi::c_uint,
+    eof: &mut ::core::ffi::c_int,
+    again: &mut ::core::ffi::c_int,
+    mut read: F,
+) -> Result<::core::ffi::c_uint, GzLoadError>
+where
+    F: FnMut(
+        ::core::ffi::c_uint,
+        ::core::ffi::c_uint,
+    ) -> Result<::core::ffi::c_uint, ::core::ffi::c_int>,
+{
+    let max = gz_load_max_read_len();
+    let mut have = 0;
+    loop {
+        let get = gz_load_read_len(len, have, max);
+        match gz_load_transition(len, have, eof, again, read(have, get)) {
+            GzLoadTransition::Error { have, errno } => {
+                return Err(GzLoadError { have, errno });
+            }
+            GzLoadTransition::Continue { have: next_have } => have = next_have,
+            GzLoadTransition::Complete { have } => return Ok(have),
+        }
     }
 }
 
@@ -860,23 +938,19 @@ unsafe fn gz_load(
     buf: *mut ::core::ffi::c_uchar,
     len: ::core::ffi::c_uint,
 ) -> GzLoadResult {
-    let max = gz_load_max_read_len();
-    let mut have = 0 as ::core::ffi::c_uint;
+    let mut load = GzLoadLoop::new(len, state.eof, state.again);
     loop {
-        let get = gz_load_read_len(len, have, max);
+        let (have, get) = load.read_request();
         let ret = crate::stdlib::read(
             state.fd,
             buf.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
         let errno = gz_load_errno(ret, std::io::Error::last_os_error().raw_os_error());
-        match gz_load_transition(
-            len,
-            have,
-            &mut state.eof,
-            &mut state.again,
-            gz_load_read_result(ret, errno),
-        ) {
+        let transition = load.apply_read(gz_load_read_result(ret, errno));
+        state.eof = load.eof;
+        state.again = load.again;
+        match transition {
             GzLoadTransition::Error { have, errno } => {
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
@@ -885,7 +959,7 @@ unsafe fn gz_load(
                 );
                 return GzLoadResult { have, failed: true };
             }
-            GzLoadTransition::Continue { have: next_have } => have = next_have,
+            GzLoadTransition::Continue { .. } => {}
             GzLoadTransition::Complete { have } => {
                 return GzLoadResult {
                     have,
@@ -927,12 +1001,9 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 )
             };
             let load = gz_load(state, buf, len);
-            match gz_avail_apply_load_transition(
-                &mut state.strm.avail_in,
-                gz_avail_load_transition(prior_avail_in, &load),
-            ) {
-                None => return -1 as ::core::ffi::c_int,
-                Some(GzAvailNextInAction::ResetToInputStart) => {
+            match gz_avail_finish_refill(prior_avail_in, &load, &mut state.strm.avail_in) {
+                Err(()) => return -1 as ::core::ffi::c_int,
+                Ok(GzAvailNextInAction::ResetToInputStart) => {
                     state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
                 }
             }
@@ -1962,6 +2033,33 @@ mod tests {
     }
 
     #[test]
+    fn gz_avail_finish_refill_preserves_input_after_failed_load() {
+        let load = GzLoadResult {
+            have: 3,
+            failed: true,
+        };
+        let mut avail_in = 4;
+
+        assert_eq!(gz_avail_finish_refill(4, &load, &mut avail_in), Err(()));
+        assert_eq!(avail_in, 4);
+    }
+
+    #[test]
+    fn gz_avail_finish_refill_commits_input_and_requests_reset() {
+        let load = GzLoadResult {
+            have: 3,
+            failed: false,
+        };
+        let mut avail_in = 4;
+
+        assert_eq!(
+            gz_avail_finish_refill(4, &load, &mut avail_in),
+            Ok(GzAvailNextInAction::ResetToInputStart)
+        );
+        assert_eq!(avail_in, 7);
+    }
+
+    #[test]
     fn gz_load_checked_have_preserves_load_failure_status() {
         assert_eq!(gz_load_checked_have(3, true), Err(()));
         assert_eq!(gz_load_checked_have(0, false), Ok(0));
@@ -2699,6 +2797,44 @@ mod tests {
         );
         assert_eq!(eof, 0);
         assert_eq!(again, 1);
+    }
+
+    #[test]
+    fn gz_load_read_loop_preserves_partial_data_on_retryable_error() {
+        let mut eof = 0;
+        let mut again = 0;
+        let mut reads = [Ok(3), Err(crate::stdlib::EAGAIN)].into_iter();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            gz_load_read_loop(8, &mut eof, &mut again, |have, get| {
+                requests.push((have, get));
+                reads.next().unwrap()
+            }),
+            Ok(3)
+        );
+        assert_eq!(requests, vec![(0, 8), (3, 5)]);
+        assert_eq!(eof, 0);
+        assert_eq!(again, 1);
+    }
+
+    #[test]
+    fn gz_load_read_loop_marks_eof_after_partial_reads() {
+        let mut eof = 0;
+        let mut again = 1;
+        let mut reads = [Ok(3), Ok(0)].into_iter();
+        let mut requests = Vec::new();
+
+        assert_eq!(
+            gz_load_read_loop(8, &mut eof, &mut again, |have, get| {
+                requests.push((have, get));
+                reads.next().unwrap()
+            }),
+            Ok(3)
+        );
+        assert_eq!(requests, vec![(0, 8), (3, 5)]);
+        assert_eq!(eof, 1);
+        assert_eq!(again, 0);
     }
 
     #[test]
