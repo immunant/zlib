@@ -412,23 +412,29 @@ fn read_buf_bytes(
     len
 }
 
-// This is an internal raw-pointer adapter, not a C callback or export. Keep
-// the ABI boundary out of the implementation so callers cannot treat it as
-// another FFI entry point.
-unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    let stream = &mut *state.strm;
+// This private adapter binds the allocations owned by a validated deflater;
+// the window algorithm itself is reference-and-slice based below.
+fn fill_window(s: *mut crate::src::deflate::deflate_state) {
+    // SAFETY: all callers operate on a live deflater state initialized by
+    // `deflateInit2_()` and associated with its stream.
+    let state = unsafe { &mut *s };
+    // SAFETY: the validated deflater keeps this stream alive for the state.
+    let stream = unsafe { &mut *state.strm };
     let window = if state.window_size == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize)
+        // SAFETY: `window_size` describes the allocation made for `window`.
+        unsafe { ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize) }
     };
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+    // SAFETY: these table sizes are the allocation lengths established during
+    // deflater initialization.
+    let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
+    let prev = unsafe { ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize) };
     let input = if stream.avail_in == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        // SAFETY: a nonempty input cursor has `avail_in` readable bytes.
+        unsafe { ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize) }
     };
     let consumed = fill_window_bytes(state, stream, window, head, prev, input);
     // `consumed` is bounded by the input slice above. Advancing the cursor
