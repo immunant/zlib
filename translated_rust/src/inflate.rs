@@ -327,11 +327,14 @@ pub unsafe extern "C" fn inflateReset_ffi(
     };
     inflate_reset_bound(strm, state)
 }
-pub unsafe extern "C" fn inflateReset2(
-    mut strm: crate::zlib_h::z_streamp,
+// Resetting an already-bound stream keeps all state validation and teardown
+// in the implementation. The exported ABI wrapper below only establishes the
+// foreign stream reference before dispatching here.
+pub fn inflateReset2(
+    strm: &mut crate::zlib_h::z_stream,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm) else {
+    let Some((strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let (wrap, window_bits) = match inflate_window_bits(windowBits) {
@@ -348,7 +351,12 @@ pub unsafe extern "C" fn inflateReset2(
             strm.opaque,
             state.window,
         );
-        Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
+        // SAFETY: `inflateStateCheck()` validated the stream's allocator and
+        // state. This window came from that allocation and is released before
+        // the state relinquishes its pointer to it.
+        unsafe {
+            Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
+        }
         state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
     inflate_reset_with_window_bits(strm, state, wrap, window_bits)
@@ -442,6 +450,9 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateReset2(strm, windowBits)
 }
 pub unsafe extern "C" fn inflateInit2_(
