@@ -1019,6 +1019,10 @@ fn inflate_trailer_checksum_from_hold(
     }
 }
 
+fn inflate_gzip_length_check_required(wrap: ::core::ffi::c_int, flags: ::core::ffi::c_int) -> bool {
+    wrap != 0 && flags != 0
+}
+
 fn update_window_metadata(
     wbits: ::core::ffi::c_uint,
     wsize: &mut ::core::ffi::c_uint,
@@ -1496,7 +1500,7 @@ pub unsafe extern "C" fn inflate(
         }
         match c2rust_current_block {
             10372812520561896112 => {
-                if (*state).wrap != 0 && (*state).flags != 0 {
+                if inflate_gzip_length_check_required((*state).wrap, (*state).flags) {
                     while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
                         if have == 0 as ::core::ffi::c_uint {
                             break 's_88;
@@ -3126,9 +3130,10 @@ mod tests {
         inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_gzip_extra_progress,
         inflate_gzip_flags, inflate_gzip_flags_error, inflate_gzip_flags_validation,
         inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
-        inflate_gzip_header_has_extra, inflate_gzip_header_has_name, inflate_gzip_window_bits,
-        inflate_head_skip_mode, inflate_header_crc_enabled, inflate_header_wrap_allows_capture,
-        inflate_is_gzip_header, inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflate_gzip_length_check_required, inflate_gzip_window_bits, inflate_head_skip_mode,
+        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
+        inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
         inflate_match_is_complete, inflate_mode_data_type_flags, inflate_mode_is_valid,
         inflate_mode_on_entry, inflate_needs_buffer_error, inflate_output_checksum,
         inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
@@ -4435,6 +4440,14 @@ mod tests {
         assert_eq!(inflate_trailer_checksum_from_hold(1, hold), hold);
         assert_eq!(inflate_trailer_checksum_from_hold(-1, hold), hold);
         assert_eq!(inflate_trailer_checksum_from_hold(0, hold), 0x1234_5678);
+    }
+
+    #[test]
+    fn gzip_length_check_requires_wrapped_gzip_streams() {
+        assert!(inflate_gzip_length_check_required(1, 1));
+        assert!(inflate_gzip_length_check_required(4, -1));
+        assert!(!inflate_gzip_length_check_required(0, 1));
+        assert!(!inflate_gzip_length_check_required(4, 0));
     }
 
     #[test]

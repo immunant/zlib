@@ -507,6 +507,10 @@ fn deflate_fast_literal_state_after_emit(
     (lookahead.wrapping_sub(1), strstart.wrapping_add(1))
 }
 
+fn deflate_insert_after_block(strstart: crate::stdlib::uInt) -> crate::stdlib::uInt {
+    strstart.min((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt)
+}
+
 pub(crate) fn symbol_triplet_cursors(
     start: crate::stdlib::uInt,
 ) -> ([crate::stdlib::uInt; 3], crate::stdlib::uInt) {
@@ -3432,13 +3436,7 @@ unsafe extern "C" fn deflate_fast(
             }
         }
     }
-    (*s).insert = if (*s).strstart
-        < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-    {
-        (*s).strstart
-    } else {
-        (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-    };
+    (*s).insert = deflate_insert_after_block((*s).strstart);
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
@@ -3743,13 +3741,7 @@ unsafe extern "C" fn deflate_slow(
         bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
-    (*s).insert = if (*s).strstart
-        < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-    {
-        (*s).strstart
-    } else {
-        (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-    };
+    (*s).insert = deflate_insert_after_block((*s).strstart);
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
@@ -4141,10 +4133,10 @@ mod tests {
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_dictionary_state_after_load, deflate_fast_literal_state_after_emit,
-        deflate_flush_rank, deflate_huff_literal_progress, deflate_match_refill_action,
-        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
-        deflate_rle_clamp_match_length, deflate_rle_match_length,
+        deflate_flush_rank, deflate_huff_literal_progress, deflate_insert_after_block,
+        deflate_match_refill_action, deflate_pending_value, deflate_preflight,
+        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
+        deflate_rle_can_scan_match, deflate_rle_clamp_match_length, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_refill_action,
         deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
         deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
@@ -4279,6 +4271,20 @@ mod tests {
             deflate_fast_literal_state_after_emit(0, crate::stdlib::uInt::MAX),
             (crate::stdlib::uInt::MAX, 0),
         );
+    }
+
+    #[test]
+    fn deflate_insert_after_block_caps_to_hashable_prefix() {
+        let prefix = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+
+        assert_eq!(deflate_insert_after_block(0), 0);
+        assert_eq!(
+            deflate_insert_after_block(prefix.wrapping_sub(1)),
+            prefix - 1
+        );
+        assert_eq!(deflate_insert_after_block(prefix), prefix);
+        assert_eq!(deflate_insert_after_block(prefix.wrapping_add(1)), prefix);
+        assert_eq!(deflate_insert_after_block(crate::stdlib::uInt::MAX), prefix);
     }
 
     #[test]
