@@ -77,7 +77,37 @@ fn copy_output_match(
     true
 }
 
-pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core::ffi::c_uint) {
+/// Copy a non-overlapping portion of the inflate history window to output.
+fn copy_window_history(
+    output: &mut [u8],
+    output_index: &mut usize,
+    window: &[u8],
+    window_index: usize,
+    length: usize,
+) -> bool {
+    let Some(window_end) = window_index.checked_add(length) else {
+        return false;
+    };
+    let Some(output_end) = output_index.checked_add(length) else {
+        return false;
+    };
+    let Some(source) = window.get(window_index..window_end) else {
+        return false;
+    };
+    let Some(destination) = output.get_mut(*output_index..output_end) else {
+        return false;
+    };
+
+    destination.copy_from_slice(source);
+    *output_index = output_end;
+    true
+}
+
+pub unsafe fn inflate_fast(
+    strm: &mut crate::zlib_h::z_stream,
+    mut start: ::core::ffi::c_uint,
+    history_may_alias_output: bool,
+) {
     let mut in_index: usize = 0;
     let mut last: usize = 0;
     let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -151,9 +181,15 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
             bits = bits.wrapping_sub(op);
             op = here_code.op as ::core::ffi::c_uint;
             if op == 0 as ::core::ffi::c_uint {
-                let c2rust_fresh2 = out;
-                out = out.wrapping_add(1);
-                *c2rust_fresh2 = here_code.val as ::core::ffi::c_uchar;
+                let output_index = out.addr().wrapping_sub(beg.addr());
+                let Some(byte) = output.get_mut(output_index) else {
+                    state.mode = crate::src::inflate::BAD;
+                    break 's_627;
+                };
+                *byte = here_code.val as ::core::ffi::c_uchar;
+                out = output
+                    .as_mut_ptr()
+                    .wrapping_add(output_index.wrapping_add(1));
                 break;
             } else if op & 16 as ::core::ffi::c_uint != 0 {
                 len = here_code.val as ::core::ffi::c_uint;
@@ -225,114 +261,204 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                                     break 's_627;
                                 }
                             }
-                            from = window;
-                            if wnext == 0 as ::core::ffi::c_uint {
-                                from = from.wrapping_add(wsize.wrapping_sub(op) as usize);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh8 = from;
-                                        from = from.wrapping_add(1);
-                                        let c2rust_fresh9 = out;
-                                        out = out.wrapping_add(1);
-                                        *c2rust_fresh9 = *c2rust_fresh8;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    // `dist` was checked against the produced output above;
-                                    // after copying the window prefix, this rewind stays within
-                                    // the same output allocation.
-                                    from = out.wrapping_offset(-(dist as isize));
-                                }
-                            } else if wnext < op {
-                                from = from.wrapping_add(
-                                    wsize.wrapping_add(wnext).wrapping_sub(op) as usize,
-                                );
-                                op = op.wrapping_sub(wnext);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh10 = from;
-                                        from = from.wrapping_add(1);
-                                        let c2rust_fresh11 = out;
-                                        out = out.wrapping_add(1);
-                                        *c2rust_fresh11 = *c2rust_fresh10;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    from = window;
-                                    if wnext < len {
-                                        op = wnext;
+                            if history_may_alias_output {
+                                // inflateBack uses its caller window as output. Keep the
+                                // legacy raw copy here so a history view never aliases the
+                                // mutable output view used by the safe fast-path helpers.
+                                let mut copy_from_output = false;
+                                from = window;
+                                if wnext == 0 as ::core::ffi::c_uint {
+                                    from = from.wrapping_add(wsize.wrapping_sub(op) as usize);
+                                    if op < len {
                                         len = len.wrapping_sub(op);
                                         loop {
-                                            let c2rust_fresh12 = from;
+                                            let source = from;
                                             from = from.wrapping_add(1);
-                                            let c2rust_fresh13 = out;
+                                            let destination = out;
                                             out = out.wrapping_add(1);
-                                            *c2rust_fresh13 = *c2rust_fresh12;
+                                            *destination = *source;
                                             op = op.wrapping_sub(1);
                                             if op == 0 {
                                                 break;
                                             }
                                         }
-                                        // See the matching history-distance check above.
                                         from = out.wrapping_offset(-(dist as isize));
+                                        copy_from_output = true;
+                                    }
+                                } else if wnext < op {
+                                    from = from.wrapping_add(
+                                        wsize.wrapping_add(wnext).wrapping_sub(op) as usize,
+                                    );
+                                    op = op.wrapping_sub(wnext);
+                                    if op < len {
+                                        len = len.wrapping_sub(op);
+                                        loop {
+                                            let source = from;
+                                            from = from.wrapping_add(1);
+                                            let destination = out;
+                                            out = out.wrapping_add(1);
+                                            *destination = *source;
+                                            op = op.wrapping_sub(1);
+                                            if op == 0 {
+                                                break;
+                                            }
+                                        }
+                                        from = window;
+                                        if wnext < len {
+                                            op = wnext;
+                                            len = len.wrapping_sub(op);
+                                            loop {
+                                                let source = from;
+                                                from = from.wrapping_add(1);
+                                                let destination = out;
+                                                out = out.wrapping_add(1);
+                                                *destination = *source;
+                                                op = op.wrapping_sub(1);
+                                                if op == 0 {
+                                                    break;
+                                                }
+                                            }
+                                            from = out.wrapping_offset(-(dist as isize));
+                                            copy_from_output = true;
+                                        }
+                                    }
+                                } else {
+                                    from = from.wrapping_add(wnext.wrapping_sub(op) as usize);
+                                    if op < len {
+                                        len = len.wrapping_sub(op);
+                                        loop {
+                                            let source = from;
+                                            from = from.wrapping_add(1);
+                                            let destination = out;
+                                            out = out.wrapping_add(1);
+                                            *destination = *source;
+                                            op = op.wrapping_sub(1);
+                                            if op == 0 {
+                                                break;
+                                            }
+                                        }
+                                        from = out.wrapping_offset(-(dist as isize));
+                                        copy_from_output = true;
+                                    }
+                                }
+                                if copy_from_output {
+                                    let mut output_index = out.addr().wrapping_sub(beg.addr());
+                                    if !copy_output_match(
+                                        output,
+                                        &mut output_index,
+                                        dist as usize,
+                                        len as usize,
+                                    ) {
+                                        state.mode = crate::src::inflate::BAD;
+                                        break 's_627;
+                                    }
+                                    out = output.as_mut_ptr().wrapping_add(output_index);
+                                } else {
+                                    while len > 2 as ::core::ffi::c_uint {
+                                        let source = from;
+                                        from = from.wrapping_add(1);
+                                        let destination = out;
+                                        out = out.wrapping_add(1);
+                                        *destination = *source;
+                                        let source = from;
+                                        from = from.wrapping_add(1);
+                                        let destination = out;
+                                        out = out.wrapping_add(1);
+                                        *destination = *source;
+                                        let source = from;
+                                        from = from.wrapping_add(1);
+                                        let destination = out;
+                                        out = out.wrapping_add(1);
+                                        *destination = *source;
+                                        len = len.wrapping_sub(3 as ::core::ffi::c_uint);
+                                    }
+                                    if len != 0 {
+                                        let source = from;
+                                        from = from.wrapping_add(1);
+                                        let destination = out;
+                                        out = out.wrapping_add(1);
+                                        *destination = *source;
+                                        if len > 1 as ::core::ffi::c_uint {
+                                            let source = from;
+                                            let destination = out;
+                                            out = out.wrapping_add(1);
+                                            *destination = *source;
+                                        }
                                     }
                                 }
                             } else {
-                                from = from.wrapping_add(wnext.wrapping_sub(op) as usize);
-                                if op < len {
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh14 = from;
-                                        from = from.wrapping_add(1);
-                                        let c2rust_fresh15 = out;
-                                        out = out.wrapping_add(1);
-                                        *c2rust_fresh15 = *c2rust_fresh14;
-                                        op = op.wrapping_sub(1);
-                                        if op == 0 {
-                                            break;
-                                        }
-                                    }
-                                    // See the matching history-distance check above.
-                                    from = out.wrapping_offset(-(dist as isize));
+                            let history = if window.is_null() || wsize == 0 {
+                                &[]
+                            } else {
+                                ::core::slice::from_raw_parts(window, wsize as usize)
+                            };
+                            let mut output_index = out.addr().wrapping_sub(beg.addr());
+                            let mut remaining = len as usize;
+                            if wnext == 0 as ::core::ffi::c_uint {
+                                let count = remaining.min(op as usize);
+                                if !copy_window_history(
+                                    output,
+                                    &mut output_index,
+                                    history,
+                                    wsize.wrapping_sub(op) as usize,
+                                    count,
+                                ) {
+                                    state.mode = crate::src::inflate::BAD;
+                                    break 's_627;
                                 }
-                            }
-                            while len > 2 as ::core::ffi::c_uint {
-                                let c2rust_fresh16 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh17 = out;
-                                out = out.wrapping_add(1);
-                                *c2rust_fresh17 = *c2rust_fresh16;
-                                let c2rust_fresh18 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh19 = out;
-                                out = out.wrapping_add(1);
-                                *c2rust_fresh19 = *c2rust_fresh18;
-                                let c2rust_fresh20 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh21 = out;
-                                out = out.wrapping_add(1);
-                                *c2rust_fresh21 = *c2rust_fresh20;
-                                len = len.wrapping_sub(3 as ::core::ffi::c_uint);
-                            }
-                            if len != 0 {
-                                let c2rust_fresh22 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh23 = out;
-                                out = out.wrapping_add(1);
-                                *c2rust_fresh23 = *c2rust_fresh22;
-                                if len > 1 as ::core::ffi::c_uint {
-                                    let c2rust_fresh24 = from;
-                                    from = from.wrapping_add(1);
-                                    let c2rust_fresh25 = out;
-                                    out = out.wrapping_add(1);
-                                    *c2rust_fresh25 = *c2rust_fresh24;
+                                remaining = remaining.wrapping_sub(count);
+                            } else if wnext < op {
+                                let first = op.wrapping_sub(wnext) as usize;
+                                let count = remaining.min(first);
+                                if !copy_window_history(
+                                    output,
+                                    &mut output_index,
+                                    history,
+                                    wsize.wrapping_add(wnext).wrapping_sub(op) as usize,
+                                    count,
+                                ) {
+                                    state.mode = crate::src::inflate::BAD;
+                                    break 's_627;
                                 }
+                                remaining = remaining.wrapping_sub(count);
+                                let count = remaining.min(wnext as usize);
+                                if !copy_window_history(
+                                    output,
+                                    &mut output_index,
+                                    history,
+                                    0,
+                                    count,
+                                ) {
+                                    state.mode = crate::src::inflate::BAD;
+                                    break 's_627;
+                                }
+                                remaining = remaining.wrapping_sub(count);
+                            } else {
+                                let count = remaining.min(op as usize);
+                                if !copy_window_history(
+                                    output,
+                                    &mut output_index,
+                                    history,
+                                    wnext.wrapping_sub(op) as usize,
+                                    count,
+                                ) {
+                                    state.mode = crate::src::inflate::BAD;
+                                    break 's_627;
+                                }
+                                remaining = remaining.wrapping_sub(count);
+                            }
+                            if remaining != 0
+                                && !copy_output_match(
+                                    output,
+                                    &mut output_index,
+                                    dist as usize,
+                                    remaining,
+                                )
+                            {
+                                state.mode = crate::src::inflate::BAD;
+                                break 's_627;
+                            }
+                            out = output.as_mut_ptr().wrapping_add(output_index);
                             }
                             break 's_92;
                         } else {
@@ -420,5 +546,5 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     let Some(strm) = strm.as_mut() else {
         return;
     };
-    unsafe { inflate_fast(strm, start) }
+    unsafe { inflate_fast(strm, start, false) }
 }
