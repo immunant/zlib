@@ -3615,9 +3615,12 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     inflateSyncPoint(strm)
 }
 
-pub unsafe extern "C" fn inflateCopy(
+// The export validates the source handle and creates this scoped borrow.  The
+// destination remains a non-borrowing handle until the source projection has
+// ended, since zlib permits source and destination to alias.
+pub unsafe fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
+    source: &mut crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_int {
     if dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3627,9 +3630,6 @@ pub unsafe extern "C" fn inflateCopy(
     // C's behavior even for a source/destination alias while all state
     // access remains scoped to the checked source stream.
     let (copy, state_copy, destination_stream) = {
-        let Some(source) = source.as_mut() else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
         let Some((source, state)) = inflate_stream_and_state(source) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -3742,6 +3742,12 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    if dest.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(source) = source.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateCopy(dest, source)
 }
 
