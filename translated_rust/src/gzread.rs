@@ -738,6 +738,10 @@ fn gzfread_completed_items(
 enum GzSkipStep {
     Complete,
     NeedFetch,
+    Advance {
+        consumed: ::core::ffi::c_uint,
+        complete: bool,
+    },
 }
 
 fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> Result<GzSkipStep, ()> {
@@ -745,14 +749,12 @@ fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> Result<GzSkipStep, ()> {
         let Some(consume) = gz_skip_buffer_plan(state.x.have, state.skip) else {
             return Err(());
         };
-        state.x.next = state.x.next.wrapping_add(consume as usize);
         if !gz_skip_buffer_commit_state(state, consume) {
             return Err(());
         }
-        return Ok(if state.skip == 0 {
-            GzSkipStep::Complete
-        } else {
-            GzSkipStep::NeedFetch
+        return Ok(GzSkipStep::Advance {
+            consumed: consume,
+            complete: state.skip == 0,
         });
     }
     if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
@@ -779,6 +781,12 @@ unsafe fn gz_read(
             Ok(GzSkipStep::NeedFetch) => {
                 if gz_fetch(state_ref) == -1 as ::core::ffi::c_int {
                     return 0 as crate::stdlib::z_size_t;
+                }
+            }
+            Ok(GzSkipStep::Advance { consumed, complete }) => {
+                state_ref.x.next = state_ref.x.next.wrapping_add(consumed as usize);
+                if complete {
+                    break;
                 }
             }
             Err(()) => return 0 as crate::stdlib::z_size_t,
@@ -1222,6 +1230,12 @@ pub unsafe extern "C" fn gzungetc_ffi(
                     return -1;
                 }
             }
+            Ok(GzSkipStep::Advance { consumed, complete }) => {
+                state.x.next = state.x.next.wrapping_add(consumed as usize);
+                if complete {
+                    break;
+                }
+            }
             Err(()) => return -1,
         }
     }
@@ -1304,6 +1318,12 @@ pub unsafe extern "C" fn gzgets_ffi(
             Ok(GzSkipStep::NeedFetch) => {
                 if gz_fetch(state) == -1 {
                     return ::core::ptr::null_mut();
+                }
+            }
+            Ok(GzSkipStep::Advance { consumed, complete }) => {
+                state.x.next = state.x.next.wrapping_add(consumed as usize);
+                if complete {
+                    break;
                 }
             }
             Err(()) => return ::core::ptr::null_mut(),
