@@ -136,6 +136,56 @@ impl GzCompressionChunk {
     }
 }
 
+// Keep one caller write request as a pointer-free owner while it crosses the
+// buffered, direct, and compressed paths.  In particular, partial-write
+// accounting comes from the bounded caller slice rather than an ABI stream
+// cursor.  The embedded-deflate boundary still consumes individual chunks,
+// but it reports progress back into this owner before the next request is
+// formed.
+struct GzWriteInput<'a> {
+    input: &'a [u8],
+    total: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+}
+
+impl<'a> GzWriteInput<'a> {
+    fn new(input: &'a [u8]) -> Self {
+        Self {
+            input,
+            total: input.len() as crate::stdlib::z_size_t,
+            remaining: input.len() as crate::stdlib::z_size_t,
+        }
+    }
+
+    fn remaining(&self) -> &'a [u8] {
+        self.input
+    }
+
+    fn len(&self) -> crate::stdlib::z_size_t {
+        self.remaining
+    }
+
+    fn is_empty(&self) -> bool {
+        self.remaining == 0
+    }
+
+    fn advance(&mut self, count: usize) -> Option<()> {
+        self.input = self.input.get(count..)?;
+        self.remaining = self
+            .remaining
+            .checked_sub(count as crate::stdlib::z_size_t)?;
+        Some(())
+    }
+
+    fn partial_or_zero(&self, again: ::core::ffi::c_int) -> crate::stdlib::z_size_t {
+        if again != 0 {
+            self.total.wrapping_sub(self.remaining)
+        } else {
+            0
+        }
+    }
+}
+
 fn gzfwrite_length(
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
@@ -634,14 +684,10 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
 }
 
-unsafe fn gz_write(
-    state: &mut crate::gzguts_h::gz_state,
-    mut input: &[u8],
-) -> crate::stdlib::z_size_t {
-    let mut len = input.len() as crate::stdlib::z_size_t;
-    let mut put: crate::stdlib::z_size_t = len;
+unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate::stdlib::z_size_t {
+    let mut request = GzWriteInput::new(input);
     let mut ret: ::core::ffi::c_int = 0;
-    if len == 0 as crate::stdlib::z_size_t {
+    if request.is_empty() {
         return 0 as crate::stdlib::z_size_t;
     }
     if state.buffers.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
@@ -651,7 +697,7 @@ unsafe fn gz_write(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if len < state.buffers.size as crate::stdlib::z_size_t {
+    if request.len() < state.buffers.size as crate::stdlib::z_size_t {
         loop {
             let (copy, cursor) = {
                 let buffer =
@@ -668,7 +714,7 @@ unsafe fn gz_write(
                 ) else {
                     return 0 as crate::stdlib::z_size_t;
                 };
-                let copy = buffered.append(input);
+                let copy = buffered.append(request.remaining());
                 let Some((start, have)) = buffered.cursor() else {
                     return 0 as crate::stdlib::z_size_t;
                 };
@@ -681,17 +727,14 @@ unsafe fn gz_write(
             state.strm.avail_in = cursor.available();
             state.buffers.input_cursor = Some(cursor);
             state.x.pos += copy as crate::stdlib::off64_t;
-            input = &input[copy..];
-            len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
-            if len == 0 as crate::stdlib::z_size_t {
+            if request.advance(copy).is_none() {
+                return 0;
+            }
+            if request.is_empty() {
                 break;
             }
             if gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int {
-                return if state.again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return request.partial_or_zero(state.again);
             }
         }
     } else {
@@ -705,16 +748,17 @@ unsafe fn gz_write(
             return 0 as crate::stdlib::z_size_t;
         }
         if state.direct != 0 {
-            while len != 0 {
+            while !request.is_empty() {
                 let max = ((-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2).wrapping_add(1))
                     as usize;
-                let count = input.len().min(max);
+                let count = request.remaining().len().min(max);
                 state.again = 0;
-                match gz_direct_write(state.fd.as_ref().unwrap(), &input[..count]) {
+                match gz_direct_write(state.fd.as_ref().unwrap(), &request.remaining()[..count]) {
                     Ok(written) => {
                         state.x.pos += written as crate::stdlib::off64_t;
-                        input = &input[written..];
-                        len = len.wrapping_sub(written as crate::stdlib::z_size_t);
+                        if request.advance(written).is_none() {
+                            return 0;
+                        }
                     }
                     Err(failure) => {
                         if failure.would_block {
@@ -729,38 +773,30 @@ unsafe fn gz_write(
                             path: state.path.as_deref(),
                         }
                         .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
-                        return if state.again != 0 {
-                            put.wrapping_sub(len)
-                        } else {
-                            0
-                        };
+                        return request.partial_or_zero(state.again);
                     }
                 }
             }
-            return put;
+            return request.total;
         }
-        state.strm.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
         loop {
-            let chunk = GzCompressionChunk::next(len);
+            let chunk = GzCompressionChunk::next(request.len());
             state.strm.avail_in = chunk.input_len;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, Some(input));
+            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, Some(request.remaining()));
             let consumed = chunk.consumed(state.strm.avail_in);
             state.x.pos += consumed as crate::stdlib::off64_t;
-            input = &input[consumed as usize..];
-            len = len.wrapping_sub(consumed as crate::stdlib::z_size_t);
-            if ret == -1 as ::core::ffi::c_int {
-                return if state.again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+            if request.advance(consumed as usize).is_none() {
+                return 0;
             }
-            if len == 0 {
+            if ret == -1 as ::core::ffi::c_int {
+                return request.partial_or_zero(state.again);
+            }
+            if request.is_empty() {
                 break;
             }
         }
     }
-    return put;
+    return request.total;
 }
 unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> ::core::ffi::c_int {
     let policy = GzWritePolicy {
