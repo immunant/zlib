@@ -85,8 +85,20 @@ impl InflateFastViews<'_> {
         if self.input.len() < 6 || self.output.len() < 258 {
             return Err(InflateFastProgress::no_progress(self.hold, self.bits));
         }
-        if self.lenbits >= u32::BITS || self.distbits >= u32::BITS || self.bits >= u64::BITS {
+        if self.bits >= u64::BITS {
             return Err(InflateFastProgress::invalid(self.hold, self.bits, 14));
+        }
+        let Some(lroot) = inflate_fast_table_root(self.lenbits) else {
+            return Err(InflateFastProgress::invalid(self.hold, self.bits, 14));
+        };
+        if self.lcode.len() < lroot {
+            return Err(InflateFastProgress::invalid(self.hold, self.bits, 14));
+        }
+        let Some(droot) = inflate_fast_table_root(self.distbits) else {
+            return Err(InflateFastProgress::invalid(self.hold, self.bits, 15));
+        };
+        if self.dcode.len() < droot {
+            return Err(InflateFastProgress::invalid(self.hold, self.bits, 15));
         }
         if self.wsize > self.window.len()
             || self.whave > self.wsize
@@ -145,6 +157,13 @@ fn inflate_fast_mask(bits: u32) -> Option<u64> {
     1u64.checked_shl(bits).map(|mask| mask.wrapping_sub(1))
 }
 
+/// Number of root entries addressed by a DEFLATE decode table.  Keep this
+/// checked even though normal inflate state constrains the widths: the safe
+/// core must reject a malformed borrowed view before it consumes any input.
+fn inflate_fast_table_root(bits: u32) -> Option<usize> {
+    1usize.checked_shl(bits)
+}
+
 /// Pull one byte into the bit accumulator without permitting an invalid
 /// shift.  A malformed bounded decoder state can otherwise ask a later
 /// refill to shift by 64 or more; the legacy raw path relies on its ABI
@@ -194,8 +213,17 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
     } = views;
     let mut input_at = 0usize;
     let mut output_at = 0usize;
-    let lmask = (1u32 << lenbits).wrapping_sub(1) as u64;
-    let dmask = (1u32 << distbits).wrapping_sub(1) as u64;
+    // `validate()` established both shifts and the corresponding root table
+    // spans. Keeping the masks checked here makes that relationship explicit
+    // if this core is later reused independently.
+    let Some(lmask) = inflate_fast_table_root(lenbits).map(|root| root.wrapping_sub(1) as u64)
+    else {
+        return InflateFastProgress::invalid(hold, bits, 14);
+    };
+    let Some(dmask) = inflate_fast_table_root(distbits).map(|root| root.wrapping_sub(1) as u64)
+    else {
+        return InflateFastProgress::invalid(hold, bits, 15);
+    };
     let mut mode = None;
     let mut error = None;
 
