@@ -5674,13 +5674,22 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     let Ok(symbol_len) = usize::try_from(state.sym_end) else {
         return 0;
     };
-    if symbol_len != 0 && state.sym_buf.is_null() {
+    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+        return 0;
+    };
+    let Some(symbol_end) = state.sym_start.checked_add(symbol_len) else {
+        return 0;
+    };
+    if symbol_end > pending_len || (pending_len != 0 && state.pending_buf.is_null()) {
         return 0;
     }
-    let symbols = if symbol_len == 0 {
+    let pending_buf = if pending_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+    };
+    let Some(symbols) = pending_buf.get_mut(state.sym_start..symbol_end) else {
+        return 0;
     };
     _tr_tally(
         symbols,

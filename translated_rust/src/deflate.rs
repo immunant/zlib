@@ -141,7 +141,11 @@ pub struct internal_state {
     pub heap_len: ::core::ffi::c_int,
     pub heap_max: ::core::ffi::c_int,
     pub depth: [crate::zutil_h::uch; 573],
-    pub sym_buf: *mut crate::zutil_h::uchf,
+    /// Offset of the literal/match symbols within `pending_buf`.  This was
+    /// previously retained as an interior raw pointer derived from the
+    /// pending allocation; an offset keeps that relationship checked and
+    /// avoids storing another raw pointer in opaque codec state.
+    pub sym_start: usize,
     pub lit_bufsize: crate::stdlib::uInt,
     pub sym_next: crate::stdlib::uInt,
     pub sym_end: crate::stdlib::uInt,
@@ -219,7 +223,7 @@ fn deflate_initial_state() -> deflate_state {
         heap_len: 0,
         heap_max: 0,
         depth: [0; 573],
-        sym_buf: ::core::ptr::null_mut(),
+        sym_start: 0,
         lit_bufsize: 0,
         sym_next: 0,
         sym_end: 0,
@@ -1160,8 +1164,7 @@ pub fn deflateInit2_(
             return crate::zlib_h::Z_MEM_ERROR;
         }
         let state = &mut *s;
-        state.sym_buf =
-            state.pending_buf.wrapping_add(state.lit_bufsize as usize) as *mut crate::zutil_h::uchf;
+        state.sym_start = state.lit_bufsize as usize;
         state.sym_end = state
             .lit_bufsize
             .wrapping_sub(1 as crate::stdlib::uInt)
@@ -3670,12 +3673,11 @@ pub unsafe extern "C" fn deflateCopy_ffi(
             .map(|end| source_state.pending_out..end)
     });
     let src_sym = sym_len.and_then(|len| {
-        deflate_copy_range(
-            pending_capacity,
-            source_state.pending_buf as usize,
-            source_state.sym_buf as usize,
-            len,
-        )
+        source_state
+            .sym_start
+            .checked_add(len)
+            .filter(|end| *end <= pending_capacity)
+            .map(|end| source_state.sym_start..end)
     });
     let dst_sym = sym_len.and_then(|len| {
         usize::try_from(dest_state.lit_bufsize)
@@ -3765,8 +3767,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     dest_state.pending_out = pending_range.start;
-    dest_state.sym_buf =
-        dest_state.pending_buf.wrapping_add(dest_sym_start) as *mut crate::zutil_h::uchf;
+    dest_state.sym_start = dest_sym_start;
     return crate::zlib_h::Z_OK;
 }
 fn longest_match_state(
@@ -4589,7 +4590,7 @@ fn deflate_fast(
                 } else {
                     ::core::slice::from_raw_parts_mut(state.prev, prev_len)
                 };
-                // `sym_buf` is the literal-buffer offset within the pending
+                // `sym_start` is the literal-buffer offset within the pending
                 // allocation. Keep this existing no-refill window/hash lend
                 // alive through a checked tree flush, rather than rebuilding
                 // either the symbol cursor or stored-block cursor below.
@@ -4853,7 +4854,7 @@ fn deflate_slow(
                 } else {
                     ::core::slice::from_raw_parts(state.window, window_len)
                 };
-                // `sym_buf` is the literal-buffer offset within this pending
+                // `sym_start` is the literal-buffer offset within this pending
                 // allocation. Keep the existing no-refill window/hash lends
                 // through a possible tree flush instead of rebuilding either
                 // raw cursor at the block boundary.
@@ -5035,7 +5036,7 @@ fn deflate_slow(
         }
         // At end of input the deferred literal, final block, and ordinary
         // symbol tail all share the same callback-owned window and pending
-        // allocation. Lend each once, derive `sym_buf` from its documented
+        // allocation. Lend each once, derive symbols from their documented
         // pending offset, and finish the tree work before `flush_pending()`
         // can revisit the ABI output cursor.
         let tail_last = {
@@ -5491,7 +5492,7 @@ fn deflate_rle(
             if pending_len != 0 && state.pending_buf.is_null() {
                 return need_more;
             }
-            // `sym_buf` is the literal-buffer offset inside `pending_buf`.
+            // `sym_start` is the literal-buffer offset inside `pending_buf`.
             // Keep this existing callback-owned lend alive for a possible
             // checked tree flush instead of re-entering its raw adapter.
             let pending_and_symbols = if pending_len == 0 {
@@ -5595,7 +5596,7 @@ fn deflate_huff(
             if pending_len != 0 && state.pending_buf.is_null() {
                 return need_more;
             }
-            // `sym_buf` is initialized as the literal-buffer offset within
+            // `sym_start` is initialized as the literal-buffer offset within
             // `pending_buf`. Lend that one callback-owned allocation once,
             // then split its symbol storage with checked slice arithmetic.
             let pending_and_symbols = if pending_len == 0 {
