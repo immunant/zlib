@@ -160,16 +160,12 @@ fn gz_write_is_empty(len: crate::stdlib::z_size_t) -> bool {
     len == 0
 }
 
-fn gz_write_needs_pending_flush(avail_in: crate::stdlib::uInt) -> bool {
+fn gz_has_pending_input(avail_in: crate::stdlib::uInt) -> bool {
     avail_in != 0
 }
 
 fn gz_write_needs_input_reset(avail_in: crate::stdlib::uInt) -> bool {
     avail_in == 0
-}
-
-fn gz_zero_needs_pending_flush(avail_in: crate::stdlib::uInt) -> bool {
-    avail_in != 0
 }
 
 fn gz_has_pending_skip(skip: crate::stdlib::off64_t) -> bool {
@@ -545,7 +541,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if gz_zero_needs_pending_flush((*strm).avail_in)
+    if gz_has_pending_input((*strm).avail_in)
         && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
@@ -637,7 +633,7 @@ unsafe extern "C" fn gz_write(
             }
         }
     } else {
-        if gz_write_needs_pending_flush((*state).strm.avail_in)
+        if gz_has_pending_input((*state).strm.avail_in)
             && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
@@ -895,7 +891,7 @@ pub unsafe extern "C" fn gzsetparams(
         return (*state).err;
     }
     if gz_buffer_is_initialized((*state).size) {
-        if gz_write_needs_pending_flush((*strm).avail_in)
+        if gz_has_pending_input((*strm).avail_in)
             && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
             return (*state).err;
@@ -968,16 +964,15 @@ mod tests {
         gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write, gz_comp_needs_reset,
         gz_comp_output_produced, gz_comp_output_write_chunk_len, gz_comp_remaining_direct_input,
         gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_skips_empty_flush,
-        gz_comp_write_chunk_len, gz_comp_write_failed, gz_has_pending_skip,
+        gz_comp_write_chunk_len, gz_comp_write_failed, gz_has_pending_input, gz_has_pending_skip,
         gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_step,
         gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
         gz_write_error_result, gz_write_is_empty, gz_write_needs_input_reset,
-        gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
-        gz_zero_needs_pending_flush, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result, gzputs_len_fits_int,
-        gzputs_result, gzsetparams_settings_match, gzsetparams_state_is_usable,
-        gzwrite_len_fits_int,
+        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_apply_progress,
+        gz_zero_chunk_len, gz_zero_needs_initialization, gzclose_mode_is_writable,
+        gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result,
+        gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
+        gzsetparams_state_is_usable, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1043,10 +1038,10 @@ mod tests {
     }
 
     #[test]
-    fn gz_zero_needs_pending_flush_only_for_buffered_input() {
-        assert!(!gz_zero_needs_pending_flush(0));
-        assert!(gz_zero_needs_pending_flush(1));
-        assert!(gz_zero_needs_pending_flush(crate::stdlib::uInt::MAX));
+    fn gz_has_pending_input_only_for_buffered_input() {
+        assert!(!gz_has_pending_input(0));
+        assert!(gz_has_pending_input(1));
+        assert!(gz_has_pending_input(crate::stdlib::uInt::MAX));
     }
 
     #[test]
@@ -1416,13 +1411,6 @@ mod tests {
     #[test]
     fn gz_write_error_result_discards_partial_count_when_not_retryable() {
         assert_eq!(gz_write_error_result(0, 10, 4), 0);
-    }
-
-    #[test]
-    fn gz_write_needs_pending_flush_only_for_buffered_input() {
-        assert!(!gz_write_needs_pending_flush(0));
-        assert!(gz_write_needs_pending_flush(1));
-        assert!(gz_write_needs_pending_flush(crate::stdlib::uInt::MAX));
     }
 
     #[test]
