@@ -866,6 +866,31 @@ fn inflate_back_pending_output(
     (left < wsize).then(|| wsize.wrapping_sub(left))
 }
 
+// The final output callback is still owned by the raw callback boundary, but
+// its result changes only the decoder's return value.  Keep that decision
+// value-only so the boundary does not also have to encode zlib's special
+// successful-end-of-stream rule.
+fn inflate_back_finish_pending_output(
+    ret: ::core::ffi::c_int,
+    output_failed: bool,
+) -> ::core::ffi::c_int {
+    if output_failed && ret == crate::zlib_h::Z_STREAM_END {
+        crate::zlib_h::Z_BUF_ERROR
+    } else {
+        ret
+    }
+}
+
+// `next_in` remains a raw cursor publication at the callback boundary.  The
+// paired available-byte count is ordinary stream bookkeeping, so isolate it
+// in a reference-bound helper.
+fn inflate_back_publish_available_input(
+    strm: &mut crate::zlib_h::z_stream,
+    have: ::core::ffi::c_uint,
+) {
+    strm.avail_in = have as crate::stdlib::uInt;
+}
+
 fn inflate_back_push_code_length(
     lens: &mut [::core::ffi::c_ushort; 320],
     have: &mut ::core::ffi::c_uint,
@@ -1639,14 +1664,12 @@ pub unsafe extern "C" fn inflateBack(
         }
     }
     if let Some(pending) = inflate_back_pending_output(state_ref.wsize, left) {
-        if out.expect("non-null function pointer")(out_desc, state_ref.window, pending) != 0
-            && ret == crate::zlib_h::Z_STREAM_END
-        {
-            ret = crate::zlib_h::Z_BUF_ERROR;
-        }
+        let output_failed =
+            out.expect("non-null function pointer")(out_desc, state_ref.window, pending) != 0;
+        ret = inflate_back_finish_pending_output(ret, output_failed);
     }
     strm.next_in = next as *mut crate::stdlib::Bytef;
-    strm.avail_in = have as crate::stdlib::uInt;
+    inflate_back_publish_available_input(strm, have);
     return ret;
 }
 #[export_name = "inflateBack"]
