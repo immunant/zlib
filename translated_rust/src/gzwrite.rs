@@ -74,6 +74,25 @@ impl GzWritePolicy {
     }
 }
 
+// Flush has the same codec lifetime as a byte write, but no caller buffer.
+// Keep its admission and error-clearing order in a pointer-free action so the
+// shared gzip adapter is the only boundary that reaches the embedded deflater.
+enum GzFlushPlan {
+    Reject,
+    ClearAndReject,
+    Dispatch { flush: ::core::ffi::c_int },
+}
+
+fn gzflush_plan(policy: &GzWritePolicy, flush: ::core::ffi::c_int) -> GzFlushPlan {
+    if !policy.accepts_write() {
+        GzFlushPlan::Reject
+    } else if !(0..=crate::zlib_h::Z_FINISH).contains(&flush) {
+        GzFlushPlan::ClearAndReject
+    } else {
+        GzFlushPlan::Dispatch { flush }
+    }
+}
+
 // Retuning has a small pointer-free admission phase before it reaches the
 // embedded deflater.  In particular, a rejected request must preserve the
 // previous error, while an accepted no-op clears it without materializing a
@@ -382,6 +401,14 @@ enum GzWritePlan<'a> {
         transaction: GzWriteTransaction<'a>,
         result: GzWriteResult,
     },
+}
+
+// Every gzip writer request crosses one persistent codec owner. A flush has
+// no input cursor, while a write retains its bounded caller slice until the
+// adapter has accounted for it.
+enum GzWriteOperation<'a> {
+    Write(GzWriteTransaction<'a>),
+    Flush { flush: ::core::ffi::c_int },
 }
 
 fn gzwrite_plan<'input>(
@@ -1032,8 +1059,38 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 // projects those bounded requests through the legacy gzip/deflate state.
 unsafe fn gzip_write_state_adapter(
     state: &mut crate::gzguts_h::gz_state,
-    transaction: GzWriteTransaction<'_>,
+    operation: GzWriteOperation<'_>,
 ) -> crate::stdlib::z_size_t {
+    let transaction = match operation {
+        GzWriteOperation::Flush { flush } => {
+            let policy = GzWritePolicy {
+                mode: state.mode,
+                err: state.err,
+                again: state.again,
+                direct: state.direct,
+            };
+            let plan = gzflush_plan(&policy, flush);
+            if matches!(plan, GzFlushPlan::Reject) {
+                return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
+            }
+            crate::src::gzlib::GzErrorState {
+                message: &mut state.msg,
+                error: &mut state.err,
+                buffered: &mut state.x.have,
+                again: state.again,
+                path: state.path.as_deref(),
+            }
+            .clear();
+            let GzFlushPlan::Dispatch { flush } = plan else {
+                return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
+            };
+            if gz_comp(state, flush, None, None, None, true) == -1 {
+                return state.err as crate::stdlib::z_size_t;
+            }
+            return state.err as crate::stdlib::z_size_t;
+        }
+        GzWriteOperation::Write(transaction) => transaction,
+    };
     let mut request = transaction.request;
     let mut ret: ::core::ffi::c_int = 0;
     if state.buffers.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
@@ -1188,7 +1245,10 @@ unsafe fn gzwrite(
         GzWritePlan::Dispatch {
             transaction,
             result,
-        } => result.finish(gzip_write_state_adapter(state, transaction)),
+        } => result.finish(gzip_write_state_adapter(
+            state,
+            GzWriteOperation::Write(transaction),
+        )),
     }
 }
 #[export_name = "gzwrite"]
@@ -1257,35 +1317,6 @@ pub unsafe extern "C" fn gzputs_ffi(
     };
     gzwrite(state, text, GzWriteFlavor::Text) as ::core::ffi::c_int
 }
-unsafe fn gzflush(
-    state: &mut crate::gzguts_h::gz_state,
-    mut flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let policy = GzWritePolicy {
-        mode: state.mode,
-        err: state.err,
-        again: state.again,
-        direct: state.direct,
-    };
-    if !policy.accepts_write() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    crate::src::gzlib::GzErrorState {
-        message: &mut state.msg,
-        error: &mut state.err,
-        buffered: &mut state.x.have,
-        again: state.again,
-        path: state.path.as_deref(),
-    }
-    .clear();
-    if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if gz_comp(state, flush, None, None, None, true) == -1 as ::core::ffi::c_int {
-        return state.err;
-    }
-    return state.err;
-}
 #[export_name = "gzflush"]
 
 pub unsafe extern "C" fn gzflush_ffi(
@@ -1295,7 +1326,7 @@ pub unsafe extern "C" fn gzflush_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    gzflush(state, flush)
+    gzip_write_state_adapter(state, GzWriteOperation::Flush { flush }) as ::core::ffi::c_int
 }
 unsafe fn gzsetparams(
     state: &mut crate::gzguts_h::gz_state,
