@@ -3016,6 +3016,29 @@ fn inflate_sync_consume_input(
     strm.total_in = strm.total_in.wrapping_add(consumed as crate::stdlib::uLong);
 }
 
+// A successful sync resets decoding state but must retain the public byte
+// counters and wrapper flags accumulated before the marker. Keep that
+// transition in one safe helper so the cursor-search path cannot accidentally
+// expose a partially reset stream.
+fn inflate_sync_finish(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+) {
+    if state.flags == -1 as ::core::ffi::c_int {
+        state.wrap = 0 as ::core::ffi::c_int;
+    } else {
+        state.wrap &= !(4 as ::core::ffi::c_int);
+    }
+    let flags = state.flags;
+    let total_in = strm.total_in;
+    let total_out = strm.total_out;
+    inflate_reset(strm, state);
+    strm.total_in = total_in;
+    strm.total_out = total_out;
+    state.flags = flags;
+    state.mode = crate::src::inflate::TYPE;
+}
+
 fn inflate_sync(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
@@ -3050,19 +3073,7 @@ fn inflate_sync(
     if state.have != 4 as ::core::ffi::c_uint {
         return crate::zlib_h::Z_DATA_ERROR;
     }
-    if state.flags == -1 as ::core::ffi::c_int {
-        state.wrap = 0 as ::core::ffi::c_int;
-    } else {
-        state.wrap &= !(4 as ::core::ffi::c_int);
-    }
-    let flags = state.flags;
-    let in_0 = strm.total_in;
-    let out = strm.total_out;
-    inflate_reset(strm, state);
-    strm.total_in = in_0;
-    strm.total_out = out;
-    state.flags = flags;
-    state.mode = crate::src::inflate::TYPE;
+    inflate_sync_finish(strm, state);
     crate::zlib_h::Z_OK
 }
 #[export_name = "inflateSync"]
