@@ -701,7 +701,7 @@ pub(crate) fn deflate_one_shot(
     }
     let produced = owner.produced(stream.avail_out);
     unsafe {
-        deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+        deflateEnd(::core::ptr::NonNull::from(&mut stream));
     }
     DeflateOneShotProgress {
         status: if status == crate::zlib_h::Z_STREAM_END {
@@ -1295,7 +1295,7 @@ pub unsafe fn deflateInit2_(
             2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
         }) as usize]
             .load(::core::sync::atomic::Ordering::Relaxed);
-        deflateEnd(stream);
+        deflateEnd(::core::ptr::NonNull::from(stream));
         return crate::zlib_h::Z_MEM_ERROR;
     }
     state.sym_buf_start = state.lit_bufsize as usize;
@@ -4206,11 +4206,15 @@ pub unsafe extern "C" fn deflate_ffi(
     };
     deflate(strm, flush)
 }
-pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let Some((strm, state)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
-    else {
+// The callback-backed release transaction consumes a validated stream handle.
+// Embedded users (notably gzip close) can form that handle from their existing
+// stream borrow instead of reconstructing a raw stream pointer. The callback
+// provenance and every release remain together here.
+pub unsafe fn deflateEnd(
+    mut strm: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
+) -> ::core::ffi::c_int {
+    let strm = strm.as_mut();
+    let Some((strm, state)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // Keep the ABI projection at the release boundary.  Everything after
@@ -4268,6 +4272,9 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    let Some(strm) = ::core::ptr::NonNull::new(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateEnd(strm)
 }
 // This is the pointer-free handoff from an ABI state snapshot to the deep
@@ -4499,7 +4506,7 @@ unsafe fn deflate_copy_from_abi_boundary(
         || ds.head.is_none()
         || ds.pending_buf.is_none()
     {
-        deflateEnd(dest as *mut crate::zlib_h::z_stream_s);
+        deflateEnd(::core::ptr::NonNull::from(dest));
         return crate::zlib_h::Z_MEM_ERROR;
     }
     ::core::ptr::copy_nonoverlapping(

@@ -1064,9 +1064,7 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     // matching codec end operation.  Consume it before either buffer is
     // detached so a partial setup cannot erase an initialized deflater.
     if state.buffers.take_embedded_deflater().is_some() {
-        crate::src::deflate::deflateEnd(
-            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
+        crate::src::deflate::deflateEnd(::core::ptr::NonNull::from(&mut state.strm));
         state.buffers.output = None;
     }
     if state.buffers.size != 0 {
