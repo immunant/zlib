@@ -4701,6 +4701,105 @@ fn tree_run_extra_bits(
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct TreeBitEmission {
+    value: ::core::ffi::c_int,
+    bit_count: ::core::ffi::c_int,
+}
+
+fn append_tree_code(
+    emissions: &mut [TreeBitEmission],
+    emission_count: &mut usize,
+    bl_tree: &[crate::src::deflate::ct_data],
+    code: usize,
+) -> Option<()> {
+    let tree_code = bl_tree.get(code)?;
+    let emission = emissions.get_mut(*emission_count)?;
+    *emission = TreeBitEmission {
+        value: tree_code.fc.value as ::core::ffi::c_int,
+        bit_count: tree_code.dl.value as ::core::ffi::c_int,
+    };
+    *emission_count += 1;
+    Some(())
+}
+
+fn append_tree_extra_bits(
+    emissions: &mut [TreeBitEmission],
+    emission_count: &mut usize,
+    action: ScanTreeAction,
+    count: ::core::ffi::c_int,
+) -> Option<()> {
+    let (value, bit_count) = tree_run_extra_bits(action, count)?;
+    let emission = emissions.get_mut(*emission_count)?;
+    *emission = TreeBitEmission { value, bit_count };
+    *emission_count += 1;
+    Some(())
+}
+
+fn tree_bit_emissions(
+    tree: &[crate::src::deflate::ct_data],
+    bl_tree: &[crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    emissions: &mut [TreeBitEmission],
+) -> Option<usize> {
+    let mut emission_count = 0;
+    for emission in tree_run_emissions(tree, max_code)? {
+        match emission.action {
+            ScanTreeAction::LiteralCount(_) => {
+                for _ in 0..emission.count {
+                    append_tree_code(
+                        emissions,
+                        &mut emission_count,
+                        bl_tree,
+                        emission.current_len as usize,
+                    )?;
+                }
+            }
+            ScanTreeAction::RepeatLength { emit_length_once } => {
+                if emit_length_once {
+                    append_tree_code(
+                        emissions,
+                        &mut emission_count,
+                        bl_tree,
+                        emission.current_len as usize,
+                    )?;
+                }
+                append_tree_code(emissions, &mut emission_count, bl_tree, REP_3_6 as usize)?;
+                append_tree_extra_bits(
+                    emissions,
+                    &mut emission_count,
+                    emission.action,
+                    emission.count,
+                )?;
+            }
+            ScanTreeAction::RepeatZeroShort => {
+                append_tree_code(emissions, &mut emission_count, bl_tree, REPZ_3_10 as usize)?;
+                append_tree_extra_bits(
+                    emissions,
+                    &mut emission_count,
+                    emission.action,
+                    emission.count,
+                )?;
+            }
+            ScanTreeAction::RepeatZeroLong => {
+                append_tree_code(
+                    emissions,
+                    &mut emission_count,
+                    bl_tree,
+                    REPZ_11_138 as usize,
+                )?;
+                append_tree_extra_bits(
+                    emissions,
+                    &mut emission_count,
+                    emission.action,
+                    emission.count,
+                )?;
+            }
+        }
+    }
+    Some(emission_count)
+}
+
 fn tree_next_cursor(index: ::core::ffi::c_int) -> usize {
     index.wrapping_add(1) as usize
 }
@@ -4781,286 +4880,64 @@ unsafe fn send_tree(
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
 ) {
-    let mut n: ::core::ffi::c_int = 0;
-    let mut curlen: ::core::ffi::c_int = 0;
-    let mut nextlen: ::core::ffi::c_int = (*tree).dl.value as ::core::ffi::c_int;
-    let (mut prevlen, mut count, mut max_count, mut min_count) = initial_tree_run_state(nextlen);
-    n = 0 as ::core::ffi::c_int;
-    while n <= max_code {
-        curlen = nextlen;
-        nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.value as ::core::ffi::c_int;
-        let (incremented_count, step) =
-            tree_run_step_after_increment(count, max_count, min_count, curlen, nextlen, prevlen);
-        count = incremented_count;
-        if let Some(action) = step.action {
-            match action {
-                ScanTreeAction::LiteralCount(_) => loop {
-                    let mut len: ::core::ffi::c_int =
-                        (*s).bl_tree[curlen as usize].dl.value as ::core::ffi::c_int;
-                    if bit_buffer_would_overflow((*s).bi_valid, len) {
-                        let mut val: ::core::ffi::c_int =
-                            (*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh33 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh33 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh34 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh34 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len;
-                    }
-                    count -= 1;
-                    if !(count != 0 as ::core::ffi::c_int) {
-                        break;
-                    }
-                },
-                ScanTreeAction::RepeatLength { emit_length_once } => {
-                    if emit_length_once {
-                        let mut len_0: ::core::ffi::c_int =
-                            (*s).bl_tree[curlen as usize].dl.value as ::core::ffi::c_int;
-                        if bit_buffer_would_overflow((*s).bi_valid, len_0) {
-                            let mut val_0: ::core::ffi::c_int =
-                                (*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int;
-                            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                                | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int)
-                                    << (*s).bi_valid)
-                                as crate::zutil_h::ush;
-                            let c2rust_fresh35 = (*s).pending;
-                            (*s).pending = (*s).pending.wrapping_add(1);
-                            *(*s).pending_buf.offset(c2rust_fresh35 as isize) =
-                                ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                    as crate::zutil_h::uch;
-                            let c2rust_fresh36 = (*s).pending;
-                            (*s).pending = (*s).pending.wrapping_add(1);
-                            *(*s).pending_buf.offset(c2rust_fresh36 as isize) =
-                                ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                    as crate::zutil_h::uch;
-                            (*s).bi_buf = (val_0 as crate::zutil_h::ush as ::core::ffi::c_int
-                                >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                                as crate::zutil_h::ush;
-                            (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
-                        } else {
-                            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                                | ((*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int)
-                                    << (*s).bi_valid)
-                                as crate::zutil_h::ush;
-                            (*s).bi_valid += len_0;
-                        }
-                        count -= 1;
-                    }
-                    let (extra_value, extra_bit_count) = tree_run_extra_bits(
-                        ScanTreeAction::RepeatLength { emit_length_once },
-                        count,
-                    )
-                    .unwrap();
-                    let mut len_1: ::core::ffi::c_int =
-                        (*s).bl_tree[16 as ::core::ffi::c_int as usize].dl.value
-                            as ::core::ffi::c_int;
-                    if bit_buffer_would_overflow((*s).bi_valid, len_1) {
-                        let mut val_1: ::core::ffi::c_int =
-                            (*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.value
-                                as ::core::ffi::c_int;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val_1 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh37 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh37 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh38 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh38 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val_1 as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_1 - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.value
-                                as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_1;
-                    }
-                    let mut len_2: ::core::ffi::c_int = extra_bit_count;
-                    if bit_buffer_would_overflow((*s).bi_valid, len_2) {
-                        let mut val_2: ::core::ffi::c_int = extra_value;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh39 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh39 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh40 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh40 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val_2 as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_2 - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (extra_value as crate::zutil_h::ush as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_2;
-                    }
-                }
-                ScanTreeAction::RepeatZeroShort => {
-                    let (extra_value, extra_bit_count) =
-                        tree_run_extra_bits(ScanTreeAction::RepeatZeroShort, count).unwrap();
-                    let mut len_3: ::core::ffi::c_int =
-                        (*s).bl_tree[17 as ::core::ffi::c_int as usize].dl.value
-                            as ::core::ffi::c_int;
-                    if bit_buffer_would_overflow((*s).bi_valid, len_3) {
-                        let mut val_3: ::core::ffi::c_int =
-                            (*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.value
-                                as ::core::ffi::c_int;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val_3 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh41 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh41 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh42 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh42 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val_3 as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_3 - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.value
-                                as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_3;
-                    }
-                    let mut len_4: ::core::ffi::c_int = extra_bit_count;
-                    if bit_buffer_would_overflow((*s).bi_valid, len_4) {
-                        let mut val_4: ::core::ffi::c_int = extra_value;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val_4 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh43 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh43 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh44 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh44 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val_4 as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_4 - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (extra_value as crate::zutil_h::ush as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_4;
-                    }
-                }
-                ScanTreeAction::RepeatZeroLong => {
-                    let (extra_value, extra_bit_count) =
-                        tree_run_extra_bits(ScanTreeAction::RepeatZeroLong, count).unwrap();
-                    let mut len_5: ::core::ffi::c_int =
-                        (*s).bl_tree[18 as ::core::ffi::c_int as usize].dl.value
-                            as ::core::ffi::c_int;
-                    if bit_buffer_would_overflow((*s).bi_valid, len_5) {
-                        let mut val_5: ::core::ffi::c_int =
-                            (*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.value
-                                as ::core::ffi::c_int;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val_5 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh45 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh45 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh46 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh46 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val_5 as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_5 - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.value
-                                as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_5;
-                    }
-                    let mut len_6: ::core::ffi::c_int = extra_bit_count;
-                    if bit_buffer_would_overflow((*s).bi_valid, len_6) {
-                        let mut val_6: ::core::ffi::c_int = extra_value;
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (val_6 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        let c2rust_fresh47 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh47 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh48 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh48 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        (*s).bi_buf = (val_6 as crate::zutil_h::ush as ::core::ffi::c_int
-                            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_6 - crate::src::deflate::Buf_size;
-                    } else {
-                        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | (extra_value as crate::zutil_h::ush as ::core::ffi::c_int)
-                                << (*s).bi_valid)
-                            as crate::zutil_h::ush;
-                        (*s).bi_valid += len_6;
-                    }
-                }
-            }
+    let Ok(max_code) = usize::try_from(max_code) else {
+        return;
+    };
+    let Some(tree_len) = max_code.checked_add(2) else {
+        return;
+    };
+    if tree_len > crate::src::deflate::HEAP_SIZE as usize {
+        return;
+    }
+    let empty_tree_code = crate::src::deflate::ct_data {
+        fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+        dl: crate::src::deflate::C2Rust_Unnamed_0 { value: 0 },
+    };
+    let mut tree_values = [empty_tree_code; crate::src::deflate::HEAP_SIZE as usize];
+    for (index, tree_code) in tree_values.iter_mut().take(tree_len).enumerate() {
+        *tree_code = *tree.add(index);
+    }
+    let empty_emission = TreeBitEmission {
+        value: 0,
+        bit_count: 0,
+    };
+    let mut emissions = [empty_emission; crate::src::deflate::HEAP_SIZE as usize];
+    let Some(emission_count) = tree_bit_emissions(
+        &tree_values[..tree_len],
+        &(*s).bl_tree,
+        max_code as ::core::ffi::c_int,
+        &mut emissions,
+    ) else {
+        return;
+    };
+
+    for emission in emissions.into_iter().take(emission_count) {
+        let len = emission.bit_count;
+        let val = emission.value;
+        if bit_buffer_would_overflow((*s).bi_valid, len) {
+            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
+                | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+                as crate::zutil_h::ush;
+            let first = (*s).pending;
+            (*s).pending = (*s).pending.wrapping_add(1);
+            *(*s).pending_buf.offset(first as isize) = ((*s).bi_buf as ::core::ffi::c_int
+                & 0xff as ::core::ffi::c_int)
+                as crate::zutil_h::uch;
+            let second = (*s).pending;
+            (*s).pending = (*s).pending.wrapping_add(1);
+            *(*s).pending_buf.offset(second as isize) = ((*s).bi_buf as ::core::ffi::c_int
+                >> 8 as ::core::ffi::c_int)
+                as crate::zutil_h::uch;
+            (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
+                >> crate::src::deflate::Buf_size - (*s).bi_valid)
+                as crate::zutil_h::ush;
+            (*s).bi_valid += len - crate::src::deflate::Buf_size;
+        } else {
+            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
+                | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+                as crate::zutil_h::ush;
+            (*s).bi_valid += len;
         }
-        count = step.count;
-        prevlen = step.previous_len;
-        max_count = step.max_count;
-        min_count = step.min_count;
-        n += 1;
     }
 }
 
@@ -5807,13 +5684,13 @@ mod tests {
         supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
-        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_code_count,
-        tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth,
-        tree_run_continues, tree_run_emissions, tree_run_extra_bits, tree_run_limits,
-        tree_run_step, tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol,
-        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, TreeInitialLeafPlan, TreeRunEmission, TreeRunStep, BL_CODE_ORDER_LEN,
-        END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
+        tree_bit_emissions, tree_bit_length_cost, tree_bit_length_totals_after_node,
+        tree_code_count, tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor,
+        tree_parent_depth, tree_run_continues, tree_run_emissions, tree_run_extra_bits,
+        tree_run_limits, tree_run_step, tree_run_step_after_increment, BlockEncoding,
+        CompressedBlockSymbol, GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild,
+        ScanTreeAction, TallyTreeUpdate, TreeBitEmission, TreeInitialLeafPlan, TreeRunEmission,
+        TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6103,6 +5980,58 @@ mod tests {
         );
         assert_eq!(tree_run_emissions(&tree, -1), None);
         assert_eq!(tree_run_emissions(&tree[..4], 3), None);
+    }
+
+    #[test]
+    fn tree_bit_emissions_preserve_tree_codes_and_repeat_extras() {
+        let empty = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { value: 0 },
+        };
+        let mut tree = [empty; 5];
+        tree[0].dl.value = 5;
+        tree[1].dl.value = 5;
+        tree[2].dl.value = 5;
+        tree[3].dl.value = 5;
+        tree[4].dl.value = 0xffff;
+
+        let mut bl_tree = [empty; crate::src::deflate::BL_CODES as usize];
+        bl_tree[5].fc.value = 1;
+        bl_tree[5].dl.value = 2;
+        bl_tree[REP_3_6 as usize].fc.value = 2;
+        bl_tree[REP_3_6 as usize].dl.value = 3;
+
+        let empty_emission = TreeBitEmission {
+            value: 0,
+            bit_count: 0,
+        };
+        let mut emissions = [empty_emission; crate::src::deflate::HEAP_SIZE as usize];
+        let emission_count = tree_bit_emissions(&tree, &bl_tree, 3, &mut emissions).unwrap();
+        assert_eq!(
+            &emissions[..emission_count],
+            [
+                TreeBitEmission {
+                    value: 1,
+                    bit_count: 2,
+                },
+                TreeBitEmission {
+                    value: 2,
+                    bit_count: 3,
+                },
+                TreeBitEmission {
+                    value: 1,
+                    bit_count: 2,
+                },
+            ]
+        );
+        assert_eq!(
+            tree_bit_emissions(&tree, &bl_tree, -1, &mut emissions),
+            None
+        );
+        assert_eq!(
+            tree_bit_emissions(&tree[..4], &bl_tree, 3, &mut emissions),
+            None
+        );
     }
 
     #[test]
