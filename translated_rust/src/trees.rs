@@ -780,7 +780,7 @@ pub mod trees_h {
     pub static static_ltree: [crate::src::deflate::ct_data; 288] = [
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 12 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 12 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -788,7 +788,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 140 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 140 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -796,7 +796,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 76 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 76 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -804,7 +804,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 204 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 204 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -812,7 +812,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 44 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 44 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -820,7 +820,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 172 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 172 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -828,7 +828,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 108 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 108 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -836,7 +836,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 236 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 236 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -844,7 +844,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 28 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 28 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -852,7 +852,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 156 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 156 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -860,7 +860,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 92 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 92 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -868,7 +868,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 220 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 220 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -876,7 +876,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 60 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 60 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -884,7 +884,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 188 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 188 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -892,7 +892,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 124 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 124 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -900,7 +900,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 252 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 252 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -908,7 +908,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 2 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 2 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -916,7 +916,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 130 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 130 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -924,7 +924,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 66 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 66 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -932,7 +932,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 194 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 194 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -940,7 +940,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 34 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 34 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -948,7 +948,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 162 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 162 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -956,7 +956,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 98 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 98 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -964,7 +964,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 226 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 226 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -972,7 +972,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 18 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 18 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -980,7 +980,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 146 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 146 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -988,7 +988,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 82 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 82 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -996,7 +996,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 210 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 210 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1004,7 +1004,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 50 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 50 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1012,7 +1012,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 178 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 178 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1020,7 +1020,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 114 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 114 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1028,7 +1028,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 242 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 242 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1036,7 +1036,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 10 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 10 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1044,7 +1044,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 138 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 138 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1052,7 +1052,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 74 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 74 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1060,7 +1060,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 202 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 202 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1068,7 +1068,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 42 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 42 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1076,7 +1076,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 170 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 170 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1084,7 +1084,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 106 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 106 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1092,7 +1092,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 234 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 234 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1100,7 +1100,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 26 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 26 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1108,7 +1108,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 154 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 154 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1116,7 +1116,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 90 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 90 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1124,7 +1124,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 218 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 218 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1132,7 +1132,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 58 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 58 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1140,7 +1140,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 186 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 186 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1148,7 +1148,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 122 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 122 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1156,7 +1156,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 250 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 250 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1164,7 +1164,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 6 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 6 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1172,7 +1172,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 134 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 134 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1180,7 +1180,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 70 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 70 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1188,7 +1188,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 198 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 198 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1196,7 +1196,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 38 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 38 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1204,7 +1204,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 166 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 166 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1212,7 +1212,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 102 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 102 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1220,7 +1220,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 230 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 230 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1228,7 +1228,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 22 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 22 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1236,7 +1236,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 150 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 150 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1244,7 +1244,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 86 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 86 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1252,7 +1252,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 214 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 214 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1260,7 +1260,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 54 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 54 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1268,7 +1268,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 182 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 182 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1276,7 +1276,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 118 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 118 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1284,7 +1284,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 246 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 246 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1292,7 +1292,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 14 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 14 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1300,7 +1300,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 142 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 142 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1308,7 +1308,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 78 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 78 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1316,7 +1316,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 206 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 206 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1324,7 +1324,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 46 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 46 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1332,7 +1332,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 174 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 174 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1340,7 +1340,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 110 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 110 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1348,7 +1348,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 238 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 238 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1356,7 +1356,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 30 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 30 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1364,7 +1364,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 158 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 158 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1372,7 +1372,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 94 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 94 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1380,7 +1380,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 222 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 222 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1388,7 +1388,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 62 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 62 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1396,7 +1396,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 190 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 190 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1404,7 +1404,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 126 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 126 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1412,7 +1412,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 254 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 254 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1420,7 +1420,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 1 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 1 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1428,7 +1428,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 129 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 129 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1436,7 +1436,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 65 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 65 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1444,7 +1444,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 193 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 193 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1452,7 +1452,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 33 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 33 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1460,7 +1460,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 161 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 161 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1468,7 +1468,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 97 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 97 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1476,7 +1476,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 225 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 225 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1484,7 +1484,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 17 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 17 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1492,7 +1492,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 145 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 145 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1500,7 +1500,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 81 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 81 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1508,7 +1508,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 209 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 209 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1516,7 +1516,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 49 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 49 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1524,7 +1524,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 177 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 177 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1532,7 +1532,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 113 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 113 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1540,7 +1540,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 241 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 241 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1548,7 +1548,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1556,7 +1556,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 137 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 137 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1564,7 +1564,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 73 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 73 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1572,7 +1572,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 201 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 201 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1580,7 +1580,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 41 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 41 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1588,7 +1588,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 169 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 169 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1596,7 +1596,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 105 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 105 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1604,7 +1604,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 233 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 233 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1612,7 +1612,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 25 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 25 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1620,7 +1620,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 153 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 153 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1628,7 +1628,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 89 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 89 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1636,7 +1636,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 217 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 217 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1644,7 +1644,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 57 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 57 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1652,7 +1652,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 185 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 185 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1660,7 +1660,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 121 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 121 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1668,7 +1668,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 249 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 249 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1676,7 +1676,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1684,7 +1684,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 133 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 133 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1692,7 +1692,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 69 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 69 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1700,7 +1700,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 197 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 197 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1708,7 +1708,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 37 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 37 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1716,7 +1716,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 165 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 165 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1724,7 +1724,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 101 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 101 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1732,7 +1732,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 229 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 229 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1740,7 +1740,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 21 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 21 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1748,7 +1748,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 149 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 149 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1756,7 +1756,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 85 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 85 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1764,7 +1764,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 213 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 213 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1772,7 +1772,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 53 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 53 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1780,7 +1780,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 181 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 181 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1788,7 +1788,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 117 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 117 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1796,7 +1796,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 245 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 245 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1804,7 +1804,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 13 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 13 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1812,7 +1812,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 141 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 141 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1820,7 +1820,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 77 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 77 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1828,7 +1828,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 205 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 205 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1836,7 +1836,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 45 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 45 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1844,7 +1844,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 173 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 173 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1852,7 +1852,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 109 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 109 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1860,7 +1860,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 237 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 237 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1868,7 +1868,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 29 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 29 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1876,7 +1876,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 157 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 157 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1884,7 +1884,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 93 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 93 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1892,7 +1892,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 221 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 221 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1900,7 +1900,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 61 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 61 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1908,7 +1908,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 189 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 189 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1916,7 +1916,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 125 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 125 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1924,7 +1924,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 253 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 253 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1932,7 +1932,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 19 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 19 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1940,7 +1940,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 275 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 275 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1948,7 +1948,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 147 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 147 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1956,7 +1956,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 403 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 403 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1964,7 +1964,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 83 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 83 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1972,7 +1972,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 339 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 339 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1980,7 +1980,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 211 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 211 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1988,7 +1988,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 467 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 467 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -1996,7 +1996,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 51 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 51 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2004,7 +2004,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 307 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 307 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2012,7 +2012,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 179 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 179 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2020,7 +2020,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 435 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 435 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2028,7 +2028,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 115 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 115 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2036,7 +2036,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 371 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 371 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2044,7 +2044,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 243 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 243 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2052,7 +2052,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 499 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 499 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2060,7 +2060,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 11 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 11 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2068,7 +2068,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 267 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 267 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2076,7 +2076,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 139 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 139 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2084,7 +2084,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 395 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 395 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2092,7 +2092,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 75 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 75 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2100,7 +2100,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 331 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 331 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2108,7 +2108,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 203 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 203 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2116,7 +2116,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 459 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 459 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2124,7 +2124,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 43 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 43 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2132,7 +2132,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 299 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 299 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2140,7 +2140,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 171 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 171 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2148,7 +2148,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 427 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 427 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2156,7 +2156,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 107 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 107 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2164,7 +2164,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 363 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 363 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2172,7 +2172,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 235 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 235 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2180,7 +2180,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 491 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 491 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2188,7 +2188,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 27 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 27 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2196,7 +2196,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 283 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 283 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2204,7 +2204,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 155 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 155 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2212,7 +2212,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 411 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 411 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2220,7 +2220,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 91 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 91 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2228,7 +2228,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 347 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 347 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2236,7 +2236,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 219 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 219 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2244,7 +2244,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 475 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 475 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2252,7 +2252,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 59 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 59 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2260,7 +2260,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 315 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 315 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2268,7 +2268,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 187 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 187 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2276,7 +2276,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 443 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 443 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2284,7 +2284,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 123 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 123 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2292,7 +2292,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 379 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 379 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2300,7 +2300,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 251 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 251 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2308,7 +2308,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 507 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 507 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2316,7 +2316,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2324,7 +2324,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 263 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 263 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2332,7 +2332,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 135 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 135 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2340,7 +2340,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 391 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 391 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2348,7 +2348,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 71 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 71 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2356,7 +2356,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 327 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 327 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2364,7 +2364,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 199 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 199 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2372,7 +2372,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 455 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 455 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2380,7 +2380,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 39 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 39 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2388,7 +2388,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 295 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 295 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2396,7 +2396,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 167 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 167 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2404,7 +2404,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 423 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 423 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2412,7 +2412,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 103 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 103 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2420,7 +2420,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 359 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 359 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2428,7 +2428,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 231 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 231 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2436,7 +2436,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 487 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 487 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2444,7 +2444,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 23 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 23 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2452,7 +2452,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 279 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 279 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2460,7 +2460,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 151 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 151 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2468,7 +2468,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 407 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 407 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2476,7 +2476,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 87 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 87 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2484,7 +2484,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 343 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 343 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2492,7 +2492,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 215 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 215 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2500,7 +2500,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 471 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 471 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2508,7 +2508,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 55 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 55 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2516,7 +2516,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 311 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 311 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2524,7 +2524,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 183 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 183 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2532,7 +2532,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 439 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 439 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2540,7 +2540,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 119 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 119 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2548,7 +2548,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 375 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 375 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2556,7 +2556,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 247 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 247 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2564,7 +2564,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 503 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 503 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2572,7 +2572,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 15 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 15 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2580,7 +2580,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 271 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 271 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2588,7 +2588,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 143 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 143 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2596,7 +2596,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 399 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 399 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2604,7 +2604,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 79 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 79 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2612,7 +2612,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 335 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 335 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2620,7 +2620,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 207 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 207 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2628,7 +2628,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 463 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 463 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2636,7 +2636,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 47 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 47 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2644,7 +2644,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 303 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 303 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2652,7 +2652,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 175 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 175 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2660,7 +2660,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 431 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 431 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2668,7 +2668,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 111 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 111 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2676,7 +2676,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 367 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 367 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2684,7 +2684,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 239 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 239 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2692,7 +2692,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 495 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 495 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2700,7 +2700,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 31 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 31 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2708,7 +2708,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 287 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 287 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2716,7 +2716,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 159 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 159 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2724,7 +2724,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 415 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 415 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2732,7 +2732,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 95 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 95 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2740,7 +2740,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 351 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 351 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2748,7 +2748,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 223 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 223 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2756,7 +2756,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 479 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 479 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2764,7 +2764,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 63 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 63 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2772,7 +2772,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 319 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 319 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2780,7 +2780,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 191 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 191 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2788,7 +2788,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 447 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 447 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2796,7 +2796,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 127 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 127 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2804,7 +2804,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 383 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 383 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2812,7 +2812,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 255 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 255 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2820,7 +2820,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 511 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 511 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2828,7 +2828,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 0 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 0 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2836,7 +2836,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 64 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 64 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2844,7 +2844,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 32 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 32 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2852,7 +2852,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 96 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 96 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2860,7 +2860,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 16 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 16 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2868,7 +2868,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 80 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 80 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2876,7 +2876,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 48 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 48 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2884,7 +2884,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 112 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 112 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2892,7 +2892,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2900,7 +2900,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 72 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 72 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2908,7 +2908,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 40 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 40 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2916,7 +2916,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 104 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 104 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2924,7 +2924,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 24 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 24 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2932,7 +2932,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 88 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 88 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2940,7 +2940,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 56 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 56 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2948,7 +2948,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 120 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 120 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2956,7 +2956,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 4 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 4 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2964,7 +2964,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 68 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 68 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2972,7 +2972,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 36 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 36 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2980,7 +2980,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 100 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 100 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2988,7 +2988,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 20 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 20 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -2996,7 +2996,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 84 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 84 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3004,7 +3004,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 52 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 52 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3012,7 +3012,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 116 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 116 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3020,7 +3020,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 3 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 3 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3028,7 +3028,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 131 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 131 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3036,7 +3036,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 67 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 67 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3044,7 +3044,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 195 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 195 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3052,7 +3052,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 35 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 35 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3060,7 +3060,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 163 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 163 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3068,7 +3068,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 99 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 99 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3076,7 +3076,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 227 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 227 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3087,7 +3087,7 @@ pub mod trees_h {
     pub static static_dtree: [crate::src::deflate::ct_data; 30] = [
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 0 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 0 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3095,7 +3095,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 16 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 16 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3103,7 +3103,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 8 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3111,7 +3111,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 24 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 24 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3119,7 +3119,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 4 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 4 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3127,7 +3127,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 20 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 20 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3135,7 +3135,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 12 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 12 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3143,7 +3143,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 28 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 28 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3151,7 +3151,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 2 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 2 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3159,7 +3159,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 18 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 18 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3167,7 +3167,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 10 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 10 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3175,7 +3175,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 26 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 26 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3183,7 +3183,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 6 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 6 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3191,7 +3191,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 22 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 22 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3199,7 +3199,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 14 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 14 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3207,7 +3207,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 30 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 30 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3215,7 +3215,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 1 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 1 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3223,7 +3223,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 17 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 17 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3231,7 +3231,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 9 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3239,7 +3239,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 25 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 25 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3247,7 +3247,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3255,7 +3255,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 21 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 21 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3263,7 +3263,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 13 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 13 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3271,7 +3271,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 29 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 29 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3279,7 +3279,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 3 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 3 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3287,7 +3287,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 19 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 19 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3295,7 +3295,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 11 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 11 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3303,7 +3303,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 27 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 27 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3311,7 +3311,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 7 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3319,7 +3319,7 @@ pub mod trees_h {
         },
         crate::src::deflate::ct_data_s {
             fc: crate::src::deflate::C2Rust_Unnamed_1 {
-                freq: 23 as ::core::ffi::c_int as crate::zutil_h::ush,
+                value: 23 as ::core::ffi::c_int as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
                 dad: 5 as ::core::ffi::c_int as crate::zutil_h::ush,
@@ -3710,7 +3710,7 @@ unsafe extern "C" fn gen_codes(
         if !(len == 0 as ::core::ffi::c_int) {
             let c2rust_fresh58 = next_code[len as usize];
             next_code[len as usize] = next_code[len as usize].wrapping_add(1);
-            (*tree.offset(n as isize)).fc.code =
+            (*tree.offset(n as isize)).fc.value =
                 bi_reverse(c2rust_fresh58 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
         n += 1;
@@ -3723,20 +3723,20 @@ unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) 
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::L_CODES {
-        (*s).dyn_ltree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        (*s).dyn_ltree[n as usize].fc.value = 0 as crate::zutil_h::ush;
         n += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::D_CODES {
-        (*s).dyn_dtree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        (*s).dyn_dtree[n as usize].fc.value = 0 as crate::zutil_h::ush;
         n += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::BL_CODES {
-        (*s).bl_tree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        (*s).bl_tree[n as usize].fc.value = 0 as crate::zutil_h::ush;
         n += 1;
     }
-    (*s).dyn_ltree[END_BLOCK as usize].fc.freq = 1 as crate::zutil_h::ush;
+    (*s).dyn_ltree[END_BLOCK as usize].fc.value = 1 as crate::zutil_h::ush;
     (*s).static_len = 0 as crate::zutil_h::ulg;
     (*s).opt_len = (*s).static_len;
     (*s).matches = 0 as crate::stdlib::uInt;
@@ -3775,23 +3775,21 @@ unsafe extern "C" fn pqdownheap(
     while j <= (*s).heap_len {
         if j < (*s).heap_len
             && (((*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                .fc
-                .freq as ::core::ffi::c_int)
-                < (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
+                .fc.value as ::core::ffi::c_int)
+                < (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
                 || (*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                    .fc
-                    .freq as ::core::ffi::c_int
-                    == (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
+                    .fc.value as ::core::ffi::c_int
+                    == (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
                     && (*s).depth[(*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
                         as ::core::ffi::c_int
                         <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int)
         {
             j += 1;
         }
-        if ((*tree.offset(v as isize)).fc.freq as ::core::ffi::c_int)
-            < (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-            || (*tree.offset(v as isize)).fc.freq as ::core::ffi::c_int
-                == (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
+        if ((*tree.offset(v as isize)).fc.value as ::core::ffi::c_int)
+            < (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
+            || (*tree.offset(v as isize)).fc.value as ::core::ffi::c_int
+                == (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
                 && (*s).depth[v as usize] as ::core::ffi::c_int
                     <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int
         {
@@ -3847,7 +3845,7 @@ unsafe extern "C" fn gen_bitlen(
             if n >= base {
                 xbits = *extra.offset((n - base) as isize) as ::core::ffi::c_int;
             }
-            f = (*tree.offset(n as isize)).fc.freq;
+            f = (*tree.offset(n as isize)).fc.value;
             (*s).opt_len =
                 (*s).opt_len
                     .wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
@@ -3898,7 +3896,7 @@ unsafe extern "C" fn gen_bitlen(
                 (*s).opt_len = (*s).opt_len.wrapping_add(
                     (bits as crate::zutil_h::ulg)
                         .wrapping_sub((*tree.offset(m as isize)).dl.len as crate::zutil_h::ulg)
-                        .wrapping_mul((*tree.offset(m as isize)).fc.freq as crate::zutil_h::ulg),
+                        .wrapping_mul((*tree.offset(m as isize)).fc.value as crate::zutil_h::ulg),
                 );
                 (*tree.offset(m as isize)).dl.len = bits as crate::zutil_h::ush;
             }
@@ -3923,7 +3921,7 @@ unsafe extern "C" fn build_tree(
     (*s).heap_max = crate::src::deflate::HEAP_SIZE;
     n = 0 as ::core::ffi::c_int;
     while n < elems {
-        if (*tree.offset(n as isize)).fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+        if (*tree.offset(n as isize)).fc.value as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             max_code = n;
             (*s).heap_len += 1;
             (*s).heap[(*s).heap_len as usize] = max_code;
@@ -3942,7 +3940,7 @@ unsafe extern "C" fn build_tree(
             0 as ::core::ffi::c_int
         };
         node = (*s).heap[(*s).heap_len as usize];
-        (*tree.offset(node as isize)).fc.freq = 1 as crate::zutil_h::ush;
+        (*tree.offset(node as isize)).fc.value = 1 as crate::zutil_h::ush;
         (*s).depth[node as usize] = 0 as crate::zutil_h::uch;
         (*s).opt_len = (*s).opt_len.wrapping_sub(1);
         if !stree.is_null() {
@@ -3969,9 +3967,9 @@ unsafe extern "C" fn build_tree(
         (*s).heap[(*s).heap_max as usize] = n;
         (*s).heap_max -= 1;
         (*s).heap[(*s).heap_max as usize] = m;
-        (*tree.offset(node as isize)).fc.freq = ((*tree.offset(n as isize)).fc.freq
+        (*tree.offset(node as isize)).fc.value = ((*tree.offset(n as isize)).fc.value
             as ::core::ffi::c_int
-            + (*tree.offset(m as isize)).fc.freq as ::core::ffi::c_int)
+            + (*tree.offset(m as isize)).fc.value as ::core::ffi::c_int)
             as crate::zutil_h::ush;
         (*s).depth[node as usize] = ((if (*s).depth[n as usize] as ::core::ffi::c_int
             >= (*s).depth[m as usize] as ::core::ffi::c_int
@@ -4030,23 +4028,23 @@ unsafe extern "C" fn scan_tree(
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
-                (*s).bl_tree[curlen as usize].fc.freq = ((*s).bl_tree[curlen as usize].fc.freq
+                (*s).bl_tree[curlen as usize].fc.value = ((*s).bl_tree[curlen as usize].fc.value
                     as ::core::ffi::c_int
                     + count as crate::zutil_h::ush as ::core::ffi::c_int)
                     as crate::zutil_h::ush;
             } else if curlen != 0 as ::core::ffi::c_int {
                 if curlen != prevlen {
-                    (*s).bl_tree[curlen as usize].fc.freq =
-                        (*s).bl_tree[curlen as usize].fc.freq.wrapping_add(1);
+                    (*s).bl_tree[curlen as usize].fc.value =
+                        (*s).bl_tree[curlen as usize].fc.value.wrapping_add(1);
                 }
-                (*s).bl_tree[REP_3_6 as usize].fc.freq =
-                    (*s).bl_tree[REP_3_6 as usize].fc.freq.wrapping_add(1);
+                (*s).bl_tree[REP_3_6 as usize].fc.value =
+                    (*s).bl_tree[REP_3_6 as usize].fc.value.wrapping_add(1);
             } else if count <= 10 as ::core::ffi::c_int {
-                (*s).bl_tree[REPZ_3_10 as usize].fc.freq =
-                    (*s).bl_tree[REPZ_3_10 as usize].fc.freq.wrapping_add(1);
+                (*s).bl_tree[REPZ_3_10 as usize].fc.value =
+                    (*s).bl_tree[REPZ_3_10 as usize].fc.value.wrapping_add(1);
             } else {
-                (*s).bl_tree[REPZ_11_138 as usize].fc.freq =
-                    (*s).bl_tree[REPZ_11_138 as usize].fc.freq.wrapping_add(1);
+                (*s).bl_tree[REPZ_11_138 as usize].fc.value =
+                    (*s).bl_tree[REPZ_11_138 as usize].fc.value.wrapping_add(1);
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
@@ -4096,7 +4094,7 @@ unsafe extern "C" fn send_tree(
                         (*s).bl_tree[curlen as usize].dl.len as ::core::ffi::c_int;
                     if (*s).bi_valid > crate::src::deflate::Buf_size - len {
                         let mut val: ::core::ffi::c_int =
-                            (*s).bl_tree[curlen as usize].fc.code as ::core::ffi::c_int;
+                            (*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -4116,7 +4114,7 @@ unsafe extern "C" fn send_tree(
                         (*s).bi_valid += len - crate::src::deflate::Buf_size;
                     } else {
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[curlen as usize].fc.code as ::core::ffi::c_int)
+                            | ((*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int)
                                 << (*s).bi_valid)
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len;
@@ -4132,7 +4130,7 @@ unsafe extern "C" fn send_tree(
                         (*s).bl_tree[curlen as usize].dl.len as ::core::ffi::c_int;
                     if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
                         let mut val_0: ::core::ffi::c_int =
-                            (*s).bl_tree[curlen as usize].fc.code as ::core::ffi::c_int;
+                            (*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -4152,7 +4150,7 @@ unsafe extern "C" fn send_tree(
                         (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
                     } else {
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((*s).bl_tree[curlen as usize].fc.code as ::core::ffi::c_int)
+                            | ((*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int)
                                 << (*s).bi_valid)
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len_0;
@@ -4163,7 +4161,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bl_tree[16 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_1 {
                     let mut val_1: ::core::ffi::c_int =
-                        (*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.code
+                        (*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.value
                             as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_1 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4184,7 +4182,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bi_valid += len_1 - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.code
+                        | ((*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.value
                             as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4223,7 +4221,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bl_tree[17 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_3 {
                     let mut val_3: ::core::ffi::c_int =
-                        (*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.code
+                        (*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.value
                             as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_3 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4244,7 +4242,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bi_valid += len_3 - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.code
+                        | ((*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.value
                             as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4283,7 +4281,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bl_tree[18 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_5 {
                     let mut val_5: ::core::ffi::c_int =
-                        (*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.code
+                        (*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.value
                             as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_5 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4304,7 +4302,7 @@ unsafe extern "C" fn send_tree(
                     (*s).bi_valid += len_5 - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.code
+                        | ((*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.value
                             as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4630,7 +4628,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
         static_ltree[256 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
     if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
         let mut val_0: ::core::ffi::c_int =
-            static_ltree[256 as ::core::ffi::c_int as usize].fc.code as ::core::ffi::c_int;
+            static_ltree[256 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;
@@ -4648,7 +4646,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
         (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
     } else {
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | (static_ltree[256 as ::core::ffi::c_int as usize].fc.code as ::core::ffi::c_int)
+            | (static_ltree[256 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int)
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len_0;
     }
@@ -4690,7 +4688,7 @@ unsafe extern "C" fn compress_block(
                     (*ltree.offset(lc as isize)).dl.len as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len {
                     let mut val: ::core::ffi::c_int =
-                        (*ltree.offset(lc as isize)).fc.code as ::core::ffi::c_int;
+                        (*ltree.offset(lc as isize)).fc.value as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4710,7 +4708,7 @@ unsafe extern "C" fn compress_block(
                     (*s).bi_valid += len - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*ltree.offset(lc as isize)).fc.code as ::core::ffi::c_int)
+                        | ((*ltree.offset(lc as isize)).fc.value as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
                     (*s).bi_valid += len;
@@ -4729,8 +4727,7 @@ unsafe extern "C" fn compress_block(
                             .wrapping_add(1 as ::core::ffi::c_uint)
                             as isize,
                     ))
-                    .fc
-                    .code
+                    .fc.value
                         as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4756,8 +4753,7 @@ unsafe extern "C" fn compress_block(
                                 .wrapping_add(1 as ::core::ffi::c_uint)
                                 as isize,
                         ))
-                        .fc
-                        .code as ::core::ffi::c_int)
+                        .fc.value as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
                     (*s).bi_valid += len_0;
@@ -4798,7 +4794,7 @@ unsafe extern "C" fn compress_block(
                     (*dtree.offset(code as isize)).dl.len as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
                     let mut val_2: ::core::ffi::c_int =
-                        (*dtree.offset(code as isize)).fc.code as ::core::ffi::c_int;
+                        (*dtree.offset(code as isize)).fc.value as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -4818,7 +4814,7 @@ unsafe extern "C" fn compress_block(
                     (*s).bi_valid += len_2 - crate::src::deflate::Buf_size;
                 } else {
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                        | ((*dtree.offset(code as isize)).fc.code as ::core::ffi::c_int)
+                        | ((*dtree.offset(code as isize)).fc.value as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
                     (*s).bi_valid += len_2;
@@ -4865,7 +4861,7 @@ unsafe extern "C" fn compress_block(
         (*ltree.offset(256 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
     if (*s).bi_valid > crate::src::deflate::Buf_size - len_4 {
         let mut val_4: ::core::ffi::c_int =
-            (*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.code as ::core::ffi::c_int;
+            (*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.value as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_4 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;
@@ -4883,7 +4879,7 @@ unsafe extern "C" fn compress_block(
         (*s).bi_valid += len_4 - crate::src::deflate::Buf_size;
     } else {
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | ((*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.code as ::core::ffi::c_int)
+            | ((*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.value as ::core::ffi::c_int)
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len_4;
     };
@@ -4897,25 +4893,25 @@ unsafe extern "C" fn detect_data_type(
     n = 0 as ::core::ffi::c_int;
     while n <= 31 as ::core::ffi::c_int {
         if block_mask & 1 as ::core::ffi::c_ulong != 0
-            && (*s).dyn_ltree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+            && (*s).dyn_ltree[n as usize].fc.value as ::core::ffi::c_int != 0 as ::core::ffi::c_int
         {
             return crate::zlib_h::Z_BINARY;
         }
         n += 1;
         block_mask >>= 1 as ::core::ffi::c_int;
     }
-    if (*s).dyn_ltree[9 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+    if (*s).dyn_ltree[9 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
         != 0 as ::core::ffi::c_int
-        || (*s).dyn_ltree[10 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+        || (*s).dyn_ltree[10 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
-        || (*s).dyn_ltree[13 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+        || (*s).dyn_ltree[13 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_TEXT;
     }
     n = 32 as ::core::ffi::c_int;
     while n < crate::src::deflate::LITERALS {
-        if (*s).dyn_ltree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+        if (*s).dyn_ltree[n as usize].fc.value as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             return crate::zlib_h::Z_TEXT;
         }
         n += 1;
@@ -5073,26 +5069,22 @@ pub unsafe extern "C" fn _tr_tally(
     *(*s).sym_buf.offset(c2rust_fresh2 as isize) =
         lc as crate::zutil_h::uch as crate::zutil_h::uchf;
     if dist == 0 as ::core::ffi::c_uint {
-        (*s).dyn_ltree[lc as usize].fc.freq = (*s).dyn_ltree[lc as usize].fc.freq.wrapping_add(1);
+        (*s).dyn_ltree[lc as usize].fc.value = (*s).dyn_ltree[lc as usize].fc.value.wrapping_add(1);
     } else {
         (*s).matches = (*s).matches.wrapping_add(1);
         dist = dist.wrapping_sub(1);
         (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
             + crate::src::deflate::LITERALS
             + 1 as ::core::ffi::c_int) as usize]
-            .fc
-            .freq = (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize]
+            .fc.value = (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize]
             as ::core::ffi::c_int
             + crate::src::deflate::LITERALS
             + 1 as ::core::ffi::c_int) as usize]
-            .fc
-            .freq
+            .fc.value
             .wrapping_add(1);
         (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
-            .fc
-            .freq = (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
-            .fc
-            .freq
+            .fc.value = (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
+            .fc.value
             .wrapping_add(1);
     }
     return ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
