@@ -81,6 +81,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     let strm = ::core::ptr::NonNull::new(strm);
     let mut copied_state = None;
     crate::src::inflate::inflate_publish_callback_owner(
+        None,
         strm,
         None,
         version,

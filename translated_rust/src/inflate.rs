@@ -746,7 +746,8 @@ impl InflateCallbackInitRequest {
 // state publication or matching zfree.  The owner it receives contains no
 // callback handle, stream pointer, or foreign registration.
 pub(crate) unsafe fn inflate_publish_callback_owner(
-    strm: Option<::core::ptr::NonNull<crate::zlib_h::z_stream_s>>,
+    strm: Option<&mut crate::zlib_h::z_stream_s>,
+    stream_handle: Option<::core::ptr::NonNull<crate::zlib_h::z_stream_s>>,
     request: Option<InflateCallbackInitRequest>,
     version: *const ::core::ffi::c_char,
     validate_version: bool,
@@ -788,14 +789,19 @@ pub(crate) unsafe fn inflate_publish_callback_owner(
         }
         None => request,
     };
-    let Some(mut strm) = strm else {
-        return crate::zlib_h::Z_STREAM_ERROR;
+    let strm = match strm {
+        Some(strm) => strm,
+        None => {
+            let Some(mut strm) = stream_handle else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            strm.as_mut()
+        }
     };
     // Callback allocation and state publication are the one transaction that
-    // needs a mutable ABI stream.  Keep the raw-handle projection here with
-    // that transaction, so callers can carry the validated handle through
-    // their pointer-free admission work without rebuilding a stream borrow.
-    let strm = strm.as_mut();
+    // needs a mutable ABI stream.  Normal initializer exports have already
+    // validated that borrow; keep it through this transaction rather than
+    // rebuilding it from a raw handle.
     // Keep the caller's stream projection at the allocator boundary. The
     // callback-owned state is published only after it has been fully
     // initialized below, since zalloc() need not return initialized bytes.
@@ -1100,7 +1106,8 @@ unsafe fn inflate_init2_from_abi(
 ) -> ::core::ffi::c_int {
     let mut copied_state = None;
     inflate_publish_callback_owner(
-        strm.map(::core::ptr::NonNull::from),
+        strm,
+        None,
         Some(inflateInit2_(window_bits)),
         version,
         true,
@@ -3483,7 +3490,8 @@ pub(crate) unsafe fn inflate_from_stream(
         };
         let mut copied_state = None;
         let status = inflate_publish_callback_owner(
-            Some(::core::ptr::NonNull::from(&mut *strm)),
+            Some(&mut *strm),
+            None,
             None,
             ::core::ptr::null(),
             false,
