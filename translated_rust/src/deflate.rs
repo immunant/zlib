@@ -680,6 +680,94 @@ fn initialize_deflate_state_base(
         .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
 }
 
+/// The C initializer zeroed its allocator-provided storage before configuring
+/// it.  Construct the equivalent valid Rust value instead, so the named
+/// allocation boundary never treats untyped bytes as an initialized state.
+fn empty_deflate_state() -> crate::src::deflate::deflate_state {
+    let empty_tree = || crate::src::deflate::ct_data_s {
+        fc: crate::src::deflate::C2Rust_Unnamed_1 { freq: 0 },
+        dl: crate::src::deflate::C2Rust_Unnamed_0 { len: 0 },
+    };
+    crate::src::deflate::deflate_state {
+        strm: ::core::ptr::null_mut(),
+        status: 0,
+        pending_buf: ::core::ptr::null_mut(),
+        pending_buf_size: 0,
+        pending_out: ::core::ptr::null_mut(),
+        pending: 0,
+        wrap: 0,
+        gzhead: ::core::ptr::null_mut(),
+        gzhead_bound_set: false,
+        gzhead_bound_has_extra: false,
+        gzhead_bound_extra_len: 0,
+        gzhead_bound_name_len: 0,
+        gzhead_bound_comment_len: 0,
+        gzhead_bound_hcrc: 0,
+        gzindex: 0,
+        method: 0,
+        last_flush: 0,
+        w_size: 0,
+        w_bits: 0,
+        w_mask: 0,
+        window: ::core::ptr::null_mut(),
+        window_size: 0,
+        prev: ::core::ptr::null_mut(),
+        head: ::core::ptr::null_mut(),
+        ins_h: 0,
+        hash_size: 0,
+        hash_bits: 0,
+        hash_mask: 0,
+        hash_shift: 0,
+        block_start: 0,
+        match_length: 0,
+        prev_match: 0,
+        match_available: 0,
+        strstart: 0,
+        match_start: 0,
+        lookahead: 0,
+        prev_length: 0,
+        max_chain_length: 0,
+        max_lazy_match: 0,
+        level: 0,
+        strategy: 0,
+        good_match: 0,
+        nice_match: 0,
+        dyn_ltree: ::core::array::from_fn(|_| empty_tree()),
+        dyn_dtree: ::core::array::from_fn(|_| empty_tree()),
+        bl_tree: ::core::array::from_fn(|_| empty_tree()),
+        l_desc: crate::src::deflate::tree_desc_s {
+            max_code: 0,
+            stat_desc: 0,
+        },
+        d_desc: crate::src::deflate::tree_desc_s {
+            max_code: 0,
+            stat_desc: 0,
+        },
+        bl_desc: crate::src::deflate::tree_desc_s {
+            max_code: 0,
+            stat_desc: 0,
+        },
+        bl_count: [0; 16],
+        heap: [0; 573],
+        heap_len: 0,
+        heap_max: 0,
+        depth: [0; 573],
+        sym_buf: ::core::ptr::null_mut(),
+        lit_bufsize: 0,
+        sym_next: 0,
+        sym_end: 0,
+        opt_len: 0,
+        static_len: 0,
+        matches: 0,
+        insert: 0,
+        bi_buf: 0,
+        bi_valid: 0,
+        bi_used: 0,
+        high_water: 0,
+        slid: 0,
+    }
+}
+
 pub fn deflateInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut level: ::core::ffi::c_int,
@@ -765,13 +853,9 @@ pub fn deflateInit2_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     unsafe {
-        crate::stdlib::memset(
-            s as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-        );
         strm.state = s as *mut crate::src::deflate::internal_state;
         let state = &mut *s;
+        *state = empty_deflate_state();
         initialize_deflate_state_base(state, strm, config.wrap, config.window_bits, memLevel);
         let storage = DeflateStorageLayout::from_state(state);
         state.window = Some(strm.zalloc.expect("non-null function pointer"))
