@@ -48,6 +48,35 @@ pub use crate::zlib_h::gz_headerp;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
+
+/// Copy a DEFLATE match whose source is earlier in the current output buffer.
+///
+/// The byte-at-a-time order is deliberate: a match may overlap its destination,
+/// and later bytes must be able to read bytes written by this same match.
+fn copy_output_match(
+    output: &mut [u8],
+    output_index: &mut usize,
+    distance: usize,
+    length: usize,
+) -> bool {
+    let Some(source_start) = output_index.checked_sub(distance) else {
+        return false;
+    };
+    let Some(output_end) = output_index.checked_add(length) else {
+        return false;
+    };
+    if output_end > output.len() {
+        return false;
+    }
+
+    for offset in 0..length {
+        let byte = output[source_start + offset];
+        output[*output_index + offset] = byte;
+    }
+    *output_index = output_end;
+    true
+}
+
 pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core::ffi::c_uint) {
     let mut in_index: usize = 0;
     let mut last: usize = 0;
@@ -84,6 +113,10 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
     out = strm.next_out as *mut ::core::ffi::c_uchar;
     beg = out
         .wrapping_offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
+    // This is the same caller output extent represented by `beg` and `start`
+    // below.  Keep it local to the fast engine, which already relies on the
+    // five-byte/257-byte entry bounds before indexing this range.
+    let output = ::core::slice::from_raw_parts_mut(beg, start as usize);
     end = out.wrapping_offset(strm.avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
     wsize = state.wsize;
     whave = state.whave;
@@ -304,43 +337,20 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                             break 's_92;
                         } else {
                             // `dist <= out - beg` on this branch, so this is a
-                            // same-allocation match-source cursor rewind.
-                            from = out.wrapping_offset(-(dist as isize));
-                            loop {
-                                let c2rust_fresh26 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh27 = out;
-                                out = out.wrapping_add(1);
-                                *c2rust_fresh27 = *c2rust_fresh26;
-                                let c2rust_fresh28 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh29 = out;
-                                out = out.wrapping_add(1);
-                                *c2rust_fresh29 = *c2rust_fresh28;
-                                let c2rust_fresh30 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh31 = out;
-                                out = out.wrapping_add(1);
-                                *c2rust_fresh31 = *c2rust_fresh30;
-                                len = len.wrapping_sub(3 as ::core::ffi::c_uint);
-                                if len <= 2 as ::core::ffi::c_uint {
-                                    break;
-                                }
+                            // same-allocation match source. Use a bounded
+                            // sequential copy so overlapping matches keep
+                            // their DEFLATE repeat semantics.
+                            let mut output_index = out.addr().wrapping_sub(beg.addr());
+                            if !copy_output_match(
+                                output,
+                                &mut output_index,
+                                dist as usize,
+                                len as usize,
+                            ) {
+                                state.mode = crate::src::inflate::BAD;
+                                break 's_627;
                             }
-                            if len != 0 {
-                                let c2rust_fresh32 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh33 = out;
-                                out = out.wrapping_add(1);
-                                *c2rust_fresh33 = *c2rust_fresh32;
-                                if len > 1 as ::core::ffi::c_uint {
-                                    let c2rust_fresh34 = from;
-                                    from = from.wrapping_add(1);
-                                    let c2rust_fresh35 = out;
-                                    out = out.wrapping_add(1);
-                                    *c2rust_fresh35 = *c2rust_fresh34;
-                                }
-                            }
+                            out = output.as_mut_ptr().wrapping_add(output_index);
                             break 's_92;
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
