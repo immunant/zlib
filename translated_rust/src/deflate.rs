@@ -1239,44 +1239,29 @@ fn deflate_state_is_usable(
     has_zalloc && has_zfree && state_points_to_stream && deflate_state_status_valid(status)
 }
 
-fn deflate_state_check_result(
-    has_stream: bool,
-    has_state: bool,
-    state_is_usable: bool,
-) -> ::core::ffi::c_int {
-    if has_stream && has_state && state_is_usable {
-        0
-    } else {
-        1
-    }
-}
-
-fn deflate_state_check_impl(
-    stream: Option<&crate::zlib_h::z_stream>,
-    state: Option<&crate::src::deflate::deflate_state>,
-    state_matches_stream: bool,
-) -> ::core::ffi::c_int {
-    let Some(stream) = stream else {
-        return deflate_state_check_result(false, false, false);
-    };
-    let Some(state) = state else {
-        return deflate_state_check_result(true, false, false);
-    };
-    let state_is_usable = deflate_state_is_usable(
+fn deflate_state_metadata_is_usable(
+    stream: &crate::zlib_h::z_stream,
+    state: &crate::src::deflate::deflate_state,
+    state_points_to_stream: bool,
+) -> bool {
+    deflate_state_is_usable(
         stream.zalloc.is_some(),
         stream.zfree.is_some(),
-        state_matches_stream,
+        state_points_to_stream,
         state.status,
-    );
-    deflate_state_check_result(true, true, state_is_usable)
+    )
 }
 
 fn deflate_state_check_references(
     stream: &crate::zlib_h::z_stream,
     state: &crate::src::deflate::deflate_state,
-    state_matches_stream: bool,
+    state_points_to_stream: bool,
 ) -> ::core::ffi::c_int {
-    deflate_state_check_impl(Some(stream), Some(state), state_matches_stream)
+    if deflate_state_metadata_is_usable(stream, state, state_points_to_stream) {
+        0
+    } else {
+        1
+    }
 }
 
 fn deflate_reset_status_and_adler(
@@ -1335,12 +1320,12 @@ fn deflate_dictionary_state_after_load(
 
 unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
-        return deflate_state_check_impl(None, None, false);
+        return 1;
     }
     let stream = &*strm;
     let state = stream.state as *mut crate::src::deflate::deflate_state;
     if state.is_null() {
-        return deflate_state_check_impl(Some(stream), None, false);
+        return 1;
     }
     let state = &*state;
     deflate_state_check_references(stream, state, state.strm == strm)
@@ -4360,11 +4345,10 @@ mod tests {
         deflate_rle_can_scan_match, deflate_rle_clamp_match_length, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
-        deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_check_impl,
-        deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
-        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
-        fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
-        fill_window_high_water_after_zero, fill_window_insert_after_slide,
+        deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_is_usable,
+        deflate_state_status_valid, deflate_version_matches, dictionary_tail_offset,
+        fill_window_available_space, fill_window_cursor, fill_window_has_insertable_match,
+        fill_window_hash_update, fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
         fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_reset_plan, lm_init_plan,
@@ -5840,57 +5824,6 @@ mod tests {
             crate::src::deflate::BUSY_STATE,
         ));
         assert!(!deflate_state_is_usable(true, true, true, 0));
-    }
-
-    #[test]
-    fn deflate_state_check_result_requires_stream_state_and_usable_metadata() {
-        let cases = [
-            (false, false, false, 1, "null stream"),
-            (
-                false,
-                false,
-                true,
-                1,
-                "null stream with otherwise usable state",
-            ),
-            (false, true, false, 1, "null stream with state"),
-            (false, true, true, 1, "null stream with usable state"),
-            (true, false, false, 1, "null state"),
-            (true, false, true, 1, "null state with usable metadata"),
-            (true, true, false, 1, "invalid metadata"),
-            (true, true, true, 0, "valid state"),
-        ];
-
-        for (has_stream, has_state, state_is_usable, expected, scenario) in cases {
-            assert_eq!(
-                deflate_state_check_result(has_stream, has_state, state_is_usable),
-                expected,
-                "{scenario}"
-            );
-        }
-    }
-
-    #[test]
-    fn deflate_state_check_impl_rejects_missing_stream_or_state() {
-        let stream = crate::zlib_h::z_stream {
-            next_in: ::core::ptr::null_mut(),
-            avail_in: 0,
-            total_in: 0,
-            next_out: ::core::ptr::null_mut(),
-            avail_out: 0,
-            total_out: 0,
-            msg: ::core::ptr::null_mut(),
-            state: ::core::ptr::null_mut(),
-            zalloc: None,
-            zfree: None,
-            opaque: ::core::ptr::null_mut(),
-            data_type: 0,
-            adler: 0,
-            reserved: 0,
-        };
-
-        assert_eq!(deflate_state_check_impl(None, None, false), 1);
-        assert_eq!(deflate_state_check_impl(Some(&stream), None, false), 1);
     }
 
     #[test]
