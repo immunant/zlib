@@ -618,13 +618,16 @@ pub unsafe extern "C" fn gzwrite_ffi(
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
+    // Validate the opaque handle before touching the caller buffer.  Besides
+    // keeping this wrapper a boundary conversion only, this preserves the
+    // null/invalid-handle return without constructing a slice from `buf`.
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0 as ::core::ffi::c_int;
+    };
     let input = if len == 0 {
         &[]
     } else {
         ::core::slice::from_raw_parts(buf.cast::<u8>(), len as usize)
-    };
-    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
-        return 0 as ::core::ffi::c_int;
     };
     gzwrite(state, input)
 }
@@ -679,12 +682,14 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
+    // As above, establish the opaque handle before forming any caller-buffer
+    // view.  The implementation retains the size/item validation policy.
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0 as crate::stdlib::z_size_t;
+    };
     let input = match size.checked_mul(nitems) {
         Some(0) | None => &[],
         Some(len) => ::core::slice::from_raw_parts(buf.cast::<u8>(), len),
-    };
-    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
-        return 0 as crate::stdlib::z_size_t;
     };
     gzfwrite(state, input, size, nitems)
 }
