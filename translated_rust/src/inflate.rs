@@ -159,14 +159,38 @@ pub struct inflate_state {
 /// sizing rule.
 struct InflateWindowLayout {
     allocation_items: crate::stdlib::uInt,
+    len: usize,
 }
 
 impl InflateWindowLayout {
-    fn from_state(state: &inflate_state) -> Self {
-        Self {
-            allocation_items: (1 as crate::stdlib::uInt) << state.wbits,
-        }
+    /// Derive the one allocation size used by inflate's legacy window.
+    ///
+    /// `wbits` is normally established by `inflateReset2`, but state copies
+    /// and the legacy allocation handles still need a single checked authority
+    /// before they turn that metadata into an allocation or a borrowed span.
+    /// Keeping the byte length beside the allocator's `uInt` item count is the
+    /// bridge an owned window can reuse without reconstructing this shift.
+    fn from_state(state: &inflate_state) -> Option<Self> {
+        let allocation_items = (1 as crate::stdlib::uInt).checked_shl(state.wbits)?;
+        let len = usize::try_from(allocation_items).ok()?;
+        Some(Self {
+            allocation_items,
+            len,
+        })
     }
+
+    fn matches_state_window(&self, state: &inflate_state) -> bool {
+        state.wsize == 0 || usize::try_from(state.wsize).ok() == Some(self.len)
+    }
+}
+
+fn inflate_window_layout_valid(state: &inflate_state) -> bool {
+    let Some(layout) = InflateWindowLayout::from_state(state) else {
+        return false;
+    };
+    layout.matches_state_window(state)
+        && state.whave <= layout.allocation_items
+        && state.wnext <= layout.allocation_items
 }
 
 /// Construct the initialized state value installed into an allocator-provided
@@ -711,11 +735,16 @@ fn updatewindow(
     state: &mut crate::src::inflate::inflate_state,
     input: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
+    let Some(layout) = InflateWindowLayout::from_state(state) else {
+        return 1 as ::core::ffi::c_int;
+    };
+    if !inflate_window_layout_valid(state) {
+        return 1 as ::core::ffi::c_int;
+    }
     if state.window.is_null() {
         let Some(zalloc) = strm.zalloc else {
             return 1 as ::core::ffi::c_int;
         };
-        let layout = InflateWindowLayout::from_state(state);
         state.window = unsafe {
             zalloc(
                 strm.opaque,
@@ -728,14 +757,17 @@ fn updatewindow(
         }
     }
     if state.wsize == 0 as ::core::ffi::c_uint {
-        state.wsize = (1 as ::core::ffi::c_uint) << state.wbits;
+        state.wsize = layout.allocation_items;
         state.wnext = 0 as ::core::ffi::c_uint;
         state.whave = 0 as ::core::ffi::c_uint;
+    }
+    if state.wnext > state.wsize || state.whave > state.wsize {
+        return 1 as ::core::ffi::c_int;
     }
     // Allocation above establishes the window's `wsize` bytes for this
     // initialized stream state.  Keep the ABI allocation handle confined to
     // this bridge; callers use only references and slices.
-    let window = unsafe { ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize) };
+    let window = unsafe { ::core::slice::from_raw_parts_mut(state.window, layout.len) };
     update_window(state, window, input).is_err() as ::core::ffi::c_int
 }
 
@@ -3021,7 +3053,8 @@ fn initialize_inflate_copy(
     }
     let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if !source_state.window.is_null() {
-        let layout = InflateWindowLayout::from_state(source_state);
+        let layout = InflateWindowLayout::from_state(source_state)
+            .expect("inflateCopy validated the source window layout");
         window = unsafe {
             Some(source.zalloc.expect("validated allocator"))
                 .expect("validated allocator")(
@@ -3087,6 +3120,7 @@ pub fn inflateCopy(
     if state_ref.next > crate::src::inftrees::ENOUGH as usize
         || !valid_table_ref(&state_ref.lencode)
         || !valid_table_ref(&state_ref.distcode)
+        || !inflate_window_layout_valid(state_ref)
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
