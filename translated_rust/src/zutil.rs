@@ -7,7 +7,7 @@ pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
 
-use ::core::sync::atomic::AtomicPtr;
+use core::sync::atomic::AtomicPtr;
 
 const fn c_chars<const N: usize>(bytes: [u8; N]) -> [::core::ffi::c_char; N] {
     let mut chars = [0; N];
@@ -29,8 +29,24 @@ static INSUFFICIENT_MEMORY: [::core::ffi::c_char; 20] = c_chars(*b"insufficient 
 static BUFFER_ERROR: [::core::ffi::c_char; 13] = c_chars(*b"buffer error\0");
 static INCOMPATIBLE_VERSION: [::core::ffi::c_char; 21] = c_chars(*b"incompatible version\0");
 
+const ERROR_MESSAGE_COUNT: usize = 10;
+const FALLBACK_ERROR_MESSAGE_INDEX: usize = ERROR_MESSAGE_COUNT - 1;
+
+static ERROR_MESSAGES: [&[::core::ffi::c_char]; ERROR_MESSAGE_COUNT] = [
+    &NEED_DICTIONARY,
+    &STREAM_END,
+    &EMPTY_ERROR,
+    &FILE_ERROR,
+    &STREAM_ERROR,
+    &DATA_ERROR,
+    &INSUFFICIENT_MEMORY,
+    &BUFFER_ERROR,
+    &INCOMPATIBLE_VERSION,
+    &EMPTY_ERROR,
+];
+
 #[no_mangle]
-pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; 10] = [
+pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; ERROR_MESSAGE_COUNT] = [
     AtomicPtr::new(NEED_DICTIONARY.as_ptr() as *mut ::core::ffi::c_char),
     AtomicPtr::new(STREAM_END.as_ptr() as *mut ::core::ffi::c_char),
     AtomicPtr::new(EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char),
@@ -71,17 +87,17 @@ fn compile_flags_for_sizes(
     pointer_size: usize,
     off_t_size: usize,
 ) -> crate::stdlib::uLong {
-    (size_class(uint_size) << 0)
-        .wrapping_add(size_class(ulong_size) << 2)
-        .wrapping_add(size_class(pointer_size) << 4)
-        .wrapping_add(size_class(off_t_size) << 6)
+    size_class(uint_size)
+        | (size_class(ulong_size) << 2)
+        | (size_class(pointer_size) << 4)
+        | (size_class(off_t_size) << 6)
 }
 
 fn zlib_compile_flags() -> crate::stdlib::uLong {
     compile_flags_for_sizes(
         ::core::mem::size_of::<crate::stdlib::uInt>(),
         ::core::mem::size_of::<crate::stdlib::uLong>(),
-        ::core::mem::size_of::<usize>(),
+        ::core::mem::size_of::<crate::stdlib::voidpf>(),
         ::core::mem::size_of::<crate::stdlib::off_t>(),
     )
 }
@@ -96,26 +112,14 @@ fn has_error_message_index(err: ::core::ffi::c_int) -> bool {
 }
 
 fn error_message_index(err: ::core::ffi::c_int) -> usize {
-    if !has_error_message_index(err) {
-        9
-    } else {
-        (2 - err) as usize
+    match err {
+        -6..=2 => (2 - err) as usize,
+        _ => FALLBACK_ERROR_MESSAGE_INDEX,
     }
 }
 
 fn error_message(err: ::core::ffi::c_int) -> &'static [::core::ffi::c_char] {
-    match error_message_index(err) {
-        0 => &NEED_DICTIONARY,
-        1 => &STREAM_END,
-        2 => &EMPTY_ERROR,
-        3 => &FILE_ERROR,
-        4 => &STREAM_ERROR,
-        5 => &DATA_ERROR,
-        6 => &INSUFFICIENT_MEMORY,
-        7 => &BUFFER_ERROR,
-        8 => &INCOMPATIBLE_VERSION,
-        _ => &EMPTY_ERROR,
-    }
+    ERROR_MESSAGES[error_message_index(err)]
 }
 
 pub(crate) fn z_errmsg_index(err: ::core::ffi::c_int) -> usize {
@@ -263,7 +267,7 @@ mod tests {
             compile_flags_for_sizes(
                 ::core::mem::size_of::<crate::stdlib::uInt>(),
                 ::core::mem::size_of::<crate::stdlib::uLong>(),
-                ::core::mem::size_of::<usize>(),
+                ::core::mem::size_of::<crate::stdlib::voidpf>(),
                 ::core::mem::size_of::<crate::stdlib::off_t>(),
             )
         );

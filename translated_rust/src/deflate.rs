@@ -864,6 +864,15 @@ fn deflate_state_status_valid(status: ::core::ffi::c_int) -> bool {
     )
 }
 
+fn deflate_state_is_usable(
+    has_zalloc: bool,
+    has_zfree: bool,
+    state_points_to_stream: bool,
+    status: ::core::ffi::c_int,
+) -> bool {
+    has_zalloc && has_zfree && state_points_to_stream && deflate_state_status_valid(status)
+}
+
 fn deflate_reset_status_and_adler(
     wrap: ::core::ffi::c_int,
 ) -> (::core::ffi::c_int, crate::stdlib::uLong) {
@@ -884,11 +893,19 @@ fn dictionary_tail_offset(
 unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
+    if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null() || (*s).strm != strm || !deflate_state_status_valid((*s).status) {
+    if s.is_null() {
+        return 1 as ::core::ffi::c_int;
+    }
+    if !deflate_state_is_usable(
+        (*strm).zalloc.is_some(),
+        (*strm).zfree.is_some(),
+        (*s).strm == strm,
+        (*s).status,
+    ) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -3798,14 +3815,14 @@ mod tests {
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_flush_rank,
         deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
         deflate_request_is_invalid, deflate_reset_status_and_adler,
-        deflate_should_return_buf_error, deflate_state_status_valid, deflate_version_matches,
-        dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
-        fill_window_insert_after_slide, fill_window_should_refill, fill_window_zero_range,
-        flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, longest_match_limit, longest_match_search_parameters,
-        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
-        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        deflate_should_return_buf_error, deflate_state_is_usable, deflate_state_status_valid,
+        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
+        fill_window_cursor, fill_window_insert_after_slide, fill_window_should_refill,
+        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, longest_match_limit,
+        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
+        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
         stored_block_is_last, stored_block_min_size, stored_block_should_wait,
         stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
@@ -4505,6 +4522,35 @@ mod tests {
             crate::src::deflate::FINISH_STATE - 1
         ));
     }
+    #[test]
+    fn deflate_state_is_usable_requires_callbacks_stream_identity_and_status() {
+        assert!(deflate_state_is_usable(
+            true,
+            true,
+            true,
+            crate::src::deflate::BUSY_STATE,
+        ));
+        assert!(!deflate_state_is_usable(
+            false,
+            true,
+            true,
+            crate::src::deflate::BUSY_STATE,
+        ));
+        assert!(!deflate_state_is_usable(
+            true,
+            false,
+            true,
+            crate::src::deflate::BUSY_STATE,
+        ));
+        assert!(!deflate_state_is_usable(
+            true,
+            true,
+            false,
+            crate::src::deflate::BUSY_STATE,
+        ));
+        assert!(!deflate_state_is_usable(true, true, true, 0));
+    }
+
     #[test]
     fn deflate_reset_status_and_adler_selects_wrapper_initial_state() {
         assert_eq!(
