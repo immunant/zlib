@@ -177,11 +177,13 @@ pub unsafe extern "C" fn zcalloc(
     items: ::core::ffi::c_uint,
     size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    let mut allocation = match zcalloc_allocate(items, size) {
+    let allocation = match zcalloc_allocate(items, size) {
         Some(allocation) => allocation,
         None => return ::core::ptr::null_mut(),
     };
-    let pointer = allocation.as_mut_ptr().cast::<::core::ffi::c_void>();
+    let pointer = (allocation.as_ref() as *const [MaybeUninit<u128>])
+        .cast_mut()
+        .cast::<::core::ffi::c_void>();
     if zcalloc_store(pointer.addr(), allocation) {
         pointer
     } else {
