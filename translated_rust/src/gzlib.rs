@@ -1262,9 +1262,7 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     let state = unsafe { &mut *(file as crate::gzguts_h::gz_statep) };
     let previous_message = state.msg;
     if gzclearerr_state_core(state) {
-        unsafe {
-            crate::stdlib::free(previous_message as *mut ::core::ffi::c_void);
-        }
+        crate::stdlib::free(previous_message as *mut ::core::ffi::c_void);
     }
 }
 #[export_name = "gz_error"]
