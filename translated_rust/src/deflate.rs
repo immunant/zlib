@@ -1077,21 +1077,141 @@ fn deflate_init_version_matches(
             .is_some_and(|size| size == ::core::mem::size_of::<crate::zlib_h::z_stream>())
 }
 
+/// The checked scalar choices needed to construct a deflate state.  Keeping
+/// these separate from callback allocation lets the initialization state
+/// machine remain ordinary Rust once the ABI boundary has obtained storage.
+struct DeflateInitSettings {
+    level: ::core::ffi::c_int,
+    method: crate::stdlib::Byte,
+    wrap: ::core::ffi::c_int,
+    window_bits: crate::stdlib::uInt,
+    mem_level: crate::stdlib::uInt,
+    strategy: ::core::ffi::c_int,
+}
+
+fn deflate_init_settings(
+    mut level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    mut window_bits: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> Option<DeflateInitSettings> {
+    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
+        level = 6;
+    }
+    let wrap = if window_bits < 0 {
+        if window_bits < -15 {
+            return None;
+        }
+        window_bits = -window_bits;
+        0
+    } else if window_bits > 15 {
+        window_bits -= 16;
+        2
+    } else {
+        1
+    };
+    if mem_level < 1
+        || mem_level > crate::stdlib::MAX_MEM_LEVEL
+        || method != crate::zlib_h::Z_DEFLATED
+        || !(8..=15).contains(&window_bits)
+        || !(0..=9).contains(&level)
+        || !(0..=crate::zlib_h::Z_FIXED).contains(&strategy)
+        || (window_bits == 8 && wrap != 1)
+    {
+        return None;
+    }
+    if window_bits == 8 {
+        window_bits = 9;
+    }
+    Some(DeflateInitSettings {
+        level,
+        method: method as crate::stdlib::Byte,
+        wrap,
+        window_bits: window_bits as crate::stdlib::uInt,
+        mem_level: mem_level as crate::stdlib::uInt,
+        strategy,
+    })
+}
+
+/// Sizes for the four callback-owned allocations.  They are derived while a
+/// state is safely borrowed, then used after that borrow ends for each foreign
+/// allocator callback.
+struct DeflateAllocationSizes {
+    window: crate::stdlib::uInt,
+    hash: crate::stdlib::uInt,
+    pending: crate::stdlib::uInt,
+}
+
+fn deflate_prepare_initial_state(
+    state: &mut deflate_state,
+    stream_identity: usize,
+    settings: &DeflateInitSettings,
+) -> DeflateAllocationSizes {
+    *state = deflate_initial_state();
+    state.strm = stream_identity;
+    state.status = crate::src::deflate::INIT_STATE;
+    state.wrap = settings.wrap;
+    state.w_bits = settings.window_bits;
+    state.w_size = (1 as crate::stdlib::uInt) << state.w_bits;
+    state.w_mask = state.w_size.wrapping_sub(1);
+    state.hash_bits = settings.mem_level.wrapping_add(7);
+    state.hash_size = (1 as crate::stdlib::uInt) << state.hash_bits;
+    state.hash_mask = state.hash_size.wrapping_sub(1);
+    state.hash_shift = state
+        .hash_bits
+        .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
+        .wrapping_sub(1)
+        .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+    state.high_water = 0;
+    state.lit_bufsize = (1 as crate::stdlib::uInt) << (settings.mem_level + 6);
+    state.pending_buf_size = (state.lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4);
+    DeflateAllocationSizes {
+        window: state.w_size,
+        hash: state.hash_size,
+        pending: state.lit_bufsize,
+    }
+}
+
+fn deflate_complete_initial_state(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut deflate_state,
+    settings: &DeflateInitSettings,
+    head: &mut [crate::src::deflate::Posf],
+) -> ::core::ffi::c_int {
+    state.sym_start = state.lit_bufsize as usize;
+    state.sym_end = state.lit_bufsize.wrapping_sub(1).wrapping_mul(3);
+    state.level = settings.level;
+    state.strategy = settings.strategy;
+    state.method = settings.method;
+    let ret = deflate_reset_keep_state(strm, state);
+    if ret == crate::zlib_h::Z_OK {
+        let _ = lm_init_state(state, head);
+    }
+    ret
+}
+
+fn deflate_mark_initialization_memory_error(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut deflate_state,
+) {
+    state.status = crate::src::deflate::FINISH_STATE;
+    strm.msg =
+        crate::src::zutil::z_errmsg[6] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+}
+
 pub fn deflateInit2_(
     strm_ref: &mut crate::zlib_h::z_stream,
-    mut level: ::core::ffi::c_int,
-    mut method: ::core::ffi::c_int,
-    mut windowBits: ::core::ffi::c_int,
-    mut memLevel: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    windowBits: ::core::ffi::c_int,
+    memLevel: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     // Allocation callbacks and the C-compatible stream/state records remain
     // an ABI boundary.  Keep their adoption confined here so callers use the
     // normal safe implementation interface.
     unsafe {
-        let mut s: *mut crate::src::deflate::deflate_state =
-            ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-        let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
         strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
         if strm_ref.zalloc.is_none() {
             strm_ref.zalloc = Some(
@@ -1110,39 +1230,14 @@ pub fn deflateInit2_(
                     as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
             ) as crate::zlib_h::free_func;
         }
-        if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
-            level = 6 as ::core::ffi::c_int;
-        }
-        if windowBits < 0 as ::core::ffi::c_int {
-            wrap = 0 as ::core::ffi::c_int;
-            if windowBits < -15 as ::core::ffi::c_int {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            windowBits = -windowBits;
-        } else if windowBits > 15 as ::core::ffi::c_int {
-            wrap = 2 as ::core::ffi::c_int;
-            windowBits -= 16 as ::core::ffi::c_int;
-        }
-        if memLevel < 1 as ::core::ffi::c_int
-            || memLevel > crate::stdlib::MAX_MEM_LEVEL
-            || method != crate::zlib_h::Z_DEFLATED
-            || windowBits < 8 as ::core::ffi::c_int
-            || windowBits > 15 as ::core::ffi::c_int
-            || level < 0 as ::core::ffi::c_int
-            || level > 9 as ::core::ffi::c_int
-            || strategy < 0 as ::core::ffi::c_int
-            || strategy > crate::zlib_h::Z_FIXED
-            || windowBits == 8 as ::core::ffi::c_int && wrap != 1 as ::core::ffi::c_int
-        {
+        let Some(settings) = deflate_init_settings(level, method, windowBits, memLevel, strategy)
+        else {
             return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        if windowBits == 8 as ::core::ffi::c_int {
-            windowBits = 9 as ::core::ffi::c_int;
-        }
+        };
         let Some(zalloc) = strm_ref.zalloc else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        s = zalloc(
+        let s = zalloc(
             strm_ref.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
@@ -1150,32 +1245,14 @@ pub fn deflateInit2_(
         if s.is_null() {
             return crate::zlib_h::Z_MEM_ERROR;
         }
-        let (w_size, hash_size, lit_bufsize) = {
+        let allocation_sizes = {
             let state = &mut *s;
-            *state = deflate_initial_state();
             strm_ref.state = s as *mut crate::src::deflate::internal_state;
-            state.strm = strm_ref as *mut crate::zlib_h::z_stream as usize;
-            state.status = crate::src::deflate::INIT_STATE;
-            state.wrap = wrap;
-            state.gzhead = None;
-            state.w_bits = windowBits as crate::stdlib::uInt;
-            state.w_size = ((1 as ::core::ffi::c_int) << state.w_bits) as crate::stdlib::uInt;
-            state.w_mask = state.w_size.wrapping_sub(1 as crate::stdlib::uInt);
-            state.hash_bits =
-                (memLevel as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
-            state.hash_size = ((1 as ::core::ffi::c_int) << state.hash_bits) as crate::stdlib::uInt;
-            state.hash_mask = state.hash_size.wrapping_sub(1 as crate::stdlib::uInt);
-            state.hash_shift = state
-                .hash_bits
-                .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
-                .wrapping_sub(1 as crate::stdlib::uInt)
-                .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-            state.high_water = 0 as crate::zutil_h::ulg;
-            state.lit_bufsize = ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int)
-                as crate::stdlib::uInt;
-            state.pending_buf_size =
-                (state.lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
-            (state.w_size, state.hash_size, state.lit_bufsize)
+            deflate_prepare_initial_state(
+                state,
+                strm_ref as *mut crate::zlib_h::z_stream as usize,
+                &settings,
+            )
         };
         // Do not retain the state borrow across a custom allocator callback.
         // Publish each allocation immediately, matching zlib's observable
@@ -1186,7 +1263,7 @@ pub fn deflateInit2_(
         };
         let window = zalloc(
             strm_ref.opaque,
-            w_size,
+            allocation_sizes.window,
             (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
                 as crate::stdlib::uInt,
         ) as *mut crate::stdlib::Bytef;
@@ -1197,7 +1274,7 @@ pub fn deflateInit2_(
         };
         let prev = zalloc(
             strm_ref.opaque,
-            w_size,
+            allocation_sizes.window,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
         (&mut *s).prev = ::core::ptr::NonNull::new(prev);
@@ -1207,7 +1284,7 @@ pub fn deflateInit2_(
         };
         let head = zalloc(
             strm_ref.opaque,
-            hash_size,
+            allocation_sizes.hash,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
         (&mut *s).head = ::core::ptr::NonNull::new(head);
@@ -1215,45 +1292,26 @@ pub fn deflateInit2_(
             let _ = deflateEnd(strm_ref);
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        let pending_buf = zalloc(strm_ref.opaque, lit_bufsize, 4 as crate::stdlib::uInt)
-            as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+        let pending_buf = zalloc(
+            strm_ref.opaque,
+            allocation_sizes.pending,
+            4 as crate::stdlib::uInt,
+        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
         (&mut *s).pending_buf = ::core::ptr::NonNull::new(pending_buf);
         if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
-            (&mut *s).status = crate::src::deflate::FINISH_STATE;
-            strm_ref.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char;
+            deflate_mark_initialization_memory_error(strm_ref, &mut *s);
             deflateEnd(strm_ref);
             return crate::zlib_h::Z_MEM_ERROR;
         }
         let state = &mut *s;
-        state.sym_start = state.lit_bufsize as usize;
-        state.sym_end = state
-            .lit_bufsize
-            .wrapping_sub(1 as crate::stdlib::uInt)
-            .wrapping_mul(3 as crate::stdlib::uInt);
-        state.level = level;
-        state.strategy = strategy;
-        state.method = method as crate::stdlib::Byte;
-        let ret = deflate_reset_keep_state(strm_ref, state);
-        if ret == crate::zlib_h::Z_OK {
-            let Ok(head_len) = usize::try_from(state.hash_size) else {
-                return ret;
-            };
-            if head_len == 0 {
-                let _ = lm_init_state(state, &mut []);
-            } else if let Some(head_handle) = state.head {
-                let head = ::core::slice::from_raw_parts_mut(head_handle.as_ptr(), head_len);
-                let _ = lm_init_state(state, head);
-            }
-        }
-        ret
+        let Ok(head_len) = usize::try_from(state.hash_size) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let head = ::core::slice::from_raw_parts_mut(
+            state.head.expect("allocated deflate hash table").as_ptr(),
+            head_len,
+        );
+        deflate_complete_initial_state(strm_ref, state, &settings, head)
     }
 }
 #[export_name = "deflateInit2_"]
@@ -3861,6 +3919,21 @@ fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
     }
 }
 
+/// Validate the safe scalar/state portion of teardown before the ABI boundary
+/// snapshots pointer handles and invokes the foreign free callback.
+fn deflate_state_can_end(
+    strm: &crate::zlib_h::z_stream,
+    state: &deflate_state,
+    stream_identity: usize,
+) -> bool {
+    deflate_state_values_are_valid(
+        strm.zalloc.is_some(),
+        strm.zfree.is_some(),
+        state.strm == stream_identity,
+        state.status,
+    )
+}
+
 pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     // This compatibility teardown still has to adopt the ABI stream/state
     // records and invoke its C allocator. Keep that work at this codec
@@ -3870,23 +3943,19 @@ pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
         // allocation. A custom `zfree` is foreign code, so do not retain a Rust
         // borrow of the stream or state while it runs.
         let (state_ptr, zfree, opaque, status, pending_buf, head, prev, window) = {
+            let stream_identity = strm as *mut crate::zlib_h::z_stream as usize;
             let state_ptr = strm.state as *mut crate::src::deflate::deflate_state;
             if state_ptr.is_null() {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
             let state = &*state_ptr;
-            if !deflate_state_values_are_valid(
-                strm.zalloc.is_some(),
-                strm.zfree.is_some(),
-                state.strm == strm as *mut crate::zlib_h::z_stream as usize,
-                state.status,
-            ) {
+            if !deflate_state_can_end(strm, state, stream_identity) {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
             let Some(zfree) = strm.zfree else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            let snapshot = (
+            (
                 state_ptr,
                 zfree,
                 strm.opaque,
@@ -3895,8 +3964,7 @@ pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
                 state.head,
                 state.prev,
                 state.window,
-            );
-            snapshot
+            )
         };
         if let Some(pending_buf) = pending_buf {
             zfree(opaque, pending_buf.as_ptr() as crate::stdlib::voidpf);
