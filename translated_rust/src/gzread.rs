@@ -1041,26 +1041,25 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
 pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut err: ::core::ffi::c_int = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
+    let state_ptr = file as crate::gzguts_h::gz_statep;
+    let state = &mut *state_ptr;
+    if state.mode != crate::gzguts_h::GZ_READ {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).size != 0 {
+    if state.size != 0 {
         crate::src::inflate::inflateEnd_ffi(
-            &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
-        crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-        crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+        crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+        crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
     }
-    err = gzclose_read_status((*state).err);
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
-    crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-    ret = crate::stdlib::close((*state).fd);
-    crate::stdlib::free(state as *mut ::core::ffi::c_void);
+    err = gzclose_read_status(state.err);
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
+    crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
+    ret = crate::stdlib::close(state.fd);
+    crate::stdlib::free(state_ptr as *mut ::core::ffi::c_void);
     return gzclose_r_final_status(ret, err);
 }
