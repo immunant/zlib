@@ -90,7 +90,7 @@ pub fn compress2_z(
         // derived only from the borrowed slices retained for this call.
         err = unsafe {
             crate::src::deflate::deflate(
-                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+                &mut stream,
                 if source_len != 0 {
                     crate::zlib_h::Z_NO_FLUSH
                 } else {

@@ -93,7 +93,7 @@ pub fn uncompress2_z(
         }
         err = unsafe {
             crate::src::inflate::inflate(
-                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+                &mut stream,
                 crate::zlib_h::Z_NO_FLUSH,
             )
         };

@@ -559,10 +559,14 @@ unsafe extern "C" fn updatewindow(
     };
     update_window(state, window, input).is_err() as ::core::ffi::c_int
 }
-pub unsafe extern "C" fn inflate(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn inflate(
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // The exported wrapper and internal callers provide a live stream
+    // reference. Keep the translated raw-state implementation below local
+    // until stream ownership is converted.
+    let strm = strm as *mut crate::zlib_h::z_stream;
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -2309,6 +2313,9 @@ pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflate(strm, flush)
 }
 pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {

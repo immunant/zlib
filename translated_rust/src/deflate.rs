@@ -1394,7 +1394,7 @@ pub(crate) fn deflateParams(
     {
         let err = unsafe {
             deflate(
-                strm as *mut crate::zlib_h::z_stream,
+                strm,
                 crate::zlib_h::Z_BLOCK,
             )
         };
@@ -1738,10 +1738,14 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         (*s).pending_out = (*s).pending_buf;
     }
 }
-pub unsafe extern "C" fn deflate(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn deflate(
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // The exported wrapper and internal callers provide a live stream
+    // reference. Keep the translated raw-state implementation below local
+    // until stream ownership is converted.
+    let strm = strm as *mut crate::zlib_h::z_stream;
     let mut old_flush: ::core::ffi::c_int = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
@@ -2342,6 +2346,9 @@ pub unsafe extern "C" fn deflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflate(strm, flush)
 }
 pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
