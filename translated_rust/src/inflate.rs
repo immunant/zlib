@@ -220,33 +220,34 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
 pub unsafe extern "C" fn inflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).total = 0 as ::core::ffi::c_ulong;
-    (*strm).total_out = (*state).total as crate::stdlib::uLong;
-    (*strm).total_in = (*strm).total_out;
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*strm).data_type = 0 as ::core::ffi::c_int;
-    if (*state).wrap != 0 {
-        (*strm).adler = ((*state).wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong;
+    // The state association was validated above.  Keep the ABI pointer
+    // projections scoped here so reset itself only mutates Rust references.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    state.total = 0 as ::core::ffi::c_ulong;
+    strm.total_out = state.total as crate::stdlib::uLong;
+    strm.total_in = strm.total_out;
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    strm.data_type = 0 as ::core::ffi::c_int;
+    if state.wrap != 0 {
+        strm.adler = (state.wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong;
     }
-    (*state).mode = crate::src::inflate::HEAD;
-    (*state).last = 0 as ::core::ffi::c_int;
-    (*state).havedict = 0 as ::core::ffi::c_int;
-    (*state).flags = -1 as ::core::ffi::c_int;
-    (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).head = None;
-    (*state).hold = 0 as ::core::ffi::c_ulong;
-    (*state).bits = 0 as ::core::ffi::c_uint;
-    (*state).next = 0;
-    (*state).distcode = crate::src::inflate::CodeTableRef::Dynamic(0);
-    (*state).lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
-    (*state).sane = 1 as ::core::ffi::c_int;
-    (*state).back = -1 as ::core::ffi::c_int;
+    state.mode = crate::src::inflate::HEAD;
+    state.last = 0 as ::core::ffi::c_int;
+    state.havedict = 0 as ::core::ffi::c_int;
+    state.flags = -1 as ::core::ffi::c_int;
+    state.dmax = 32768 as ::core::ffi::c_uint;
+    state.head = None;
+    state.hold = 0 as ::core::ffi::c_ulong;
+    state.bits = 0 as ::core::ffi::c_uint;
+    state.next = 0;
+    state.distcode = crate::src::inflate::CodeTableRef::Dynamic(0);
+    state.lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
+    state.sane = 1 as ::core::ffi::c_int;
+    state.back = -1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateResetKeep"]
@@ -257,15 +258,13 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     inflateResetKeep(strm)
 }
 pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).wsize = 0 as ::core::ffi::c_uint;
-    (*state).whave = 0 as ::core::ffi::c_uint;
-    (*state).wnext = 0 as ::core::ffi::c_uint;
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    state.wsize = 0 as ::core::ffi::c_uint;
+    state.whave = 0 as ::core::ffi::c_uint;
+    state.wnext = 0 as ::core::ffi::c_uint;
     return inflateResetKeep(strm);
 }
 #[export_name = "inflateReset"]
@@ -415,22 +414,20 @@ pub unsafe extern "C" fn inflatePrime(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if bits == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_OK;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
     if bits < 0 as ::core::ffi::c_int {
-        (*state).hold = 0 as ::core::ffi::c_ulong;
-        (*state).bits = 0 as ::core::ffi::c_uint;
+        state.hold = 0 as ::core::ffi::c_ulong;
+        state.bits = 0 as ::core::ffi::c_uint;
         return crate::zlib_h::Z_OK;
     }
     if bits > 16 as ::core::ffi::c_int
-        || ((*state).bits as crate::stdlib::uInt).wrapping_add(bits as crate::stdlib::uInt)
+        || (state.bits as crate::stdlib::uInt).wrapping_add(bits as crate::stdlib::uInt)
             > 32 as ::core::ffi::c_uint
     {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -438,10 +435,10 @@ pub unsafe extern "C" fn inflatePrime(
     value = (value as ::core::ffi::c_long
         & ((1 as ::core::ffi::c_long) << bits) - 1 as ::core::ffi::c_long)
         as ::core::ffi::c_int;
-    (*state).hold = (*state)
+    state.hold = state
         .hold
-        .wrapping_add((value as ::core::ffi::c_ulong) << (*state).bits);
-    (*state).bits = (*state)
+        .wrapping_add((value as ::core::ffi::c_ulong) << state.bits);
+    state.bits = state
         .bits
         .wrapping_add(bits as crate::stdlib::uInt as ::core::ffi::c_uint);
     return crate::zlib_h::Z_OK;
