@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -1072,44 +1072,20 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     }
 }
 
-/// The scalar consequences of replacing a gzip error.  Message allocation,
-/// ownership, and raw ABI conversion remain at the FFI boundary.
+/// The pointer-free portion of gzip error replacement.  This is deliberately
+/// separate from the ABI state: the caller owns the old C allocation, and the
+/// exported boundary is the only place that can release it or install the new
+/// C pointer.
 #[derive(Clone, Copy)]
-struct GzErrorTransition {
-    clear_available: bool,
-    compose_message: bool,
-}
-
-/// Determine the error-state transition without borrowing the opaque gzip
-/// handle.  `Z_MEM_ERROR` uses zlib's static message, so a supplied message
-/// must not be allocated in that case.
-fn gz_error_transition(
+struct GzErrorState {
+    available: ::core::ffi::c_uint,
     again: ::core::ffi::c_int,
-    err: ::core::ffi::c_int,
-    has_message: bool,
-) -> GzErrorTransition {
-    GzErrorTransition {
-        clear_available: err != crate::zlib_h::Z_OK
-            && err != crate::zlib_h::Z_BUF_ERROR
-            && again == 0,
-        compose_message: has_message && err != crate::zlib_h::Z_MEM_ERROR,
-    }
 }
 
-/// Apply an already-safe scalar error decision to the ABI mirror.  Keeping
-/// these writes behind one temporary boundary borrow preserves the existing
-/// raw-pointer surface of `gz_error`.
-fn gz_error_apply_transition(
-    state: &mut crate::gzguts_h::gz_state,
+struct GzErrorUpdate {
+    available: ::core::ffi::c_uint,
     err: ::core::ffi::c_int,
-    has_message: bool,
-) -> bool {
-    let transition = gz_error_transition(state.again, err, has_message);
-    if transition.clear_available {
-        state.x.have = 0;
-    }
-    state.err = err;
-    transition.compose_message
+    message: Option<::std::ffi::CString>,
 }
 
 /// Clear a previously recorded gzip error without touching its boundary-owned
@@ -1146,34 +1122,79 @@ fn gz_error_message(
     ::std::ffi::CString::from_vec_with_nul(bytes).ok()
 }
 
+/// Compute an error replacement without accessing ABI pointers or making a
+/// foreign allocation.  In particular, message-construction failure is
+/// normalized to `Z_MEM_ERROR` before the boundary mutates the C mirror.
+fn gz_error_update(
+    state: GzErrorState,
+    err: ::core::ffi::c_int,
+    path: Option<&::std::ffi::CStr>,
+    message: Option<&::std::ffi::CStr>,
+) -> GzErrorUpdate {
+    let available =
+        if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && state.again == 0 {
+            0
+        } else {
+            state.available
+        };
+    let compose_message = err != crate::zlib_h::Z_MEM_ERROR && message.is_some();
+    let message = if compose_message {
+        path.zip(message)
+            .and_then(|(path, message)| gz_error_message(path, message))
+    } else {
+        None
+    };
+    let err = if compose_message && message.is_none() {
+        crate::zlib_h::Z_MEM_ERROR
+    } else {
+        err
+    };
+    GzErrorUpdate {
+        available,
+        err,
+        message,
+    }
+}
+
 pub unsafe extern "C" fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    if !(*state).msg.is_null() {
-        if (*state).err != crate::zlib_h::Z_MEM_ERROR {
-            crate::stdlib::free((*state).msg as *mut ::core::ffi::c_void);
-        }
-        (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let state = &mut *state;
+    let prior = GzErrorState {
+        available: state.x.have,
+        again: state.again,
+    };
+    let prior_message = state.msg;
+    if !prior_message.is_null() && state.err != crate::zlib_h::Z_MEM_ERROR {
+        crate::stdlib::free(prior_message as *mut ::core::ffi::c_void);
     }
-    if !gz_error_apply_transition(&mut *state, err, !msg.is_null()) {
-        return;
-    }
-    let Some(message) = gz_error_message(
-        ::std::ffi::CStr::from_ptr((*state).path),
-        ::std::ffi::CStr::from_ptr(msg),
-    ) else {
-        (*state).err = crate::zlib_h::Z_MEM_ERROR;
+    let message = if msg.is_null() {
+        None
+    } else {
+        Some(::std::ffi::CStr::from_ptr(msg))
+    };
+    let path = if message.is_some() && !state.path.is_null() {
+        Some(::std::ffi::CStr::from_ptr(state.path))
+    } else {
+        None
+    };
+    let update = gz_error_update(prior, err, path, message);
+
+    state.msg = ::core::ptr::null_mut();
+    state.x.have = update.available;
+    state.err = update.err;
+    let Some(message) = update.message else {
         return;
     };
     let storage_len = message.as_bytes_with_nul().len();
-    (*state).msg = crate::stdlib::malloc(storage_len) as *mut ::core::ffi::c_char;
-    if (*state).msg.is_null() {
-        (*state).err = crate::zlib_h::Z_MEM_ERROR;
+    state.msg = crate::stdlib::malloc(storage_len) as *mut ::core::ffi::c_char;
+    if state.msg.is_null() {
+        state.err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
-    ::core::ptr::copy_nonoverlapping(message.as_ptr(), (*state).msg, storage_len);
+    ::core::ptr::copy_nonoverlapping(message.as_ptr(), state.msg, storage_len);
 }
 #[export_name = "gz_error"]
 
