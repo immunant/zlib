@@ -2373,8 +2373,12 @@ unsafe fn bi_flush(s: *mut crate::src::deflate::deflate_state) {
     }
 }
 
-unsafe fn bi_windup(s: *mut crate::src::deflate::deflate_state) {
-    let s = &mut *s;
+/// Finish the current bit buffer for an already-validated deflate state.
+///
+/// The state still owns raw allocations, so this remains an unsafe internal
+/// operation.  Its caller, however, need not discard an existing exclusive
+/// borrow merely to recreate it from a raw pointer.
+unsafe fn bi_windup(s: &mut crate::src::deflate::deflate_state) {
     if s.bi_valid > 8 as ::core::ffi::c_int {
         s.put_pending_byte(
             (s.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch,
@@ -2894,11 +2898,8 @@ unsafe fn send_tree(
     }
 }
 
-unsafe extern "C" fn build_bl_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
+unsafe fn build_bl_tree(s: &mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     let mut max_blindex: ::core::ffi::c_int = 0;
-    let s = &mut *s;
     let l_max_code = s.l_desc.max_code;
     scan_tree(&mut s.bl_tree, &mut s.dyn_ltree, l_max_code);
     let d_max_code = s.d_desc.max_code;
@@ -2926,12 +2927,11 @@ unsafe extern "C" fn build_bl_tree(
 }
 
 unsafe fn send_all_trees(
-    s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     lcodes: ::core::ffi::c_int,
     dcodes: ::core::ffi::c_int,
     blcodes: ::core::ffi::c_int,
 ) {
-    let s = &mut *s;
     send_bits(s, lcodes - 257, 5);
     send_bits(s, dcodes - 1, 5);
     send_bits(s, blcodes - 4, 4);
@@ -2980,7 +2980,7 @@ unsafe fn tr_stored_block(
                 << s.bi_valid) as crate::zutil_h::ush;
         s.bi_valid += len;
     }
-    bi_windup(s as *mut crate::src::deflate::deflate_state);
+    bi_windup(s);
     s.put_pending_byte(
         (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
             as crate::zutil_h::uch,
@@ -3418,7 +3418,7 @@ unsafe fn tr_flush_block_impl(
         }
         unsafe { build_tree(s, crate::src::deflate::STATIC_TREE_LITERAL) };
         unsafe { build_tree(s, crate::src::deflate::STATIC_TREE_DISTANCE) };
-        max_blindex = unsafe { build_bl_tree(s as *mut crate::src::deflate::deflate_state) };
+        max_blindex = unsafe { build_bl_tree(s) };
         opt_lenb = s
             .opt_len
             .wrapping_add(3 as crate::zutil_h::ulg)
@@ -3494,7 +3494,7 @@ unsafe fn tr_flush_block_impl(
             s.bi_valid += len_0;
         }
         unsafe { send_all_trees(
-            s as *mut crate::src::deflate::deflate_state,
+            s,
             s.l_desc.max_code + 1 as ::core::ffi::c_int,
             s.d_desc.max_code + 1 as ::core::ffi::c_int,
             max_blindex + 1 as ::core::ffi::c_int,
@@ -3507,7 +3507,7 @@ unsafe fn tr_flush_block_impl(
     }
     init_block(s);
     if last != 0 {
-        unsafe { bi_windup(s as *mut crate::src::deflate::deflate_state) };
+        unsafe { bi_windup(s) };
     }
 }
 
