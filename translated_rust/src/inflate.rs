@@ -765,8 +765,13 @@ pub fn inflate(
                                                                                             's_1582: {
                                                                                                 match (*state).mode as ::core::ffi::c_uint {
                                                                                                 16180 => {
-                                                                                                    if (*state).wrap == 0 as ::core::ffi::c_int {
-                                                                                                        (*state).mode = crate::src::inflate::TYPEDO;
+                                                                                                    // This wrapper-selection phase only needs the
+                                                                                                    // validated state reference.  Keep header output
+                                                                                                    // pointers at the legacy boundary, but avoid
+                                                                                                    // repeatedly dereferencing the state handle.
+                                                                                                    let state = &mut *state;
+                                                                                                    if state.wrap == 0 as ::core::ffi::c_int {
+                                                                                                        state.mode = crate::src::inflate::TYPEDO;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
                                                                                                         while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -783,30 +788,30 @@ pub fn inflate(
                                                                                                                 );
                                                                                                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                         }
-                                                                                                        if (*state).wrap & 2 as ::core::ffi::c_int != 0
+                                                                                                        if state.wrap & 2 as ::core::ffi::c_int != 0
                                                                                                             && hold == 0x8b1f as ::core::ffi::c_ulong
                                                                                                         {
-                                                                                                            if (*state).wbits == 0 as ::core::ffi::c_uint {
-                                                                                                                (*state).wbits = 15 as ::core::ffi::c_uint;
+                                                                                                            if state.wbits == 0 as ::core::ffi::c_uint {
+                                                                                                                state.wbits = 15 as ::core::ffi::c_uint;
                                                                                                             }
-                                                                                                            (*state).check = crate::src::crc32::crc32(0 as crate::stdlib::uLong, None) as ::core::ffi::c_ulong;
+                                                                                                            state.check = crate::src::crc32::crc32(0 as crate::stdlib::uLong, None) as ::core::ffi::c_ulong;
                                                                                                             hbuf[0 as ::core::ffi::c_int as usize] = hold
                                                                                                                 as ::core::ffi::c_uchar;
                                                                                                             hbuf[1 as ::core::ffi::c_int as usize] = (hold
                                                                                                                 >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                                            (*state).check = crate::src::crc32::crc32(
-                                                                                                                (*state).check as crate::stdlib::uLong,
+                                                                                                            state.check = crate::src::crc32::crc32(
+                                                                                                                state.check as crate::stdlib::uLong,
                                                                                                                 Some(&hbuf[..2]),
                                                                                                             ) as ::core::ffi::c_ulong;
                                                                                                             hold = 0 as ::core::ffi::c_ulong;
                                                                                                             bits = 0 as ::core::ffi::c_uint;
-                                                                                                            (*state).mode = crate::src::inflate::FLAGS;
+                                                                                                            state.mode = crate::src::inflate::FLAGS;
                                                                                                             continue '_inf_leave;
                                                                                                         } else {
-                                                                                                            if !(*state).head.is_null() {
-                                                                                                                (*(*state).head).done = -1 as ::core::ffi::c_int;
+                                                                                                            if !state.head.is_null() {
+                                                                                                                (*state.head).done = -1 as ::core::ffi::c_int;
                                                                                                             }
-                                                                                                            if (*state).wrap & 1 as ::core::ffi::c_int == 0
+                                                                                                            if state.wrap & 1 as ::core::ffi::c_int == 0
                                                                                                                 || (((hold as ::core::ffi::c_uint
                                                                                                                     & ((1 as ::core::ffi::c_uint) << 8 as ::core::ffi::c_int)
                                                                                                                         .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -816,7 +821,7 @@ pub fn inflate(
                                                                                                             {
                                                                                                                 (*strm).msg = INFLATE_MESSAGES[0].as_ptr()
                                                                                                                     as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                                (*state).mode = crate::src::inflate::BAD;
+                                                                                                                state.mode = crate::src::inflate::BAD;
                                                                                                                 continue '_inf_leave;
                                                                                                             } else if hold as ::core::ffi::c_uint
                                                                                                                 & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
@@ -825,7 +830,7 @@ pub fn inflate(
                                                                                                             {
                                                                                                                 (*strm).msg = INFLATE_MESSAGES[1].as_ptr()
                                                                                                                     as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                                (*state).mode = crate::src::inflate::BAD;
+                                                                                                                state.mode = crate::src::inflate::BAD;
                                                                                                                 continue '_inf_leave;
                                                                                                             } else {
                                                                                                                 hold >>= 4 as ::core::ffi::c_int;
@@ -837,23 +842,23 @@ pub fn inflate(
                                                                                                                     & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
                                                                                                                         .wrapping_sub(1 as ::core::ffi::c_uint))
                                                                                                                     .wrapping_add(8 as ::core::ffi::c_uint);
-                                                                                                                if (*state).wbits == 0 as ::core::ffi::c_uint {
-                                                                                                                    (*state).wbits = len;
+                                                                                                                if state.wbits == 0 as ::core::ffi::c_uint {
+                                                                                                                    state.wbits = len;
                                                                                                                 }
-                                                                                                                if len > 15 as ::core::ffi::c_uint || len > (*state).wbits {
+                                                                                                                if len > 15 as ::core::ffi::c_uint || len > state.wbits {
                                                                                                                     (*strm).msg = INFLATE_MESSAGES[2].as_ptr()
                                                                                                                         as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                                    (*state).mode = crate::src::inflate::BAD;
+                                                                                                                    state.mode = crate::src::inflate::BAD;
                                                                                                                     continue '_inf_leave;
                                                                                                                 } else {
-                                                                                                                    (*state).dmax = (1 as ::core::ffi::c_uint) << len;
-                                                                                                                    (*state).flags = 0 as ::core::ffi::c_int;
-                                                                                                                    (*state).check = crate::src::adler32::adler32(
+                                                                                                                    state.dmax = (1 as ::core::ffi::c_uint) << len;
+                                                                                                                    state.flags = 0 as ::core::ffi::c_int;
+                                                                                                                    state.check = crate::src::adler32::adler32(
                                                                                                                         0 as crate::stdlib::uLong,
                                                                                                                         None,
                                                                                                                     ) as ::core::ffi::c_ulong;
-                                                                                                                    (*strm).adler = (*state).check as crate::stdlib::uLong;
-                                                                                                                    (*state).mode = (if hold & 0x200 as ::core::ffi::c_ulong
+                                                                                                                    (*strm).adler = state.check as crate::stdlib::uLong;
+                                                                                                                    state.mode = (if hold & 0x200 as ::core::ffi::c_ulong
                                                                                                                         != 0
                                                                                                                     {
                                                                                                                         crate::src::inflate::DICTID as ::core::ffi::c_int
@@ -869,6 +874,7 @@ pub fn inflate(
                                                                                                     }
                                                                                                 }
                                                                                                 16181 => {
+                                                                                                    let state = &mut *state;
                                                                                                     while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                                     {
                                                                                                         if have == 0 as ::core::ffi::c_uint {
@@ -883,39 +889,39 @@ pub fn inflate(
                                                                                                             );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
-                                                                                                    (*state).flags = hold as ::core::ffi::c_int;
-                                                                                                    if (*state).flags & 0xff as ::core::ffi::c_int != crate::zlib_h::Z_DEFLATED
+                                                                                                    state.flags = hold as ::core::ffi::c_int;
+                                                                                                    if state.flags & 0xff as ::core::ffi::c_int != crate::zlib_h::Z_DEFLATED
                                                                                                     {
                                                                                                         (*strm).msg = INFLATE_MESSAGES[1].as_ptr()
                                                                                                             as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                        (*state).mode = crate::src::inflate::BAD;
+                                                                                                        state.mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
-                                                                                                    } else if (*state).flags & 0xe000 as ::core::ffi::c_int != 0
+                                                                                                    } else if state.flags & 0xe000 as ::core::ffi::c_int != 0
                                                                                                     {
                                                                                                         (*strm).msg = INFLATE_MESSAGES[3].as_ptr()
                                                                                                             as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                        (*state).mode = crate::src::inflate::BAD;
+                                                                                                        state.mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
-                                                                                                        if !(*state).head.is_null() {
-                                                                                                            (*(*state).head).text = (hold >> 8 as ::core::ffi::c_int
+                                                                                                        if !state.head.is_null() {
+                                                                                                            (*state.head).text = (hold >> 8 as ::core::ffi::c_int
                                                                                                                 & 1 as ::core::ffi::c_ulong) as ::core::ffi::c_int;
                                                                                                         }
-                                                                                                        if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                                                                                                            && (*state).wrap & 4 as ::core::ffi::c_int != 0
+                                                                                                        if state.flags & 0x200 as ::core::ffi::c_int != 0
+                                                                                                            && state.wrap & 4 as ::core::ffi::c_int != 0
                                                                                                         {
                                                                                                             hbuf[0 as ::core::ffi::c_int as usize] = hold
                                                                                                                 as ::core::ffi::c_uchar;
                                                                                                             hbuf[1 as ::core::ffi::c_int as usize] = (hold
                                                                                                                 >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                                            (*state).check = crate::src::crc32::crc32(
-                                                                                                                (*state).check as crate::stdlib::uLong,
+                                                                                                            state.check = crate::src::crc32::crc32(
+                                                                                                                state.check as crate::stdlib::uLong,
                                                                                                                 Some(&hbuf[..2]),
                                                                                                             ) as ::core::ffi::c_ulong;
                                                                                                         }
                                                                                                         hold = 0 as ::core::ffi::c_ulong;
                                                                                                         bits = 0 as ::core::ffi::c_uint;
-                                                                                                        (*state).mode = crate::src::inflate::TIME;
+                                                                                                        state.mode = crate::src::inflate::TIME;
                                                                                                         break 's_425;
                                                                                                     }
                                                                                                 }
