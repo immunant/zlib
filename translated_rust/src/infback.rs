@@ -77,28 +77,24 @@ fn inflate_back_window_size(window_bits: ::core::ffi::c_int) -> ::core::ffi::c_u
 }
 
 fn inflate_back_init_metadata_is_valid(
-    version_first_byte: ::core::ffi::c_int,
+    version_first_byte: Option<::core::ffi::c_int>,
     stream_size: ::core::ffi::c_int,
 ) -> bool {
-    version_first_byte == crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
+    version_first_byte
+        == Some(crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int)
         && stream_size == ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
 }
 
-pub unsafe extern "C" fn inflateBackInit_(
+pub unsafe fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
     mut window: *mut ::core::ffi::c_uchar,
-    mut version: *const ::core::ffi::c_char,
+    version_first_byte: Option<::core::ffi::c_int>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if version.is_null()
-        || !inflate_back_init_metadata_is_valid(
-            *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int,
-            stream_size,
-        )
-    {
+    if !inflate_back_init_metadata_is_valid(version_first_byte, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     if strm.is_null() || window.is_null() || !inflate_back_window_bits_are_valid(windowBits) {
@@ -150,7 +146,12 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateBackInit_(strm, windowBits, window, version, stream_size)
+    let version_first_byte = if version.is_null() {
+        None
+    } else {
+        Some(*version as ::core::ffi::c_int)
+    };
+    inflateBackInit_(strm, windowBits, window, version_first_byte, stream_size)
 }
 pub unsafe extern "C" fn inflateBack(
     mut strm: crate::zlib_h::z_streamp,
@@ -1069,16 +1070,17 @@ mod tests {
         let stream_size = ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int;
 
         assert!(inflate_back_init_metadata_is_valid(
-            version_first_byte,
+            Some(version_first_byte),
             stream_size,
         ));
         assert!(!inflate_back_init_metadata_is_valid(
-            version_first_byte.wrapping_add(1),
+            Some(version_first_byte.wrapping_add(1)),
             stream_size,
         ));
         assert!(!inflate_back_init_metadata_is_valid(
-            version_first_byte,
+            Some(version_first_byte),
             stream_size.wrapping_sub(1),
         ));
+        assert!(!inflate_back_init_metadata_is_valid(None, stream_size));
     }
 }
