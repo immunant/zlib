@@ -310,13 +310,23 @@ fn initial_inflate_normal_state() -> InflateNormalState {
 // registrations.  It is intentionally not installed in gzip yet: callers
 // still use the ABI adapter until the bounded inflate-call core can consume
 // this owner directly.
-pub(crate) struct InflateGzipOwner {
+// This is the persistent owner for every decoder that has no ABI cursor or
+// foreign header registration.  Gzip and the one-shot APIs already use it;
+// keeping the normal state and its scalar stream snapshot together makes it
+// the pointer-free counterpart to the remaining ABI stream/state adapter.
+//
+// The owner deliberately has no callback allocation handle.  Normal inflate
+// still keeps that provenance at `inflate_stream_and_state()` until the ABI
+// state record can be replaced as one complete lifecycle.
+pub(crate) struct InflateOwnedDecoder {
     normal: InflateNormalState,
-    total_in: crate::stdlib::uLong,
-    total_out: crate::stdlib::uLong,
-    adler: crate::stdlib::uLong,
-    data_type: ::core::ffi::c_int,
+    stream: InflateDecoderStream,
 }
+
+// Retain the gzip-facing name while gzip owns the decoder.  The owner itself
+// is intentionally codec-generic so the ABI stream adapter can eventually
+// hand off the same pointer-free state without a second representation.
+pub(crate) type InflateGzipOwner = InflateOwnedDecoder;
 
 // Gzip owns its inflater for the lifetime of the opaque gzip handle, so it
 // never needs the public `z_stream` cursor or a registered header.  Expose
@@ -330,7 +340,7 @@ pub(crate) struct InflateGzipResult {
     pub(crate) data_error_message: Option<&'static [u8]>,
 }
 
-impl InflateGzipOwner {
+impl InflateOwnedDecoder {
     pub(crate) fn new() -> Self {
         Self::with_window_bits(15 + 16)
     }
@@ -345,53 +355,52 @@ impl InflateGzipOwner {
             .expect("one-shot and gzip window bits are valid");
         Self {
             normal,
-            total_in: 0,
-            total_out: 0,
-            adler: reset.adler.unwrap_or(0),
-            data_type: 0,
+            stream: InflateDecoderStream {
+                total_in: 0,
+                total_out: 0,
+                adler: reset.adler.unwrap_or(0),
+                data_type: 0,
+                message: None,
+            },
         }
     }
 
     pub(crate) fn reset(&mut self) {
         let reset = inflate_reset_core(&mut self.normal);
-        self.total_in = 0;
-        self.total_out = 0;
-        self.data_type = 0;
+        self.stream.total_in = 0;
+        self.stream.total_out = 0;
+        self.stream.data_type = 0;
+        self.stream.message = None;
         if let Some(adler) = reset.adler {
-            self.adler = adler;
+            self.stream.adler = adler;
         }
     }
 
     pub(crate) fn inflate(&mut self, input: &[u8], output: &mut [u8]) -> InflateGzipResult {
-        let mut stream = InflateDecoderStream {
-            total_in: self.total_in,
-            total_out: self.total_out,
-            adler: self.adler,
-            data_type: self.data_type,
-            message: None,
-        };
+        // The ABI adapter clears `strm.msg` before each invocation.  The
+        // persistent owner keeps scalar counters between calls, but a prior
+        // diagnostic must not be reported again after a later successful
+        // bounded request.
+        self.stream.message = None;
         let result = InflateStreamOwner {
             normal: &mut self.normal,
             input,
             output,
             header: None,
-            stream: &mut stream,
+            stream: &mut self.stream,
             flush: crate::zlib_h::Z_NO_FLUSH,
         }
         .run();
-        self.total_in = stream.total_in;
-        self.total_out = stream.total_out;
-        self.adler = stream.adler;
-        self.data_type = stream.data_type;
         InflateGzipResult {
             status: result.status,
             input_remaining: result.cursor.input_remaining,
             output_remaining: result.cursor.output_remaining,
-            total_in: self.total_in,
-            total_out: self.total_out,
-            data_error_message: stream.message.and_then(|message| match message {
-                InflateMessage::Error(index) => Some(&INFLATE_ERROR_MESSAGES[index]
-                    [..INFLATE_ERROR_MESSAGES[index].len() - 1]),
+            total_in: self.stream.total_in,
+            total_out: self.stream.total_out,
+            data_error_message: self.stream.message.and_then(|message| match message {
+                InflateMessage::Error(index) => {
+                    Some(&INFLATE_ERROR_MESSAGES[index][..INFLATE_ERROR_MESSAGES[index].len() - 1])
+                }
                 // The former gzip adapter recognized only the stable table
                 // entries above; retain its generic gzip diagnostic for this
                 // non-table stream message.
