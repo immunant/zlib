@@ -281,6 +281,42 @@ pub(crate) fn gz_comp_needs_write(
             && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END))
 }
 
+// Describe a compression-output drain before the raw write adapter touches
+// the descriptor or advances its buffer pointer.  Address arithmetic avoids
+// making a provenance-dependent pointer subtraction part of that adapter.
+pub(crate) struct GzCompOutputPlan {
+    pub reset: bool,
+}
+
+pub(crate) fn gz_comp_output_pending(
+    state: &crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_uint {
+    state
+        .strm
+        .next_out
+        .addr()
+        .wrapping_sub(state.x.next.addr()) as ::core::ffi::c_uint
+}
+
+pub(crate) fn gz_comp_output_plan(
+    state: &crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+) -> Option<GzCompOutputPlan> {
+    if !gz_comp_needs_write(state.strm.avail_out, flush, ret) {
+        return None;
+    }
+    Some(GzCompOutputPlan {
+        reset: state.strm.avail_out == 0,
+    })
+}
+
+pub(crate) fn gz_comp_reset_output(state: &mut crate::gzguts_h::gz_state) {
+    gz_reset_output_buffer(state);
+    state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
+    state.x.next = state.out;
+}
+
 pub(crate) fn gz_comp_should_reset(flush: ::core::ffi::c_int) -> bool {
     flush == crate::zlib_h::Z_FINISH
 }
@@ -361,6 +397,21 @@ pub(crate) fn gz_write_uses_buffer(
     remaining: crate::stdlib::z_size_t,
 ) -> bool {
     remaining < state.size as crate::stdlib::z_size_t
+}
+
+// The gzip input buffer is contiguous.  Keep its cursor setup and byte count
+// out of the copy adapter, which is the only write-path code that needs the
+// raw source and destination pointers.
+pub(crate) fn gz_buffered_input_len(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_uint {
+    if state.strm.avail_in == 0 {
+        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+    }
+    state
+        .strm
+        .next_in
+        .addr()
+        .wrapping_add(state.strm.avail_in as usize)
+        .wrapping_sub(state.in_0.addr()) as ::core::ffi::c_uint
 }
 
 pub(crate) fn gz_buffered_copy_progress(

@@ -154,12 +154,12 @@ unsafe extern "C" fn gz_comp(
     }
     ret = crate::zlib_h::Z_OK;
     loop {
-        if crate::src::gzlib::gz_comp_needs_write(state.strm.avail_out, flush, ret) {
+        if let Some(plan) = crate::src::gzlib::gz_comp_output_plan(state, flush, ret) {
             while state.strm.next_out > state.x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 crate::src::gzlib::gz_begin_io(state);
                 put = crate::src::gzlib::gz_syscall_chunk(
-                    state.strm.next_out.offset_from(state.x.next) as ::core::ffi::c_uint,
+                    crate::src::gzlib::gz_comp_output_pending(state),
                 );
                 writ = crate::stdlib::write(
                     state.fd,
@@ -177,10 +177,8 @@ unsafe extern "C" fn gz_comp(
                 }
                 state.x.next = state.x.next.wrapping_add(writ as usize);
             }
-            if state.strm.avail_out == 0 as crate::stdlib::uInt {
-                crate::src::gzlib::gz_reset_output_buffer(state);
-                state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
-                state.x.next = state.out;
+            if plan.reset {
+                crate::src::gzlib::gz_comp_reset_output(state);
             }
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
@@ -262,15 +260,7 @@ unsafe extern "C" fn gz_write(
         loop {
             let mut have: ::core::ffi::c_uint = 0;
             let mut copy: ::core::ffi::c_uint = 0;
-            if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
-            }
-            have = state
-                .strm
-                .next_in
-                .wrapping_add(state.strm.avail_in as usize)
-                .addr()
-                .wrapping_sub(state.in_0.addr()) as ::core::ffi::c_uint;
+            have = crate::src::gzlib::gz_buffered_input_len(state);
             copy = crate::src::gzlib::gz_buffer_space(state.size, have, len);
             crate::stdlib::memcpy(
                 state.in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
@@ -426,14 +416,7 @@ pub unsafe extern "C" fn gzputc(
         return -1 as ::core::ffi::c_int;
     }
     if (*state).size != 0 {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt {
-            (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
-        }
-        have = (*strm)
-            .next_in
-            .wrapping_add((*strm).avail_in as usize)
-            .addr()
-            .wrapping_sub((*state).in_0.addr()) as ::core::ffi::c_uint;
+        have = crate::src::gzlib::gz_buffered_input_len(&mut *state);
         if have < (*state).size {
             *(*state).in_0.wrapping_add(have as usize) = c as ::core::ffi::c_uchar;
             (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
