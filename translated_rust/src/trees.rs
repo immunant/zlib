@@ -5186,19 +5186,20 @@ pub unsafe extern "C" fn _tr_stored_block(
     if s.is_null() {
         return;
     }
-    let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+    let s = &mut *s;
+    let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
         return;
     };
     let Ok(stored_len) = usize::try_from(stored_len) else {
         return;
     };
-    if (pending_len != 0 && (*s).pending_buf.is_null()) || (stored_len != 0 && buf.is_null()) {
+    if (pending_len != 0 && s.pending_buf.is_null()) || (stored_len != 0 && buf.is_null()) {
         return;
     }
     let pending_buf = if pending_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+        ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
     };
     let stored = if stored_len == 0 {
         &[]
@@ -5207,10 +5208,10 @@ pub unsafe extern "C" fn _tr_stored_block(
     };
     let _ = tr_stored_block_state(
         pending_buf,
-        &mut (*s).pending,
-        &mut (*s).bi_buf,
-        &mut (*s).bi_valid,
-        &mut (*s).bi_used,
+        &mut s.pending,
+        &mut s.bi_buf,
+        &mut s.bi_valid,
+        &mut s.bi_used,
         stored,
         last,
     );
@@ -5241,23 +5242,19 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
     if s.is_null() {
         return;
     }
-    let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+    let s = &mut *s;
+    let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
         return;
     };
-    if pending_len != 0 && (*s).pending_buf.is_null() {
+    if pending_len != 0 && s.pending_buf.is_null() {
         return;
     }
     let pending_buf = if pending_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+        ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
     };
-    tr_align_state(
-        pending_buf,
-        &mut (*s).pending,
-        &mut (*s).bi_buf,
-        &mut (*s).bi_valid,
-    );
+    tr_align_state(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid);
 }
 #[export_name = "_tr_align"]
 
