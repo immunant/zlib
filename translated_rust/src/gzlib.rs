@@ -903,15 +903,9 @@ pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::s
 pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
     gzoffset64(file)
 }
-pub unsafe extern "C" fn gzoffset(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzoffset64(file);
-    return gz_legacy_offset_result(ret);
-}
 #[export_name = "gzoffset"]
-
-pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gzoffset(file)
+pub unsafe extern "C" fn gzoffset_ffi(file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
+    gz_legacy_offset_result(gzoffset64(file))
 }
 fn gzeof_result(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if mode == crate::gzguts_h::GZ_READ {

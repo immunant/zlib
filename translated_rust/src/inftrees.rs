@@ -2824,16 +2824,31 @@ const DEXT: [u16; 32] = [
     27, 27, 28, 28, 29, 29, 64, 64,
 ];
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CodeType {
+    Codes,
+    Lens,
+    Dists,
+}
+
+fn code_type(type_0: crate::src::inftrees::codetype) -> Option<CodeType> {
+    match type_0 {
+        crate::src::inftrees::CODES => Some(CodeType::Codes),
+        crate::src::inftrees::LENS => Some(CodeType::Lens),
+        crate::src::inftrees::DISTS => Some(CodeType::Dists),
+        _ => None,
+    }
+}
+
 fn table_entry_for_symbol(
-    type_0: crate::src::inftrees::codetype,
+    type_0: CodeType,
     symbol: u16,
     bits: u8,
 ) -> Option<crate::src::inftrees::code> {
     let (base, extra, match_symbol): (&[u16], &[u16], u16) = match type_0 {
-        crate::src::inftrees::CODES => (&[], &[], 20),
-        crate::src::inftrees::LENS => (&LBASE, &LEXT, 257),
-        crate::src::inftrees::DISTS => (&DBASE, &DEXT, 0),
-        _ => return None,
+        CodeType::Codes => (&[], &[], 20),
+        CodeType::Lens => (&LBASE, &LEXT, 257),
+        CodeType::Dists => (&DBASE, &DEXT, 0),
     };
     if u32::from(symbol) + 1 < u32::from(match_symbol) {
         Some(crate::src::inftrees::code {
@@ -2876,12 +2891,9 @@ pub fn inflate_table_safe(
         return 1;
     }
 
-    if !matches!(
-        type_0,
-        crate::src::inftrees::CODES | crate::src::inftrees::LENS | crate::src::inftrees::DISTS
-    ) {
+    let Some(type_0) = code_type(type_0) else {
         return -1;
-    }
+    };
 
     let mut count = [0u16; MAXBITS as usize + 1];
     for &length in lens {
@@ -2936,7 +2948,7 @@ pub fn inflate_table_safe(
             return -1;
         }
     }
-    if left > 0 && (type_0 == CODES || max != 1) {
+    if left > 0 && (type_0 == CodeType::Codes || max != 1) {
         return -1;
     }
 
@@ -2965,8 +2977,8 @@ pub fn inflate_table_safe(
     let mut low = u32::MAX;
     let mut used = 1u32 << root;
     let mask = used - 1;
-    if (type_0 == LENS && used > ENOUGH_LENS as u32)
-        || (type_0 == DISTS && used > ENOUGH_DISTS as u32)
+    if (type_0 == CodeType::Lens && used > ENOUGH_LENS as u32)
+        || (type_0 == CodeType::Dists && used > ENOUGH_DISTS as u32)
         || table_start
             .checked_add(used as usize)
             .map_or(true, |end| end > table.len())
@@ -3040,8 +3052,8 @@ pub fn inflate_table_safe(
                 left <<= 1;
             }
             used += 1u32 << curr;
-            if (type_0 == LENS && used > ENOUGH_LENS as u32)
-                || (type_0 == DISTS && used > ENOUGH_DISTS as u32)
+            if (type_0 == CodeType::Lens && used > ENOUGH_LENS as u32)
+                || (type_0 == CodeType::Dists && used > ENOUGH_DISTS as u32)
                 || table_start
                     .checked_add(used as usize)
                     .map_or(true, |end| end > table.len())
@@ -3143,27 +3155,27 @@ mod tests {
 
     #[test]
     fn table_entry_for_symbol_classifies_code_entries() {
-        assert_table_entry(table_entry_for_symbol(CODES, 18, 7), 0, 7, 18);
-        assert_table_entry(table_entry_for_symbol(CODES, 19, 7), 96, 7, 0);
-        assert!(table_entry_for_symbol(CODES, 20, 7).is_none());
+        assert_table_entry(table_entry_for_symbol(CodeType::Codes, 18, 7), 0, 7, 18);
+        assert_table_entry(table_entry_for_symbol(CodeType::Codes, 19, 7), 96, 7, 0);
+        assert!(table_entry_for_symbol(CodeType::Codes, 20, 7).is_none());
     }
 
     #[test]
     fn table_entry_for_symbol_classifies_length_and_distance_entries() {
         assert_table_entry(
-            table_entry_for_symbol(LENS, 257, 4),
+            table_entry_for_symbol(CodeType::Lens, 257, 4),
             LEXT[0] as u8,
             4,
             LBASE[0],
         );
-        assert!(table_entry_for_symbol(LENS, 288, 4).is_none());
+        assert!(table_entry_for_symbol(CodeType::Lens, 288, 4).is_none());
         assert_table_entry(
-            table_entry_for_symbol(DISTS, 29, 3),
+            table_entry_for_symbol(CodeType::Dists, 29, 3),
             DEXT[29] as u8,
             3,
             DBASE[29],
         );
-        assert!(table_entry_for_symbol(DISTS, 32, 3).is_none());
+        assert!(table_entry_for_symbol(CodeType::Dists, 32, 3).is_none());
     }
 
     #[test]
@@ -3288,6 +3300,32 @@ mod tests {
             assert_eq!(cursor, 0, "lens={lens:?}");
             assert_eq!(bits, 7, "lens={lens:?}");
         }
+    }
+
+    #[test]
+    fn safe_table_rejects_invalid_type_before_writing_output() {
+        let lens = [1u16, 1];
+        let original_entry = code {
+            op: 7,
+            bits: 8,
+            val: 9,
+        };
+        let mut table = [original_entry; 2];
+        let mut cursor = 0;
+        let mut bits = 7;
+        let mut work = [0u16; 2];
+
+        assert_eq!(
+            inflate_table_safe(3, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            -1
+        );
+        for entry in table {
+            assert_eq!(entry.op, original_entry.op);
+            assert_eq!(entry.bits, original_entry.bits);
+            assert_eq!(entry.val, original_entry.val);
+        }
+        assert_eq!(cursor, 0);
+        assert_eq!(bits, 7);
     }
 
     #[test]
