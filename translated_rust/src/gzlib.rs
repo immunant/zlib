@@ -356,14 +356,16 @@ pub unsafe extern "C" fn gzdopen_ffi(
 ) -> crate::zlib_h::gzFile {
     gzdopen(fd, mode)
 }
-unsafe fn gzbuffer_state(
-    state: &mut crate::gzguts_h::gz_state,
+fn gzbuffer_state(
+    mode: ::core::ffi::c_int,
+    current_size: ::core::ffi::c_uint,
     mut size: ::core::ffi::c_uint,
+    want: &mut ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
+    if mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE {
         return -1 as ::core::ffi::c_int;
     }
-    if state.size != 0 as ::core::ffi::c_uint {
+    if current_size != 0 as ::core::ffi::c_uint {
         return -1 as ::core::ffi::c_int;
     }
     if (size << 1 as ::core::ffi::c_int) < size {
@@ -372,7 +374,7 @@ unsafe fn gzbuffer_state(
     if size < 8 as ::core::ffi::c_uint {
         size = 8 as ::core::ffi::c_uint;
     }
-    state.want = size;
+    *want = size;
     return 0 as ::core::ffi::c_int;
 }
 
@@ -385,7 +387,8 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    gzbuffer_state(&mut *(file as crate::gzguts_h::gz_statep), size)
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    gzbuffer_state(state.mode, state.size, size, &mut state.want)
 }
 pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
