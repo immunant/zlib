@@ -571,6 +571,40 @@ fn inflate_distance_extra_plan(
     })
 }
 
+/// The scalar commit after `LENEXT` has collected the length code's extra
+/// bits.  As with distance extras, consuming the ABI cursor remains in the
+/// transitional decoder boundary.  Keeping the mask and shifts here makes an
+/// incoherent opaque-state `extra` value an ordinary decode failure instead of
+/// an oversized Rust shift.
+#[derive(Copy, Clone)]
+struct InflateLengthExtraPlan {
+    length: ::core::ffi::c_uint,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    back: ::core::ffi::c_int,
+}
+
+fn inflate_length_extra_plan(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    extra: ::core::ffi::c_uint,
+    length: ::core::ffi::c_uint,
+    back: ::core::ffi::c_int,
+) -> Option<InflateLengthExtraPlan> {
+    if extra > bits {
+        return None;
+    }
+    let mask = (1 as ::core::ffi::c_uint)
+        .checked_shl(extra)?
+        .wrapping_sub(1);
+    Some(InflateLengthExtraPlan {
+        length: length.wrapping_add(hold as ::core::ffi::c_uint & mask),
+        hold: hold >> extra,
+        bits: bits.wrapping_sub(extra),
+        back: (back as ::core::ffi::c_uint).wrapping_add(extra) as ::core::ffi::c_int,
+    })
+}
+
 /// Select the source and bounded progress for one ordinary-inflate match.
 /// The legacy decoder still owns its ABI cursor lends and the bytewise copy
 /// (output-backed matches deliberately overlap), but the distance and
@@ -3030,7 +3064,8 @@ pub fn inflate(
                                     // the distance-extra transition below.
                                     let state_ref = &mut *state;
                                     if state_ref.extra != 0 {
-                                        while bits < state_ref.extra {
+                                        let extra = state_ref.extra;
+                                        while bits < extra {
                                             if have == 0 as ::core::ffi::c_uint {
                                                 break '_inf_leave;
                                             }
@@ -3042,16 +3077,20 @@ pub fn inflate(
                                             );
                                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                         }
-                                        state_ref.length = state_ref.length.wrapping_add(
-                                            hold as ::core::ffi::c_uint
-                                                & ((1 as ::core::ffi::c_uint) << state_ref.extra)
-                                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                                        );
-                                        hold >>= state_ref.extra;
-                                        bits = bits.wrapping_sub(state_ref.extra);
-                                        state_ref.back = (state_ref.back as ::core::ffi::c_uint)
-                                            .wrapping_add(state_ref.extra)
-                                            as ::core::ffi::c_int;
+                                        let Some(plan) = inflate_length_extra_plan(
+                                            hold,
+                                            bits,
+                                            extra,
+                                            state_ref.length,
+                                            state_ref.back,
+                                        ) else {
+                                            state_ref.mode = crate::src::inflate::BAD;
+                                            continue '_inf_leave;
+                                        };
+                                        state_ref.length = plan.length;
+                                        hold = plan.hold;
+                                        bits = plan.bits;
+                                        state_ref.back = plan.back;
                                     }
                                     state_ref.was = state_ref.length;
                                     state_ref.mode = crate::src::inflate::DIST;
