@@ -1856,6 +1856,40 @@ fn write_gzip_header_crc(
     state.pending = state.pending.wrapping_add(2);
 }
 
+// The fixed portion of a caller-supplied gzip header only reads the already
+// bound header record and writes the deflater-owned pending allocation. Keep
+// that transition reference-bound; the variable caller-owned byte strings
+// remain at the raw boundary in `deflate()` below.
+fn deflate_begin_gzip_header(
+    stream: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    head: &crate::zlib_h::gz_header,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) {
+    write_gzip_prefix(state, pending_buf);
+    write_gzip_header_fields(state, pending_buf, head);
+    if head.hcrc != 0 {
+        stream.adler = crate::src::crc32::crc32_bytes(
+            stream.adler,
+            &pending_buf[..state.pending as usize],
+        );
+    }
+    state.gzindex = 0;
+    state.status = crate::src::deflate::EXTRA_STATE;
+}
+
+// Once the variable header bytes have been emitted, appending the optional
+// two-byte header CRC is entirely deflater-owned work.
+fn deflate_append_gzip_header_crc(
+    stream: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) {
+    let checksum = stream.adler;
+    write_gzip_header_crc(state, pending_buf, checksum);
+    stream.adler = crate::src::crc32::crc32_buffer(0, None);
+}
+
 fn write_gzip_trailer(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -2266,22 +2300,13 @@ pub unsafe extern "C" fn deflate(
     }
     let s = (*strm).state as *mut crate::src::deflate::deflate_state;
     if (*s).status == crate::src::deflate::GZIP_STATE {
-            let state = &mut *s;
-            let head = &*state.gzhead;
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
-            write_gzip_prefix(state, pending_buf);
-            write_gzip_header_fields(state, pending_buf, head);
-            if head.hcrc != 0 {
-                (*strm).adler = crate::src::crc32::crc32_bytes(
-                    (*strm).adler,
-                    &pending_buf[..state.pending as usize],
-                );
-            }
-            state.gzindex = 0 as crate::zutil_h::ulg;
-            state.status = crate::src::deflate::EXTRA_STATE;
+        let state = &mut *s;
+        let head = &*state.gzhead;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        deflate_begin_gzip_header(&mut *strm, state, head, pending_buf);
     }
     if (*s).status == crate::src::deflate::EXTRA_STATE {
         if !(*(*s).gzhead).extra.is_null() {
@@ -2429,14 +2454,12 @@ pub unsafe extern "C" fn deflate(
                     return crate::zlib_h::Z_OK;
                 }
             }
-            let checksum = (*strm).adler;
             let state = &mut *s;
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
             );
-            write_gzip_header_crc(state, pending_buf, checksum);
-            (*strm).adler = crate::src::crc32::crc32_buffer(0 as crate::stdlib::uLong, None);
+            deflate_append_gzip_header_crc(&mut *strm, state, pending_buf);
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending(&mut *s, &mut *strm, |_state, _pending| {});
