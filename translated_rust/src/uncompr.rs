@@ -2,8 +2,8 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate_impl;
 pub use crate::src::inflate::inflateEnd;
+pub use crate::src::inflate::inflate_impl;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::uLongf;
@@ -263,25 +263,47 @@ fn decode_huffman_block(
     }
 }
 
-fn decode_zlib(dest: &mut [u8], source: &[u8]) -> (::core::ffi::c_int, usize) {
+struct DecodeResult {
+    status: ::core::ffi::c_int,
+    written: usize,
+    consumed: usize,
+}
+
+fn decode_zlib(dest: &mut [u8], source: &[u8]) -> DecodeResult {
     let Some((&cmf, &flg)) = source.first().zip(source.get(1)) else {
-        return (crate::zlib_h::Z_DATA_ERROR, 0);
+        return DecodeResult {
+            status: crate::zlib_h::Z_DATA_ERROR,
+            written: 0,
+            consumed: source.len(),
+        };
     };
     if cmf & 15 != 8
         || cmf >> 4 > 7
         || (u16::from(cmf) << 8 | u16::from(flg)) % 31 != 0
         || flg & 32 != 0
     {
-        return (crate::zlib_h::Z_DATA_ERROR, 0);
+        return DecodeResult {
+            status: crate::zlib_h::Z_DATA_ERROR,
+            written: 0,
+            consumed: 2,
+        };
     }
     let mut bits = BitReader::new(&source[2..]);
     let mut written = 0usize;
     loop {
         let Some(last) = bits.read(1) else {
-            return (crate::zlib_h::Z_DATA_ERROR, written);
+            return DecodeResult {
+                status: crate::zlib_h::Z_DATA_ERROR,
+                written,
+                consumed: bits.byte + 2,
+            };
         };
         let Some(kind) = bits.read(2) else {
-            return (crate::zlib_h::Z_DATA_ERROR, written);
+            return DecodeResult {
+                status: crate::zlib_h::Z_DATA_ERROR,
+                written,
+                consumed: bits.byte + 2,
+            };
         };
         let result = match kind {
             0 => {
@@ -291,24 +313,44 @@ fn decode_zlib(dest: &mut [u8], source: &[u8]) -> (::core::ffi::c_int, usize) {
                     .zip(bits.read_byte())
                     .map(|(low, high)| u16::from_le_bytes([low, high]))
                 else {
-                    return (crate::zlib_h::Z_DATA_ERROR, written);
+                    return DecodeResult {
+                        status: crate::zlib_h::Z_DATA_ERROR,
+                        written,
+                        consumed: bits.byte + 2,
+                    };
                 };
                 let Some(nlen) = bits
                     .read_byte()
                     .zip(bits.read_byte())
                     .map(|(low, high)| u16::from_le_bytes([low, high]))
                 else {
-                    return (crate::zlib_h::Z_DATA_ERROR, written);
+                    return DecodeResult {
+                        status: crate::zlib_h::Z_DATA_ERROR,
+                        written,
+                        consumed: bits.byte + 2,
+                    };
                 };
                 if len != !nlen {
-                    return (crate::zlib_h::Z_DATA_ERROR, written);
+                    return DecodeResult {
+                        status: crate::zlib_h::Z_DATA_ERROR,
+                        written,
+                        consumed: bits.byte + 2,
+                    };
                 }
                 for _ in 0..len {
                     let Some(byte) = bits.read_byte() else {
-                        return (crate::zlib_h::Z_DATA_ERROR, written);
+                        return DecodeResult {
+                            status: crate::zlib_h::Z_DATA_ERROR,
+                            written,
+                            consumed: bits.byte + 2,
+                        };
                     };
                     let Some(slot) = dest.get_mut(written) else {
-                        return (crate::zlib_h::Z_BUF_ERROR, written);
+                        return DecodeResult {
+                            status: crate::zlib_h::Z_BUF_ERROR,
+                            written,
+                            consumed: bits.byte + 2,
+                        };
                     };
                     *slot = byte;
                     written += 1;
@@ -328,7 +370,11 @@ fn decode_zlib(dest: &mut [u8], source: &[u8]) -> (::core::ffi::c_int, usize) {
             _ => Err(crate::zlib_h::Z_DATA_ERROR),
         };
         if let Err(error) = result {
-            return (error, written);
+            return DecodeResult {
+                status: error,
+                written,
+                consumed: bits.byte + 2,
+            };
         }
         if last != 0 {
             break;
@@ -342,167 +388,119 @@ fn decode_zlib(dest: &mut [u8], source: &[u8]) -> (::core::ffi::c_int, usize) {
         .zip(bits.read_byte())
         .map(|(((a, b), c), d)| u32::from_be_bytes([a, b, c, d]))
     else {
-        return (crate::zlib_h::Z_DATA_ERROR, written);
+        return DecodeResult {
+            status: crate::zlib_h::Z_DATA_ERROR,
+            written,
+            consumed: bits.byte + 2,
+        };
     };
     if crate::src::adler32::adler32_z(1, &dest[..written]) as u32 != trailer {
-        return (crate::zlib_h::Z_DATA_ERROR, written);
+        return DecodeResult {
+            status: crate::zlib_h::Z_DATA_ERROR,
+            written,
+            consumed: bits.byte + 2,
+        };
     }
-    (crate::zlib_h::Z_OK, written)
+    DecodeResult {
+        status: crate::zlib_h::Z_OK,
+        written,
+        consumed: bits.byte + 2,
+    }
 }
-pub unsafe extern "C" fn uncompress2_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
-    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
-        next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_in: 0,
-        total_in: 0,
-        next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_out: 0,
-        total_out: 0,
-        msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
-        zalloc: None,
-        zfree: None,
-        opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
-        data_type: 0,
-        adler: 0,
-        reserved: 0,
-    };
-    let mut err: ::core::ffi::c_int = 0;
-    let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut left: crate::stdlib::z_size_t = 0;
-    if sourceLen.is_null()
-        || *sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    len = *sourceLen;
-    left = *destLen;
-    if left == 0 as crate::stdlib::z_size_t && dest.is_null() {
-        dest = &raw mut stream.reserved as *mut crate::stdlib::Bytef;
-    }
-    stream.next_in = source as *mut crate::stdlib::Bytef;
-    stream.avail_in = 0 as crate::stdlib::uInt;
-    stream.zalloc = None;
-    stream.zfree = None;
-    stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    err = crate::src::inflate::inflateInit2_(
-        &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        crate::zutil_h::DEF_WBITS,
-        crate::zlib_h::ZLIB_VERSION.as_ptr(),
-        ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-    );
-    if err != crate::zlib_h::Z_OK {
-        return err;
-    }
-    stream.next_out = dest;
-    stream.avail_out = 0 as crate::stdlib::uInt;
-    loop {
-        if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
-        }
-        if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if len > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                len as crate::stdlib::uInt
-            };
-            len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
-        }
-        if stream.next_out.is_null() || (stream.next_in.is_null() && stream.avail_in != 0) {
-            err = crate::zlib_h::Z_STREAM_ERROR;
-            break;
-        }
-        let input = if stream.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-        };
-        let output = ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize);
-        let mut inflate_message = None;
-        let inflate_state = stream.state.cast::<crate::src::inflate::inflate_state>();
-        let Some(inflate_state) = inflate_state.as_mut() else {
-            err = crate::zlib_h::Z_STREAM_ERROR;
-            break;
-        };
-        err = crate::src::inflate::inflate_impl(
-            &mut stream,
-            inflate_state,
-            crate::zlib_h::Z_NO_FLUSH,
-            input,
-            output,
-            None,
-            &mut inflate_message,
-        );
-        if err != crate::zlib_h::Z_OK {
-            break;
-        }
-    }
-    len = len.wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
-    left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
-    *sourceLen = (*sourceLen).wrapping_sub(len);
-    *destLen = (*destLen).wrapping_sub(left);
-    crate::src::inflate::inflateEnd(&mut stream);
-    return if err == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else if err == crate::zlib_h::Z_NEED_DICT {
-        crate::zlib_h::Z_DATA_ERROR
-    } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        err
-    };
+fn uncompress2_z_impl(
+    dest: &mut [crate::stdlib::Bytef],
+    source: &[crate::stdlib::Bytef],
+) -> DecodeResult {
+    decode_zlib(dest, source)
 }
 #[export_name = "uncompress2_z"]
 
 pub unsafe extern "C" fn uncompress2_z_ffi(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::z_size_t,
+    dest: *mut crate::stdlib::Bytef,
+    destLen: *mut crate::stdlib::z_size_t,
+    source: *const crate::stdlib::Bytef,
+    sourceLen: *mut crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    uncompress2_z(dest, destLen, source, sourceLen)
-}
-pub unsafe extern "C" fn uncompress2(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::uLong,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    let mut used: crate::stdlib::z_size_t = *sourceLen as crate::stdlib::z_size_t;
-    ret = uncompress2_z(dest, &raw mut got, source, &raw mut used);
-    *sourceLen = used as crate::stdlib::uLong;
-    *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    return ret;
+    let Some(source_len) = (unsafe { sourceLen.as_ref() }).copied() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(dest_len) = (unsafe { destLen.as_ref() }).copied() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if source_len > isize::MAX as crate::stdlib::z_size_t
+        || dest_len > isize::MAX as crate::stdlib::z_size_t
+        || (source_len != 0 && source.is_null())
+        || (dest_len != 0 && dest.is_null())
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source = if source_len == 0 {
+        &[]
+    } else {
+        unsafe { core::slice::from_raw_parts(source, source_len) }
+    };
+    let dest = if dest_len == 0 {
+        &mut []
+    } else {
+        unsafe { core::slice::from_raw_parts_mut(dest, dest_len) }
+    };
+    let result = uncompress2_z_impl(dest, source);
+    unsafe {
+        *sourceLen = result.consumed;
+        *destLen = result.written;
+    }
+    result.status
 }
 #[export_name = "uncompress2"]
 
 pub unsafe extern "C" fn uncompress2_ffi(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::uLong,
+    dest: *mut crate::stdlib::Bytef,
+    destLen: *mut crate::stdlib::uLongf,
+    source: *const crate::stdlib::Bytef,
+    sourceLen: *mut crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    uncompress2(dest, destLen, source, sourceLen)
+    let Some(source_len) = (unsafe { sourceLen.as_ref() }).copied() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(dest_len) = (unsafe { destLen.as_ref() }).copied() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Ok(source_len) = usize::try_from(source_len) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Ok(dest_len) = usize::try_from(dest_len) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if source_len > isize::MAX as usize
+        || dest_len > isize::MAX as usize
+        || (source_len != 0 && source.is_null())
+        || (dest_len != 0 && dest.is_null())
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source = if source_len == 0 {
+        &[]
+    } else {
+        unsafe { core::slice::from_raw_parts(source, source_len) }
+    };
+    let dest = if dest_len == 0 {
+        &mut []
+    } else {
+        unsafe { core::slice::from_raw_parts_mut(dest, dest_len) }
+    };
+    let result = uncompress2_z_impl(dest, source);
+    unsafe {
+        *sourceLen = result.consumed as crate::stdlib::uLong;
+        *destLen = result.written as crate::stdlib::uLongf;
+    }
+    result.status
 }
 pub fn uncompress_z(
     dest: &mut [crate::stdlib::Bytef],
     source: &[crate::stdlib::Bytef],
 ) -> (::core::ffi::c_int, crate::stdlib::z_size_t) {
-    decode_zlib(dest, source)
+    let result = decode_zlib(dest, source);
+    (result.status, result.written)
 }
 #[export_name = "uncompress_z"]
 
@@ -540,8 +538,8 @@ pub fn uncompress(
     dest: &mut [crate::stdlib::Bytef],
     source: &[crate::stdlib::Bytef],
 ) -> (::core::ffi::c_int, crate::stdlib::uLongf) {
-    let (result, written) = decode_zlib(dest, source);
-    (result, written as crate::stdlib::uLongf)
+    let result = decode_zlib(dest, source);
+    (result.status, result.written as crate::stdlib::uLongf)
 }
 #[export_name = "uncompress"]
 
