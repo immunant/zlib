@@ -168,7 +168,7 @@ pub unsafe extern "C" fn inflateBackInit_(
             stream_identity,
             head: None,
             window: Some(::core::ptr::NonNull::new(window).expect("validated caller window")),
-            normal: crate::src::inflate::InflateNormalState {
+            decoder: crate::src::inflate::InflateOwnedDecoder::from_normal(crate::src::inflate::InflateNormalState {
                 mode: crate::src::inflate::TYPE,
                 last: 0,
                 wrap: 0,
@@ -206,7 +206,7 @@ pub unsafe extern "C" fn inflateBackInit_(
                 sane: 1,
                 back: 0,
                 was: 0,
-            },
+            }),
         },
     );
     return crate::zlib_h::Z_OK;
@@ -1245,9 +1245,9 @@ pub unsafe extern "C" fn inflateBack(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    raw_state.normal.mode = crate::src::inflate::TYPE;
-    raw_state.normal.last = 0;
-    raw_state.normal.whave = 0;
+    raw_state.decoder.normal.mode = crate::src::inflate::TYPE;
+    raw_state.decoder.normal.last = 0;
+    raw_state.decoder.normal.whave = 0;
     let mut next = strm.next_in as *mut ::core::ffi::c_uchar;
     let mut have = if next.is_null() {
         0
@@ -1256,30 +1256,30 @@ pub unsafe extern "C" fn inflateBack(
     };
     let window = ::core::slice::from_raw_parts_mut(
         raw_state.window.expect("inflateBack window").as_ptr(),
-        raw_state.normal.wsize as usize,
+        raw_state.decoder.normal.wsize as usize,
     );
     let mut state = InflateBackDecoderState {
-        mode: raw_state.normal.mode,
-        last: raw_state.normal.last,
-        wsize: raw_state.normal.wsize,
-        whave: raw_state.normal.whave,
-        wnext: raw_state.normal.wnext,
-        length: raw_state.normal.length,
-        offset: raw_state.normal.offset,
-        extra: raw_state.normal.extra,
-        lencode: raw_state.normal.lencode,
-        distcode: raw_state.normal.distcode,
-        lenbits: raw_state.normal.lenbits,
-        distbits: raw_state.normal.distbits,
-        ncode: raw_state.normal.ncode,
-        nlen: raw_state.normal.nlen,
-        ndist: raw_state.normal.ndist,
-        have: raw_state.normal.have,
-        next: raw_state.normal.next,
-        lens: &mut raw_state.normal.lens,
-        work: &mut raw_state.normal.work,
-        codes: &mut raw_state.normal.codes,
-        sane: raw_state.normal.sane,
+        mode: raw_state.decoder.normal.mode,
+        last: raw_state.decoder.normal.last,
+        wsize: raw_state.decoder.normal.wsize,
+        whave: raw_state.decoder.normal.whave,
+        wnext: raw_state.decoder.normal.wnext,
+        length: raw_state.decoder.normal.length,
+        offset: raw_state.decoder.normal.offset,
+        extra: raw_state.decoder.normal.extra,
+        lencode: raw_state.decoder.normal.lencode,
+        distcode: raw_state.decoder.normal.distcode,
+        lenbits: raw_state.decoder.normal.lenbits,
+        distbits: raw_state.decoder.normal.distbits,
+        ncode: raw_state.decoder.normal.ncode,
+        nlen: raw_state.decoder.normal.nlen,
+        ndist: raw_state.decoder.normal.ndist,
+        have: raw_state.decoder.normal.have,
+        next: raw_state.decoder.normal.next,
+        lens: &mut raw_state.decoder.normal.lens,
+        work: &mut raw_state.decoder.normal.work,
+        codes: &mut raw_state.decoder.normal.codes,
+        sane: raw_state.decoder.normal.sane,
     };
     let output = InflateBackOutput::new(window, |bytes| {
         out.expect("non-null function pointer")(
@@ -1312,22 +1312,22 @@ pub unsafe extern "C" fn inflateBack(
     // Release callback/window borrows before writing either the backing state
     // or the ABI stream.  The completion above carries only scalar state.
     drop(invocation);
-    raw_state.normal.mode = final_state.mode;
-    raw_state.normal.last = final_state.last;
-    raw_state.normal.whave = final_state.whave;
-    raw_state.normal.wnext = final_state.wnext;
-    raw_state.normal.length = final_state.length;
-    raw_state.normal.offset = final_state.offset;
-    raw_state.normal.extra = final_state.extra;
-    raw_state.normal.lencode = final_state.lencode;
-    raw_state.normal.distcode = final_state.distcode;
-    raw_state.normal.lenbits = final_state.lenbits;
-    raw_state.normal.distbits = final_state.distbits;
-    raw_state.normal.ncode = final_state.ncode;
-    raw_state.normal.nlen = final_state.nlen;
-    raw_state.normal.ndist = final_state.ndist;
-    raw_state.normal.have = final_state.have;
-    raw_state.normal.next = final_state.next;
+    raw_state.decoder.normal.mode = final_state.mode;
+    raw_state.decoder.normal.last = final_state.last;
+    raw_state.decoder.normal.whave = final_state.whave;
+    raw_state.decoder.normal.wnext = final_state.wnext;
+    raw_state.decoder.normal.length = final_state.length;
+    raw_state.decoder.normal.offset = final_state.offset;
+    raw_state.decoder.normal.extra = final_state.extra;
+    raw_state.decoder.normal.lencode = final_state.lencode;
+    raw_state.decoder.normal.distcode = final_state.distcode;
+    raw_state.decoder.normal.lenbits = final_state.lenbits;
+    raw_state.decoder.normal.distbits = final_state.distbits;
+    raw_state.decoder.normal.ncode = final_state.ncode;
+    raw_state.decoder.normal.nlen = final_state.nlen;
+    raw_state.decoder.normal.ndist = final_state.ndist;
+    raw_state.decoder.normal.have = final_state.have;
+    raw_state.decoder.normal.next = final_state.next;
     if let Some(message) = result.message {
         strm.msg = message.as_ptr().cast_mut().cast();
     }

@@ -214,7 +214,12 @@ pub struct inflate_state {
     // call and `window` belongs exclusively to inflateBack().
     pub head: Option<::core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
     pub window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>>,
-    pub normal: InflateNormalState,
+    // The normal codec and its scalar completion form one pointer-free
+    // owner.  The callback-owned record retains only the two persistent ABI
+    // registrations plus this owner; later stream adapters can hand the
+    // owner directly to bounded decoder requests without rebuilding a
+    // second scalar snapshot.
+    pub(crate) decoder: InflateOwnedDecoder,
 }
 
 // All resumable normal-inflate data is pointer-free.  Keeping it separate
@@ -319,7 +324,7 @@ fn initial_inflate_normal_state() -> InflateNormalState {
 // still keeps that provenance at `inflate_stream_and_state()` until the ABI
 // state record can be replaced as one complete lifecycle.
 pub(crate) struct InflateOwnedDecoder {
-    normal: InflateNormalState,
+    pub(crate) normal: InflateNormalState,
     stream: InflateDecoderStream,
 }
 
@@ -341,6 +346,19 @@ pub(crate) struct InflateGzipResult {
 }
 
 impl InflateOwnedDecoder {
+    pub(crate) fn from_normal(normal: InflateNormalState) -> Self {
+        Self {
+            normal,
+            stream: InflateDecoderStream {
+                total_in: 0,
+                total_out: 0,
+                adler: 0,
+                data_type: 0,
+                message: None,
+            },
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self::with_window_bits(15 + 16)
     }
@@ -500,9 +518,9 @@ pub(crate) unsafe fn inflate_stream_and_state<'stream>(
         .cast::<crate::src::inflate::inflate_state>()
         .as_mut();
     if state.stream_identity != identity
-        || (state.normal.mode as ::core::ffi::c_uint)
+        || (state.decoder.normal.mode as ::core::ffi::c_uint)
             < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || state.normal.mode as ::core::ffi::c_uint
+        || state.decoder.normal.mode as ::core::ffi::c_uint
             > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         return None;
@@ -588,7 +606,7 @@ unsafe fn inflate_publish_callback_owner(
             stream_identity: ::core::ptr::from_mut(strm).addr(),
             head: None,
             window: None,
-            normal: owner.normal,
+            decoder: InflateOwnedDecoder::from_normal(owner.normal),
         },
     );
     strm.state = Some(state.cast());
@@ -747,7 +765,10 @@ pub(crate) unsafe fn inflate_reset_from_abi_stream(
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let mut stream = InflateDecoderStream {
+    // Refresh the owner from the ABI scalar snapshot at the one cursor
+    // projection boundary.  The bounded decoder then updates that owner
+    // directly, so no second stream-scalar lifecycle can drift from it.
+    state.decoder.stream = InflateDecoderStream {
         total_in: strm.total_in,
         total_out: strm.total_out,
         adler: strm.adler,
@@ -755,17 +776,17 @@ pub(crate) unsafe fn inflate_reset_from_abi_stream(
         message: None,
     };
     let completion = match inflate_reset_from_stream(
-        InflateResetOwner::new(&mut state.normal, &mut stream),
+        InflateResetOwner::new(&mut state.decoder.normal, &mut state.decoder.stream),
         kind,
     ) {
         Ok(completion) => completion,
         Err(status) => return status,
     };
-    strm.total_out = stream.total_out;
-    strm.total_in = stream.total_in;
+    strm.total_out = state.decoder.stream.total_out;
+    strm.total_in = state.decoder.stream.total_in;
     strm.msg = ::core::ptr::null_mut();
-    strm.data_type = stream.data_type;
-    strm.adler = stream.adler;
+    strm.data_type = state.decoder.stream.data_type;
+    strm.adler = state.decoder.stream.adler;
     if completion.clear_header_registration {
         state.head = None;
     }
@@ -912,7 +933,7 @@ unsafe fn inflate_prime_stream(
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let mut owner = InflateNormalStateOwner::new(&mut state.normal);
+    let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
     inflatePrime(&mut owner, bits, value)
 }
 #[export_name = "inflatePrime"]
@@ -1007,11 +1028,12 @@ unsafe fn inflateGetDictionary<'stream>(
     stream: &'stream mut crate::zlib_h::z_stream_s,
 ) -> Option<InflateDictionaryRequest<'stream>> {
     let (_, state) = inflate_stream_and_state(stream)?;
-    let whave = state.normal.whave as usize;
+    let whave = state.decoder.normal.whave as usize;
     let window = if whave == 0 {
         &[]
     } else {
         state
+            .decoder
             .normal
             .owned_window
             .as_deref()
@@ -1019,7 +1041,7 @@ unsafe fn inflateGetDictionary<'stream>(
     };
     Some(InflateDictionaryRequest {
         window,
-        wnext: state.normal.wnext as usize,
+        wnext: state.decoder.normal.wnext as usize,
         whave,
     })
 }
@@ -3063,7 +3085,10 @@ pub(crate) unsafe fn inflate_from_stream(
     } else {
         ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
     };
-    let mut stream = InflateDecoderStream {
+    // Keep stream scalars inside the same pointer-free decoder owner as the
+    // resumable normal state.  The ABI adapter refreshes it only while the
+    // cursor/header projections are live, then publishes this completion.
+    state.decoder.stream = InflateDecoderStream {
         total_in: strm.total_in,
         total_out: strm.total_out,
         adler: strm.adler,
@@ -3071,11 +3096,11 @@ pub(crate) unsafe fn inflate_from_stream(
         message: None,
     };
     let result = InflateStreamOwner {
-        normal: &mut state.normal,
+        normal: &mut state.decoder.normal,
         input,
         output,
         header,
-        stream: &mut stream,
+        stream: &mut state.decoder.stream,
         flush,
     }
     .run();
@@ -3083,11 +3108,11 @@ pub(crate) unsafe fn inflate_from_stream(
     strm.avail_out = result.cursor.output_remaining;
     strm.next_in = strm.next_in.wrapping_add(result.cursor.input_used);
     strm.avail_in = result.cursor.input_remaining;
-    strm.total_in = stream.total_in;
-    strm.total_out = stream.total_out;
-    strm.adler = stream.adler;
-    strm.data_type = stream.data_type;
-    if let Some(message) = stream.message {
+    strm.total_in = state.decoder.stream.total_in;
+    strm.total_out = state.decoder.stream.total_out;
+    strm.adler = state.decoder.stream.adler;
+    strm.data_type = state.decoder.stream.data_type;
+    if let Some(message) = state.decoder.stream.message {
         strm.msg = match message {
             InflateMessage::Error(index) => {
                 INFLATE_ERROR_MESSAGES[index].as_ptr().cast_mut().cast()
@@ -3175,7 +3200,7 @@ pub unsafe fn inflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi:
     let Some((stream, state)) = inflate_stream_and_state(stream) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    InflateEndOwner::from_normal(&mut state.normal).release();
+    InflateEndOwner::from_normal(&mut state.decoder.normal).release();
     let zfree = stream.zfree.expect("non-null function pointer");
     let opaque = stream.opaque;
     zfree(opaque, state_handle.as_ptr().cast());
@@ -3270,7 +3295,7 @@ unsafe fn inflate_set_dictionary_from_stream(
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let mut owner = InflateNormalStateOwner::new(&mut state.normal);
+    let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
     inflateSetDictionary(&mut owner, dictionary)
 }
 #[export_name = "inflateSetDictionary"]
@@ -3304,7 +3329,7 @@ pub unsafe fn inflateGetHeader(
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if state.normal.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+    if state.decoder.normal.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state.head = head.as_deref_mut().map(::core::ptr::NonNull::from);
@@ -3410,20 +3435,20 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     };
     let (flags, in_0, out) = {
         let sync_state = InflateSyncState {
-            mode: state.normal.mode,
-            hold: state.normal.hold,
-            bits: state.normal.bits,
-            have: state.normal.have,
-            flags: state.normal.flags,
-            wrap: state.normal.wrap,
+            mode: state.decoder.normal.mode,
+            hold: state.decoder.normal.hold,
+            bits: state.decoder.normal.bits,
+            have: state.decoder.normal.have,
+            flags: state.decoder.normal.flags,
+            wrap: state.decoder.normal.wrap,
         };
         let (sync_state, consumed, status) = inflate_sync_core(sync_state, input);
-        state.normal.mode = sync_state.mode;
-        state.normal.hold = sync_state.hold;
-        state.normal.bits = sync_state.bits;
-        state.normal.have = sync_state.have;
-        state.normal.flags = sync_state.flags;
-        state.normal.wrap = sync_state.wrap;
+        state.decoder.normal.mode = sync_state.mode;
+        state.decoder.normal.hold = sync_state.hold;
+        state.decoder.normal.bits = sync_state.bits;
+        state.decoder.normal.have = sync_state.have;
+        state.decoder.normal.flags = sync_state.flags;
+        state.decoder.normal.wrap = sync_state.wrap;
         strm_ref.avail_in = strm_ref
             .avail_in
             .wrapping_sub(consumed as crate::stdlib::uInt);
@@ -3434,9 +3459,9 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
         if status != crate::zlib_h::Z_OK {
             return status;
         }
-        (state.normal.flags, strm_ref.total_in, strm_ref.total_out)
+        (state.decoder.normal.flags, strm_ref.total_in, strm_ref.total_out)
     };
-    let update = inflate_reset_core(&mut state.normal);
+    let update = inflate_reset_core(&mut state.decoder.normal);
     strm_ref.total_out = 0;
     strm_ref.total_in = strm_ref.total_out;
     strm_ref.msg = ::core::ptr::null_mut();
@@ -3447,8 +3472,8 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     state.head = None;
     strm_ref.total_in = in_0;
     strm_ref.total_out = out;
-    state.normal.flags = flags;
-    state.normal.mode = crate::src::inflate::TYPE;
+    state.decoder.normal.flags = flags;
+    state.decoder.normal.mode = crate::src::inflate::TYPE;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateSync"]
@@ -3473,7 +3498,7 @@ pub unsafe fn inflateSyncPoint(strm: &mut crate::zlib_h::z_stream_s) -> ::core::
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_sync_point(state.normal.mode, state.normal.bits)
+    inflate_sync_point(state.decoder.normal.mode, state.decoder.normal.bits)
 }
 #[export_name = "inflateSyncPoint"]
 
@@ -3516,7 +3541,7 @@ pub unsafe extern "C" fn inflateCopy(
         // The ABI state has already been projected above.  Copy its ordinary
         // fields directly here so the deep-copy operation does not need a
         // separate unsafe helper carrying the raw-pointer-bearing state type.
-        let owned_window = match state.normal.owned_window.as_deref() {
+        let owned_window = match state.decoder.normal.owned_window.as_deref() {
             Some(source_window) => {
                 let Some(mut window) = allocate_inflate_window(source_window.len()) else {
                     Some(source.zfree.expect("non-null function pointer"))
@@ -3525,8 +3550,8 @@ pub unsafe extern "C" fn inflateCopy(
                     );
                     return crate::zlib_h::Z_MEM_ERROR;
                 };
-                window[..state.normal.whave as usize]
-                    .copy_from_slice(&source_window[..state.normal.whave as usize]);
+                window[..state.decoder.normal.whave as usize]
+                    .copy_from_slice(&source_window[..state.decoder.normal.whave as usize]);
                 Some(window)
             }
             None => None,
@@ -3535,42 +3560,51 @@ pub unsafe extern "C" fn inflateCopy(
             stream_identity: dest_identity,
             head: state.head,
             window: state.window,
-            normal: InflateNormalState {
-                mode: state.normal.mode,
-                last: state.normal.last,
-                wrap: state.normal.wrap,
-                havedict: state.normal.havedict,
-                flags: state.normal.flags,
-                dmax: state.normal.dmax,
-                check: state.normal.check,
-                total: state.normal.total,
-                wbits: state.normal.wbits,
-                wsize: state.normal.wsize,
-                whave: state.normal.whave,
-                wnext: state.normal.wnext,
+            decoder: InflateOwnedDecoder {
+                normal: InflateNormalState {
+                mode: state.decoder.normal.mode,
+                last: state.decoder.normal.last,
+                wrap: state.decoder.normal.wrap,
+                havedict: state.decoder.normal.havedict,
+                flags: state.decoder.normal.flags,
+                dmax: state.decoder.normal.dmax,
+                check: state.decoder.normal.check,
+                total: state.decoder.normal.total,
+                wbits: state.decoder.normal.wbits,
+                wsize: state.decoder.normal.wsize,
+                whave: state.decoder.normal.whave,
+                wnext: state.decoder.normal.wnext,
                 owned_window,
-                hold: state.normal.hold,
-                bits: state.normal.bits,
-                length: state.normal.length,
-                offset: state.normal.offset,
-                extra: state.normal.extra,
-                lencode: state.normal.lencode,
-                distcode: state.normal.distcode,
-                lenbits: state.normal.lenbits,
-                distbits: state.normal.distbits,
-                ncode: state.normal.ncode,
-                nlen: state.normal.nlen,
-                ndist: state.normal.ndist,
-                have: state.normal.have,
-                next: state.normal.next,
-                lens: state.normal.lens,
-                work: state.normal.work,
+                hold: state.decoder.normal.hold,
+                bits: state.decoder.normal.bits,
+                length: state.decoder.normal.length,
+                offset: state.decoder.normal.offset,
+                extra: state.decoder.normal.extra,
+                lencode: state.decoder.normal.lencode,
+                distcode: state.decoder.normal.distcode,
+                lenbits: state.decoder.normal.lenbits,
+                distbits: state.decoder.normal.distbits,
+                ncode: state.decoder.normal.ncode,
+                nlen: state.decoder.normal.nlen,
+                ndist: state.decoder.normal.ndist,
+                have: state.decoder.normal.have,
+                next: state.decoder.normal.next,
+                lens: state.decoder.normal.lens,
+                work: state.decoder.normal.work,
                 codes: core::array::from_fn(|index| {
-                    crate::src::inftrees::code::copied_from(&state.normal.codes[index])
+                    crate::src::inftrees::code::copied_from(&state.decoder.normal.codes[index])
                 }),
-                sane: state.normal.sane,
-                back: state.normal.back,
-                was: state.normal.was,
+                sane: state.decoder.normal.sane,
+                back: state.decoder.normal.back,
+                was: state.decoder.normal.was,
+                },
+                stream: InflateDecoderStream {
+                    total_in: state.decoder.stream.total_in,
+                    total_out: state.decoder.stream.total_out,
+                    adler: state.decoder.stream.adler,
+                    data_type: state.decoder.stream.data_type,
+                    message: state.decoder.stream.message,
+                },
             },
         };
         let destination_stream = crate::zlib_h::z_stream_s {
@@ -3619,7 +3653,7 @@ pub unsafe fn inflateUndermine(
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_undermine_sane(&mut state.normal.sane)
+    inflate_undermine_sane(&mut state.decoder.normal.sane)
 }
 #[export_name = "inflateUndermine"]
 
@@ -3655,7 +3689,7 @@ pub unsafe extern "C" fn inflateValidate(
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_validate_wrap(&mut state.normal.wrap, check)
+    inflate_validate_wrap(&mut state.decoder.normal.wrap, check)
 }
 #[export_name = "inflateValidate"]
 
@@ -3691,10 +3725,10 @@ pub unsafe fn inflateMark(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
     inflate_mark_value(
-        state.normal.back,
-        state.normal.mode,
-        state.normal.length,
-        state.normal.was,
+        state.decoder.normal.back,
+        state.decoder.normal.mode,
+        state.decoder.normal.length,
+        state.decoder.normal.was,
     )
 }
 #[export_name = "inflateMark"]
@@ -3721,7 +3755,7 @@ pub unsafe extern "C" fn inflateCodesUsed(
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
-    inflate_codes_used(state.normal.next)
+    inflate_codes_used(state.decoder.normal.next)
 }
 #[export_name = "inflateCodesUsed"]
 
