@@ -61,6 +61,37 @@ struct InflateFastResult {
     error: Option<InflateFastError>,
 }
 
+// The fast loop only changes these three inflater fields.  Snapshot the
+// scalars it reads as well, so its decode tables can remain borrowed from the
+// state's owned workspace for the whole bounded operation.
+struct InflateFastState {
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    lenbits: ::core::ffi::c_uint,
+    distbits: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    sane: ::core::ffi::c_int,
+    wsize: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
+    mode: crate::src::inflate::inflate_mode,
+}
+
+impl From<&crate::src::inflate::inflate_state> for InflateFastState {
+    fn from(state: &crate::src::inflate::inflate_state) -> Self {
+        Self {
+            hold: state.hold,
+            bits: state.bits,
+            lenbits: state.lenbits,
+            distbits: state.distbits,
+            whave: state.whave,
+            sane: state.sane,
+            wsize: state.wsize,
+            wnext: state.wnext,
+            mode: state.mode,
+        }
+    }
+}
+
 // The fast loop reports positions relative to its already-bound input and
 // output views.  Publishing them through slice tails keeps the cursor update
 // bounds-checked and separate from the raw stream binding at the ABI edge.
@@ -84,7 +115,7 @@ fn publish_inflate_fast_result(
 }
 
 fn inflate_fast_impl(
-    state: &mut crate::src::inflate::inflate_state,
+    state: &mut InflateFastState,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
     window: &[crate::stdlib::Bytef],
@@ -248,35 +279,35 @@ fn inflate_fast_impl(
 }
 
 // Once the stream-owned views have been bound, fast inflation is ordinary
-// slice and state work. Keeping this dispatch separate prevents the raw
-// cursor adapter below from acquiring any decoding or result-policy logic.
+// slice and scalar-state work. The full inflater can keep its decode-table
+// workspace borrowed during this operation, rather than recreating raw views
+// of those tables at the cursor adapter.
 fn inflate_fast_bound(
-    strm: &mut crate::zlib_h::z_stream,
-    state: &mut crate::src::inflate::inflate_state,
+    state: &mut InflateFastState,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
     window: &[crate::stdlib::Bytef],
     lcode: &[crate::src::inftrees::code],
     dcode: &[crate::src::inftrees::code],
     used: usize,
-) {
-    let result = inflate_fast_impl(state, input, output, window, lcode, dcode, used);
-    publish_inflate_fast_result(strm, input, output, result);
+) -> InflateFastResult {
+    inflate_fast_impl(state, input, output, window, lcode, dcode, used)
 }
 
-// Fixed tables have their exact static length; dynamic tables use the
-// corresponding inflater workspace limit. Keep this policy value-only so the
-// raw cursor adapter below only identifies which table kind it was given.
-fn inflate_fast_table_len(
-    fixed: bool,
-    fixed_len: usize,
-    dynamic_len: usize,
-) -> usize {
-    if fixed {
-        fixed_len
-    } else {
-        dynamic_len
-    }
+// Apply the fast loop's state changes before publishing the advanced cursors,
+// matching the original decoder ordering without retaining a raw table view.
+fn finish_inflate_fast(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    fast_state: InflateFastState,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    result: InflateFastResult,
+) {
+    state.hold = fast_state.hold;
+    state.bits = fast_state.bits;
+    state.mode = fast_state.mode;
+    publish_inflate_fast_result(strm, input, output, result);
 }
 
 // The raw stream cursors are bound in one narrow scope, after which the
@@ -305,27 +336,43 @@ pub fn inflate_fast(
         } else {
             ::core::slice::from_raw_parts(state.window, state.wsize as usize)
         };
+        let mut fast_state = InflateFastState::from(&*state);
         let lcode_fixed = ::core::ptr::eq(
             state.lencode,
             crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
-        );
-        let lcode_len = inflate_fast_table_len(
-            lcode_fixed,
-            crate::src::inftrees::inffixed_h::lenfix.len(),
-            crate::src::inftrees::ENOUGH_LENS as usize,
         );
         let dcode_fixed = ::core::ptr::eq(
             state.distcode,
             crate::src::inftrees::inffixed_h::distfix.as_ptr(),
         );
-        let dcode_len = inflate_fast_table_len(
-            dcode_fixed,
-            crate::src::inftrees::inffixed_h::distfix.len(),
-            crate::src::inftrees::ENOUGH_DISTS as usize,
+        // Dynamic decode tables are subranges of the state-owned `codes`
+        // workspace. Fixed tables retain their static slices. Both cases now
+        // use checked slices, leaving raw cursor/window binding above as the
+        // only pointer-to-slice conversion in this adapter.
+        let code_base = state.codes.as_ptr().addr();
+        let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+        let lcode = if lcode_fixed {
+            &crate::src::inftrees::inffixed_h::lenfix[..]
+        } else {
+            let start = state.lencode.addr().wrapping_sub(code_base) / code_size;
+            &state.codes[start..start + crate::src::inftrees::ENOUGH_LENS as usize]
+        };
+        let dcode = if dcode_fixed {
+            &crate::src::inftrees::inffixed_h::distfix[..]
+        } else {
+            let start = state.distcode.addr().wrapping_sub(code_base) / code_size;
+            &state.codes[start..start + crate::src::inftrees::ENOUGH_DISTS as usize]
+        };
+        let result = inflate_fast_bound(
+            &mut fast_state,
+            input,
+            output,
+            window,
+            lcode,
+            dcode,
+            used,
         );
-        let lcode = ::core::slice::from_raw_parts(state.lencode, lcode_len);
-        let dcode = ::core::slice::from_raw_parts(state.distcode, dcode_len);
-        inflate_fast_bound(strm, state, input, output, window, lcode, dcode, used);
+        finish_inflate_fast(strm, state, fast_state, input, output, result);
     }
 }
 #[export_name = "inflate_fast"]
