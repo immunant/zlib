@@ -664,12 +664,13 @@ pub unsafe extern "C" fn gzputs_ffi(
         // ABI entry. Its mode is checked by the implementation dispatcher.
         Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
     };
-    let source = if file.is_null() {
+    let source = if s.is_null() {
         None
     } else {
-        // SAFETY: C's `gzputs` contract supplies a nul-terminated string.
-        // This exported adapter owns that caller-pointer conversion; the
-        // dispatcher below owns all gzip-state preflight and operation work.
+        // SAFETY: C's `gzputs` contract supplies a non-null, nul-terminated
+        // string. This exported adapter owns that caller-pointer conversion;
+        // the dispatcher below owns all gzip-state preflight and operation
+        // work.
         Some(unsafe { ::core::ffi::CStr::from_ptr(s) })
     };
     gzputs_ffi_dispatch(state, source)
