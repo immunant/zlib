@@ -3334,28 +3334,32 @@ pub unsafe extern "C" fn inflate_table_ffi(
     // These ABI cursors are only borrowed for this adapter call.  Keep the
     // raw access at the edge and let the builder below operate entirely on
     // owned/slice data.
-    let table = &mut *table;
+    let table_cursor = &mut *table;
     let bits = &mut *bits;
-    let mut lens_copy = [0; 320];
-    for index in 0..codes as usize {
-        lens_copy[index] = *lens.wrapping_add(index);
-    }
+    let codes = codes as usize;
+    // `codes` is bounded above and all ABI views live only for this export
+    // call.  Copy the input before invoking the canonical builder so no
+    // implementation code depends on caller-owned storage.
+    let lens = ::core::slice::from_raw_parts(lens, codes);
+    let mut lens_copy = [0; MAX_CODE_LENGTHS];
+    lens_copy[..codes].copy_from_slice(lens);
     let root = *bits;
-    let build = match inflate_table_build(type_0, &lens_copy[..codes as usize], root) {
+    let build = match inflate_table_build(type_0, &lens_copy[..codes], root) {
         Ok(build) => build,
         Err(status) => return status,
     };
-    let table_start = *table;
+    let table_start = *table_cursor;
     if table_start.is_null() {
         return 1;
     }
-    for (index, symbol) in build.work.iter().enumerate() {
-        *work.wrapping_add(index) = *symbol;
-    }
-    for (index, entry) in build.entries.iter().enumerate() {
-        *table_start.wrapping_add(index) = *entry;
-    }
-    *table = table_start.wrapping_add(build.entries.len());
+    // The C ABI supplies capacity for exactly these build products.  Keep
+    // the boundary's temporary views exact-sized, rather than constructing
+    // an oversized slice from an interior table cursor.
+    let work = ::core::slice::from_raw_parts_mut(work, build.work.len());
+    work.copy_from_slice(&build.work);
+    let output = ::core::slice::from_raw_parts_mut(table_start, build.entries.len());
+    output.copy_from_slice(&build.entries);
+    *table_cursor = output.as_mut_ptr().wrapping_add(output.len());
     *bits = build.root;
     0
 }
