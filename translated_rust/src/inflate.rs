@@ -1140,7 +1140,11 @@ pub fn inflate(
                                                                                                                 crate::src::crc32::crc32(
                                                                                                                     (*state).check as crate::stdlib::uLong,
                                                                                                                     Some(::core::slice::from_raw_parts(
-                                                                                                                        put.offset(-(out as isize)),
+                                                                                                                        // `out` is the number of bytes just produced from this
+                                                                                                                        // output cursor, so this remains within the caller's
+                                                                                                                        // validated output range.  Cursor arithmetic itself need
+                                                                                                                        // not be an unsafe operation.
+                                                                                                                        put.wrapping_offset(-(out as isize)),
                                                                                                                         out as usize,
                                                                                                                     )),
                                                                                                                 )
@@ -1148,7 +1152,7 @@ pub fn inflate(
                                                                                                                 crate::src::adler32::adler32(
                                                                                                                     (*state).check as crate::stdlib::uLong,
                                                                                                                     Some(::core::slice::from_raw_parts(
-                                                                                                                        put.offset(-(out as isize)),
+                                                                                                                        put.wrapping_offset(-(out as isize)),
                                                                                                                         out as crate::stdlib::z_size_t,
                                                                                                                     )),
                                                                                                                 )
