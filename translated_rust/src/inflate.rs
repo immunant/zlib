@@ -565,19 +565,22 @@ fn update_window(
     Ok(())
 }
 
-unsafe extern "C" fn updatewindow(
-    mut strm: crate::zlib_h::z_streamp,
-    mut end: *const crate::stdlib::Bytef,
-    mut copy: ::core::ffi::c_uint,
+fn updatewindow(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    input: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
     if state.window.is_null() {
-        state.window = Some((*strm).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*strm).opaque,
-            (1 as crate::stdlib::uInt) << state.wbits,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
+        let Some(zalloc) = strm.zalloc else {
+            return 1 as ::core::ffi::c_int;
+        };
+        state.window = unsafe {
+            zalloc(
+                strm.opaque,
+                (1 as crate::stdlib::uInt) << state.wbits,
+                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            ) as *mut ::core::ffi::c_uchar
+        };
         if state.window.is_null() {
             return 1 as ::core::ffi::c_int;
         }
@@ -587,12 +590,10 @@ unsafe extern "C" fn updatewindow(
         state.wnext = 0 as ::core::ffi::c_uint;
         state.whave = 0 as ::core::ffi::c_uint;
     }
-    let window = ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize);
-    let input = if copy == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(end.offset(-(copy as isize)), copy as usize)
-    };
+    // Allocation above establishes the window's `wsize` bytes for this
+    // initialized stream state.  Keep the ABI allocation handle confined to
+    // this bridge; callers use only references and slices.
+    let window = unsafe { ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize) };
     update_window(state, window, input).is_err() as ::core::ffi::c_int
 }
 pub unsafe fn inflate(
@@ -2284,11 +2285,16 @@ pub unsafe fn inflate(
                 < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
                 || flush != crate::zlib_h::Z_FINISH)
     {
-        if updatewindow(
-            strm,
-            (*strm).next_out,
-            out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint),
-        ) != 0
+        let copy = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+        let input = if copy == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(
+                (*strm).next_out.offset(-(copy as isize)),
+                copy as usize,
+            )
+        };
+        if updatewindow(&mut *strm, &mut *state, input) != 0
         {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
@@ -2498,40 +2504,16 @@ fn inflate_set_dictionary_complete(state: &mut crate::src::inflate::inflate_stat
     state.havedict = 1 as ::core::ffi::c_int;
 }
 
-pub unsafe extern "C" fn inflateSetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
+fn inflate_set_dictionary(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !inflate_stream_has_allocators(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !inflate_state_valid(strm, state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if dictLength != 0 && dictionary.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let dictionary = if dictLength == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
-    };
     let check = inflate_set_dictionary_check(strm, state, dictionary);
     if check != crate::zlib_h::Z_OK {
         return check;
     }
-    let ret = updatewindow(
-        strm,
-        dictionary.as_ptr().wrapping_add(dictionary.len()),
-        dictLength as ::core::ffi::c_uint,
-    );
+    let ret = updatewindow(strm, state, dictionary);
     if ret != 0 {
         state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
@@ -2546,7 +2528,24 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    inflateSetDictionary(strm, dictionary, dictLength)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if dictLength != 0 && dictionary.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dictionary = if dictLength == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
+    };
+    inflate_set_dictionary(strm, state, dictionary)
 }
 pub fn inflateGetHeader(
     strm: &mut crate::zlib_h::z_stream_s,
