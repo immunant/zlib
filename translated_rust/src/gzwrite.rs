@@ -705,6 +705,7 @@ pub unsafe extern "C" fn gzflush_ffi(
 }
 fn gzsetparams(
     state: &mut crate::gzguts_h::gz_state,
+    deflate_state: Option<&mut crate::src::deflate::deflate_state>,
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -729,9 +730,6 @@ fn gzsetparams(
         {
             return state.err;
         }
-        let deflate_state = unsafe {
-            (state.strm.state as *mut crate::src::deflate::deflate_state).as_mut()
-        };
         let Some(deflate_state) = deflate_state else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -756,7 +754,9 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    gzsetparams(state, level, strategy)
+    let deflate_state =
+        (state.strm.state as *mut crate::src::deflate::deflate_state).as_mut();
+    gzsetparams(state, deflate_state, level, strategy)
 }
 fn gzclose_w_cleanup(state: &mut crate::gzguts_h::gz_state) {
     if state.size != 0 {
