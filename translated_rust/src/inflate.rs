@@ -663,9 +663,33 @@ fn inflate_prime_bits(
     crate::zlib_h::Z_OK
 }
 
+// A normal-inflate state borrow is pointer-free once the stream-bound opaque
+// state projection has completed.  Keep scalar controls on this owner, so
+// their cores cannot accidentally regain access to ABI stream fields.
+struct InflateNormalStateOwner<'state> {
+    normal: &'state mut InflateNormalState,
+}
+
+impl<'state> InflateNormalStateOwner<'state> {
+    fn new(normal: &'state mut InflateNormalState) -> Self {
+        Self { normal }
+    }
+}
+
+// Bit priming is a pure normal-state operation.  Its signature intentionally
+// contains no ABI stream or opaque-state handle.
+fn inflatePrime(
+    owner: &mut InflateNormalStateOwner<'_>,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    inflate_prime_bits(owner.normal, bits, value)
+}
+
 // The export wrapper owns stream validation/conversion; this adapter retains
-// the stream-lifetime-bound opaque-state projection.
-pub unsafe fn inflatePrime(
+// the stream-lifetime-bound opaque-state projection and then produces the
+// pointer-free owner consumed by the scalar core above.
+unsafe fn inflate_prime_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     bits: ::core::ffi::c_int,
     value: ::core::ffi::c_int,
@@ -673,7 +697,8 @@ pub unsafe fn inflatePrime(
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_prime_bits(&mut state.normal, bits, value)
+    let mut owner = InflateNormalStateOwner::new(&mut state.normal);
+    inflatePrime(&mut owner, bits, value)
 }
 #[export_name = "inflatePrime"]
 
@@ -685,7 +710,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflatePrime(strm, bits, value)
+    inflate_prime_stream(strm, bits, value)
 }
 fn copy_history_window(
     window: &mut [u8],
