@@ -1314,11 +1314,40 @@ where
     }
 }
 
-// This is the complete ABI projection boundary.  It deliberately contains no
-// decoder work: after assembling a pointer-free invocation owner, it calls
-// `inflateBack()` and only writes the completed scalar/cursor state back to
-// the caller's stream.
-pub unsafe fn inflateBack<InputVisitor, OutputVisitor>(
+// One complete callback-back request is pointer-free once the stream/state
+// association has supplied its normal decoder and bounded back window.  In
+// particular, the callback invocation ends before the scalar completion is
+// committed, so this core cannot retain either ABI cursor provenance or a
+// caller window borrow.
+fn inflateBack<InputVisitor, OutputVisitor>(
+    owner: &mut InflateBackStateOwner<'_>,
+    input_visit: InputVisitor,
+    output_visit: OutputVisitor,
+) -> InflateBackDecodeResult
+where
+    InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
+    OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
+{
+    let (state, window) = owner.begin().expect("inflateBack window geometry");
+    let output = InflateBackOutput::new(window, output_visit);
+    let input = InflateBackInput::new(input_visit);
+    let mut invocation = InflateBackInvocation {
+        state,
+        input,
+        output,
+    };
+    let completion = invocation.decode();
+    // Release callback/window borrows before writing either the backing state
+    // or any ABI stream.  The completion above carries only scalar state.
+    drop(invocation);
+    owner.commit(completion)
+}
+
+// This is the complete ABI projection boundary.  It only associates the
+// validated stream with its callback-backed state, builds the pointer-free
+// owner, and publishes the completed diagnostic.  Decoder work remains in
+// `inflateBack()` above.
+unsafe fn inflate_back_from_stream<InputVisitor, OutputVisitor>(
     strm: &mut crate::zlib_h::z_stream_s,
     input_visit: InputVisitor,
     output_visit: OutputVisitor,
@@ -1339,19 +1368,7 @@ where
         raw_state.back_window.as_mut().expect("inflateBack window"),
     );
     let mut owner = InflateBackStateOwner::new(normal, back_window);
-    let (state, window) = owner.begin().expect("inflateBack window geometry");
-    let output = InflateBackOutput::new(window, output_visit);
-    let input = InflateBackInput::new(input_visit);
-    let mut invocation = InflateBackInvocation {
-        state,
-        input,
-        output,
-    };
-    let completion = invocation.decode();
-    // Release callback/window borrows before writing either the backing state
-    // or the ABI stream.  The completion above carries only scalar state.
-    drop(invocation);
-    let result = owner.commit(completion);
+    let result = inflateBack(&mut owner, input_visit, output_visit);
     if let Some(message) = result.message {
         strm.msg = message.as_ptr().cast_mut().cast();
     }
@@ -1379,7 +1396,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
     } else {
         strm.avail_in as ::core::ffi::c_uint
     };
-    let status = inflateBack(
+    let status = inflate_back_from_stream(
         strm,
         |consume| {
             if have == 0 {
