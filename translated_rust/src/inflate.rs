@@ -547,18 +547,29 @@ pub unsafe extern "C" fn inflateReset_ffi(
     };
     inflateReset(strm, state)
 }
-pub fn inflateReset2(
+/// The safe reset decision, including a callback-owned window that the ABI
+/// boundary must release before the reset mutates the stream state.
+struct InflateReset2Plan {
+    wrap: ::core::ffi::c_int,
+    window_bits: ::core::ffi::c_int,
+    release_window: bool,
+}
+
+/// Validate and describe an `inflateReset2` operation without invoking the
+/// caller's allocator callback.  The FFI wrapper performs that one ABI action
+/// before handing this plan back to the safe reset implementation.
+fn prepare_inflate_reset2(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
     mut windowBits: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+) -> Result<InflateReset2Plan, ::core::ffi::c_int> {
     let mut wrap: ::core::ffi::c_int = 0;
     if !inflate_state_valid(strm, state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
     if windowBits < 0 as ::core::ffi::c_int {
         if windowBits < -15 as ::core::ffi::c_int {
-            return crate::zlib_h::Z_STREAM_ERROR;
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
         }
         wrap = 0 as ::core::ffi::c_int;
         windowBits = -windowBits;
@@ -571,22 +582,27 @@ pub fn inflateReset2(
     if windowBits != 0
         && (windowBits < 8 as ::core::ffi::c_int || windowBits > 15 as ::core::ffi::c_int)
     {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    if state.window.is_some() && state.wbits != windowBits as ::core::ffi::c_uint {
-        // The validated stream owns this existing window allocation. The
-        // callback remains the ABI boundary for custom allocators.
-        unsafe {
-            Some(strm.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                state.window.expect("checked non-null window").as_ptr().cast(),
-            );
-        }
+    Ok(InflateReset2Plan {
+        wrap,
+        window_bits: windowBits,
+        release_window: state.window.is_some() && state.wbits != windowBits as ::core::ffi::c_uint,
+    })
+}
+
+/// Apply a previously validated reset after its optional callback-owned
+/// window has been released at the ABI boundary.
+fn apply_inflate_reset2(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    plan: InflateReset2Plan,
+) -> ::core::ffi::c_int {
+    if plan.release_window {
         state.window = None;
     }
-    state.wrap = wrap;
-    state.wbits = windowBits as ::core::ffi::c_uint;
+    state.wrap = plan.wrap;
+    state.wbits = plan.window_bits as crate::stdlib::uInt;
     inflateReset(strm, state)
 }
 #[export_name = "inflateReset2"]
@@ -604,7 +620,17 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateReset2(strm, state, windowBits)
+    let plan = match prepare_inflate_reset2(strm, state, windowBits) {
+        Ok(plan) => plan,
+        Err(error) => return error,
+    };
+    if plan.release_window {
+        let window = state.window.expect("plan requires an installed window");
+        // This is the existing custom-allocator boundary.  It deliberately
+        // precedes the safe reset mutation, matching zlib's callback order.
+        strm.zfree.expect("checked allocator")(strm.opaque, window.as_ptr().cast());
+    }
+    apply_inflate_reset2(strm, state, plan)
 }
 
 fn initialize_inflate_state_base(
@@ -641,7 +667,13 @@ fn initialize_allocated_inflate_state(
     let state_ref = unsafe { &mut *state };
     *state_ref = empty_inflate_state();
     initialize_inflate_state_base(state_ref, strm, allocator_provenance);
-    let ret = inflateReset2(strm, state_ref, window_bits);
+    let ret = match prepare_inflate_reset2(strm, state_ref, window_bits) {
+        Ok(plan) => {
+            debug_assert!(!plan.release_window);
+            apply_inflate_reset2(strm, state_ref, plan)
+        }
+        Err(error) => error,
+    };
     if ret != crate::zlib_h::Z_OK {
         unsafe {
             Some(strm.zfree.expect("non-null function pointer"))
