@@ -5455,67 +5455,7 @@ pub unsafe extern "C" fn _tr_flush_block(
     let encoding = select_block_encoding(stored_len, opt_lenb, static_lenb, !buf.is_null());
     if encoding == BlockEncoding::Stored {
         _tr_stored_block(s, buf, stored_len, last);
-    } else if encoding == BlockEncoding::Static {
-        let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-        let header = block_header_bits(1 as ::core::ffi::c_int, last);
-        if bit_buffer_would_overflow((*s).bi_valid, len) {
-            let mut val: ::core::ffi::c_int = header;
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                as crate::zutil_h::ush;
-            let c2rust_fresh3 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh3 as isize) = ((*s).bi_buf as ::core::ffi::c_int
-                & 0xff as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            let c2rust_fresh4 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh4 as isize) = ((*s).bi_buf as ::core::ffi::c_int
-                >> 8 as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
-                >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                as crate::zutil_h::ush;
-            (*s).bi_valid += len - crate::src::deflate::Buf_size;
-        } else {
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | (header as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                as crate::zutil_h::ush;
-            (*s).bi_valid += len;
-        }
-        compress_block(
-            s,
-            &raw const static_ltree as *const crate::src::deflate::ct_data,
-            &raw const static_dtree as *const crate::src::deflate::ct_data,
-        );
     } else {
-        let mut len_0: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-        let header = block_header_bits(2 as ::core::ffi::c_int, last);
-        if bit_buffer_would_overflow((*s).bi_valid, len_0) {
-            let mut val_0: ::core::ffi::c_int = header;
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                as crate::zutil_h::ush;
-            let c2rust_fresh5 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh5 as isize) = ((*s).bi_buf as ::core::ffi::c_int
-                & 0xff as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            let c2rust_fresh6 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh6 as isize) = ((*s).bi_buf as ::core::ffi::c_int
-                >> 8 as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            (*s).bi_buf = (val_0 as crate::zutil_h::ush as ::core::ffi::c_int
-                >> crate::src::deflate::Buf_size - (*s).bi_valid)
-                as crate::zutil_h::ush;
-            (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
-        } else {
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | (header as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-                as crate::zutil_h::ush;
-            (*s).bi_valid += len_0;
-        }
         let pending_buffer =
             core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
         let mut writer = PendingBitWriter {
@@ -5524,22 +5464,36 @@ pub unsafe extern "C" fn _tr_flush_block(
             bi_buf: &mut state.bi_buf,
             bi_valid: &mut state.bi_valid,
         };
-        let _ = send_all_trees(
-            &mut writer,
-            &state.bl_tree,
-            &state.dyn_ltree,
-            &state.dyn_dtree,
-            state.l_desc.max_code + 1 as ::core::ffi::c_int,
-            state.d_desc.max_code + 1 as ::core::ffi::c_int,
-            max_blindex + 1 as ::core::ffi::c_int,
-        );
-        compress_block(
-            s,
-            &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-            &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-        );
+        if encoding == BlockEncoding::Static {
+            let _ = writer.write_bits(block_header_bits(1, last), 3);
+        } else {
+            let _ = writer.write_bits(block_header_bits(2, last), 3);
+            let _ = send_all_trees(
+                &mut writer,
+                &state.bl_tree,
+                &state.dyn_ltree,
+                &state.dyn_dtree,
+                state.l_desc.max_code + 1 as ::core::ffi::c_int,
+                state.d_desc.max_code + 1 as ::core::ffi::c_int,
+                max_blindex + 1 as ::core::ffi::c_int,
+            );
+        }
+        drop(writer);
+        if encoding == BlockEncoding::Static {
+            compress_block(
+                s,
+                &raw const static_ltree as *const crate::src::deflate::ct_data,
+                &raw const static_dtree as *const crate::src::deflate::ct_data,
+            );
+        } else {
+            compress_block(
+                s,
+                &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
+                    as *const crate::src::deflate::ct_data,
+                &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
+                    as *const crate::src::deflate::ct_data,
+            );
+        }
     }
     init_block(state);
     if last != 0 {

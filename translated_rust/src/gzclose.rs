@@ -6,7 +6,6 @@ pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::off64_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::gzwrite::gzclose_w;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
@@ -53,7 +52,7 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
             crate::src::gzread::gzclose_r_ffi(file as *mut crate::zlib_h::gzFile_s)
         }
         Ok(GzCloseAction::Write) => {
-            crate::src::gzwrite::gzclose_w(file as *mut crate::zlib_h::gzFile_s)
+            crate::src::gzwrite::gzclose_w_ffi(file as *mut crate::zlib_h::gzFile_s)
         }
     }
 }

@@ -1686,7 +1686,8 @@ pub unsafe extern "C" fn gzflush_ffi(
     gz_comp(state, flush);
     return (*state).err;
 }
-unsafe fn gzsetparams(
+#[export_name = "gzsetparams"]
+pub unsafe extern "C" fn gzsetparams_ffi(
     mut file: crate::zlib_h::gzFile,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
@@ -1740,16 +1741,8 @@ unsafe fn gzsetparams(
     state.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
-#[export_name = "gzsetparams"]
-
-pub unsafe extern "C" fn gzsetparams_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzsetparams(file, level, strategy)
-}
-pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzclose_w"]
+pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -1790,12 +1783,6 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
     return gzclose_w_result(zero_error, finish_error, close_failed);
 }
-#[export_name = "gzclose_w"]
-
-pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_w(file)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
