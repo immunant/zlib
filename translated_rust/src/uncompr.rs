@@ -87,6 +87,10 @@ fn has_invalid_uncompress_buffers(
     source_len > 0 && source_is_null || dest_len > 0 && dest_is_null
 }
 
+fn has_missing_uncompress_lengths(dest_len_is_null: bool, source_len_is_null: bool) -> bool {
+    dest_len_is_null || source_len_is_null
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct UncompressOutcome {
     status: ::core::ffi::c_int,
@@ -142,7 +146,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: *mut crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    if sourceLen.is_null() || destLen.is_null() {
+    if has_missing_uncompress_lengths(destLen.is_null(), sourceLen.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let source_len = *sourceLen;
@@ -217,7 +221,7 @@ pub unsafe extern "C" fn uncompress2_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: *mut crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    if destLen.is_null() || sourceLen.is_null() {
+    if has_missing_uncompress_lengths(destLen.is_null(), sourceLen.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let lengths = LegacyUncompressLengths::from_legacy(*destLen, *sourceLen);
@@ -255,8 +259,9 @@ pub unsafe extern "C" fn uncompress_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        has_invalid_uncompress_buffers, normalize_uncompress_status, replenish_scalar,
-        uncompress_outcome, ChunkedProgress, LegacyUncompressLengths,
+        has_invalid_uncompress_buffers, has_missing_uncompress_lengths,
+        normalize_uncompress_status, replenish_scalar, uncompress_outcome, ChunkedProgress,
+        LegacyUncompressLengths,
     };
 
     #[test]
@@ -273,6 +278,13 @@ mod tests {
     #[test]
     fn buffer_validation_accepts_present_nonempty_buffers() {
         assert!(!has_invalid_uncompress_buffers(false, 1, false, 1));
+    }
+
+    #[test]
+    fn length_validation_rejects_either_missing_length() {
+        assert!(has_missing_uncompress_lengths(true, false));
+        assert!(has_missing_uncompress_lengths(false, true));
+        assert!(!has_missing_uncompress_lengths(false, false));
     }
 
     #[test]

@@ -2930,6 +2930,20 @@ fn code_input_buffers_are_valid(
     codes == 0 || (lens_present && work_present)
 }
 
+fn ffi_table_capacity(
+    type_0: crate::src::inftrees::codetype,
+    codes: ::core::ffi::c_uint,
+    table_out_present: bool,
+    bits_present: bool,
+    lens_present: bool,
+    work_present: bool,
+) -> Option<usize> {
+    (table_out_present
+        && bits_present
+        && code_input_buffers_are_valid(codes, lens_present, work_present))
+    .then(|| table_capacity_for_type(type_0))?
+}
+
 fn table_usage_fits(type_0: CodeType, used: u32, table_cursor: TableCursor) -> bool {
     let within_type_capacity = type_0
         .maximum_used_entries()
@@ -3230,14 +3244,14 @@ pub unsafe extern "C" fn inflate_table_ffi(
     bits: *mut ::core::ffi::c_uint,
     work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
-    if table_out.is_null()
-        || bits.is_null()
-        || !code_input_buffers_are_valid(codes, !lens.is_null(), !work.is_null())
-    {
-        return -1;
-    }
-
-    let Some(table_capacity) = table_capacity_for_type(type_0) else {
+    let Some(table_capacity) = ffi_table_capacity(
+        type_0,
+        codes,
+        !table_out.is_null(),
+        !bits.is_null(),
+        !lens.is_null(),
+        !work.is_null(),
+    ) else {
         return -1;
     };
     let table_start = *table_out;
@@ -3380,6 +3394,28 @@ mod tests {
         assert!(!code_input_buffers_are_valid(1, false, true));
         assert!(!code_input_buffers_are_valid(1, true, false));
         assert!(!code_input_buffers_are_valid(1, false, false));
+    }
+
+    #[test]
+    fn ffi_table_capacity_validates_scalar_ffi_inputs() {
+        assert_eq!(
+            ffi_table_capacity(CODES, 0, true, true, false, false),
+            Some(128)
+        );
+        assert_eq!(
+            ffi_table_capacity(LENS, 1, true, true, true, true),
+            Some(ENOUGH_LENS as usize)
+        );
+        assert_eq!(
+            ffi_table_capacity(CODES, 0, false, true, false, false),
+            None
+        );
+        assert_eq!(
+            ffi_table_capacity(CODES, 0, true, false, false, false),
+            None
+        );
+        assert_eq!(ffi_table_capacity(CODES, 1, true, true, false, true), None);
+        assert_eq!(ffi_table_capacity(3, 0, true, true, false, false), None);
     }
 
     #[test]

@@ -64,6 +64,10 @@ pub fn adler32(adler: uLong, buf: &[Bytef]) -> uLong {
     adler32_z(adler, buf)
 }
 
+fn adler32_ffi_input(adler: uLong, input: Option<&[Bytef]>) -> uLong {
+    input.map_or(1, |input| adler32_z(adler, input))
+}
+
 fn adler32_combine_(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
     if len2 < 0 {
         return 0xffff_ffff;
@@ -91,28 +95,28 @@ pub fn adler32_combine64(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
 
 #[export_name = "adler32_z"]
 pub unsafe extern "C" fn adler32_z_ffi(adler: uLong, buf: *const Bytef, len: z_size_t) -> uLong {
-    if buf.is_null() {
-        return 1;
-    }
-    if len == 0 {
-        return adler32_z(adler, &[]);
-    }
+    let input: Option<&[Bytef]> = if buf.is_null() {
+        None
+    } else if len == 0 {
+        Some(&[])
+    } else {
+        Some(unsafe { core::slice::from_raw_parts(buf, len) })
+    };
 
-    let input = unsafe { core::slice::from_raw_parts(buf, len) };
-    adler32_z(adler, input)
+    adler32_ffi_input(adler, input)
 }
 
 #[export_name = "adler32"]
 pub unsafe extern "C" fn adler32_ffi(adler: uLong, buf: *const Bytef, len: uInt) -> uLong {
-    if buf.is_null() {
-        return 1;
-    }
-    if len == 0 {
-        return adler32(adler, &[]);
-    }
+    let input: Option<&[Bytef]> = if buf.is_null() {
+        None
+    } else if len == 0 {
+        Some(&[])
+    } else {
+        Some(unsafe { core::slice::from_raw_parts(buf, len as usize) })
+    };
 
-    let input = unsafe { core::slice::from_raw_parts(buf, len as usize) };
-    adler32(adler, input)
+    adler32_ffi_input(adler, input)
 }
 
 #[export_name = "adler32_combine"]
@@ -157,6 +161,15 @@ mod tests {
         assert_eq!(unsafe { adler32_ffi(seed, pointer, 0) }, adler32(seed, &[]));
         assert_eq!(unsafe { adler32_z_ffi(seed, core::ptr::null(), 0) }, 1);
         assert_eq!(unsafe { adler32_ffi(seed, core::ptr::null(), 0) }, 1);
+    }
+
+    #[test]
+    fn ffi_input_preserves_null_and_slice_results() {
+        let seed = 0x1234_5678;
+        let input = b"input";
+
+        assert_eq!(adler32_ffi_input(seed, None), 1);
+        assert_eq!(adler32_ffi_input(seed, Some(input)), adler32_z(seed, input));
     }
 
     #[test]
