@@ -118,10 +118,9 @@ fn gz_save_direct_input(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> 
 }
 
 /// Set up gzip's owned staging buffers and synchronize their initial cursors
-/// to the legacy stream.  Deflate construction and stepping intentionally
-/// stay with `GzCompressor::compress`, the one place that crosses that legacy
-/// boundary.
-unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+/// to the legacy stream.  This only configures buffers owned by `gz_state`;
+/// construction and stepping of the legacy deflate stream stay separate.
+fn gz_initialize_buffers(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let strm: &mut crate::zlib_h::z_stream = &mut state.strm;
     if state.size == 0 {
         if let Err(error) = gz_prepare_write_buffers(
@@ -153,6 +152,13 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
     }
     0
+}
+
+/// Legacy state setup entry retained for callers that still carry the stream
+/// across an unsafe boundary.  Buffer initialization itself does not require
+/// that boundary.
+unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    gz_initialize_buffers(state)
 }
 
 impl GzCompressor<'_> {
@@ -290,7 +296,7 @@ impl GzCompressor<'_> {
             }
             return 0 as ::core::ffi::c_int;
         }
-        if state.size == 0 && unsafe { gz_init(state) } == -1 {
+        if state.size == 0 && gz_initialize_buffers(state) == -1 {
             return -1;
         }
         if state.strm.state.is_null() {
