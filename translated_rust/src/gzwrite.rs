@@ -1450,37 +1450,6 @@ where
     }
 }
 
-unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let buffer = if state.size == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
-    };
-    let mut input = GzWriteInputStorage::new(buffer);
-    let mut zero = GzZeroCore::new(state.size, state.x.pos, state.skip);
-    if matches!(
-        zero.initial_action(state.strm.avail_in),
-        GzZeroInitialAction::FlushPending
-    ) && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    loop {
-        let chunk = zero.prepare_chunk(&mut input);
-        state.strm.avail_in = chunk.len;
-        state.strm.next_in = state.in_0;
-        let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        let action = zero.apply_compression(chunk.len, state.strm.avail_in, ret);
-        state.x.pos = zero.pos;
-        state.skip = zero.skip;
-        match action {
-            GzZeroAction::Error => return -1 as ::core::ffi::c_int,
-            GzZeroAction::Done => return 0 as ::core::ffi::c_int,
-            GzZeroAction::Continue => {}
-        }
-    }
-}
-
 unsafe fn gz_write(
     state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidpc,
@@ -1494,11 +1463,9 @@ unsafe fn gz_write(
                 return 0 as crate::stdlib::z_size_t;
             }
         }
-        GzWritePreparation::ZeroSkip => {
-            if gz_zero(state) == -1 as ::core::ffi::c_int {
-                return 0 as crate::stdlib::z_size_t;
-            }
-        }
+        // Exported write wrappers flush pending seek zeroes before calling this
+        // implementation. This branch is unreachable for the private call graph.
+        GzWritePreparation::ZeroSkip => return 0 as crate::stdlib::z_size_t,
         GzWritePreparation::Ready => {}
     }
     if gz_write_uses_buffered_path(len, state.size) {
@@ -1671,6 +1638,43 @@ fn gzclose_buffer_action(
     }
 }
 
+// Keep the raw backing-buffer conversion and compression calls at exported
+// boundaries. The zero-fill state machine itself is `GzZeroCore` above.
+macro_rules! gz_zero_at_ffi_boundary {
+    ($state:expr) => {{
+        let state = &mut *$state;
+        let buffer = if state.size == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
+        };
+        let mut input = GzWriteInputStorage::new(buffer);
+        let mut zero = GzZeroCore::new(state.size, state.x.pos, state.skip);
+        if matches!(
+            zero.initial_action(state.strm.avail_in),
+            GzZeroInitialAction::FlushPending
+        ) && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+        {
+            -1 as ::core::ffi::c_int
+        } else {
+            loop {
+                let chunk = zero.prepare_chunk(&mut input);
+                state.strm.avail_in = chunk.len;
+                state.strm.next_in = state.in_0;
+                let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+                let action = zero.apply_compression(chunk.len, state.strm.avail_in, ret);
+                state.x.pos = zero.pos;
+                state.skip = zero.skip;
+                match action {
+                    GzZeroAction::Error => break -1 as ::core::ffi::c_int,
+                    GzZeroAction::Done => break 0 as ::core::ffi::c_int,
+                    GzZeroAction::Continue => {}
+                }
+            }
+        }
+    }};
+}
+
 #[export_name = "gzwrite"]
 pub unsafe extern "C" fn gzwrite_ffi(
     mut file: crate::zlib_h::gzFile,
@@ -1700,6 +1704,11 @@ pub unsafe extern "C" fn gzwrite_ffi(
         );
         return 0 as ::core::ffi::c_int;
     };
+    if len != 0 && gz_has_pending_skip(state.skip)
+        && gz_zero_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
+    {
+        return 0 as ::core::ffi::c_int;
+    }
     return gz_write(state, buf, len) as ::core::ffi::c_int;
 }
 #[export_name = "gzfwrite"]
@@ -1736,6 +1745,11 @@ pub unsafe extern "C" fn gzfwrite_ffi(
             return 0 as crate::stdlib::z_size_t;
         }
     };
+    if len != 0 && gz_has_pending_skip(state.skip)
+        && gz_zero_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
+    {
+        return 0 as crate::stdlib::z_size_t;
+    }
     gzfwrite_result(size, len, gz_write(state, buf, len))
 }
 #[export_name = "gzputc"]
@@ -1760,6 +1774,11 @@ pub unsafe extern "C" fn gzputc_ffi(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
+    if gz_has_pending_skip(state.skip)
+        && gz_zero_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
+    {
+        return -1 as ::core::ffi::c_int;
+    }
     let written = gz_write(
         state,
         buf.as_ptr() as crate::stdlib::voidpc,
@@ -1803,6 +1822,11 @@ pub unsafe extern "C" fn gzputs_ffi(
         );
         return -1 as ::core::ffi::c_int;
     }
+    if len != 0 && gz_has_pending_skip(state.skip)
+        && gz_zero_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
+    {
+        return -1 as ::core::ffi::c_int;
+    }
     put = gz_write(state, s as crate::stdlib::voidpc, len);
     return gzputs_result(len, put);
 }
@@ -1830,7 +1854,7 @@ pub unsafe extern "C" fn gzflush_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let zero_result = if gz_has_pending_skip((*state).skip) {
-        Some(gz_zero(state))
+        Some(gz_zero_at_ffi_boundary!(state))
     } else {
         None
     };
@@ -1875,7 +1899,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     if matches!(
         gzsetparams_zero_action(gz_has_pending_skip(state.skip)),
         GzSetParamsZeroAction::Zero
-    ) && gz_zero(state) == -1 as ::core::ffi::c_int
+    ) && gz_zero_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
     {
         return state.err;
     }
@@ -1908,7 +1932,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let zero_error = if gz_has_pending_skip((*state).skip) {
-        let result = gz_zero(state);
+        let result = gz_zero_at_ffi_boundary!(state);
         gzclose_operation_error(result, (*state).err)
     } else {
         None
