@@ -1680,12 +1680,14 @@ struct GzSeekState<'a> {
 
 // The seek transition borrows only scalar gzip fields, owned error storage,
 // and the descriptor.  The ABI wrapper validates and converts its cursor
-// before building this pointer-free target, then publishes the returned
-// cursor advance afterwards.
+// before building this pointer-free target.  The core then synchronizes that
+// checked cursor with the owned buffer before applying seek policy, so a
+// public `gzgetc` macro advance cannot leave the owner stale.
 struct GzSeekTarget<'a> {
     mode: ::core::ffi::c_int,
     reset: GzResetTarget<'a>,
     output_cursor: &'a mut Option<GzCodecOutputCursor>,
+    validated_output_cursor: Option<GzCodecOutputCursor>,
     fd: Option<&'a rustix::fd::OwnedFd>,
     start: crate::stdlib::off64_t,
 }
@@ -1834,6 +1836,11 @@ fn gzseek64(
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
 ) -> (crate::stdlib::off64_t, usize) {
+    // The ABI cursor is exposed through the public `gzgetc` macro, so it can
+    // advance without an intervening Rust call.  The wrapper proved this
+    // cursor is within the owned output allocation; make it authoritative
+    // before this safe state transition consults or advances the owner.
+    *target.output_cursor = target.validated_output_cursor;
     let reset = GzResetState {
         mode: target.mode,
         have: *target.reset.have,
@@ -1899,8 +1906,8 @@ pub unsafe extern "C" fn gzseek64_ffi(
     // prove both the cursor's provenance and its advertised remaining length
     // against the owned output allocation before dispatching to the safe seek
     // transition.
-    let buffered = if state.x.have == 0 {
-        None
+    let (buffered, validated_output_cursor) = if state.x.have == 0 {
+        (None, None)
     } else {
         let Some(buffer) = state.buffers.output.as_deref() else {
             return -1 as crate::stdlib::off64_t;
@@ -1910,7 +1917,12 @@ pub unsafe extern "C" fn gzseek64_ffi(
         else {
             return -1 as crate::stdlib::off64_t;
         };
-        Some(buffered.unread())
+        let Some(cursor) =
+            GzCodecOutputCursor::from_owned_buffer(buffer, buffered.start, state.x.have)
+        else {
+            return -1 as crate::stdlib::off64_t;
+        };
+        (Some(buffered.unread()), Some(cursor))
     };
     let (result, consumed) = gzseek64(
         GzSeekTarget {
@@ -1934,6 +1946,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
                 input_cursor: &mut state.buffers.input_cursor,
             },
             output_cursor: &mut state.buffers.output_cursor,
+            validated_output_cursor,
             fd: state.fd.as_ref(),
             start: state.start,
         },
@@ -1963,8 +1976,8 @@ pub unsafe extern "C" fn gzseek_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as crate::stdlib::off_t;
     };
-    let buffered = if state.x.have == 0 {
-        None
+    let (buffered, validated_output_cursor) = if state.x.have == 0 {
+        (None, None)
     } else {
         let Some(buffer) = state.buffers.output.as_deref() else {
             return -1 as crate::stdlib::off_t;
@@ -1974,7 +1987,12 @@ pub unsafe extern "C" fn gzseek_ffi(
         else {
             return -1 as crate::stdlib::off_t;
         };
-        Some(buffered.unread())
+        let Some(cursor) =
+            GzCodecOutputCursor::from_owned_buffer(buffer, buffered.start, state.x.have)
+        else {
+            return -1 as crate::stdlib::off_t;
+        };
+        (Some(buffered.unread()), Some(cursor))
     };
     let (result, consumed) = gzseek64(
         GzSeekTarget {
@@ -1998,6 +2016,7 @@ pub unsafe extern "C" fn gzseek_ffi(
                 input_cursor: &mut state.buffers.input_cursor,
             },
             output_cursor: &mut state.buffers.output_cursor,
+            validated_output_cursor,
             fd: state.fd.as_ref(),
             start: state.start,
         },
