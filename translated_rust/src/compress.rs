@@ -37,6 +37,40 @@ fn compress_output_len(
     capacity.wrapping_sub(left.wrapping_add(avail_out as crate::stdlib::z_size_t))
 }
 
+// The stream driver uses the same bounded chunking for input and output.
+// Keep that arithmetic separate from its raw cursors and FFI arguments.
+fn compress_chunk(
+    remaining: crate::stdlib::z_size_t,
+    max: crate::stdlib::uInt,
+) -> (crate::stdlib::uInt, crate::stdlib::z_size_t) {
+    let chunk = if remaining > max as crate::stdlib::z_size_t {
+        max
+    } else {
+        remaining as crate::stdlib::uInt
+    };
+    (
+        chunk,
+        remaining.wrapping_sub(chunk as crate::stdlib::z_size_t),
+    )
+}
+
+fn compress_buffers_valid(
+    source_is_null: bool,
+    source_len: crate::stdlib::z_size_t,
+    dest_is_null: bool,
+    dest_len: crate::stdlib::z_size_t,
+) -> bool {
+    !(source_len != 0 && source_is_null || dest_len != 0 && dest_is_null)
+}
+
+fn compress_flush(remaining_source: crate::stdlib::z_size_t) -> ::core::ffi::c_int {
+    if remaining_source != 0 {
+        crate::zlib_h::Z_NO_FLUSH
+    } else {
+        crate::zlib_h::Z_FINISH
+    }
+}
+
 pub unsafe extern "C" fn compress2_z(
     mut dest: *mut crate::stdlib::Bytef,
     destLen: &mut crate::stdlib::z_size_t,
@@ -64,9 +98,7 @@ pub unsafe extern "C" fn compress2_z(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;
     let mut capacity: crate::stdlib::z_size_t = 0;
-    if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
+    if !compress_buffers_valid(source.is_null(), sourceLen, dest.is_null(), *destLen) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     capacity = *destLen;
@@ -90,28 +122,14 @@ pub unsafe extern "C" fn compress2_z(
     stream.avail_in = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
+            (stream.avail_out, left) = compress_chunk(left, max);
         }
         if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if sourceLen > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                sourceLen as crate::stdlib::uInt
-            };
-            sourceLen = sourceLen.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
+            (stream.avail_in, sourceLen) = compress_chunk(sourceLen, max);
         }
         err = crate::src::deflate::deflate(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            if sourceLen != 0 {
-                crate::zlib_h::Z_NO_FLUSH
-            } else {
-                crate::zlib_h::Z_FINISH
-            },
+            compress_flush(sourceLen),
         );
         if err != crate::zlib_h::Z_OK {
             break;
