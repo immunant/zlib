@@ -108,6 +108,27 @@ pub(crate) fn gz_produced(
     available_before.wrapping_sub(available_after as ::core::ffi::c_uint)
 }
 
+// Account for bytes appended to the gzip input buffer without involving its
+// raw buffer pointer.  The caller has already copied exactly `added` bytes.
+pub(crate) fn gz_append_input(
+    state: &mut crate::gzguts_h::gz_state,
+    added: ::core::ffi::c_uint,
+) {
+    state.strm.avail_in = state.strm.avail_in.wrapping_add(added);
+    gz_advance_pos(state, added);
+}
+
+// Account for the portion of a stream input request consumed by deflate.
+// `avail_in` remains the source of truth for the raw stream adapter.
+pub(crate) fn gz_consume_stream_input(
+    state: &mut crate::gzguts_h::gz_state,
+    requested: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let consumed = gz_produced(requested, state.strm.avail_in);
+    gz_advance_pos(state, consumed);
+    consumed
+}
+
 // Classify a POSIX I/O result without coupling the decision to the raw
 // descriptor and buffer adapters.  A non-negative result is a byte count;
 // a negative result preserves whether a non-blocking operation stalled.

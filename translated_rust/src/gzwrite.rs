@@ -280,8 +280,7 @@ unsafe extern "C" fn gz_write(
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
-            state.strm.avail_in = state.strm.avail_in.wrapping_add(copy);
-            crate::src::gzlib::gz_advance_pos(state, copy);
+            crate::src::gzlib::gz_append_input(state, copy);
             buf =
                 (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
             len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
@@ -303,8 +302,7 @@ unsafe extern "C" fn gz_write(
             let mut n: ::core::ffi::c_uint = crate::src::gzlib::gz_stream_chunk(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            n = crate::src::gzlib::gz_produced(n, state.strm.avail_in);
-            crate::src::gzlib::gz_advance_pos(state, n);
+            n = crate::src::gzlib::gz_consume_stream_input(state, n);
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
                 return crate::src::gzlib::gz_write_result(put, len, (*state).again != 0);
