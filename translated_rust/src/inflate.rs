@@ -206,6 +206,25 @@ pub(crate) fn inflate_stored_block_length(
     }
 }
 
+fn inflate_direct_copy_len(
+    length: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    let mut copy = length;
+    if copy > have {
+        copy = have;
+    }
+    if copy > left {
+        copy = left;
+    }
+    if copy == 0 as ::core::ffi::c_uint {
+        None
+    } else {
+        Some(copy)
+    }
+}
+
 pub(crate) struct InflateBlockHeader {
     pub(crate) last: ::core::ffi::c_int,
     pub(crate) block_type: ::core::ffi::c_uint,
@@ -1422,15 +1441,10 @@ pub unsafe extern "C" fn inflate_ffi(
             16745500758254703311 => {
                 copy = (*state).length;
                 if copy != 0 {
-                    if copy > have {
-                        copy = have;
-                    }
-                    if copy > left {
-                        copy = left;
-                    }
-                    if copy == 0 as ::core::ffi::c_uint {
+                    let Some(copy_len) = inflate_direct_copy_len(copy, have, left) else {
                         break;
-                    }
+                    };
+                    copy = copy_len;
                     crate::stdlib::memcpy(
                         put as *mut ::core::ffi::c_void,
                         next as *const ::core::ffi::c_void,
