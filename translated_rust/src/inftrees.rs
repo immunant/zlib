@@ -3105,21 +3105,22 @@ pub fn inflate_table_safe(
         return -1;
     };
 
-    let Some(length_state) = (match LengthState::try_new(type_0, lens, *bits) {
-        Ok(state) => state,
+    let length_state = match LengthState::try_new(type_0, lens, *bits) {
         Err(error) => return error,
-    }) else {
-        let here = crate::src::inftrees::code {
-            op: 64,
-            bits: 1,
-            val: 0,
-        };
-        let Some(end) = table_cursor.write_entries(table, 0, &[here; 2]) else {
-            return 1;
-        };
-        *table_cursor_out = end;
-        *bits = 1;
-        return 0;
+        Ok(None) => {
+            let here = crate::src::inftrees::code {
+                op: 64,
+                bits: 1,
+                val: 0,
+            };
+            let Some(end) = table_cursor.write_entries(table, 0, &[here; 2]) else {
+                return 1;
+            };
+            *table_cursor_out = end;
+            *bits = 1;
+            return 0;
+        }
+        Ok(Some(length_state)) => length_state,
     };
     let mut count = length_state.counts;
     let min = length_state.min;
