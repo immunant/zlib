@@ -1524,45 +1524,49 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     deflateSetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn deflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    let mut len: crate::stdlib::uInt = 0;
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
+/// Select the current preset dictionary from a validated deflate state.
+///
+/// The returned bytes are borrowed from the state-owned window.  Keeping the
+/// selection separate from the ABI output buffer lets the implementation
+/// remain slice based.
+fn deflate_dictionary_source<'a>(
+    strm: &crate::zlib_h::z_stream_s,
+    state: &'a crate::src::deflate::deflate_state,
+) -> Result<&'a [crate::stdlib::Bytef], ::core::ffi::c_int> {
+    if !deflate_params_stream_is_valid(strm) || !deflate_params_state_is_valid(state) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    let strm = &mut *strm;
-    if !deflate_params_stream_is_valid(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
+    let mut len = state.strstart.wrapping_add(state.lookahead);
+    if len > state.w_size {
+        len = state.w_size;
     }
-    let Some(s) = strm.state.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !deflate_params_state_is_valid(s) {
-        return crate::zlib_h::Z_STREAM_ERROR;
+    if len == 0 {
+        return Ok(&[]);
     }
-    len = (*s).strstart.wrapping_add((*s).lookahead);
-    if len > (*s).w_size {
-        len = (*s).w_size;
-    }
-    if !dictionary.is_null() && len != 0 {
-        let start = (*s).strstart.wrapping_add((*s).lookahead).wrapping_sub(len);
-        let Some(source) = (*s).window_bytes(start, len as usize) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            source.as_ptr() as *const ::core::ffi::c_void,
-            len as crate::__stddef_size_t_h::size_t,
-        );
-    }
-    if !dictLength.is_null() {
-        *dictLength = len;
-    }
-    return crate::zlib_h::Z_OK;
+    let start = state.strstart.wrapping_add(state.lookahead).wrapping_sub(len);
+    state
+        .window_bytes(start, len as usize)
+        .ok_or(crate::zlib_h::Z_STREAM_ERROR)
 }
+
+/// Copy a validated dictionary into an optional, exactly-sized caller sink.
+fn deflate_get_dictionary_impl(
+    source: &[crate::stdlib::Bytef],
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
+) -> ::core::ffi::c_int {
+    if let Some(dictionary) = dictionary {
+        if dictionary.len() != source.len() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        dictionary.copy_from_slice(source);
+    }
+    if let Some(dict_length) = dict_length {
+        *dict_length = source.len() as crate::stdlib::uInt;
+    }
+    crate::zlib_h::Z_OK
+}
+
 #[export_name = "deflateGetDictionary"]
 
 pub unsafe extern "C" fn deflateGetDictionary_ffi(
@@ -1570,7 +1574,27 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateGetDictionary(strm, dictionary, dictLength)
+    let Some(strm) = strm.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(state) = strm
+        .state
+        .cast::<crate::src::deflate::deflate_state>()
+        .as_ref()
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let source = match deflate_dictionary_source(strm, state) {
+        Ok(source) => source,
+        Err(error) => return error,
+    };
+    let dictionary = if dictionary.is_null() || source.is_empty() {
+        None
+    } else {
+        Some(core::slice::from_raw_parts_mut(dictionary, source.len()))
+    };
+    let dict_length = dictLength.as_mut();
+    deflate_get_dictionary_impl(source, dictionary, dict_length)
 }
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
