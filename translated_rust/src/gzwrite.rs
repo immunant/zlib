@@ -372,11 +372,9 @@ pub unsafe extern "C" fn gzwrite(
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return 0 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    // This is a validated write state, so clearing the shared error record
+    // cannot affect read-side EOF bookkeeping.
+    crate::src::gzlib::gzclearerr(state);
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
         crate::src::gzlib::gz_error(
             state,
@@ -409,11 +407,7 @@ pub unsafe extern "C" fn gzfwrite(
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gzclearerr(state);
     len = nitems.wrapping_mul(size);
     if size != 0 && len.wrapping_div(size) != nitems {
         crate::src::gzlib::gz_error(
@@ -451,11 +445,7 @@ pub unsafe extern "C" fn gzputc(
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gzclearerr(state);
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
@@ -498,11 +488,7 @@ pub unsafe extern "C" fn gzputs(
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gzclearerr(state);
     len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
         || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
@@ -571,11 +557,7 @@ pub unsafe extern "C" fn gzsetparams(
     if !crate::src::gzlib::gz_write_state_is_usable(state) || state.direct != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gzclearerr(state);
     if level == state.level && strategy == state.strategy {
         return crate::zlib_h::Z_OK;
     }
@@ -633,11 +615,7 @@ pub unsafe extern "C" fn gzclose_w(
         }
         crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gzclearerr(state);
     let path = state.path;
     let fd = state.fd;
     crate::stdlib::free(path as *mut ::core::ffi::c_void);
