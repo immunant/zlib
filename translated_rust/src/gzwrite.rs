@@ -379,7 +379,7 @@ fn gz_write_buffered_step(
     )
 }
 
-unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     state.in_0 = crate::stdlib::malloc(
         (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
@@ -433,7 +433,7 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     0 as ::core::ffi::c_int
 }
 
-unsafe extern "C" fn gz_comp(
+unsafe fn gz_comp(
     mut state: crate::gzguts_h::gz_statep,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -536,7 +536,7 @@ unsafe extern "C" fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
@@ -583,7 +583,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_write(
+unsafe fn gz_write(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: crate::stdlib::voidpc,
     mut len: crate::stdlib::z_size_t,

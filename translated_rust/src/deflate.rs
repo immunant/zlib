@@ -801,6 +801,20 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         stream_size,
     )
 }
+fn deflate_state_status_valid(status: ::core::ffi::c_int) -> bool {
+    matches!(
+        status,
+        crate::src::deflate::INIT_STATE
+            | crate::src::deflate::GZIP_STATE
+            | crate::src::deflate::EXTRA_STATE
+            | crate::src::deflate::NAME_STATE
+            | crate::src::deflate::COMMENT_STATE
+            | crate::src::deflate::HCRC_STATE
+            | crate::src::deflate::BUSY_STATE
+            | crate::src::deflate::FINISH_STATE
+    )
+}
+
 unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
@@ -808,17 +822,7 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null()
-        || (*s).strm != strm
-        || (*s).status != crate::src::deflate::INIT_STATE
-            && (*s).status != crate::src::deflate::GZIP_STATE
-            && (*s).status != crate::src::deflate::EXTRA_STATE
-            && (*s).status != crate::src::deflate::NAME_STATE
-            && (*s).status != crate::src::deflate::COMMENT_STATE
-            && (*s).status != crate::src::deflate::HCRC_STATE
-            && (*s).status != crate::src::deflate::BUSY_STATE
-            && (*s).status != crate::src::deflate::FINISH_STATE
-    {
+    if s.is_null() || (*s).strm != strm || !deflate_state_status_valid((*s).status) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -3623,7 +3627,7 @@ unsafe extern "C" fn deflate_huff(
 mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
-        deflate_prime_bits_valid, deflate_version_matches, gzip_header_crc,
+        deflate_prime_bits_valid, deflate_state_status_valid, deflate_version_matches, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
         pending_output_len, read_buf_len, slide_hash_entry, stored_block_min_size, zlib_header,
     };
@@ -3829,5 +3833,25 @@ mod tests {
             b'1' as ::core::ffi::c_char,
             expected_size.wrapping_add(1),
         ));
+    }
+
+    #[test]
+    fn deflate_state_status_valid_accepts_only_deflate_states() {
+        for status in [
+            crate::src::deflate::INIT_STATE,
+            crate::src::deflate::GZIP_STATE,
+            crate::src::deflate::EXTRA_STATE,
+            crate::src::deflate::NAME_STATE,
+            crate::src::deflate::COMMENT_STATE,
+            crate::src::deflate::HCRC_STATE,
+            crate::src::deflate::BUSY_STATE,
+            crate::src::deflate::FINISH_STATE,
+        ] {
+            assert!(deflate_state_status_valid(status));
+        }
+
+        assert!(!deflate_state_status_valid(0));
+        assert!(!deflate_state_status_valid(-1));
+        assert!(!deflate_state_status_valid(crate::src::deflate::FINISH_STATE - 1));
     }
 }

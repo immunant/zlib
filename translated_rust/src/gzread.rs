@@ -49,29 +49,51 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-fn gz_load_core(
-    state: &mut crate::gzguts_h::gz_state,
+#[derive(Debug, PartialEq, Eq)]
+struct GzLoadDecision {
+    have: ::core::ffi::c_uint,
+    eof: bool,
+    again: bool,
+    more: bool,
+    error: Option<::core::ffi::c_int>,
+}
+
+fn gz_load_decision(
     have: ::core::ffi::c_uint,
     len: ::core::ffi::c_uint,
     read: Result<::core::ffi::c_uint, ::core::ffi::c_int>,
-) -> (::core::ffi::c_uint, bool, Option<::core::ffi::c_int>) {
+) -> GzLoadDecision {
     match read {
-        Ok(0) => {
-            state.eof = 1 as ::core::ffi::c_int;
-            (have, false, None)
-        }
+        Ok(0) => GzLoadDecision {
+            have,
+            eof: true,
+            again: false,
+            more: false,
+            error: None,
+        },
         Ok(got) => {
             let have = have.wrapping_add(got);
-            (have, have < len, None)
+            GzLoadDecision {
+                have,
+                eof: false,
+                again: false,
+                more: have < len,
+                error: None,
+            }
         }
         Err(errno) => {
-            if errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK {
-                state.again = 1 as ::core::ffi::c_int;
-                if have != 0 {
-                    return (have, false, None);
-                }
+            let again = errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK;
+            GzLoadDecision {
+                have,
+                eof: false,
+                again,
+                more: false,
+                error: if again && have != 0 {
+                    None
+                } else {
+                    Some(errno)
+                },
             }
-            (have, false, Some(errno))
         }
     }
 }
@@ -351,13 +373,14 @@ unsafe extern "C" fn gz_load(
     have: *mut ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let max = gz_load_max_read_len();
-    (*state).again = 0 as ::core::ffi::c_int;
+    let state_ref = &mut *state;
+    state_ref.again = 0 as ::core::ffi::c_int;
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
     loop {
         let get = gz_load_read_len(len, *have, max);
         let ret = crate::stdlib::read(
-            (*state).fd,
+            state_ref.fd,
             buf.wrapping_add(*have as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
@@ -366,9 +389,15 @@ unsafe extern "C" fn gz_load(
         } else {
             Ok(ret as ::core::ffi::c_uint)
         };
-        let (got, more, error) = gz_load_core(&mut *state, *have, len, read);
-        *have = got;
-        if let Some(errno) = error {
+        let decision = gz_load_decision(*have, len, read);
+        if decision.eof {
+            state_ref.eof = 1 as ::core::ffi::c_int;
+        }
+        if decision.again {
+            state_ref.again = 1 as ::core::ffi::c_int;
+        }
+        *have = decision.have;
+        if let Some(errno) = decision.error {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_ERRNO,
@@ -376,7 +405,7 @@ unsafe extern "C" fn gz_load(
             );
             return -1 as ::core::ffi::c_int;
         }
-        if !more {
+        if !decision.more {
             return 0 as ::core::ffi::c_int;
         }
     }
@@ -1095,6 +1124,82 @@ mod tests {
     #[test]
     fn gz_load_read_len_preserves_unsigned_wrapping_before_capping() {
         assert_eq!(gz_load_read_len(0, 1, 8), 8);
+    }
+
+    #[test]
+    fn gz_load_decision_marks_eof_without_requesting_more_data() {
+        assert_eq!(
+            gz_load_decision(4, 8, Ok(0)),
+            GzLoadDecision {
+                have: 4,
+                eof: true,
+                again: false,
+                more: false,
+                error: None,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_load_decision_requests_more_only_for_partial_reads() {
+        assert_eq!(
+            gz_load_decision(2, 8, Ok(3)),
+            GzLoadDecision {
+                have: 5,
+                eof: false,
+                again: false,
+                more: true,
+                error: None,
+            }
+        );
+        assert_eq!(
+            gz_load_decision(2, 5, Ok(3)),
+            GzLoadDecision {
+                have: 5,
+                eof: false,
+                again: false,
+                more: false,
+                error: None,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_load_decision_preserves_buffered_data_on_retryable_errors() {
+        assert_eq!(
+            gz_load_decision(3, 8, Err(crate::stdlib::EAGAIN)),
+            GzLoadDecision {
+                have: 3,
+                eof: false,
+                again: true,
+                more: false,
+                error: None,
+            }
+        );
+        assert_eq!(
+            gz_load_decision(0, 8, Err(crate::stdlib::EWOULDBLOCK)),
+            GzLoadDecision {
+                have: 0,
+                eof: false,
+                again: true,
+                more: false,
+                error: Some(crate::stdlib::EWOULDBLOCK),
+            }
+        );
+    }
+
+    #[test]
+    fn gz_load_decision_reports_nonretryable_errors() {
+        assert_eq!(
+            gz_load_decision(3, 8, Err(5)),
+            GzLoadDecision {
+                have: 3,
+                eof: false,
+                again: false,
+                more: false,
+                error: Some(5),
+            }
+        );
     }
 
     #[test]
