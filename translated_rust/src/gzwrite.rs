@@ -300,6 +300,21 @@ fn gz_write_direct_commit_state(
     remaining.wrapping_sub(consumed as crate::stdlib::z_size_t)
 }
 
+/// Convert a failed compression step into zlib's public write progress.  A
+/// retryable descriptor error reports the completed prefix; every other
+/// error reports no completed write.
+fn gz_write_failure_result(
+    again: ::core::ffi::c_int,
+    requested: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    if again != 0 {
+        requested.wrapping_sub(remaining)
+    } else {
+        0
+    }
+}
+
 /// Compute the byte length requested by `gzfwrite`.  `None` preserves the
 /// API's overflow failure, while `Some(0)` remains an ordinary empty request.
 fn gzfwrite_request_len(
@@ -445,11 +460,7 @@ unsafe extern "C" fn gz_write(
                 break;
             }
             if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return gz_write_failure_result((*state).again, put, len);
             }
         }
     } else {
@@ -466,11 +477,7 @@ unsafe extern "C" fn gz_write(
             n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
             len = gz_write_direct_commit_state(&mut *state, len, n);
             if ret == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return gz_write_failure_result((*state).again, put, len);
             }
             if len == 0 {
                 break;
