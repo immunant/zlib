@@ -587,7 +587,7 @@ pub(crate) fn deflate_one_shot(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut status = unsafe {
         deflateInit2_(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+            Some(&mut stream),
             level,
             crate::zlib_h::Z_DEFLATED,
             crate::stdlib::MAX_WBITS,
@@ -1008,7 +1008,7 @@ pub unsafe extern "C" fn deflateInit__ffi(
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     deflateInit2_(
-        strm,
+        strm.as_mut(),
         level,
         crate::zlib_h::Z_DEFLATED,
         crate::stdlib::MAX_WBITS,
@@ -1018,28 +1018,29 @@ pub unsafe extern "C" fn deflateInit__ffi(
         stream_size,
     )
 }
-pub unsafe extern "C" fn deflateInit2_(
-    mut strm: crate::zlib_h::z_streamp,
+// The ABI wrappers convert the nullable stream handle before reaching this
+// lifecycle implementation. Keep version validation here so it retains
+// zlib's version-error precedence over a null stream.
+pub unsafe fn deflateInit2_(
+    strm: Option<&mut crate::zlib_h::z_stream_s>,
     mut level: ::core::ffi::c_int,
     mut method: ::core::ffi::c_int,
     mut windowBits: ::core::ffi::c_int,
     mut memLevel: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
+    version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     static my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
-        || *version.offset(0 as isize) as ::core::ffi::c_int
-            != my_version[0 as usize] as ::core::ffi::c_int
+        || *version as ::core::ffi::c_int != my_version[0 as usize] as ::core::ffi::c_int
         || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>()
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() {
+    let Some(stream) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let stream = &mut *strm;
+    };
     stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if stream.zalloc.is_none() {
         stream.zalloc = Some(
@@ -1210,7 +1211,7 @@ pub unsafe extern "C" fn deflateInit2_(
             2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
         }) as usize]
             .load(::core::sync::atomic::Ordering::Relaxed);
-        deflateEnd(strm);
+        deflateEnd(stream);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     state.sym_buf_start = state.lit_bufsize as usize;
@@ -1288,7 +1289,7 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     deflateInit2_(
-        strm,
+        strm.as_mut(),
         level,
         method,
         windowBits,

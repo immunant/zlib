@@ -179,7 +179,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.zfree = None;
         state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         ret = crate::src::deflate::deflateInit2_(
-            &raw mut state.strm as *mut crate::zlib_h::z_stream_s,
+            Some(&mut state.strm),
             state.level,
             8 as ::core::ffi::c_int,
             15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
