@@ -662,24 +662,47 @@ fn inflate_release_owned_state(state: &mut crate::src::inflate::inflate_state) {
     state.head = false;
 }
 
-pub unsafe fn inflateInit2_(
-    strm: &mut crate::zlib_h::z_stream_s,
-    mut windowBits: ::core::ffi::c_int,
+/// The validated, fully Rust-owned portion of public inflater initialization.
+///
+/// Allocator selection and ownership transfer intentionally happen later in
+/// `inflate_allocate_state()`: only that boundary can pair a caller's `zalloc`
+/// and `zfree` callbacks.  Keeping validation and state construction here
+/// leaves that boundary with one narrow responsibility.
+struct InflateInitPreparation {
+    state: crate::src::inflate::inflate_state,
+    window_bits: ::core::ffi::c_int,
+}
+
+fn prepare_inflate_init(
+    window_bits: ::core::ffi::c_int,
     version: Option<::core::ffi::c_char>,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if version != Some(crate::zlib_h::ZLIB_VERSION[0 as usize])
+    stream_size: ::core::ffi::c_int,
+) -> Result<InflateInitPreparation, ::core::ffi::c_int> {
+    if version != Some(crate::zlib_h::ZLIB_VERSION[0])
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
-        return crate::zlib_h::Z_VERSION_ERROR;
+        return Err(crate::zlib_h::Z_VERSION_ERROR);
     }
+    let mut state = new_inflate_state();
+    state.mode = crate::src::inflate::HEAD;
+    Ok(InflateInitPreparation { state, window_bits })
+}
+
+pub unsafe fn inflateInit2_(
+    strm: &mut crate::zlib_h::z_stream_s,
+    windowBits: ::core::ffi::c_int,
+    version: Option<::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let preparation = match prepare_inflate_init(windowBits, version, stream_size) {
+        Ok(preparation) => preparation,
+        Err(error) => return error,
+    };
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut initialized = new_inflate_state();
-    initialized.mode = crate::src::inflate::HEAD;
     inflate_allocate_state(
         strm,
-        initialized,
-        InflateStateInstallation::Initialize(windowBits),
+        preparation.state,
+        InflateStateInstallation::Initialize(preparation.window_bits),
     )
 }
 #[export_name = "inflateInit2_"]
