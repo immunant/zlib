@@ -1837,19 +1837,29 @@ fn write_gzip_header_magic(
     true
 }
 
+struct DeflateGzipHeader<'a> {
+    text: ::core::ffi::c_int,
+    time: crate::stdlib::uLong,
+    os: ::core::ffi::c_int,
+    extra: Option<&'a [crate::stdlib::Bytef]>,
+    name: Option<&'a ::std::ffi::CStr>,
+    comment: Option<&'a ::std::ffi::CStr>,
+    hcrc: ::core::ffi::c_int,
+}
+
 fn write_gzip_header_fixed(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
-    header: &crate::zlib_h::gz_header_s,
+    header: &DeflateGzipHeader<'_>,
 ) -> bool {
     let Ok(start) = usize::try_from(state.pending) else {
         return false;
     };
     let flags = (if header.text != 0 { 1 } else { 0 })
         + (if header.hcrc != 0 { 2 } else { 0 })
-        + (if header.extra.is_null() { 0 } else { 4 })
-        + (if header.name.is_null() { 0 } else { 8 })
-        + (if header.comment.is_null() { 0 } else { 16 });
+        + (if header.extra.is_none() { 0 } else { 4 })
+        + (if header.name.is_none() { 0 } else { 8 })
+        + (if header.comment.is_none() { 0 } else { 16 });
     let xfl = if state.level == 9 {
         2
     } else if state.strategy >= 2 || state.level < 2 {
@@ -1868,10 +1878,11 @@ fn write_gzip_header_fixed(
         0,
         0,
     ];
-    let length = if header.extra.is_null() { 7 } else { 9 };
-    if !header.extra.is_null() {
-        fixed[7] = header.extra_len as crate::stdlib::Bytef;
-        fixed[8] = (header.extra_len >> 8) as crate::stdlib::Bytef;
+    let length = if header.extra.is_none() { 7 } else { 9 };
+    if let Some(extra) = header.extra {
+        let extra_len = extra.len() as crate::stdlib::uInt;
+        fixed[7] = extra_len as crate::stdlib::Bytef;
+        fixed[8] = (extra_len >> 8) as crate::stdlib::Bytef;
     }
     let Some(end) = start.checked_add(length) else {
         return false;
@@ -2217,12 +2228,39 @@ pub unsafe fn deflate(
         }
     }
     // A custom header is retained by the stream for the duration of a deflate
-    // call. Borrow it once at this legacy boundary so the header phases below
-    // do not repeatedly dereference the raw state/header pointers.
+    // call. Convert it once at this legacy boundary so all header phases below
+    // operate on ordinary borrowed Rust values.
     let gzip_header = if (*s).gzhead.is_null() {
         None
     } else {
-        Some(&*(*s).gzhead)
+        let header = &*(*s).gzhead;
+        let extra = if header.extra.is_null() {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts(
+                header.extra,
+                (header.extra_len & 0xffff as crate::stdlib::uInt) as usize,
+            ))
+        };
+        let name = if header.name.is_null() {
+            None
+        } else {
+            Some(::std::ffi::CStr::from_ptr(header.name.cast()))
+        };
+        let comment = if header.comment.is_null() {
+            None
+        } else {
+            Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
+        };
+        Some(DeflateGzipHeader {
+            text: header.text,
+            time: header.time,
+            os: header.os,
+            extra,
+            name,
+            comment,
+            hcrc: header.hcrc,
+        })
     };
     if (*s).status == crate::src::deflate::GZIP_STATE {
         (*strm).adler = crate::src::crc32::crc32(0 as crate::stdlib::uLong, None);
@@ -2243,7 +2281,7 @@ pub unsafe fn deflate(
                 (*s).last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
             }
-        } else if let Some(header) = gzip_header {
+        } else if let Some(header) = gzip_header.as_ref() {
             if !write_gzip_header_fixed(state, pending_buf, header) {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
@@ -2264,12 +2302,11 @@ pub unsafe fn deflate(
         }
     }
     if (*s).status == crate::src::deflate::EXTRA_STATE {
-        let Some(header) = gzip_header else {
+        let Some(header) = gzip_header.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if !header.extra.is_null() {
-            let extra_len = (header.extra_len & 0xffff as crate::stdlib::uInt) as usize;
-            let extra = ::core::slice::from_raw_parts(header.extra, extra_len);
+        if let Some(extra) = header.extra {
+            let extra_len = extra.len();
             let state = &mut *s;
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
@@ -2321,14 +2358,11 @@ pub unsafe fn deflate(
         (*s).status = crate::src::deflate::NAME_STATE;
     }
     if (*s).status == crate::src::deflate::NAME_STATE {
-        let Some(header) = gzip_header else {
+        let Some(header) = gzip_header.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if !header.name.is_null() {
-            let name = ::std::ffi::CStr::from_ptr(
-                header.name as *const ::core::ffi::c_char,
-            )
-            .to_bytes_with_nul();
+        if let Some(name) = header.name {
+            let name = name.to_bytes_with_nul();
             let state = &mut *s;
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
@@ -2377,14 +2411,11 @@ pub unsafe fn deflate(
         (*s).status = crate::src::deflate::COMMENT_STATE;
     }
     if (*s).status == crate::src::deflate::COMMENT_STATE {
-        let Some(header) = gzip_header else {
+        let Some(header) = gzip_header.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if !header.comment.is_null() {
-            let comment = ::std::ffi::CStr::from_ptr(
-                header.comment as *const ::core::ffi::c_char,
-            )
-            .to_bytes_with_nul();
+        if let Some(comment) = header.comment {
+            let comment = comment.to_bytes_with_nul();
             let state = &mut *s;
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
@@ -2432,7 +2463,7 @@ pub unsafe fn deflate(
         (*s).status = crate::src::deflate::HCRC_STATE;
     }
     if (*s).status == crate::src::deflate::HCRC_STATE {
-        let Some(header) = gzip_header else {
+        let Some(header) = gzip_header.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         if header.hcrc != 0 {
