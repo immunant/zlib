@@ -2303,13 +2303,15 @@ fn set_stored_block_length(
     header[3] = (!len >> 8) as crate::stdlib::Bytef;
 }
 
-unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) -> crate::stdlib::uInt {
+// The callers have already validated and projected the ABI stream and its
+// opaque state. Keep that projection at their boundary: the shared pending
+// flush only needs those scoped references plus bounded views of the two
+// callback-owned byte regions.
+unsafe fn flush_pending(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::deflate::deflate_state,
+) -> crate::stdlib::uInt {
     let mut len: ::core::ffi::c_uint = 0;
-    // The stream and its opaque state are distinct allocations.  Project each
-    // once so the bounded pending/output helpers operate on Rust references
-    // rather than repeatedly dereferencing the ABI pointers.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     let pending_buf = ::core::slice::from_raw_parts_mut(
         state
             .pending_buf
@@ -2389,7 +2391,7 @@ pub unsafe extern "C" fn deflate(
     old_flush = s.last_flush;
     s.last_flush = flush;
     if s.pending != 0 as crate::zutil_h::ulg {
-        flush_pending(strm);
+        flush_pending(strm, s);
         if strm.avail_out == 0 as crate::stdlib::uInt {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2489,7 +2491,7 @@ pub unsafe extern "C" fn deflate(
         }
         strm.adler = crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None);
         s.status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm);
+        flush_pending(strm, s);
         if s.pending != 0 as crate::zutil_h::ulg {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2516,7 +2518,7 @@ pub unsafe extern "C" fn deflate(
         ) {
             None => {
             state.status = crate::src::deflate::BUSY_STATE;
-            flush_pending(strm);
+            flush_pending(strm, s);
             if s.pending != 0 as crate::zutil_h::ulg {
                 s.last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -2540,26 +2542,43 @@ pub unsafe extern "C" fn deflate(
             .as_ref()
             .is_some_and(|header| header.extra.is_some())
         {
-            let gzhead = s.gzhead.as_ref().expect("gzip header was checked");
-            let extra = gzhead.extra.as_deref().expect("gzip extra was checked");
-            let hcrc = gzhead.hcrc;
-            let mut left = extra.len().wrapping_sub(s.gzindex);
+            let hcrc = s.gzhead.as_ref().expect("gzip header was checked").hcrc;
+            let mut left = s
+                .gzhead
+                .as_ref()
+                .expect("gzip header was checked")
+                .extra
+                .as_deref()
+                .expect("gzip extra was checked")
+                .len()
+                .wrapping_sub(s.gzindex);
             while s.pending.wrapping_add(left as crate::zutil_h::ulg) > s.pending_buf_size {
                 let mut copy: crate::zutil_h::ulg =
                     s.pending_buf_size.wrapping_sub(s.pending);
-                let pending_buf = ::core::slice::from_raw_parts_mut(
-                    s.pending_buf
-                        .expect("initialized pending buffer")
-                        .as_ptr(),
-                    s.pending_buf_size as usize,
-                );
-                append_pending_bytes(pending_buf, &mut s.pending, &extra[..copy as usize]);
-                if hcrc {
-                    strm.adler =
-                        crate::src::crc32::crc32_z(strm.adler, Some(&extra[..copy as usize]));
+                {
+                    let extra = s
+                        .gzhead
+                        .as_ref()
+                        .expect("gzip header was checked")
+                        .extra
+                        .as_deref()
+                        .expect("gzip extra was checked");
+                    let pending_buf = ::core::slice::from_raw_parts_mut(
+                        s.pending_buf
+                            .expect("initialized pending buffer")
+                            .as_ptr(),
+                        s.pending_buf_size as usize,
+                    );
+                    append_pending_bytes(pending_buf, &mut s.pending, &extra[..copy as usize]);
+                    if hcrc {
+                        strm.adler = crate::src::crc32::crc32_z(
+                            strm.adler,
+                            Some(&extra[..copy as usize]),
+                        );
+                    }
                 }
                 s.gzindex = s.gzindex.wrapping_add(copy as usize);
-                flush_pending(strm);
+                flush_pending(strm, s);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2567,6 +2586,13 @@ pub unsafe extern "C" fn deflate(
                 left = left.wrapping_sub(copy as usize);
             }
             if left != 0 {
+                let extra = s
+                    .gzhead
+                    .as_ref()
+                    .expect("gzip header was checked")
+                    .extra
+                    .as_deref()
+                    .expect("gzip extra was checked");
                 let pending_buf = ::core::slice::from_raw_parts_mut(
                     s.pending_buf
                         .expect("initialized pending buffer")
@@ -2615,7 +2641,7 @@ pub unsafe extern "C" fn deflate(
                             Some(&pending_buf[beg_0 as usize..state.pending as usize]),
                         );
                     }
-                    flush_pending(strm);
+                    flush_pending(strm, s);
                     if s.pending != 0 as crate::zutil_h::ulg {
                         s.last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2699,7 +2725,7 @@ pub unsafe extern "C" fn deflate(
                             Some(&pending_buf[beg_1 as usize..state.pending as usize]),
                         );
                     }
-                    flush_pending(strm);
+                    flush_pending(strm, s);
                     if s.pending != 0 as crate::zutil_h::ulg {
                         s.last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2749,7 +2775,7 @@ pub unsafe extern "C" fn deflate(
     if s.status == crate::src::deflate::HCRC_STATE {
         if s.gzhead.as_ref().is_some_and(|header| header.hcrc) {
             if s.pending.wrapping_add(2 as crate::zutil_h::ulg) > s.pending_buf_size {
-                flush_pending(strm);
+                flush_pending(strm, s);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2778,7 +2804,7 @@ pub unsafe extern "C" fn deflate(
             strm.adler = crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None);
         }
         s.status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm);
+        flush_pending(strm, s);
         if s.pending != 0 as crate::zutil_h::ulg {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2792,9 +2818,9 @@ pub unsafe extern "C" fn deflate(
         bstate = (if s.level == 0 as ::core::ffi::c_int {
             deflate_stored(s, flush) as ::core::ffi::c_uint
         } else if s.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(s, flush) as ::core::ffi::c_uint
+            deflate_huff(s, strm, flush) as ::core::ffi::c_uint
         } else if s.strategy == crate::zlib_h::Z_RLE {
-            deflate_rle(s, flush) as ::core::ffi::c_uint
+            deflate_rle(s, strm, flush) as ::core::ffi::c_uint
         } else {
             let func = match configuration_table[s.level as usize].algorithm {
                 DeflateAlgorithm::Stored => deflate_stored,
@@ -2878,7 +2904,7 @@ pub unsafe extern "C" fn deflate(
                     }
                 }
             }
-            flush_pending(strm);
+            flush_pending(strm, s);
             if strm.avail_out == 0 as crate::stdlib::uInt {
                 s.last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -2946,7 +2972,7 @@ pub unsafe extern "C" fn deflate(
             );
         }
     }
-    flush_pending(strm);
+    flush_pending(strm, s);
     if s.wrap > 0 as ::core::ffi::c_int {
         s.wrap = -s.wrap;
     }
@@ -3337,7 +3363,7 @@ unsafe extern "C" fn deflate_stored(
             last,
         );
         set_stored_block_length(pending_buf, state.pending, len);
-        flush_pending(state.strm.as_ptr());
+        flush_pending(stream, state);
         if left != 0 {
             if left > len {
                 left = len;
@@ -3524,7 +3550,7 @@ unsafe extern "C" fn deflate_stored(
             last,
         );
         state.block_start += len as ::core::ffi::c_long;
-        flush_pending(state.strm.as_ptr());
+        flush_pending(stream, state);
     }
     if last != 0 {
         state.bi_used = 8 as ::core::ffi::c_int;
@@ -3736,7 +3762,7 @@ unsafe extern "C" fn deflate_fast(
                 0,
             );
             state.block_start = state.strstart as ::core::ffi::c_long;
-            flush_pending(state.strm.as_ptr());
+            flush_pending(stream, state);
             if stream.avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
@@ -3802,7 +3828,7 @@ unsafe extern "C" fn deflate_fast(
             1,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(state.strm.as_ptr());
+        flush_pending(stream, state);
         if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
@@ -3861,7 +3887,7 @@ unsafe extern "C" fn deflate_fast(
             0,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(state.strm.as_ptr());
+        flush_pending(stream, state);
         if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
@@ -4081,7 +4107,7 @@ unsafe extern "C" fn deflate_slow(
                             0,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(state.strm.as_ptr());
+                    flush_pending(stream, state);
                     if stream.avail_out == 0 as crate::stdlib::uInt {
                         return need_more;
                     }
@@ -4134,7 +4160,7 @@ unsafe extern "C" fn deflate_slow(
                             0,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(state.strm.as_ptr());
+                    flush_pending(stream, state);
                 }
                 state.strstart = state.strstart.wrapping_add(1);
                 state.lookahead = state.lookahead.wrapping_sub(1);
@@ -4222,7 +4248,7 @@ unsafe extern "C" fn deflate_slow(
                 1,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(state.strm.as_ptr());
+        flush_pending(stream, state);
         if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
@@ -4281,7 +4307,7 @@ unsafe extern "C" fn deflate_slow(
                 0,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(state.strm.as_ptr());
+        flush_pending(stream, state);
         if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
@@ -4334,6 +4360,7 @@ fn rle_match_length(
 
 unsafe extern "C" fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
@@ -4416,7 +4443,7 @@ unsafe extern "C" fn deflate_rle(
                 0 as ::core::ffi::c_int,
             );
             state.block_start = state.strstart as ::core::ffi::c_long;
-            if flush_pending(state.strm.as_ptr()) == 0 as crate::stdlib::uInt {
+            if flush_pending(stream, state) == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
                 } else {
@@ -4442,7 +4469,7 @@ unsafe extern "C" fn deflate_rle(
             1 as ::core::ffi::c_int,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        if flush_pending(state.strm.as_ptr()) == 0 as crate::stdlib::uInt {
+        if flush_pending(stream, state) == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -4467,7 +4494,7 @@ unsafe extern "C" fn deflate_rle(
             0 as ::core::ffi::c_int,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        if flush_pending(state.strm.as_ptr()) == 0 as crate::stdlib::uInt {
+        if flush_pending(stream, state) == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -4480,6 +4507,7 @@ unsafe extern "C" fn deflate_rle(
 
 unsafe extern "C" fn deflate_huff(
     mut s: *mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
@@ -4540,7 +4568,7 @@ unsafe extern "C" fn deflate_huff(
                 0 as ::core::ffi::c_int,
             );
             state.block_start = state.strstart as ::core::ffi::c_long;
-            if flush_pending(state.strm.as_ptr()) == 0 as crate::stdlib::uInt {
+            if flush_pending(stream, state) == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
                 } else {
@@ -4567,7 +4595,7 @@ unsafe extern "C" fn deflate_huff(
             1 as ::core::ffi::c_int,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        if flush_pending(state.strm.as_ptr()) == 0 as crate::stdlib::uInt {
+        if flush_pending(stream, state) == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -4593,7 +4621,7 @@ unsafe extern "C" fn deflate_huff(
             0 as ::core::ffi::c_int,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        if flush_pending(state.strm.as_ptr()) == 0 as crate::stdlib::uInt {
+        if flush_pending(stream, state) == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
