@@ -648,30 +648,29 @@ fn initialize_inflate_state_base(
     state.mode = crate::src::inflate::HEAD;
 }
 
-/// Initialize a state value in already-reserved storage.
+/// Allocate one uninitialized opaque inflate-state slot and expose it only
+/// after storing its first Rust value.
 ///
-/// The allocator boundary supplies the slot, but all Rust-value initialization
-/// and reset policy stays in this safe helper.  This deliberately accepts a
-/// `MaybeUninit` slot rather than a raw allocation so a later boundary adapter
-/// can allocate the slot directly without reintroducing initialization through
-/// a reference to uninitialized state.
-fn initialize_inflate_state_slot(
+/// The arbitrary callback allocation remains the one local unsafe boundary.
+/// Initialization and reset policy receive only a typed state reference, so
+/// they cannot form an initialized reference before the value exists.
+fn with_callback_inflate_state_slot<R>(
     strm: &mut crate::zlib_h::z_stream,
-    state_slot: &mut ::core::mem::MaybeUninit<crate::src::inflate::inflate_state>,
-    window_bits: ::core::ffi::c_int,
-    allocator_provenance: crate::src::zutil::AllocatorProvenance,
-) -> ::core::ffi::c_int {
-    let state = state_slot.write(empty_inflate_state());
-    strm.state = (state as *mut crate::src::inflate::inflate_state)
-        .cast::<crate::src::deflate::internal_state>();
-    initialize_inflate_state_base(state, strm, allocator_provenance);
-    match prepare_inflate_reset2(strm, state, window_bits) {
-        Ok(plan) => {
-            debug_assert!(!plan.release_window);
-            apply_inflate_reset2(strm, state, plan)
-        }
-        Err(error) => error,
-    }
+    initialize: impl FnOnce(
+        &mut crate::zlib_h::z_stream,
+        &mut crate::src::inflate::inflate_state,
+    ) -> R,
+) -> Option<R> {
+    let allocation = (strm.zalloc?)(
+        strm.opaque,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+    ) as *mut ::core::mem::MaybeUninit<crate::src::inflate::inflate_state>;
+    let mut slot = ::core::ptr::NonNull::new(allocation)?;
+    // The callback allocation is live and uniquely owned by stream setup.
+    // Write the first value before exposing a typed state reference.
+    let state = unsafe { slot.as_mut().write(empty_inflate_state()) };
+    Some(initialize(strm, state))
 }
 
 /// Allocate, initialize, and install the opaque state through one named
@@ -682,25 +681,21 @@ fn initialize_allocated_inflate_state(
     window_bits: ::core::ffi::c_int,
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
-    let state = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    // The callback returns uninitialized storage.  Convert it once to the
-    // slot type expected by the safe initializer; no initialized reference is
-    // formed until `MaybeUninit::write` above has stored the first Rust value.
-    let state_slot = unsafe {
-        &mut *state.cast::<::core::mem::MaybeUninit<crate::src::inflate::inflate_state>>()
-    };
-    let ret = initialize_inflate_state_slot(strm, state_slot, window_bits, allocator_provenance);
+    let ret = with_callback_inflate_state_slot(strm, |strm, state| {
+        strm.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
+        initialize_inflate_state_base(state, strm, allocator_provenance);
+        match prepare_inflate_reset2(strm, state, window_bits) {
+            Ok(plan) => {
+                debug_assert!(!plan.release_window);
+                apply_inflate_reset2(strm, state, plan)
+            }
+            Err(error) => error,
+        }
+    })
+    .unwrap_or(crate::zlib_h::Z_MEM_ERROR);
     if ret != crate::zlib_h::Z_OK {
         Some(strm.zfree.expect("non-null function pointer"))
-            .expect("non-null function pointer")(strm.opaque, state.cast());
+            .expect("non-null function pointer")(strm.opaque, strm.state.cast());
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     ret
