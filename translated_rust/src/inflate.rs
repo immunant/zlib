@@ -685,6 +685,44 @@ impl WindowHistory {
         self.have = plan.whave;
         Some(plan)
     }
+
+    /// Copy the dictionary in oldest-to-newest order.
+    ///
+    /// A partially filled window has never wrapped, so its initialized bytes
+    /// are the prefix ending at `next`.  Once it is full, `next` instead
+    /// identifies the oldest byte.  Keeping that distinction here prevents
+    /// dictionary users from reimplementing cursor arithmetic around the
+    /// callback-backed storage.
+    fn copy_dictionary_to(
+        &self,
+        window: &[crate::stdlib::Bytef],
+        dictionary: &mut [crate::stdlib::Bytef],
+    ) -> Option<()> {
+        if window.len() != self.size as usize || dictionary.len() != self.have as usize {
+            return None;
+        }
+        if dictionary.is_empty() {
+            return Some(());
+        }
+
+        if self.have < self.size {
+            if self.next != self.have {
+                return None;
+            }
+            dictionary.copy_from_slice(window.get(..self.have as usize)?);
+            return Some(());
+        }
+
+        let next = self.next as usize;
+        let first = (self.size as usize).checked_sub(next)?;
+        dictionary
+            .get_mut(..first)?
+            .copy_from_slice(window.get(next..)?);
+        dictionary
+            .get_mut(first..)?
+            .copy_from_slice(window.get(..next)?);
+        Some(())
+    }
 }
 
 fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> WindowMetadata {
@@ -811,16 +849,16 @@ fn apply_window_update(
 
 fn copy_dictionary_from_window(
     window: &[crate::stdlib::Bytef],
-    wnext: usize,
+    wnext: crate::stdlib::uInt,
     dictionary: &mut [crate::stdlib::Bytef],
-) {
+) -> Option<()> {
     if dictionary.is_empty() {
-        return;
+        return Some(());
     }
 
-    let first = dictionary.len() - wnext;
-    dictionary[..first].copy_from_slice(&window[wnext..wnext + first]);
-    dictionary[first..].copy_from_slice(&window[..wnext]);
+    let size = crate::stdlib::uInt::try_from(window.len()).ok()?;
+    let have = crate::stdlib::uInt::try_from(dictionary.len()).ok()?;
+    WindowHistory::new(size, wnext, have)?.copy_dictionary_to(window, dictionary)
 }
 
 fn inflate_get_dictionary_result(
@@ -831,7 +869,9 @@ fn inflate_get_dictionary_result(
     dict_length: Option<&mut crate::stdlib::uInt>,
 ) -> ::core::ffi::c_int {
     if let (Some(window), Some(dictionary)) = (window, dictionary) {
-        copy_dictionary_from_window(window, wnext as usize, dictionary);
+        if copy_dictionary_from_window(window, wnext, dictionary).is_none() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
     }
     if let Some(dict_length) = dict_length {
         *dict_length = whave;
@@ -4161,7 +4201,10 @@ mod tests {
         let window = *b"abcdefgh";
         let mut dictionary = [0; 5];
 
-        copy_dictionary_from_window(&window, 0, &mut dictionary);
+        assert_eq!(
+            copy_dictionary_from_window(&window, 5, &mut dictionary),
+            Some(())
+        );
 
         assert_eq!(dictionary, *b"abcde");
     }
@@ -4171,7 +4214,10 @@ mod tests {
         let window = *b"YZcdefWX";
         let mut dictionary = [0; 8];
 
-        copy_dictionary_from_window(&window, 2, &mut dictionary);
+        assert_eq!(
+            copy_dictionary_from_window(&window, 2, &mut dictionary),
+            Some(())
+        );
 
         assert_eq!(dictionary, *b"cdefWXYZ");
     }
@@ -4180,9 +4226,38 @@ mod tests {
     fn dictionary_copy_ignores_an_empty_dictionary() {
         let mut dictionary = [];
 
-        copy_dictionary_from_window(b"abc", 3, &mut dictionary);
+        assert_eq!(
+            copy_dictionary_from_window(b"abc", 3, &mut dictionary),
+            Some(())
+        );
 
         assert!(dictionary.is_empty());
+    }
+
+    #[test]
+    fn dictionary_copy_uses_the_initialized_prefix_before_window_wraps() {
+        let window = *b"abc_____";
+        let mut dictionary = [0; 3];
+
+        assert_eq!(
+            copy_dictionary_from_window(&window, 3, &mut dictionary),
+            Some(())
+        );
+
+        assert_eq!(dictionary, *b"abc");
+    }
+
+    #[test]
+    fn dictionary_copy_rejects_inconsistent_partial_window_metadata() {
+        let window = *b"abc_____";
+        let mut dictionary = *b"keep";
+
+        assert_eq!(
+            copy_dictionary_from_window(&window, 2, &mut dictionary),
+            None
+        );
+
+        assert_eq!(dictionary, *b"keep");
     }
 
     #[test]
@@ -4218,6 +4293,26 @@ mod tests {
             inflate_get_dictionary_result(5, 0, None, None, None),
             crate::zlib_h::Z_OK
         );
+    }
+
+    #[test]
+    fn dictionary_result_rejects_invalid_window_metadata_without_reporting_a_length() {
+        let window = *b"abc_____";
+        let mut dictionary = *b"keep";
+        let mut length = 99;
+
+        assert_eq!(
+            inflate_get_dictionary_result(
+                4,
+                2,
+                Some(&window),
+                Some(&mut dictionary),
+                Some(&mut length),
+            ),
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+        assert_eq!(dictionary, *b"keep");
+        assert_eq!(length, 99);
     }
 
     #[test]
