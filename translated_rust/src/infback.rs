@@ -74,38 +74,6 @@ struct InflateBackStateConfig {
     wsize: ::core::ffi::c_uint,
 }
 
-// An inflateBack input callback is allowed to signal exhaustion with zero.
-// Any nonzero length, however, must come with a buffer before the decoder
-// advances and dereferences `next`.  Keep that callback contract check at
-// every refill site in the raw decoder rather than relying on a later byte
-// load to discover an invalid callback result.
-macro_rules! inflate_back_refill {
-    ($input:expr, $input_desc:expr, $next:ident) => {{
-        let have = $input.expect("non-null function pointer")($input_desc, &raw mut $next);
-        if have != 0 && $next.is_null() {
-            0
-        } else {
-            have
-        }
-    }};
-}
-
-// Keep the callback's failure publication identical at every byte-loading
-// site.  The decoder still owns the raw cursor that follows this check; this
-// macro only makes the safe refill/exhaustion transition uniform.
-macro_rules! inflate_back_require_input {
-    ($input:expr, $input_desc:expr, $next:ident, $have:ident, $ret:ident, $leave:lifetime) => {{
-        if $have == 0 {
-            $have = inflate_back_refill!($input, $input_desc, $next);
-            if $have == 0 {
-                $next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                $ret = crate::zlib_h::Z_BUF_ERROR;
-                break $leave;
-            }
-        }
-    }};
-}
-
 // Keep the public initializer's validation order independent of its raw
 // stream and window bindings.  In particular, a bad version must win over
 // every other error, as it does in zlib.
@@ -1158,514 +1126,96 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     let version_first = unsafe { version.as_ref().copied() };
     inflateBackInit_(strm, windowBits, window, version_first, stream_size)
 }
+// Keep the callback-facing window separate from the general inflater's
+// history window.  `inflateBack()` lends the caller's window to `out`, whereas
+// `inflate()` keeps an independently managed history ring.  The adapter uses
+// an owned history buffer for one decode and restores the caller's window
+// before returning, so no callback-owned cursor needs a raw dereference here.
 pub(crate) fn inflateBack(
     strm: Option<&mut crate::zlib_h::z_stream>,
-    mut in_0: crate::zlib_h::in_func,
-    mut in_desc: *mut ::core::ffi::c_void,
-    mut out: crate::zlib_h::out_func,
-    mut out_desc: *mut ::core::ffi::c_void,
+    input: crate::zlib_h::in_func,
+    input_desc: *mut ::core::ffi::c_void,
+    output: crate::zlib_h::out_func,
+    output_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    // Keep stream validation in this named implementation. The exported ABI
-    // forwarder only binds its foreign stream reference and dispatches here.
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // `inflateBackInit_()` establishes the reciprocal stream/state binding
-    // above. Reuse the shared checked binder so this decoder's state setup is
-    // reference-bound; the raw callback and window cursors remain below.
-    let Some((strm, state_ref)) =
+    let Some((strm, state)) =
         crate::src::inflate::inflateStateCheck(strm as *mut crate::zlib_h::z_stream)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // SAFETY: the reference-based setup above has validated the live
-    // stream/state pair. The remaining raw operations are limited to the
-    // callback-owned input cursor and its one stored-block range binding;
-    // keeping them in this narrow scope avoids exposing an unsafe contract to
-    // Rust callers of the implementation.
-    unsafe {
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut have: ::core::ffi::c_uint = 0;
-    let mut left: ::core::ffi::c_uint = 0;
-    let mut hold: ::core::ffi::c_ulong = 0;
-    let mut bits: ::core::ffi::c_uint = 0;
-    let mut copy: ::core::ffi::c_uint = 0;
-    let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
-        op: 0,
-        bits: 0,
-        val: 0,
-    };
-    let mut last: crate::src::inftrees::code = crate::src::inftrees::code {
-        op: 0,
-        bits: 0,
-        val: 0,
-    };
-    let mut ret: ::core::ffi::c_int = 0;
-    left = inflate_back_begin_decode(strm, state_ref);
-    next = strm.next_in as *mut ::core::ffi::c_uchar;
-    have = inflate_back_initial_input_available(strm, !next.is_null());
-    hold = 0 as ::core::ffi::c_ulong;
-    bits = 0 as ::core::ffi::c_uint;
-    '_inf_leave: loop {
-        match inflate_back_decode_mode(state_ref.mode) {
-            InflateBackDecodeMode::Type => {
-                if state_ref.last != 0 {
-                    let padding = bits & 7;
-                    inflate_back_drop_bits(&mut hold, &mut bits, padding);
-                    inflate_back_finish_stream(state_ref);
-                    continue;
-                } else {
-                    while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                        inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                        have = have.wrapping_sub(1);
-                        let c2rust_fresh0 = next;
-                        next = next.wrapping_add(1);
-                        inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh0);
-                    }
-                    if inflate_back_apply_block_header(state_ref, &mut hold, &mut bits) {
-                        inflate_back_report_error(
-                            strm,
-                            state_ref,
-                            InflateBackError::InvalidBlockType,
-                        );
-                    }
-                    continue;
-                }
+    inflate_back_begin_decode(strm, state);
+    let callback_window = state.window;
+    let window_size = state.wsize as usize;
+    let saved_next_out = strm.next_out;
+    let saved_avail_out = strm.avail_out;
+    let saved_public = (strm.total_in, strm.total_out, strm.data_type, strm.adler);
+    let saved_bit_buffer = (state.hold, state.bits);
+    let mut history = vec![0; window_size];
+    let mut written = 0usize;
+    let mut published_full_window = false;
+
+    state.window = history.as_mut_ptr();
+    state.wnext = 0;
+    state.whave = 0;
+
+    let mut ret = loop {
+        strm.next_out = callback_window.wrapping_add(written);
+        strm.avail_out = (window_size - written) as crate::stdlib::uInt;
+        let status = crate::src::inflate::inflate(strm, crate::zlib_h::Z_NO_FLUSH);
+        written = window_size - strm.avail_out as usize;
+
+        if written == window_size {
+            published_full_window = true;
+            if output.expect("non-null function pointer")(output_desc, callback_window, state.wsize)
+                != 0
+            {
+                break crate::zlib_h::Z_BUF_ERROR;
             }
-            InflateBackDecodeMode::Stored => {
-                let padding = bits & 7;
-                inflate_back_drop_bits(&mut hold, &mut bits, padding);
-                while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                    have = have.wrapping_sub(1);
-                    let c2rust_fresh1 = next;
-                    next = next.wrapping_add(1);
-                    inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh1);
-                }
-                if let Some(length) = inflate_back_stored_length(hold) {
-                    inflate_back_begin_stored_copy(state_ref, length, &mut hold, &mut bits);
-                    while state_ref.length != 0 as ::core::ffi::c_uint {
-                        copy = state_ref.length;
-                        inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                        if inflate_back_prepare_output_window(state_ref, &mut left) {
-                            if out.expect("non-null function pointer")(out_desc, state_ref.window, left) != 0 {
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break '_inf_leave;
-                            }
-                        }
-                        copy = inflate_back_stored_copy_count(copy, have, left);
-                        // `have` and `copy` bound the callback-provided input
-                        // range, while `left` bounds the configured output
-                        // window.  Bind the input once; the transfer itself is
-                        // checked slice work in `inflate_back_copy_stored_window`.
-                        let source = ::core::slice::from_raw_parts(next, copy as usize);
-                        inflate_back_copy_stored_window(strm, state_ref, left, source);
-                        have = have.wrapping_sub(copy);
-                        next = next.wrapping_add(copy as usize);
-                        inflate_back_consume_output_copy(state_ref, &mut left, copy);
-                    }
-                    inflate_back_finish_stored_block(state_ref);
-                    continue;
-                } else {
-                    inflate_back_report_error(
-                        strm,
-                        state_ref,
-                        InflateBackError::InvalidStoredBlockLengths,
-                    );
-                    continue;
-                }
-            }
-            InflateBackDecodeMode::Table => {
-                while bits < 14 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                    have = have.wrapping_sub(1);
-                    let c2rust_fresh2 = next;
-                    next = next.wrapping_add(1);
-                    inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh2);
-                }
-                let header = inflate_back_apply_dynamic_header(state_ref, &mut hold, &mut bits);
-                if !inflate_back_dynamic_header_is_valid(header) {
-                    inflate_back_report_error(
-                        strm,
-                        state_ref,
-                        InflateBackError::TooManyLengthOrDistanceSymbols,
-                    );
-                    continue;
-                } else {
-                    inflate_back_start_code_length_order(state_ref);
-                    while state_ref.have < state_ref.ncode {
-                        while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                            inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                            have = have.wrapping_sub(1);
-                            let c2rust_fresh3 = next;
-                            next = next.wrapping_add(1);
-                            inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh3);
-                        }
-                        inflate_back_set_code_length_order(
-                            &mut state_ref.lens,
-                            &mut state_ref.have,
-                            hold,
-                        );
-                        inflate_back_drop_bits(&mut hold, &mut bits, 3);
-                    }
-                    inflate_back_finish_code_length_order(&mut state_ref.lens, &mut state_ref.have);
-                    let code_length_table = inflate_back_code_length_table_spec();
-                    inflate_back_prepare_dynamic_table(
-                        state_ref,
-                        InflateBackDynamicTableTarget::CodeLengths,
-                        &code_length_table,
-                    );
-                    ret = inflate_back_build_dynamic_table(
-                        state_ref,
-                        InflateBackDynamicTableTarget::CodeLengths,
-                        &code_length_table,
-                    );
-                    if ret != 0 {
-                        inflate_back_report_error(
-                            strm,
-                            state_ref,
-                            InflateBackError::InvalidCodeLengthsSet,
-                        );
-                        continue;
-                    } else {
-                        inflate_back_start_dynamic_code_lengths(state_ref);
-                        while state_ref.have < state_ref.nlen.wrapping_add(state_ref.ndist) {
-                            loop {
-                                here = inflate_back_code_table_entry(
-                                    state_ref,
-                                    InflateBackCodeTable::Length,
-                                    inflate_back_table_index(hold, state_ref.lenbits) as usize,
-                                );
-                                if here.bits as ::core::ffi::c_uint <= bits {
-                                    break;
-                                }
-                                inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                                have = have.wrapping_sub(1);
-                                let c2rust_fresh6 = next;
-                                next = next.wrapping_add(1);
-                                inflate_back_append_input_byte(
-                                    &mut hold,
-                                    &mut bits,
-                                    *c2rust_fresh6,
-                                );
-                            }
-                            if here.val >= 16 {
-                                while bits < inflate_back_code_length_bits_required(here) {
-                                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                                    have = have.wrapping_sub(1);
-                                    let c2rust_fresh8 = next;
-                                    next = next.wrapping_add(1);
-                                    inflate_back_append_input_byte(
-                                        &mut hold,
-                                        &mut bits,
-                                        *c2rust_fresh8,
-                                    );
-                                }
-                            }
-                            if let Err(error) = inflate_back_apply_code_length(
-                                state_ref,
-                                here,
-                                &mut hold,
-                                &mut bits,
-                            ) {
-                                inflate_back_report_error(strm, state_ref, error);
-                                break;
-                            }
-                        }
-                        if state_ref.mode as ::core::ffi::c_uint
-                            == crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
-                        {
-                            continue;
-                        }
-                        if !inflate_back_has_end_code(state_ref) {
-                            inflate_back_report_error(
-                                strm,
-                                state_ref,
-                                InflateBackError::MissingEndOfBlock,
-                            );
-                            continue;
-                        } else {
-                            let literal_length_table =
-                                inflate_back_literal_length_table_spec(state_ref.nlen);
-                            inflate_back_prepare_dynamic_table(
-                                state_ref,
-                                InflateBackDynamicTableTarget::LiteralLengths,
-                                &literal_length_table,
-                            );
-                            ret = inflate_back_build_dynamic_table(
-                                state_ref,
-                                InflateBackDynamicTableTarget::LiteralLengths,
-                                &literal_length_table,
-                            );
-                            if ret != 0 {
-                                inflate_back_report_error(
-                                    strm,
-                                    state_ref,
-                                    InflateBackError::InvalidLiteralLengthsSet,
-                                );
-                                continue;
-                            } else {
-                                let distance_table = inflate_back_distance_table_spec(
-                                    state_ref.nlen,
-                                    state_ref.ndist,
-                                );
-                                inflate_back_prepare_dynamic_table(
-                                    state_ref,
-                                    InflateBackDynamicTableTarget::Distances,
-                                    &distance_table,
-                                );
-                                ret = inflate_back_build_dynamic_table(
-                                    state_ref,
-                                    InflateBackDynamicTableTarget::Distances,
-                                    &distance_table,
-                                );
-                                if ret != 0 {
-                                    inflate_back_report_error(
-                                        strm,
-                                        state_ref,
-                                        InflateBackError::InvalidDistancesSet,
-                                    );
-                                    continue;
-                                } else {
-                                    inflate_back_finish_dynamic_tables(state_ref);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            InflateBackDecodeMode::Length => {}
-            InflateBackDecodeMode::Terminal(status) => {
-                ret = status;
-                break;
-            }
+            written = 0;
+            continue;
         }
-        loop {
-                here = inflate_back_code_table_entry(
-                    state_ref,
-                    InflateBackCodeTable::Length,
-                    inflate_back_table_index(hold, state_ref.lenbits) as usize,
-                );
-                if here.bits as ::core::ffi::c_uint <= bits {
-                    break;
+
+        match status {
+            crate::zlib_h::Z_STREAM_END | crate::zlib_h::Z_DATA_ERROR | crate::zlib_h::Z_MEM_ERROR
+            | crate::zlib_h::Z_STREAM_ERROR => break status,
+            crate::zlib_h::Z_OK | crate::zlib_h::Z_BUF_ERROR if strm.avail_in == 0 => {
+                let mut next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                let have = input.expect("non-null function pointer")(input_desc, &raw mut next);
+                if have == 0 || next.is_null() {
+                    strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                    strm.avail_in = 0;
+                    break crate::zlib_h::Z_BUF_ERROR;
                 }
-                inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                have = have.wrapping_sub(1);
-                let c2rust_fresh13 = next;
-                next = next.wrapping_add(1);
-                inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh13);
+                strm.next_in = next;
+                strm.avail_in = have as crate::stdlib::uInt;
             }
-            if inflate_back_length_code_needs_subtable(here) {
-                last = here;
-                loop {
-                    here = inflate_back_code_table_entry(
-                        state_ref,
-                        InflateBackCodeTable::Length,
-                        inflate_back_subtable_index(hold, last) as usize,
-                    );
-                    if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
-                        as ::core::ffi::c_uint
-                        <= bits
-                    {
-                        break;
-                    }
-                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                    have = have.wrapping_sub(1);
-                    let c2rust_fresh14 = next;
-                    next = next.wrapping_add(1);
-                    inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh14);
-                }
-                inflate_back_drop_bits(&mut hold, &mut bits, last.bits as ::core::ffi::c_uint);
-            }
-            inflate_back_drop_bits(&mut hold, &mut bits, here.bits as ::core::ffi::c_uint);
-            match inflate_back_start_length_code(state_ref, here) {
-                InflateBackLengthCode::Literal => {
-                    if inflate_back_prepare_output_window(state_ref, &mut left) {
-                        if out.expect("non-null function pointer")(out_desc, state_ref.window, left) != 0 {
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break;
-                        }
-                    }
-                    inflate_back_write_literal(
-                        strm,
-                        state_ref,
-                        left,
-                        inflate_back_literal_byte(state_ref),
-                    );
-                    inflate_back_commit_literal(state_ref, &mut left);
-                }
-                InflateBackLengthCode::End => {
-                    inflate_back_finish_end_code(state_ref);
-                }
-                InflateBackLengthCode::Invalid => {
-                    inflate_back_report_error(
-                        strm,
-                        state_ref,
-                        InflateBackError::InvalidLiteralLengthCode,
-                    );
-                }
-                InflateBackLengthCode::Match { .. } => {
-                    if state_ref.extra != 0 as ::core::ffi::c_uint {
-                        while bits < state_ref.extra {
-                            inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                            have = have.wrapping_sub(1);
-                            let c2rust_fresh16 = next;
-                            next = next.wrapping_add(1);
-                            inflate_back_append_input_byte(
-                                &mut hold,
-                                &mut bits,
-                                *c2rust_fresh16,
-                            );
-                        }
-                        let extra = inflate_back_take_bits(&mut hold, &mut bits, state_ref.extra);
-                        inflate_back_add_length_extra(state_ref, extra);
-                    }
-                    loop {
-                        here = inflate_back_code_table_entry(
-                            state_ref,
-                            InflateBackCodeTable::Distance,
-                            inflate_back_table_index(hold, state_ref.distbits) as usize,
-                        );
-                        if here.bits as ::core::ffi::c_uint <= bits {
-                            break;
-                        }
-                        inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                        have = have.wrapping_sub(1);
-                        let c2rust_fresh17 = next;
-                        next = next.wrapping_add(1);
-                        inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh17);
-                    }
-                    if inflate_back_distance_code_needs_subtable(here) {
-                        last = here;
-                        loop {
-                            here = inflate_back_code_table_entry(
-                                state_ref,
-                                InflateBackCodeTable::Distance,
-                                inflate_back_subtable_index(hold, last) as usize,
-                            );
-                            if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
-                                as ::core::ffi::c_uint
-                                <= bits
-                            {
-                                break;
-                            }
-                            inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                            have = have.wrapping_sub(1);
-                            let c2rust_fresh18 = next;
-                            next = next.wrapping_add(1);
-                            inflate_back_append_input_byte(
-                                &mut hold,
-                                &mut bits,
-                                *c2rust_fresh18,
-                            );
-                        }
-                        inflate_back_drop_bits(
-                            &mut hold,
-                            &mut bits,
-                            last.bits as ::core::ffi::c_uint,
-                        );
-                    }
-                    inflate_back_drop_bits(&mut hold, &mut bits, here.bits as ::core::ffi::c_uint);
-                    match inflate_back_start_distance_code(state_ref, here) {
-                        InflateBackDistanceCode::Invalid => {
-                            inflate_back_report_error(
-                                strm,
-                                state_ref,
-                                InflateBackError::InvalidDistanceCode,
-                            );
-                        }
-                        InflateBackDistanceCode::Distance { .. } => {
-                            if state_ref.extra != 0 as ::core::ffi::c_uint {
-                                while bits < state_ref.extra {
-                                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
-                                    have = have.wrapping_sub(1);
-                                    let c2rust_fresh19 = next;
-                                    next = next.wrapping_add(1);
-                                    inflate_back_append_input_byte(
-                                        &mut hold,
-                                        &mut bits,
-                                        *c2rust_fresh19,
-                                    );
-                                }
-                                let extra =
-                                    inflate_back_take_bits(&mut hold, &mut bits, state_ref.extra);
-                                inflate_back_add_distance_extra(state_ref, extra);
-                            }
-                            if !inflate_back_distance_fits(
-                                state_ref.offset,
-                                state_ref.wsize,
-                                state_ref.whave,
-                                left,
-                            ) {
-                                inflate_back_report_error(
-                                    strm,
-                                    state_ref,
-                                    InflateBackError::InvalidDistanceTooFarBack,
-                                );
-                            } else {
-                                loop {
-                                    if inflate_back_prepare_output_window(state_ref, &mut left) {
-                                        if out.expect("non-null function pointer")(
-                                            out_desc, state_ref.window, left,
-                                        ) != 0
-                                        {
-                                            ret = crate::zlib_h::Z_BUF_ERROR;
-                                            break '_inf_leave;
-                                        }
-                                    }
-                                    let match_copy = inflate_back_match_copy(
-                                        state_ref.wsize,
-                                        state_ref.offset,
-                                        left,
-                                        state_ref.length,
-                                    );
-                                    // The distance check above establishes both the
-                                    // source and destination ranges in the active
-                                    // window. Borrow that already-configured window
-                                    // through the inflater's bounded access path so
-                                    // overlapping LZ copies need no raw dereferences.
-                                    let write_index =
-                                        state_ref.wsize.wrapping_sub(left) as usize;
-                                    crate::src::inflate::updatewindow(
-                                        strm,
-                                        state_ref,
-                                        crate::src::inflate::InflateWindowAccess::Existing,
-                                        |_, window| {
-                                            inflate_back_copy_match_window(
-                                                window.expect(
-                                                    "inflateBack has a configured output window",
-                                                ),
-                                                write_index,
-                                                match_copy,
-                                            );
-                                        },
-                                    )
-                                    .expect("inflateBack existing window access cannot fail");
-                                    inflate_back_consume_output_copy(
-                                        state_ref,
-                                        &mut left,
-                                        match_copy.count,
-                                    );
-                                    if state_ref.length == 0 as ::core::ffi::c_uint {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            crate::zlib_h::Z_OK | crate::zlib_h::Z_BUF_ERROR => break status,
+            _ => break status,
         }
-    }
-    if let Some(pending) = inflate_back_pending_output(state_ref.wsize, left) {
-        let output_failed =
-            out.expect("non-null function pointer")(out_desc, state_ref.window, pending) != 0;
+    };
+
+    if written != 0 {
+        let output_failed = output.expect("non-null function pointer")(
+            output_desc,
+            callback_window,
+            written as ::core::ffi::c_uint,
+        ) != 0;
         ret = inflate_back_finish_pending_output(ret, output_failed);
     }
-    strm.next_in = next as *mut crate::stdlib::Bytef;
-    inflate_back_publish_available_input(strm, have);
-    return ret;
-    }
+
+    state.window = callback_window;
+    state.wnext = 0;
+    state.whave = if published_full_window { state.wsize } else { 0 };
+    (state.hold, state.bits) = saved_bit_buffer;
+    (strm.total_in, strm.total_out, strm.data_type, strm.adler) = saved_public;
+    strm.next_out = saved_next_out;
+    strm.avail_out = saved_avail_out;
+    ret
 }
+
 #[export_name = "inflateBack"]
 
 pub unsafe extern "C" fn inflateBack_ffi(
