@@ -1180,7 +1180,15 @@ pub unsafe fn inflate(
                                                                                 's_425: {
                                                                                     'c_2336: {
                                                                                         's_1582: {
-                                                                                            match (*state).mode as ::core::ffi::c_uint {
+                                                                                            // Snapshot the dispatcher mode through a
+                                                                                            // short-lived state borrow.  Individual
+                                                                                            // transitions continue to adopt the state
+                                                                                            // only for their own commits.
+                                                                                            let mode = {
+                                                                                                let state_ref = &*state;
+                                                                                                state_ref.mode
+                                                                                            };
+                                                                                            match mode as ::core::ffi::c_uint {
                                                                                                 16180 => {
                                                                                                     // The decoder entry already validated both
                                                                                                     // compatibility records.  Keep the header
