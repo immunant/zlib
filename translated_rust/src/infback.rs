@@ -255,7 +255,10 @@ pub fn inflateBack(
     // boundary. Keeping it here lets callers dispatch through a safe core.
     unsafe {
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    // `window` is the one validated caller-owned history/output span.  Keep
+    // its output cursor as an index so the decoder never advances a raw
+    // pointer through that span.
+    let mut put_index: usize = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -306,7 +309,6 @@ pub fn inflateBack(
     }) as ::core::ffi::c_uint;
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
-    put = window.as_mut_ptr();
     left = state.wsize;
     '_inf_leave: loop {
         match state.mode as ::core::ffi::c_uint {
@@ -405,10 +407,10 @@ pub fn inflateBack(
                             }
                         }
                         if left == 0 as ::core::ffi::c_uint {
-                            put = window.as_mut_ptr();
+                            put_index = 0;
                             left = state.wsize;
                             state.whave = left;
-                            if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
+                            if out.expect("non-null function pointer")(out_desc, window.as_mut_ptr(), left) != 0 {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             }
@@ -419,15 +421,23 @@ pub fn inflateBack(
                         if copy > left {
                             copy = left;
                         }
+                        let copy_len = copy as usize;
+                        let Some(destination) = put_index
+                            .checked_add(copy_len)
+                            .and_then(|end| window.get_mut(put_index..end))
+                        else {
+                            ret = crate::zlib_h::Z_STREAM_ERROR;
+                            break '_inf_leave;
+                        };
                         crate::stdlib::memcpy(
-                            put as *mut ::core::ffi::c_void,
+                            destination.as_mut_ptr() as *mut ::core::ffi::c_void,
                             next as *const ::core::ffi::c_void,
                             copy as crate::__stddef_size_t_h::size_t,
                         );
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
                         left = left.wrapping_sub(copy);
-                        put = put.wrapping_add(copy as usize);
+                        put_index = put_index.wrapping_add(copy_len);
                         state.length = state.length.wrapping_sub(copy);
                     }
                     state.mode = crate::src::inflate::TYPE;
@@ -817,15 +827,27 @@ pub fn inflateBack(
             }
         }
         if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
-            strm.next_out = put as *mut crate::stdlib::Bytef;
+            let Some(output) = window.get_mut(put_index..) else {
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break '_inf_leave;
+            };
+            strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
             strm.avail_out = left as crate::stdlib::uInt;
             strm.next_in = next as *mut crate::stdlib::Bytef;
             strm.avail_in = have as crate::stdlib::uInt;
             state.hold = hold;
             state.bits = bits;
             crate::src::inffast::inflate_fast(strm, state, state.wsize, None, true);
-            put = strm.next_out as *mut ::core::ffi::c_uchar;
             left = strm.avail_out as ::core::ffi::c_uint;
+            let Some(produced) = usize::try_from(state.wsize.wrapping_sub(left)).ok() else {
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break '_inf_leave;
+            };
+            if produced > window.len() {
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break '_inf_leave;
+            }
+            put_index = produced;
             next = strm.next_in as *mut ::core::ffi::c_uchar;
             have = strm.avail_in as ::core::ffi::c_uint;
             hold = state.hold;
@@ -910,15 +932,15 @@ pub fn inflateBack(
             state.length = here.val as ::core::ffi::c_uint;
             if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                 if left == 0 as ::core::ffi::c_uint {
-                    put = window.as_mut_ptr();
+                    put_index = 0;
                     left = state.wsize;
                     state.whave = left;
-                    if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
+                    if out.expect("non-null function pointer")(out_desc, window.as_mut_ptr(), left) != 0 {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break;
                     }
                 }
-                let Some(put_index) = state
+                let Some(current_put) = state
                     .wsize
                     .checked_sub(left)
                     .and_then(|remaining| usize::try_from(remaining).ok())
@@ -927,20 +949,20 @@ pub fn inflateBack(
                     break '_inf_leave;
                 };
                 let literal = state.length as ::core::ffi::c_uchar;
-                let Some(put_end) = put_index.checked_add(1) else {
+                let Some(put_end) = current_put.checked_add(1) else {
                     ret = crate::zlib_h::Z_STREAM_ERROR;
                     break '_inf_leave;
                 };
-                let Some(window) = inflate_back_window(state, window, put_index, 1) else {
+                let Some(window) = inflate_back_window(state, window, current_put, 1) else {
                     ret = crate::zlib_h::Z_STREAM_ERROR;
                     break '_inf_leave;
                 };
-                let Some(destination) = window.get_mut(put_index..put_end) else {
+                let Some(destination) = window.get_mut(current_put..put_end) else {
                     ret = crate::zlib_h::Z_STREAM_ERROR;
                     break '_inf_leave;
                 };
                 destination.copy_from_slice(&[literal]);
-                put = put.wrapping_add(1);
+                put_index = put_end;
                 left = left.wrapping_sub(1);
                 state.mode = crate::src::inflate::LEN;
             } else if here.op as ::core::ffi::c_int & 32 as ::core::ffi::c_int != 0 {
@@ -1100,10 +1122,10 @@ pub fn inflateBack(
                     } else {
                         loop {
                             if left == 0 as ::core::ffi::c_uint {
-                                put = window.as_mut_ptr();
+                                put_index = 0;
                                 left = state.wsize;
                                 state.whave = left;
-                                if out.expect("non-null function pointer")(out_desc, put, left) != 0
+                                if out.expect("non-null function pointer")(out_desc, window.as_mut_ptr(), left) != 0
                                 {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break '_inf_leave;
@@ -1122,20 +1144,20 @@ pub fn inflateBack(
                                 ret = crate::zlib_h::Z_STREAM_ERROR;
                                 break '_inf_leave;
                             };
-                            let Some(put_index) = usize::try_from(remaining).ok() else {
+                            let Some(current_put) = usize::try_from(remaining).ok() else {
                                 ret = crate::zlib_h::Z_STREAM_ERROR;
                                 break '_inf_leave;
                             };
                             let copy_len = copy as usize;
                             let distance = state.offset as usize;
-                            let Some(window) = inflate_back_window(state, window, put_index, copy_len)
+                            let Some(window) = inflate_back_window(state, window, current_put, copy_len)
                             else {
                                 ret = crate::zlib_h::Z_STREAM_ERROR;
                                 break '_inf_leave;
                             };
                             if copy_inflate_back_match(
                                 window,
-                                put_index,
+                                current_put,
                                 distance,
                                 copy_len,
                             )
@@ -1146,7 +1168,7 @@ pub fn inflateBack(
                             }
                             state.length = state.length.wrapping_sub(copy);
                             left = left.wrapping_sub(copy);
-                            put = window.as_mut_ptr().wrapping_add(put_index + copy_len);
+                            put_index = current_put + copy_len;
                             if state.length == 0 as ::core::ffi::c_uint {
                                 break;
                             }
