@@ -4302,20 +4302,12 @@ pub fn tr_stored_block(
         .wrapping_add(stored_len as crate::zutil_h::ulg);
 }
 
-pub unsafe extern "C" fn _tr_stored_block(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
+pub fn _tr_stored_block(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    source: &[crate::stdlib::Bytef],
+    last: ::core::ffi::c_int,
 ) {
-    let state = &mut *s;
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let source = if stored_len == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
-    };
     tr_stored_block(state, pending, source, last);
 }
 #[export_name = "_tr_stored_block"]
@@ -4326,7 +4318,18 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    _tr_stored_block(s, buf, stored_len, last)
+    // SAFETY: the C ABI supplies an initialized deflater and, when non-empty,
+    // a readable stored-block range. Bind those raw ranges once here; the
+    // implementation is entirely reference- and slice-based.
+    let state = &mut *s;
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let source = if stored_len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
+    };
+    _tr_stored_block(state, pending, source, last)
 }
 // Bit flushing only updates an already-bound deflater and its pending-output
 // buffer. Keep that work reference-based; the ABI adapter below owns the raw
