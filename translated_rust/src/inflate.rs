@@ -481,64 +481,60 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     inflatePrime(strm, bits, value)
 }
 unsafe extern "C" fn updatewindow(
-    mut strm: crate::zlib_h::z_streamp,
-    mut end: *const crate::stdlib::Bytef,
-    mut copy: ::core::ffi::c_uint,
+    strm: crate::zlib_h::z_streamp,
+    end: *const crate::stdlib::Bytef,
+    copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut dist: ::core::ffi::c_uint = 0;
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).window.is_null() {
-        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    let end = if copy == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(end.sub(copy as usize), copy as usize)
+    };
+    if state.window.is_null() {
+        state.window = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
+            strm.opaque,
+            (1 as crate::stdlib::uInt) << state.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
-        if (*state).window.is_null() {
+        if state.window.is_null() {
             return 1 as ::core::ffi::c_int;
         }
     }
-    if (*state).wsize == 0 as ::core::ffi::c_uint {
-        (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = 0 as ::core::ffi::c_uint;
+    if state.wsize == 0 as ::core::ffi::c_uint {
+        state.wsize = (1 as ::core::ffi::c_uint) << state.wbits;
+        state.wnext = 0 as ::core::ffi::c_uint;
+        state.whave = 0 as ::core::ffi::c_uint;
     }
-    if copy >= (*state).wsize {
-        crate::stdlib::memcpy(
-            (*state).window as *mut ::core::ffi::c_void,
-            end.offset(-((*state).wsize as isize)) as *const ::core::ffi::c_void,
-            (*state).wsize as crate::__stddef_size_t_h::size_t,
-        );
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = (*state).wsize;
+    let wsize = state.wsize as usize;
+    let wnext = state.wnext as usize;
+    if wnext > wsize {
+        return 1 as ::core::ffi::c_int;
+    }
+    // `window` is allocated above (or supplied by inflateBackInit_) with
+    // exactly `wsize` bytes.  Its lifetime is managed by the stream state.
+    let window = ::core::slice::from_raw_parts_mut(state.window, wsize);
+    if end.len() >= wsize {
+        window.copy_from_slice(&end[end.len() - wsize..]);
+        state.wnext = 0 as ::core::ffi::c_uint;
+        state.whave = state.wsize;
     } else {
-        dist = (*state).wsize.wrapping_sub((*state).wnext);
-        if dist > copy {
-            dist = copy;
-        }
-        crate::stdlib::memcpy(
-            (*state).window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
-            end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-            dist as crate::__stddef_size_t_h::size_t,
-        );
-        copy = copy.wrapping_sub(dist);
+        let dist = (wsize - wnext).min(end.len());
+        window[wnext..wnext + dist].copy_from_slice(&end[..dist]);
+        let copy = end.len() - dist;
         if copy != 0 {
-            crate::stdlib::memcpy(
-                (*state).window as *mut ::core::ffi::c_void,
-                end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
-            );
-            (*state).wnext = copy;
-            (*state).whave = (*state).wsize;
+            window[..copy].copy_from_slice(&end[dist..]);
+            state.wnext = copy as ::core::ffi::c_uint;
+            state.whave = state.wsize;
         } else {
-            (*state).wnext = (*state).wnext.wrapping_add(dist);
-            if (*state).wnext == (*state).wsize {
-                (*state).wnext = 0 as ::core::ffi::c_uint;
+            state.wnext = state.wnext.wrapping_add(dist as ::core::ffi::c_uint);
+            if state.wnext == state.wsize {
+                state.wnext = 0 as ::core::ffi::c_uint;
             }
-            if (*state).whave < (*state).wsize {
-                (*state).whave = (*state).whave.wrapping_add(dist);
+            if state.whave < state.wsize {
+                state.whave = state.whave.wrapping_add(dist as ::core::ffi::c_uint);
             }
         }
     }
