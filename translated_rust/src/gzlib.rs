@@ -177,6 +177,16 @@ pub struct GzCodecInput {
     available: crate::stdlib::uInt,
 }
 
+// A single codec dispatch receives a bounded input slice plus the scalar
+// output capacity.  This is deliberately independent of `z_stream`: the ABI
+// projection can borrow these values for one inflate call, while the gzip
+// owner retains the checked cursor that accounts for consumption afterwards.
+pub(crate) struct GzCodecCall<'a> {
+    input: &'a [u8],
+    input_cursor: GzCodecInput,
+    output_available: crate::stdlib::uInt,
+}
+
 pub(crate) struct GzCodecOutputView<'a> {
     bytes: &'a mut [u8],
 }
@@ -421,6 +431,32 @@ impl GzCodecInput {
     pub(crate) fn update(&mut self, cursor: usize, available: u32) {
         self.cursor = cursor;
         self.available = available;
+    }
+
+    // The codec reports consumption by reducing `avail_in`.  The call was
+    // built from this checked cursor, so a remaining count within the
+    // advertised range is enough to retain a pointer-free post-call cursor.
+    // This avoids deriving the next cursor from the ABI stream's raw pointer.
+    pub(crate) fn after_codec(&self, remaining: u32) -> Option<Self> {
+        let consumed = self.available.checked_sub(remaining)?;
+        Some(Self {
+            cursor: self.cursor.checked_add(consumed as usize)?,
+            available: remaining,
+        })
+    }
+}
+
+impl<'a> GzCodecCall<'a> {
+    pub(crate) fn input(&self) -> &'a [u8] {
+        self.input
+    }
+
+    pub(crate) fn input_cursor(&self) -> &GzCodecInput {
+        &self.input_cursor
+    }
+
+    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
+        self.output_available
     }
 }
 
@@ -934,6 +970,20 @@ impl GzDecompState {
 
     pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
         self.codec.available_output()
+    }
+
+    // Build the complete pointer-free input/output view for one codec pass.
+    // The slice bounds validate the stored cursor before any ABI stream
+    // cursor is published by the caller.
+    pub(crate) fn codec_call<'a>(&self, input: &'a [u8]) -> Option<GzCodecCall<'a>> {
+        Some(GzCodecCall {
+            input: self.input.bytes(input)?,
+            input_cursor: GzCodecInput {
+                cursor: self.input.cursor,
+                available: self.input.available,
+            },
+            output_available: self.output_available(),
+        })
     }
 
     pub(crate) fn record_inflate(

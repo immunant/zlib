@@ -46,7 +46,7 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-use crate::src::gzlib::GzCodecInput;
+use crate::src::gzlib::{GzCodecCall, GzCodecInput};
 
 fn is_gzip_header(input: &[u8]) -> bool {
     input.len() >= 4 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32
@@ -637,7 +637,7 @@ impl GzDecompLoopState<'_> {
 fn gz_decomp_loop(
     mut decomp: crate::src::gzlib::GzDecompState,
     state: &mut GzDecompLoopState<'_>,
-    mut inflate: impl FnMut(&[u8], &GzCodecInput, crate::stdlib::uInt) -> Option<GzInflateResult>,
+    mut inflate: impl FnMut(GzCodecCall<'_>) -> Option<GzInflateResult>,
 ) -> crate::src::gzlib::GzDecompFinish {
     let mut result = crate::zlib_h::Z_OK;
     loop {
@@ -654,7 +654,7 @@ fn gz_decomp_loop(
         let Some(call) = state
             .input
             .as_deref()
-            .and_then(|input| inflate(input, decomp.input(), decomp.output_available()))
+            .and_then(|input| decomp.codec_call(input).and_then(&mut inflate))
         else {
             result = -1;
             break;
@@ -864,47 +864,39 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             buffered: &mut state.x.have,
             path: state.path.as_deref(),
         };
-        gz_decomp_loop(
-            decomp,
-            &mut loop_state,
-            |input, input_cursor, available_out| {
-                strm.next_in = input
-                    .as_ptr()
-                    .wrapping_add(input_cursor.cursor())
-                    .cast_mut();
-                strm.avail_in = input_cursor.available();
-                strm.avail_out = available_out;
-                let result = crate::src::inflate::inflate(
-                    strm as *mut crate::zlib_h::z_stream_s,
-                    crate::zlib_h::Z_NO_FLUSH,
-                );
-                let input =
-                    GzCodecInput::from_owned_buffer(input, strm.next_in.addr(), strm.avail_in)?;
-                // `inflate()` owns every diagnostic it publishes through
-                // `strm.msg`. Match that known static storage by address rather
-                // than dereferencing the ABI pointer. The safe loop receives only
-                // the selected byte slice.
-                let data_error_message = if result == crate::zlib_h::Z_DATA_ERROR {
-                    Some(
-                        crate::src::inflate::INFLATE_ERROR_MESSAGES
-                            .iter()
-                            .find(|known| known.as_ptr().cast::<::core::ffi::c_char>() == strm.msg)
-                            .map(|known| &known[..known.len() - 1])
-                            .unwrap_or(b"compressed data error"),
-                    )
-                } else {
-                    None
-                };
-                Some(GzInflateResult {
-                    result,
-                    input,
-                    output_available: strm.avail_out,
-                    total_in: strm.total_in,
-                    total_out: strm.total_out,
-                    data_error_message,
-                })
-            },
-        )
+        gz_decomp_loop(decomp, &mut loop_state, |call| {
+            strm.next_in = call.input().as_ptr().cast_mut();
+            strm.avail_in = call.input_cursor().available();
+            strm.avail_out = call.output_available();
+            let result = crate::src::inflate::inflate(
+                strm as *mut crate::zlib_h::z_stream_s,
+                crate::zlib_h::Z_NO_FLUSH,
+            );
+            let input = call.input_cursor().after_codec(strm.avail_in)?;
+            // `inflate()` owns every diagnostic it publishes through
+            // `strm.msg`. Match that known static storage by address rather
+            // than dereferencing the ABI pointer. The safe loop receives only
+            // the selected byte slice.
+            let data_error_message = if result == crate::zlib_h::Z_DATA_ERROR {
+                Some(
+                    crate::src::inflate::INFLATE_ERROR_MESSAGES
+                        .iter()
+                        .find(|known| known.as_ptr().cast::<::core::ffi::c_char>() == strm.msg)
+                        .map(|known| &known[..known.len() - 1])
+                        .unwrap_or(b"compressed data error"),
+                )
+            } else {
+                None
+            };
+            Some(GzInflateResult {
+                result,
+                input,
+                output_available: strm.avail_out,
+                total_in: strm.total_in,
+                total_out: strm.total_out,
+                data_error_message,
+            })
+        })
     };
     // The core transition returns the checked start of its owned output span,
     // not the ABI cursor that `inflate()` advanced. Rebuild that cursor only
