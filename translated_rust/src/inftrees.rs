@@ -2868,6 +2868,15 @@ impl TableCursor {
         (index < self.table_len).then_some(index)
     }
 
+    fn entry_mut(
+        self,
+        table: &mut [crate::src::inftrees::code],
+        table_offset: usize,
+        entry_offset: usize,
+    ) -> Option<&mut crate::src::inftrees::code> {
+        table.get_mut(self.index(table_offset, entry_offset)?)
+    }
+
     fn end(self, table_offset: usize) -> Option<usize> {
         let end = self.start.checked_add(table_offset)?;
         (end <= self.table_len).then_some(end)
@@ -3060,11 +3069,9 @@ pub fn inflate_table_safe(
         let next_table_size = fill;
         loop {
             fill -= increment;
-            let Some(index) = table_cursor.index(next, ((huff >> drop_bits) + fill) as usize)
+            let Some(entry) =
+                table_cursor.entry_mut(table, next, ((huff >> drop_bits) + fill) as usize)
             else {
-                return 1;
-            };
-            let Some(entry) = table.get_mut(index) else {
                 return 1;
             };
             *entry = here;
@@ -3113,10 +3120,7 @@ pub fn inflate_table_safe(
                 return 1;
             }
             low = huff & mask;
-            let Some(index) = table_cursor.index(0, low as usize) else {
-                return 1;
-            };
-            let Some(entry) = table.get_mut(index) else {
+            let Some(entry) = table_cursor.entry_mut(table, 0, low as usize) else {
                 return 1;
             };
             entry.op = curr as u8;
@@ -3126,10 +3130,7 @@ pub fn inflate_table_safe(
     }
 
     if huff != 0 {
-        let Some(index) = table_cursor.index(next, huff as usize) else {
-            return 1;
-        };
-        let Some(entry) = table.get_mut(index) else {
+        let Some(entry) = table_cursor.entry_mut(table, next, huff as usize) else {
             return 1;
         };
         *entry = crate::src::inftrees::code {
@@ -3225,6 +3226,11 @@ mod tests {
     #[test]
     fn table_cursor_enforces_table_bounds() {
         let cursor = TableCursor::new(2, 6).expect("cursor starts within table");
+        let mut table = [code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        }; 6];
 
         assert_eq!(cursor.index(1, 2), Some(5));
         assert_eq!(cursor.end(4), Some(6));
@@ -3232,6 +3238,12 @@ mod tests {
         assert_eq!(cursor.index(4, 0), None);
         assert_eq!(cursor.end(5), None);
         assert_eq!(cursor.advance(4, 1), None);
+        cursor
+            .entry_mut(&mut table, 1, 2)
+            .expect("entry lies within cursor bounds")
+            .val = 42;
+        assert_eq!(table[5].val, 42);
+        assert!(cursor.entry_mut(&mut table, 4, 0).is_none());
         assert_eq!(TableCursor::new(7, 6), None);
     }
 
