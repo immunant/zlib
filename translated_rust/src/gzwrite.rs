@@ -1026,6 +1026,19 @@ struct GzWriteBufferedCopyPlan {
     reset_input_cursor: bool,
 }
 
+fn gz_write_apply_buffered_copy_plan(
+    avail_in: &mut crate::stdlib::uInt,
+    have: &mut ::core::ffi::c_uint,
+    pos: &mut crate::stdlib::off64_t,
+    remaining: &mut crate::stdlib::z_size_t,
+    plan: &GzWriteBufferedCopyPlan,
+) {
+    *avail_in = plan.avail_in;
+    *have = plan.have;
+    *pos = plan.pos;
+    *remaining = plan.remaining;
+}
+
 fn gz_write_buffered_copy_plan(
     size: ::core::ffi::c_uint,
     avail_in: crate::stdlib::uInt,
@@ -1373,10 +1386,13 @@ unsafe fn gz_write(
             if plan.reset_input_cursor {
                 state.strm.next_in = state.in_0;
             }
-            state.strm.avail_in = plan.avail_in;
-            state.x.have = plan.have;
-            state.x.pos = plan.pos;
-            len = plan.remaining;
+            gz_write_apply_buffered_copy_plan(
+                &mut state.strm.avail_in,
+                &mut state.x.have,
+                &mut state.x.pos,
+                &mut len,
+                &plan,
+            );
             crate::stdlib::memcpy(
                 state.in_0.wrapping_add(plan.destination_offset) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
@@ -1807,7 +1823,8 @@ mod tests {
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
         gz_comp_write_progress, gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip,
         gz_init_allocation_plan, gz_init_deflate_failed, gz_init_failed, gz_init_mode,
-        gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_buffered_progress,
+        gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_buffered_copy_plan,
+        gz_write_apply_buffered_progress,
         gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
         gz_write_buffered_comp_result, gz_write_buffered_copy_len, gz_write_buffered_copy_plan,
         gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
@@ -3180,6 +3197,25 @@ mod tests {
                 reset_input_cursor: false,
             }
         );
+    }
+
+    #[test]
+    fn gz_write_apply_buffered_copy_plan_commits_only_scalar_progress() {
+        let plan = gz_write_buffered_copy_plan(1024, 17, 1000, 10, 99);
+        let mut avail_in = 17;
+        let mut have = 1000;
+        let mut pos = 10;
+        let mut remaining = 99;
+
+        gz_write_apply_buffered_copy_plan(
+            &mut avail_in,
+            &mut have,
+            &mut pos,
+            &mut remaining,
+            &plan,
+        );
+
+        assert_eq!((avail_in, have, pos, remaining), (41, 1024, 34, 75));
     }
 
     #[test]

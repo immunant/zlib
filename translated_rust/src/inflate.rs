@@ -1191,6 +1191,14 @@ fn update_window_plan(
     }
 }
 
+fn update_window_state_plan(
+    state: &crate::src::inflate::inflate_state,
+    has_window: bool,
+    copy: ::core::ffi::c_uint,
+) -> UpdateWindowPlan {
+    update_window_plan(has_window, state.wsize, state.wbits, copy)
+}
+
 fn update_window_slices_after_allocation(
     plan: UpdateWindowPlan,
     has_window: bool,
@@ -1229,7 +1237,7 @@ unsafe fn updatewindow(
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-    let plan = update_window_plan(!state.window.is_null(), state.wsize, state.wbits, copy);
+    let plan = update_window_state_plan(state, !state.window.is_null(), copy);
     if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
         state.window = Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")((*strm).opaque, items, size)

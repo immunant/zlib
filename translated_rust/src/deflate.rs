@@ -961,6 +961,13 @@ fn fill_window_should_slide(strstart: crate::stdlib::uInt, wsize: crate::stdlib:
         )
 }
 
+fn fill_window_lookahead_after_read(
+    lookahead: crate::stdlib::uInt,
+    read: ::core::ffi::c_uint,
+) -> crate::stdlib::uInt {
+    lookahead.wrapping_add(read)
+}
+
 unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
@@ -999,7 +1006,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         }
         let cursor = fill_window_cursor((*s).strstart, (*s).lookahead);
         n = read_buf((*s).strm, (*s).window.wrapping_add(cursor as usize), more);
-        (*s).lookahead = (*s).lookahead.wrapping_add(n);
+        (*s).lookahead = fill_window_lookahead_after_read((*s).lookahead, n);
         if fill_window_has_insertable_match((*s).lookahead, (*s).insert) {
             let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
             (*s).ins_h = *(*s).window.wrapping_add(str as usize) as crate::stdlib::uInt;
@@ -4362,6 +4369,7 @@ mod tests {
         deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
         fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
         fill_window_high_water_after_zero, fill_window_insert_after_slide,
+        fill_window_lookahead_after_read,
         fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
         fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_reset_plan, lm_init_plan,
@@ -5372,6 +5380,16 @@ mod tests {
         assert_eq!(
             fill_window_available_space(0, 1, 0, 32, true),
             ::core::ffi::c_uint::MAX - 1,
+        );
+    }
+
+    #[test]
+    fn fill_window_lookahead_after_read_preserves_wrapping_accounting() {
+        assert_eq!(fill_window_lookahead_after_read(0, 0), 0);
+        assert_eq!(fill_window_lookahead_after_read(12, 20), 32);
+        assert_eq!(
+            fill_window_lookahead_after_read(crate::stdlib::uInt::MAX, 1),
+            0,
         );
     }
 
