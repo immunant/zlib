@@ -136,6 +136,14 @@ fn fast_decode_needs_prefetch(bits: ::core::ffi::c_uint) -> bool {
     bits < 15 as ::core::ffi::c_uint
 }
 
+fn fast_decode_prefetch_byte_count(bits: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    if fast_decode_needs_prefetch(bits) {
+        2
+    } else {
+        0
+    }
+}
+
 fn output_cursor_after_write(
     output_produced: crate::stdlib::uInt,
     output_remaining: crate::stdlib::uInt,
@@ -408,15 +416,11 @@ pub unsafe extern "C" fn inflate_fast(
     dmask = bit_mask((*state).distbits);
     let mut c2rust_current_block_141: u64;
     's_94: loop {
-        if fast_decode_needs_prefetch(bits) {
-            let c2rust_fresh0 = in_0;
+        for _ in 0..fast_decode_prefetch_byte_count(bits) {
+            let input_byte = in_0;
             in_0 = in_0.wrapping_add(1);
             input_remaining = input_remaining_after_read(input_remaining);
-            (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh0);
-            let c2rust_fresh1 = in_0;
-            in_0 = in_0.wrapping_add(1);
-            input_remaining = input_remaining_after_read(input_remaining);
-            (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh1);
+            (hold, bits) = append_input_byte(hold, bits, *input_byte);
         }
         here = lcode.wrapping_add(table_index(hold, lmask));
         loop {
@@ -444,15 +448,11 @@ pub unsafe extern "C" fn inflate_fast(
                         }
                         (len, hold, bits) = add_and_consume_extra_bits(len, hold, bits, extra_bits);
                     }
-                    if fast_decode_needs_prefetch(bits) {
-                        let c2rust_fresh4 = in_0;
+                    for _ in 0..fast_decode_prefetch_byte_count(bits) {
+                        let input_byte = in_0;
                         in_0 = in_0.wrapping_add(1);
                         input_remaining = input_remaining_after_read(input_remaining);
-                        (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh4);
-                        let c2rust_fresh5 = in_0;
-                        in_0 = in_0.wrapping_add(1);
-                        input_remaining = input_remaining_after_read(input_remaining);
-                        (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh5);
+                        (hold, bits) = append_input_byte(hold, bits, *input_byte);
                     }
                     here = dcode.wrapping_add(table_index(hold, dmask));
                     c2rust_current_block_141 = 3217834059723038609;
@@ -699,12 +699,13 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_decode_needs_prefetch, fast_dist_action, fast_litlen_action, fast_match_uses_window,
-        fast_window_copy_plan, fast_window_distance_is_invalid, finish_fast_distance,
-        input_bytes_needed, input_remaining_after_read, low_bits, match_copy_layout,
-        output_cursor_after_write, subtable_index, table_index, unread_input_state,
-        validate_fast_window_distance, FastDistAction, FastDistance, FastDistanceSource,
-        FastLitLenAction, FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
+        fast_decode_needs_prefetch, fast_decode_prefetch_byte_count, fast_dist_action,
+        fast_litlen_action, fast_match_uses_window, fast_window_copy_plan,
+        fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
+        input_remaining_after_read, low_bits, match_copy_layout, output_cursor_after_write,
+        subtable_index, table_index, unread_input_state, validate_fast_window_distance,
+        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction,
+        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -947,6 +948,14 @@ mod tests {
         assert!(fast_decode_needs_prefetch(14));
         assert!(!fast_decode_needs_prefetch(15));
         assert!(!fast_decode_needs_prefetch(::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn fast_decode_prefetch_count_preserves_two_byte_refill() {
+        assert_eq!(fast_decode_prefetch_byte_count(0), 2);
+        assert_eq!(fast_decode_prefetch_byte_count(14), 2);
+        assert_eq!(fast_decode_prefetch_byte_count(15), 0);
+        assert_eq!(fast_decode_prefetch_byte_count(::core::ffi::c_uint::MAX), 0);
     }
 
     #[test]

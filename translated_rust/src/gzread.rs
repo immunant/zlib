@@ -1188,51 +1188,46 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
     gz_decomp_apply_result(&mut state_ref.how, &mut state_ref.junk, ret)
 }
 
-unsafe fn gz_fetch(state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let state_ref = &mut *state;
+unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
-        match gz_fetch_action(state_ref.how) {
+        match gz_fetch_action(state.how) {
             GzFetchAction::Look => {
-                if gz_look(state_ref as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
-                {
+                if gz_look(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
-                let how = state_ref.how;
+                let how = state.how;
                 if gz_fetch_after_look(how) == GzFetchAfterLook::Return {
                     return 0 as ::core::ffi::c_int;
                 }
             }
             GzFetchAction::Copy => {
-                let out = state_ref.out;
-                let size = state_ref.size;
-                let load = gz_load(state_ref, out, gz_output_buffer_len(size));
-                state_ref.x.have = load.have;
+                let out = state.out;
+                let size = state.size;
+                let load = gz_load(state, out, gz_output_buffer_len(size));
+                state.x.have = load.have;
                 if gz_fetch_copy_action(&load) == GzFetchCopyAction::Error {
                     return -1 as ::core::ffi::c_int;
                 }
-                state_ref.x.next = state_ref.out;
+                state.x.next = state.out;
                 return 0 as ::core::ffi::c_int;
             }
             GzFetchAction::Gzip => {
-                state_ref.strm.avail_out =
-                    gz_output_buffer_len(state_ref.size) as crate::stdlib::uInt;
-                state_ref.strm.next_out = state_ref.out as *mut crate::stdlib::Bytef;
-                if gz_decomp(state_ref as *mut crate::gzguts_h::gz_state)
-                    == -1 as ::core::ffi::c_int
-                {
+                state.strm.avail_out = gz_output_buffer_len(state.size) as crate::stdlib::uInt;
+                state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
+                if gz_decomp(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
             GzFetchAction::StateCorrupt => {
                 crate::src::gzlib::gz_error(
-                    state_ref as *mut crate::gzguts_h::gz_state,
+                    state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_STREAM_ERROR,
                     b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
                 );
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if !gz_fetch_should_continue(state_ref.x.have, state_ref.eof, state_ref.strm.avail_in) {
+        if !gz_fetch_should_continue(state.x.have, state.eof, state.strm.avail_in) {
             break;
         }
     }
@@ -1476,24 +1471,16 @@ fn gzclose_r_result(
     }
 }
 
-unsafe fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
-        let action = {
-            let state_ref = &mut *state;
-            let action = gz_skip_action(state_ref.x.have, state_ref.eof, state_ref.strm.avail_in);
-            if matches!(action, GzSkipAction::ConsumeBuffered) {
-                let n = gz_skip_len(
-                    state_ref.x.have,
-                    state_ref.skip,
-                    crate::src::gzlib::gz_intmax(),
-                );
-                gz_skip_consume_buffered(state_ref, n);
-            }
-            action
-        };
+        let action = gz_skip_action(state.x.have, state.eof, state.strm.avail_in);
+        if matches!(action, GzSkipAction::ConsumeBuffered) {
+            let n = gz_skip_len(state.x.have, state.skip, crate::src::gzlib::gz_intmax());
+            gz_skip_consume_buffered(state, n);
+        }
         let fetch_failed =
             matches!(action, GzSkipAction::Fetch) && gz_fetch(state) == -1 as ::core::ffi::c_int;
-        match gz_skip_loop_decision(action, fetch_failed, (*state).skip) {
+        match gz_skip_loop_decision(action, fetch_failed, state.skip) {
             GzSkipLoopDecision::Error => return -1 as ::core::ffi::c_int,
             GzSkipLoopDecision::Done => break,
             GzSkipLoopDecision::Continue => {}
@@ -3081,9 +3068,7 @@ unsafe fn gz_read(
     if gz_read_request_is_empty(len) {
         return 0 as crate::stdlib::z_size_t;
     }
-    if gz_read_has_pending_skip(state_ref.skip)
-        && gz_skip(state_ref as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int
-    {
+    if gz_read_has_pending_skip(state_ref.skip) && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -3115,10 +3100,9 @@ unsafe fn gz_read(
             }
             GzReadAction::StopAtEof => break,
             GzReadAction::Fetch => {
-                if let Some(fetch_error) = gz_read_fetch_error(
-                    gz_fetch(state_ref as *mut crate::gzguts_h::gz_state),
-                    state_ref.x.have,
-                ) {
+                if let Some(fetch_error) =
+                    gz_read_fetch_error(gz_fetch(state_ref), state_ref.x.have)
+                {
                     err = fetch_error;
                 }
                 false
@@ -3317,24 +3301,25 @@ pub unsafe extern "C" fn gzungetc(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if gz_read_has_pending_skip((*state).skip) && gz_skip(state) == -1 as ::core::ffi::c_int {
+    let state_ref = &mut *state;
+    if gz_read_has_pending_skip(state_ref.skip) && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if !gz_ungetc_accepts_byte(c) {
         return -1 as ::core::ffi::c_int;
     }
     match gz_ungetc_action(
-        (*state).x.have,
-        (*state).size,
-        (*state).x.next == (*state).out,
+        state_ref.x.have,
+        state_ref.size,
+        state_ref.x.next == state_ref.out,
     ) {
         GzUngetcAction::Empty { write_index } => {
-            let (have, pos, past) = gz_ungetc_progress((*state).x.have, (*state).x.pos);
-            (*state).x.have = have;
-            (*state).x.next = (*state).out.wrapping_add(write_index);
-            *(*state).x.next = c as ::core::ffi::c_uchar;
-            (*state).x.pos = pos;
-            (*state).past = past;
+            let (have, pos, past) = gz_ungetc_progress(state_ref.x.have, state_ref.x.pos);
+            state_ref.x.have = have;
+            state_ref.x.next = state_ref.out.wrapping_add(write_index);
+            *state_ref.x.next = c as ::core::ffi::c_uchar;
+            state_ref.x.pos = pos;
+            state_ref.past = past;
             return c;
         }
         GzUngetcAction::Full => {
@@ -3347,23 +3332,23 @@ pub unsafe extern "C" fn gzungetc(
         }
         GzUngetcAction::Pushable { compact } => {
             if compact {
-                let plan = gz_ungetc_compact_plan((*state).x.have, (*state).size);
+                let plan = gz_ungetc_compact_plan(state_ref.x.have, state_ref.size);
                 let mut remaining = plan.len;
                 while remaining != 0 {
                     remaining -= 1;
-                    *(*state).out.wrapping_add(plan.dest_index + remaining) =
-                        *(*state).out.wrapping_add(remaining);
+                    *state_ref.out.wrapping_add(plan.dest_index + remaining) =
+                        *state_ref.out.wrapping_add(remaining);
                 }
-                (*state).x.next = (*state).out.wrapping_add(plan.dest_index);
+                state_ref.x.next = state_ref.out.wrapping_add(plan.dest_index);
             }
         }
     }
-    let (have, pos, past) = gz_ungetc_progress((*state).x.have, (*state).x.pos);
-    (*state).x.have = have;
-    (*state).x.next = (*state).x.next.wrapping_sub(1);
-    *(*state).x.next = c as ::core::ffi::c_uchar;
-    (*state).x.pos = pos;
-    (*state).past = past;
+    let (have, pos, past) = gz_ungetc_progress(state_ref.x.have, state_ref.x.pos);
+    state_ref.x.have = have;
+    state_ref.x.next = state_ref.x.next.wrapping_sub(1);
+    *state_ref.x.next = c as ::core::ffi::c_uchar;
+    state_ref.x.pos = pos;
+    state_ref.past = past;
     return c;
 }
 #[export_name = "gzungetc"]
@@ -3398,7 +3383,8 @@ pub unsafe extern "C" fn gzgets(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if gz_read_has_pending_skip((*state).skip) && gz_skip(state) == -1 as ::core::ffi::c_int {
+    let state_ref = &mut *state;
+    if gz_read_has_pending_skip(state_ref.skip) && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
@@ -3406,43 +3392,43 @@ pub unsafe extern "C" fn gzgets(
     left = initial_left;
     if left != 0 {
         loop {
-            let fetch = if gzgets_needs_fetch((*state).x.have) {
-                gz_fetch(state)
+            let fetch = if gzgets_needs_fetch(state_ref.x.have) {
+                gz_fetch(state_ref)
             } else {
                 0
             };
-            match gzgets_post_fetch_decision((*state).x.have, fetch) {
+            match gzgets_post_fetch_decision(state_ref.x.have, fetch) {
                 GzgetsPostFetchDecision::Stop => break,
                 GzgetsPostFetchDecision::MarkPastAndStop => {
-                    (*state).past = 1 as ::core::ffi::c_int;
+                    state_ref.past = 1 as ::core::ffi::c_int;
                     break;
                 }
                 GzgetsPostFetchDecision::Copy => {}
             }
-            n = gzgets_copy_len((*state).x.have, left, None);
+            n = gzgets_copy_len(state_ref.x.have, left, None);
             eol = crate::stdlib::memchr(
-                (*state).x.next as *const ::core::ffi::c_void,
+                state_ref.x.next as *const ::core::ffi::c_void,
                 '\n' as i32,
                 n as crate::__stddef_size_t_h::size_t,
             ) as *mut ::core::ffi::c_uchar;
             if !eol.is_null() {
                 n = gzgets_copy_len(
-                    (*state).x.have,
+                    state_ref.x.have,
                     left,
-                    Some(eol.offset_from((*state).x.next) as usize),
+                    Some(eol.offset_from(state_ref.x.next) as usize),
                 );
             }
             crate::stdlib::memcpy(
                 buf as *mut ::core::ffi::c_void,
-                (*state).x.next as *const ::core::ffi::c_void,
+                state_ref.x.next as *const ::core::ffi::c_void,
                 n as crate::__stddef_size_t_h::size_t,
             );
             let progress =
-                gzgets_copy_progress((*state).x.have, left, (*state).x.pos, n, !eol.is_null());
-            (*state).x.have = progress.have;
+                gzgets_copy_progress(state_ref.x.have, left, state_ref.x.pos, n, !eol.is_null());
+            state_ref.x.have = progress.have;
             left = progress.left;
-            (*state).x.pos = progress.pos;
-            (*state).x.next = (*state).x.next.wrapping_add(n as usize);
+            state_ref.x.pos = progress.pos;
+            state_ref.x.next = state_ref.x.next.wrapping_add(n as usize);
             buf = buf.wrapping_add(n as usize);
             if !progress.should_continue {
                 break;

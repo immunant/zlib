@@ -1914,12 +1914,31 @@ fn pending_short_cursors(
     ([pending, second], second.wrapping_add(1))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PendingShortWrite {
+    bytes: [crate::stdlib::Byte; 2],
+    cursors: [crate::zutil_h::ulg; 2],
+    next_pending: crate::zutil_h::ulg,
+}
+
+fn pending_short_write(
+    pending: crate::zutil_h::ulg,
+    value: crate::stdlib::uInt,
+) -> PendingShortWrite {
+    let (cursors, next_pending) = pending_short_cursors(pending);
+    PendingShortWrite {
+        bytes: short_msb_bytes(value),
+        cursors,
+        next_pending,
+    }
+}
+
 unsafe fn putShortMSB(mut s: *mut crate::src::deflate::deflate_state, mut b: crate::stdlib::uInt) {
-    let bytes = short_msb_bytes(b);
-    let (cursors, next_pending) = pending_short_cursors((*s).pending);
-    (*s).pending = next_pending;
-    *(*s).pending_buf.wrapping_add(cursors[0] as usize) = bytes[0];
-    *(*s).pending_buf.wrapping_add(cursors[1] as usize) = bytes[1];
+    let state = &mut *s;
+    let write = pending_short_write(state.pending, b);
+    state.pending = write.next_pending;
+    *state.pending_buf.wrapping_add(write.cursors[0] as usize) = write.bytes[0];
+    *state.pending_buf.wrapping_add(write.cursors[1] as usize) = write.bytes[1];
 }
 
 fn pending_output_len(
