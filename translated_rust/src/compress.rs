@@ -172,7 +172,7 @@ macro_rules! compress2_z_at_boundary {
             }
         }
         *destLen = compress_output_len(capacity, left, stream.avail_out);
-        crate::src::deflate::deflateEnd(&mut stream);
+        crate::src::deflate::deflate_end_at_boundary!(&mut stream);
         if err == crate::zlib_h::Z_STREAM_END {
             crate::zlib_h::Z_OK
         } else {
@@ -278,4 +278,3 @@ pub unsafe extern "C" fn compressBound_ffi(
 ) -> crate::stdlib::uLong {
     compressBound(sourceLen)
 }
-pub use crate::src::deflate::deflateEnd;

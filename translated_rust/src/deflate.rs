@@ -1253,7 +1253,7 @@ macro_rules! deflate_init2_at_boundary {
                 // Publish each allocation immediately, matching zlib's observable
                 // partial-initialization state for allocator hooks.
                 let Some(zalloc) = strm_ref.zalloc else {
-                    let _ = crate::src::deflate::deflateEnd(strm_ref);
+                    let _ = crate::src::deflate::deflate_end_at_boundary!(strm_ref);
                     break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
                 };
                 let window = zalloc(
@@ -1264,7 +1264,7 @@ macro_rules! deflate_init2_at_boundary {
                 ) as *mut crate::stdlib::Bytef;
                 (&mut *s).window = ::core::ptr::NonNull::new(window);
                 let Some(zalloc) = strm_ref.zalloc else {
-                    let _ = crate::src::deflate::deflateEnd(strm_ref);
+                    let _ = crate::src::deflate::deflate_end_at_boundary!(strm_ref);
                     break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
                 };
                 let prev = zalloc(
@@ -1274,7 +1274,7 @@ macro_rules! deflate_init2_at_boundary {
                 ) as *mut crate::src::deflate::Posf;
                 (&mut *s).prev = ::core::ptr::NonNull::new(prev);
                 let Some(zalloc) = strm_ref.zalloc else {
-                    let _ = crate::src::deflate::deflateEnd(strm_ref);
+                    let _ = crate::src::deflate::deflate_end_at_boundary!(strm_ref);
                     break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
                 };
                 let head = zalloc(
@@ -1284,7 +1284,7 @@ macro_rules! deflate_init2_at_boundary {
                 ) as *mut crate::src::deflate::Posf;
                 (&mut *s).head = ::core::ptr::NonNull::new(head);
                 let Some(zalloc) = strm_ref.zalloc else {
-                    let _ = crate::src::deflate::deflateEnd(strm_ref);
+                    let _ = crate::src::deflate::deflate_end_at_boundary!(strm_ref);
                     break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
                 };
                 let pending_buf = zalloc(
@@ -1298,7 +1298,7 @@ macro_rules! deflate_init2_at_boundary {
                     crate::src::deflate::deflate_mark_initialization_memory_error(
                         strm_ref, &mut *s,
                     );
-                    crate::src::deflate::deflateEnd(strm_ref);
+                    crate::src::deflate::deflate_end_at_boundary!(strm_ref);
                     break 'deflate_init_result crate::zlib_h::Z_MEM_ERROR;
                 }
                 let state = &mut *s;
@@ -3930,7 +3930,7 @@ pub unsafe extern "C" fn deflate_ffi(
         )
     }
 }
-fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
+pub(crate) fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
     } else {
@@ -3940,7 +3940,7 @@ fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
 
 /// Validate the safe scalar/state portion of teardown before the ABI boundary
 /// snapshots pointer handles and invokes the foreign free callback.
-fn deflate_state_can_end(
+pub(crate) fn deflate_state_can_end(
     strm: &crate::zlib_h::z_stream,
     state: &deflate_state,
     stream_identity: usize,
@@ -4020,62 +4020,66 @@ fn deflate_copy_plan(source: &deflate_state, dest: &deflate_state) -> Option<Def
     })
 }
 
-pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    // This compatibility teardown still has to adopt the ABI stream/state
-    // records and invoke its C allocator. Keep that work at this codec
-    // boundary so Rust callers do not inherit an unsafe-function contract.
-    unsafe {
-        // Validate and snapshot every callback argument before releasing any
-        // allocation. A custom `zfree` is foreign code, so do not retain a Rust
-        // borrow of the stream or state while it runs.
-        let (state_ptr, zfree, opaque, status, pending_buf, head, prev, window) = {
-            let stream_identity = strm as *mut crate::zlib_h::z_stream as usize;
-            let state_ptr = strm.state as *mut crate::src::deflate::deflate_state;
-            if state_ptr.is_null() {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            let state = &*state_ptr;
-            if !deflate_state_can_end(strm, state, stream_identity) {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            let Some(zfree) = strm.zfree else {
-                return crate::zlib_h::Z_STREAM_ERROR;
+// This expands only at ABI boundaries.  State adoption and allocator callbacks
+// cannot cross into a safe implementation helper; scalar validation and status
+// selection remain in the helpers above.
+macro_rules! deflate_end_at_boundary {
+    ($strm:expr $(,)?) => {{
+        'deflate_end_result: {
+            let strm: &mut crate::zlib_h::z_stream = $strm;
+            // Validate and snapshot every callback argument before releasing any
+            // allocation. A custom `zfree` is foreign code, so do not retain a Rust
+            // borrow of the stream or state while it runs.
+            let (state_ptr, zfree, opaque, status, pending_buf, head, prev, window) = {
+                let stream_identity = strm as *mut crate::zlib_h::z_stream as usize;
+                let state_ptr = strm.state as *mut crate::src::deflate::deflate_state;
+                if state_ptr.is_null() {
+                    break 'deflate_end_result crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let state = &*state_ptr;
+                if !crate::src::deflate::deflate_state_can_end(strm, state, stream_identity) {
+                    break 'deflate_end_result crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let Some(zfree) = strm.zfree else {
+                    break 'deflate_end_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                (
+                    state_ptr,
+                    zfree,
+                    strm.opaque,
+                    state.status,
+                    state.pending_buf,
+                    state.head,
+                    state.prev,
+                    state.window,
+                )
             };
-            (
-                state_ptr,
-                zfree,
-                strm.opaque,
-                state.status,
-                state.pending_buf,
-                state.head,
-                state.prev,
-                state.window,
-            )
-        };
-        if let Some(pending_buf) = pending_buf {
-            zfree(opaque, pending_buf.as_ptr() as crate::stdlib::voidpf);
+            if let Some(pending_buf) = pending_buf {
+                zfree(opaque, pending_buf.as_ptr() as crate::stdlib::voidpf);
+            }
+            if let Some(head) = head {
+                zfree(opaque, head.as_ptr() as crate::stdlib::voidpf);
+            }
+            if let Some(prev) = prev {
+                zfree(opaque, prev.as_ptr() as crate::stdlib::voidpf);
+            }
+            if let Some(window) = window {
+                zfree(opaque, window.as_ptr() as crate::stdlib::voidpf);
+            }
+            zfree(opaque, state_ptr as crate::stdlib::voidpf);
+            strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+            crate::src::deflate::deflate_end_status(status)
         }
-        if let Some(head) = head {
-            zfree(opaque, head.as_ptr() as crate::stdlib::voidpf);
-        }
-        if let Some(prev) = prev {
-            zfree(opaque, prev.as_ptr() as crate::stdlib::voidpf);
-        }
-        if let Some(window) = window {
-            zfree(opaque, window.as_ptr() as crate::stdlib::voidpf);
-        }
-        zfree(opaque, state_ptr as crate::stdlib::voidpf);
-        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-        deflate_end_status(status)
-    }
+    }};
 }
+pub(crate) use deflate_end_at_boundary;
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    deflateEnd(&mut *strm)
+    deflate_end_at_boundary!(&mut *strm)
 }
 #[export_name = "deflateCopy"]
 pub unsafe extern "C" fn deflateCopy_ffi(
@@ -4131,11 +4135,11 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         || dest_state.head.is_none()
         || dest_state.pending_buf.is_none()
     {
-        deflateEnd(&mut *dest);
+        deflate_end_at_boundary!(&mut *dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     let Some(copy_plan) = deflate_copy_plan(source_state, dest_state) else {
-        deflateEnd(&mut *dest);
+        deflate_end_at_boundary!(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let DeflateCopyPlan {
@@ -4254,7 +4258,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         dst_sym,
         src_sym,
     ) {
-        deflateEnd(&mut *dest);
+        deflate_end_at_boundary!(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     dest_state.pending_out = pending_range.start;
