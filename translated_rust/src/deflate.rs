@@ -2909,6 +2909,30 @@ fn update_stored_history(
     true
 }
 
+fn slide_stored_window(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &mut [crate::stdlib::Bytef],
+) -> Option<crate::stdlib::uInt> {
+    let w_size = usize::try_from(state.w_size).ok()?;
+    let strstart = usize::try_from(state.strstart).ok()?;
+    let block_start = usize::try_from(state.block_start).ok()?;
+    let retained = strstart.checked_sub(w_size)?;
+    let source_end = w_size.checked_add(retained)?;
+    if block_start < w_size || source_end > window.len() {
+        return None;
+    }
+    window.copy_within(w_size..source_end, 0);
+    state.block_start -= state.w_size as ::core::ffi::c_long;
+    state.strstart -= state.w_size;
+    if state.matches < 2 as crate::stdlib::uInt {
+        state.matches += 1;
+    }
+    if state.insert > state.strstart {
+        state.insert = state.strstart;
+    }
+    Some(state.w_size)
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3041,20 +3065,15 @@ unsafe extern "C" fn deflate_stored(
         .window_size
         .wrapping_sub((*s).strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
     if (*(*s).strm).avail_in > have && (*s).block_start >= (*s).w_size as ::core::ffi::c_long {
-        (*s).block_start -= (*s).w_size as ::core::ffi::c_long;
-        (*s).strstart = (*s).strstart.wrapping_sub((*s).w_size);
-        crate::stdlib::memcpy(
-            (*s).window as *mut ::core::ffi::c_void,
-            (*s).window.offset((*s).w_size as isize) as *const ::core::ffi::c_void,
-            (*s).strstart as crate::__stddef_size_t_h::size_t,
+        let state = &mut *s;
+        let window = ::core::slice::from_raw_parts_mut(
+            state.window,
+            state.window_size as usize,
         );
-        if (*s).matches < 2 as crate::stdlib::uInt {
-            (*s).matches = (*s).matches.wrapping_add(1);
-        }
-        have = have.wrapping_add((*s).w_size as ::core::ffi::c_uint);
-        if (*s).insert > (*s).strstart {
-            (*s).insert = (*s).strstart;
-        }
+        let Some(slid) = slide_stored_window(state, window) else {
+            return need_more;
+        };
+        have = have.wrapping_add(slid);
     }
     if have > (*(*s).strm).avail_in {
         have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
