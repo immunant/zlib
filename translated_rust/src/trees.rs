@@ -5142,7 +5142,9 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 ) {
     _tr_stored_block(s, buf, stored_len, last)
 }
-pub(crate) unsafe fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
+#[export_name = "_tr_flush_bits"]
+
+pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let (count, bytes) = bi_flush_core(&mut (*s).bi_buf, &mut (*s).bi_valid);
     let pending = (*s).pending;
     for (index, byte) in bytes.into_iter().take(count).enumerate() {
@@ -5150,11 +5152,6 @@ pub(crate) unsafe fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
         *(*s).pending_buf.wrapping_add(cursor as usize) = byte;
     }
     (*s).pending = pending_cursor_after_bytes(pending, count);
-}
-#[export_name = "_tr_flush_bits"]
-
-pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s)
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
@@ -5208,7 +5205,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len_0;
     }
-    bi_flush(s);
+    _tr_flush_bits_ffi(s);
 }
 #[export_name = "_tr_align"]
 
