@@ -4584,14 +4584,17 @@ pub(crate) fn tr_flush_block_bound(
     }
 }
 
-// Bind the C-compatible state and its allocation-backed ranges once.  The
-// implementation above performs all block policy and byte emission safely.
-pub unsafe extern "C" fn _tr_flush_block(
+#[export_name = "_tr_flush_block"]
+
+pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
+    // SAFETY: the C ABI supplies an initialized deflater and an optional
+    // readable stored-block range. Bind those ranges once at the ABI entry;
+    // the block policy and byte emission below are reference- and slice-based.
     let state = &mut *s;
     let stream = &mut *state.strm;
     let pending =
@@ -4606,16 +4609,6 @@ pub unsafe extern "C" fn _tr_flush_block(
     };
     let symbols = ::core::slice::from_raw_parts(state.sym_buf, state.sym_next as usize);
     tr_flush_block_bound(state, stream, pending, source, symbols, stored_len, last);
-}
-#[export_name = "_tr_flush_block"]
-
-pub unsafe extern "C" fn _tr_flush_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_flush_block(s, buf, stored_len, last)
 }
 fn tally_symbols(
     state: &mut crate::src::deflate::deflate_state,

@@ -152,7 +152,7 @@ pub use crate::src::crc32::crc32_z_ffi as crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align_ffi as _tr_align;
-pub use crate::src::trees::_tr_flush_block;
+pub use crate::src::trees::_tr_flush_block_ffi as _tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
