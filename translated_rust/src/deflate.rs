@@ -2749,11 +2749,11 @@ unsafe extern "C" fn deflate_fast(
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     let sym_buf_start = (*s).sym_buf_start;
-    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
-    let sym_buf = ::core::slice::from_raw_parts_mut(
-        (*s).pending_buf.wrapping_add(sym_buf_start),
-        sym_buf_len,
-    );
+    // `pending_buf` is the full allocation; symbols occupy its suffix after
+    // the literal area. Keeping one full-capacity view avoids a raw cursor.
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+    let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -2946,11 +2946,11 @@ unsafe extern "C" fn deflate_slow(
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     let sym_buf_start = (*s).sym_buf_start;
-    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
-    let sym_buf = ::core::slice::from_raw_parts_mut(
-        (*s).pending_buf.wrapping_add(sym_buf_start),
-        sym_buf_len,
-    );
+    // `pending_buf` is the full allocation; symbols occupy its suffix after
+    // the literal area. Keeping one full-capacity view avoids a raw cursor.
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+    let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -3246,11 +3246,11 @@ unsafe extern "C" fn deflate_rle(
     let mut bflush: ::core::ffi::c_int = 0;
     let state = &mut *s;
     let sym_buf_start = state.sym_buf_start;
-    let sym_buf_len = (state.pending_buf_size as usize).wrapping_sub(sym_buf_start);
-    let sym_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf.wrapping_add(sym_buf_start),
-        sym_buf_len,
-    );
+    // `pending_buf` is the full allocation; symbols occupy its suffix after
+    // the literal area. Keeping one full-capacity view avoids a raw cursor.
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
@@ -3384,11 +3384,11 @@ unsafe extern "C" fn deflate_huff(
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     let sym_buf_start = (*s).sym_buf_start;
-    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
-    let sym_buf = ::core::slice::from_raw_parts_mut(
-        (*s).pending_buf.wrapping_add(sym_buf_start),
-        sym_buf_len,
-    );
+    // `pending_buf` is the full allocation; symbols occupy its suffix after
+    // the literal area. Keeping one full-capacity view avoids a raw cursor.
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+    let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead == 0 as crate::stdlib::uInt {
             fill_window(s);
