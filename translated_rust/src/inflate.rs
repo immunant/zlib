@@ -3843,6 +3843,63 @@ fn inflate_dictionary_copy(
     Some(())
 }
 
+/// Classify and size dictionary installation before the ABI boundary invokes
+/// an allocator or lends the history allocation.  The checksum and mode
+/// rules are ordinary inflate state transitions; only the callback and raw
+/// window conversion belong to the exported wrapper.
+fn inflate_dictionary_admission(
+    state: &inflate_state,
+    dictionary: &[crate::stdlib::Byte],
+) -> Result<InflateWindowBoundaryPlan, ::core::ffi::c_int> {
+    if state.wrap != 0 && state.mode != crate::src::inflate::DICT {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    if state.mode == crate::src::inflate::DICT {
+        let dictid = crate::src::adler32::adler32_z(
+            crate::src::adler32::ADLER32_INITIAL as crate::stdlib::uLong,
+            dictionary,
+        ) as ::core::ffi::c_ulong;
+        if dictid != state.check {
+            return Err(crate::zlib_h::Z_DATA_ERROR);
+        }
+    }
+    let copy =
+        ::core::ffi::c_uint::try_from(dictionary.len()).map_err(|_| crate::zlib_h::Z_MEM_ERROR)?;
+    inflate_window_boundary_plan(state.window.is_null(), state.wbits, state.wsize, copy)
+        .ok_or(crate::zlib_h::Z_MEM_ERROR)
+}
+
+/// Commit a validated preset dictionary using an already-lent history slice.
+/// All state and slice work stays safe, so the export boundary only has to
+/// allocate the optional window and create this temporary view.
+fn inflate_dictionary_commit(
+    state: &mut inflate_state,
+    dictionary: &[crate::stdlib::Byte],
+    window: &mut [crate::stdlib::Byte],
+) -> Result<(), ::core::ffi::c_int> {
+    let admission = inflate_dictionary_admission(state, dictionary)?;
+    if admission.allocate
+        || admission.window_len != window.len()
+        || admission.copy_len != dictionary.len()
+    {
+        return Err(crate::zlib_h::Z_MEM_ERROR);
+    }
+    let update = inflate_window_update(
+        window,
+        dictionary,
+        state.wbits,
+        state.wsize,
+        state.wnext,
+        state.whave,
+    )
+    .ok_or(crate::zlib_h::Z_MEM_ERROR)?;
+    state.wsize = update.wsize;
+    state.wnext = update.wnext;
+    state.whave = update.whave;
+    state.havedict = 1;
+    Ok(())
+}
+
 /// Check the non-overlap precondition before lending an ABI history window
 /// and caller dictionary as Rust slices.  zlib's original copies have
 /// `memcpy` semantics, so an overlapping caller destination was never a
@@ -3925,32 +3982,14 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     } else {
         core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
-    let (needs_window, zalloc, opaque, wbits) = {
+    let (admission, zalloc, opaque) = {
         let strm_ref = &mut *strm;
         let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
-        if state.wrap != 0 as ::core::ffi::c_int
-            && state.mode as ::core::ffi::c_uint
-                != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        if state.mode as ::core::ffi::c_uint
-            == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            let dictid = crate::src::adler32::adler32_z(
-                crate::src::adler32::ADLER32_INITIAL as crate::stdlib::uLong,
-                dictionary,
-            ) as ::core::ffi::c_ulong;
-            if dictid != state.check {
-                return crate::zlib_h::Z_DATA_ERROR;
-            }
-        }
-        (
-            state.window.is_null(),
-            strm_ref.zalloc,
-            strm_ref.opaque,
-            state.wbits,
-        )
+        let admission = match inflate_dictionary_admission(state, dictionary) {
+            Ok(admission) => admission,
+            Err(status) => return status,
+        };
+        (admission, strm_ref.zalloc, strm_ref.opaque)
     };
 
     // This exported boundary owns the allocator callback and the raw window
@@ -3958,11 +3997,8 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     // the public stream record. The circular-buffer planning and copying stay
     // in the checked slice core, so dictionary setup does not enter the
     // private raw `updatewindow` codec adapter.
-    let allocated_window = if needs_window {
-        let Some(window_len) = inflate_window_len(wbits, 0) else {
-            return crate::zlib_h::Z_MEM_ERROR;
-        };
-        let Ok(window_len) = crate::stdlib::uInt::try_from(window_len) else {
+    let allocated_window = if admission.allocate {
+        let Ok(window_len) = crate::stdlib::uInt::try_from(admission.window_len) else {
             return crate::zlib_h::Z_MEM_ERROR;
         };
         // `inflate_state_check_at_boundary!` normally guarantees this, but
@@ -3989,41 +4025,29 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    if state.wsize == 0 {
-        let Some(window_len) = inflate_window_len(state.wbits, 0) else {
-            state.mode = crate::src::inflate::MEM;
-            return crate::zlib_h::Z_MEM_ERROR;
-        };
-        let Ok(window_len) = ::core::ffi::c_uint::try_from(window_len) else {
-            state.mode = crate::src::inflate::MEM;
-            return crate::zlib_h::Z_MEM_ERROR;
-        };
-        state.wsize = window_len;
-        state.wnext = 0;
-        state.whave = 0;
-    }
-    let Some(plan) = inflate_window_copy_plan(state.wsize, state.wnext, state.whave, dictLength)
-    else {
-        state.mode = crate::src::inflate::MEM;
-        return crate::zlib_h::Z_MEM_ERROR;
+    let admission = match inflate_dictionary_admission(state, dictionary) {
+        Ok(admission) => admission,
+        Err(status) => {
+            if status == crate::zlib_h::Z_MEM_ERROR {
+                state.mode = crate::src::inflate::MEM;
+            }
+            return status;
+        }
     };
-    let Some((next, have)) = plan.cursor_values() else {
-        state.mode = crate::src::inflate::MEM;
-        return crate::zlib_h::Z_MEM_ERROR;
-    };
-    let Ok(window_len) = usize::try_from(state.wsize) else {
-        state.mode = crate::src::inflate::MEM;
-        return crate::zlib_h::Z_MEM_ERROR;
-    };
-    let window = core::slice::from_raw_parts_mut(state.window, window_len);
-    if inflate_window_copy(window, dictionary, plan).is_none() {
+    if admission.allocate || state.window.is_null() {
         state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    state.wnext = next;
-    state.whave = have;
-    state.havedict = 1 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_OK;
+    let window = core::slice::from_raw_parts_mut(state.window, admission.window_len);
+    match inflate_dictionary_commit(state, dictionary, window) {
+        Ok(()) => crate::zlib_h::Z_OK,
+        Err(status) => {
+            if status == crate::zlib_h::Z_MEM_ERROR {
+                state.mode = crate::src::inflate::MEM;
+            }
+            status
+        }
+    }
 }
 #[export_name = "inflateGetHeader"]
 pub unsafe extern "C" fn inflateGetHeader_ffi(
