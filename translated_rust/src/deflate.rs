@@ -6256,6 +6256,11 @@ unsafe fn deflate_copy_from_abi_boundary(
     // retained until their replacements are installed below, preserving the
     // C copy path's callback-visible allocation order.  Header registration
     // is independently deep-copied before any callback can observe `ds`.
+    // Keep the transaction's pointer-free lifecycle owner locally as well as
+    // in the published state.  The local copy lets this boundary decide
+    // completion and copy admission after the callback sequence without
+    // extending a Rust borrow of callback-visible state across it.
+    let mut destination_owner = DeflateCallbackStorageOwner::new_state(storage);
     ds.write(crate::src::deflate::internal_state {
         data_type: payload.data_type,
         status: payload.status,
@@ -6263,7 +6268,7 @@ unsafe fn deflate_copy_from_abi_boundary(
         pending_buf_size: payload.pending_buf_size,
         pending_out: payload.pending_out,
         pending: payload.pending,
-        callback_storage: DeflateCallbackStorageOwner::new_state(storage),
+        callback_storage: destination_owner,
         wrap: payload.wrap,
         gzhead: payload.gzhead,
         gzindex: payload.gzindex,
@@ -6320,10 +6325,11 @@ unsafe fn deflate_copy_from_abi_boundary(
         high_water: payload.high_water,
         slid: payload.slid,
     });
-    let ds = &mut *ds.as_ptr();
     // Preserve the source implementation's callback-visible order.  Reload
-    // the callback and opaque value for every request: a re-entrant custom
-    // allocator is allowed to inspect or update the stream between calls.
+    // the callback and opaque value for every request.  Do not retain a Rust
+    // state borrow across that callback: a re-entrant custom allocator may
+    // inspect the just-published destination stream before its result is
+    // recorded in the pointer-free lifecycle ledger.
     request_deflate_storage(&storage, |request| {
         let allocation = Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
@@ -6331,6 +6337,10 @@ unsafe fn deflate_copy_from_abi_boundary(
             request.allocation.items,
             request.allocation.size,
         );
+        // The allocation callback has returned, so it is now safe to take a
+        // short state projection solely to publish this handle and its
+        // matching lifecycle bit before the next callback can re-enter.
+        let ds = &mut *ds.as_ptr();
         match request.slot {
             DeflateStorageSlot::Window => {
                 ds.window = ::core::ptr::NonNull::new(allocation.cast());
@@ -6347,8 +6357,9 @@ unsafe fn deflate_copy_from_abi_boundary(
         }
         let allocated = !allocation.is_null();
         ds.callback_storage.record_storage(request.slot, allocated);
+        destination_owner.record_storage(request.slot, allocated);
     });
-    if !ds.callback_storage.is_complete() {
+    if !destination_owner.is_complete() {
         deflateEnd(::core::ptr::NonNull::from(dest));
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -6357,7 +6368,7 @@ unsafe fn deflate_copy_from_abi_boundary(
     // bounded storage views to the pointer-free copy core.
     assert!(ss
         .callback_storage
-        .copy_geometry(&ds.callback_storage, &copy_layout));
+        .copy_geometry(&destination_owner, &copy_layout));
     let source_storage = source_storage
         .into_dispatch_storage()
         .expect("complete source copy storage projection");
