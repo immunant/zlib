@@ -1150,7 +1150,7 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     inflateBackInit_(strm, windowBits, window, version_first, stream_size)
 }
 pub unsafe extern "C" fn inflateBack(
-    strm: &mut crate::zlib_h::z_stream,
+    strm: Option<&mut crate::zlib_h::z_stream>,
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
     mut out: crate::zlib_h::out_func,
@@ -1174,6 +1174,11 @@ pub unsafe extern "C" fn inflateBack(
         val: 0,
     };
     let mut ret: ::core::ffi::c_int = 0;
+    // Keep stream validation in this named implementation. The exported ABI
+    // forwarder only binds its foreign stream reference and dispatches here.
+    let Some(strm) = strm else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     // `inflateBackInit_()` establishes the reciprocal stream/state binding
     // above. Reuse the shared checked binder so this decoder's state setup is
     // reference-bound; the raw callback and window cursors remain below.
@@ -1769,14 +1774,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflateBack(&mut *strm, in_0, in_desc, out, out_desc)
+    inflateBack(strm.as_mut(), in_0, in_desc, out, out_desc)
 }
-// The FFI wrapper has already established that `strm` is a valid mutable
-// stream. Keep validation and the post-release transition reference-bound;
-// only the configured C deallocator remains an unsafe boundary here.
+// The ABI forwarder only binds the foreign stream reference. Keep validation
+// and the post-release transition reference-bound; only the configured C
+// deallocator remains an unsafe boundary here.
 fn inflate_back_end_can_release(strm: &crate::zlib_h::z_stream) -> bool {
     !strm.state.is_null() && strm.zfree.is_some()
 }
@@ -1786,7 +1788,12 @@ fn inflate_back_end_complete(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi:
     crate::zlib_h::Z_OK
 }
 
-pub fn inflateBackEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+pub fn inflateBackEnd(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::ffi::c_int {
+    // As with inflateBack(), the export binds the foreign reference and this
+    // implementation owns validation and teardown decisions.
+    let Some(strm) = strm else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     if !inflate_back_end_can_release(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1810,8 +1817,5 @@ pub fn inflateBackEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int 
 pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflateBackEnd(&mut *strm)
+    inflateBackEnd(strm.as_mut())
 }
