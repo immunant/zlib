@@ -328,6 +328,50 @@ fn inflate_zlib_header_error(
     }
 }
 
+/// The scalar state selected by a valid zlib header.  Cursor consumption and
+/// ABI error publication remain at the ordinary-inflate boundary; this plan
+/// makes the window and dictionary decisions independently checked.
+struct InflateZlibHeaderPlan {
+    wbits: ::core::ffi::c_uint,
+    dmax: ::core::ffi::c_uint,
+    mode: inflate_mode,
+}
+
+/// Validate a zlib header and select its post-header decoder state.  `hold`
+/// is intentionally left unmodified: the compatibility cursor loop retains
+/// responsibility for dropping its method/flags bits at the original commit
+/// point.
+fn inflate_zlib_header_plan(
+    wrap: ::core::ffi::c_int,
+    configured_wbits: ::core::ffi::c_uint,
+    hold: ::core::ffi::c_ulong,
+) -> Result<InflateZlibHeaderPlan, usize> {
+    if let Some(error) = inflate_zlib_header_error(wrap, hold) {
+        return Err(error);
+    }
+
+    let header = hold >> 4;
+    let header_wbits = (header as ::core::ffi::c_uint & 0x0f).wrapping_add(8);
+    let wbits = if configured_wbits == 0 {
+        header_wbits
+    } else {
+        configured_wbits
+    };
+    if header_wbits > 15 || header_wbits > wbits {
+        return Err(2);
+    }
+
+    Ok(InflateZlibHeaderPlan {
+        wbits,
+        dmax: 1u32.wrapping_shl(header_wbits) as ::core::ffi::c_uint,
+        mode: if header & 0x200 != 0 {
+            crate::src::inflate::DICTID
+        } else {
+            crate::src::inflate::TYPE
+        },
+    })
+}
+
 /// Preserve zlib's final no-progress/finish result mapping independently of
 /// the ABI cursor commit that precedes it.
 fn inflate_exit_status(
@@ -1473,53 +1517,37 @@ pub fn inflate(
                                                                                                             if !state_ref.head.is_null() {
                                                                                                                 (*state_ref.head).done = -1 as ::core::ffi::c_int;
                                                                                                             }
-                                                                                                            if let Some(error) = inflate_zlib_header_error(
-                                                                                                                state_ref.wrap,
-                                                                                                                hold,
+                                                                                                            let header_plan = match inflate_zlib_header_plan(
+                                                                                                               state_ref.wrap,
+                                                                                                               state_ref.wbits,
+                                                                                                               hold,
                                                                                                             ) {
-                                                                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[error].as_ptr()
-                                                                                                                    as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                               state_ref.mode = crate::src::inflate::BAD;
-                                                                                                               continue '_inf_leave;
-                                                                                                            } else {
-                                                                                                                hold >>= 4 as ::core::ffi::c_int;
-                                                                                                                bits = bits
-                                                                                                                    .wrapping_sub(
-                                                                                                                        4 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                                                                                                    );
-                                                                                                                len = (hold as ::core::ffi::c_uint
-                                                                                                                    & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                                                                                                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                                                                                    .wrapping_add(8 as ::core::ffi::c_uint);
-                                                                                                                if state_ref.wbits == 0 as ::core::ffi::c_uint {
-                                                                                                                    state_ref.wbits = len;
-                                                                                                                }
-                                                                                                                if len > 15 as ::core::ffi::c_uint || len > state_ref.wbits {
-                                                                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[2].as_ptr()
-                                                                                                                        as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                                Ok(plan) => plan,
+                                                                                                                Err(error) => {
+                                                                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[error].as_ptr()
+                                                                                                                   as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
                                                                                                                     state_ref.mode = crate::src::inflate::BAD;
                                                                                                                     continue '_inf_leave;
-                                                                                                                } else {
-                                                                                                                    state_ref.dmax = (1 as ::core::ffi::c_uint) << len;
-                                                                                                                    state_ref.flags = 0 as ::core::ffi::c_int;
-                                                                                                                    // zlib defines the checksum of an empty
-                                                                                                                    // stream directly.  Do not route this
-                                                                                                                    // through the raw-pointer ABI adapter.
-                                                                                                                    state_ref.check = crate::src::adler32::ADLER32_INITIAL
-                                                                                                                        as ::core::ffi::c_ulong;
-                                                                                                                    strm_ref.adler = state_ref.check as crate::stdlib::uLong;
-                                                                                                                    state_ref.mode = (if hold & 0x200 as ::core::ffi::c_ulong
-                                                                                                                        != 0
-                                                                                                                    {
-                                                                                                                        crate::src::inflate::DICTID as ::core::ffi::c_int
-                                                                                                                    } else {
-                                                                                                                        crate::src::inflate::TYPE as ::core::ffi::c_int
-                                                                                                                    }) as crate::src::inflate::inflate_mode;
-                                                                                                                    hold = 0 as ::core::ffi::c_ulong;
-                                                                                                                    bits = 0 as ::core::ffi::c_uint;
-                                                                                                                    continue '_inf_leave;
                                                                                                                 }
-                                                                                                            }
+                                                                                                            };
+                                                                                                               hold >>= 4 as ::core::ffi::c_int;
+                                                                                                               bits = bits
+                                                                                                                   .wrapping_sub(
+                                                                                                                       4 as ::core::ffi::c_int as ::core::ffi::c_uint,
+                                                                                                                   );
+                                                                                                                state_ref.wbits = header_plan.wbits;
+                                                                                                                state_ref.dmax = header_plan.dmax;
+                                                                                                                state_ref.flags = 0 as ::core::ffi::c_int;
+                                                                                                                // zlib defines the checksum of an empty
+                                                                                                                // stream directly.  Do not route this
+                                                                                                                // through the raw-pointer ABI adapter.
+                                                                                                                state_ref.check = crate::src::adler32::ADLER32_INITIAL
+                                                                                                                    as ::core::ffi::c_ulong;
+                                                                                                                strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+                                                                                                               state_ref.mode = header_plan.mode;
+                                                                                                               hold = 0 as ::core::ffi::c_ulong;
+                                                                                                               bits = 0 as ::core::ffi::c_uint;
+                                                                                                               continue '_inf_leave;
                                                                                                         }
                                                                                                     }
                                                                                                 }
