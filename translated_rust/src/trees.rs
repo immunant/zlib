@@ -4144,10 +4144,7 @@ fn tree_code_count(max_code: ::core::ffi::c_int) -> usize {
     max_code as usize + 1
 }
 
-fn append_tree_code_length(
-    lengths: &mut Vec<crate::zutil_h::ush>,
-    length: crate::zutil_h::ush,
-) {
+fn append_tree_code_length(lengths: &mut Vec<crate::zutil_h::ush>, length: crate::zutil_h::ush) {
     lengths.push(length);
 }
 

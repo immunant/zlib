@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -1278,16 +1278,15 @@ mod tests {
         gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
         gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result, gzerror_core,
         gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
-        gzrewind_start_offset,
-        gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
-        gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
-        gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan_fast_forward,
-        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset, gzseek_plan_request,
-        gzseek_read_buffer_consumed, gzseek_read_buffer_plan_for_mode,
-        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid, gzseek_uses_read_buffer,
-        gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenFdPlan,
-        GzOpenOffsetPlan, GzResetFields, GzSeekFastForwardPlan, GzSeekOffsetPlan,
-        GzSeekReadBufferPlan, GzSeekRequestPlan,
+        gzrewind_start_offset, gzseek_adjust_offset, gzseek_can_fast_forward,
+        gzseek_clears_pending_skip, gzseek_effective_skip, gzseek_error_allows_positioning,
+        gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset, gzseek_finish_fast_forward,
+        gzseek_plan_fast_forward, gzseek_plan_read_buffer_consumption,
+        gzseek_plan_remaining_offset, gzseek_plan_request, gzseek_read_buffer_consumed,
+        gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
+        gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
+        GzErrorMessage, GzErrorPlan, GzOpenFdPlan, GzOpenOffsetPlan, GzResetFields,
+        GzSeekFastForwardPlan, GzSeekOffsetPlan, GzSeekReadBufferPlan, GzSeekRequestPlan,
     };
 
     #[test]

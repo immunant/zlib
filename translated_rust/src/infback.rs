@@ -177,6 +177,25 @@ fn inflate_back_take_bits(
     (value, hold >> count, bits.wrapping_sub(count))
 }
 
+fn inflate_back_discard_bits(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    count: ::core::ffi::c_uint,
+) -> (::core::ffi::c_ulong, ::core::ffi::c_uint) {
+    (hold >> count, bits.wrapping_sub(count))
+}
+
+fn inflate_back_fill_code_length_run(
+    lens: &mut [::core::ffi::c_ushort],
+    start: usize,
+    count: usize,
+    length: ::core::ffi::c_ushort,
+) -> usize {
+    let end = start + count;
+    lens[start..end].fill(length);
+    end
+}
+
 fn inflate_back_align_to_byte_boundary(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -621,8 +640,7 @@ pub unsafe extern "C" fn inflateBack(
                 (*state).nlen = counts.nlen;
                 (*state).ndist = counts.ndist;
                 (*state).ncode = counts.ncode;
-                hold >>= 14 as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(14 as ::core::ffi::c_uint);
+                (hold, bits) = inflate_back_discard_bits(hold, bits, 14);
                 if !counts.is_valid() {
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
@@ -653,8 +671,7 @@ pub unsafe extern "C" fn inflateBack(
                         (*state).have = (*state).have.wrapping_add(1);
                         (*state).lens[ORDER[c2rust_fresh4 as usize] as usize] =
                             inflate_back_low_bits(hold, 3) as ::core::ffi::c_ushort;
-                        hold >>= 3 as ::core::ffi::c_int;
-                        bits = bits.wrapping_sub(3 as ::core::ffi::c_int as ::core::ffi::c_uint);
+                        (hold, bits) = inflate_back_discard_bits(hold, bits, 3);
                     }
                     while (*state).have < 19 as ::core::ffi::c_uint {
                         let c2rust_fresh5 = (*state).have;
@@ -688,12 +705,9 @@ pub unsafe extern "C" fn inflateBack(
                         (*state).have = 0 as ::core::ffi::c_uint;
                         while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
                             loop {
-                                here = *(*state)
-                                    .lencode
-                                    .wrapping_add(inflate_back_root_table_index(
-                                        hold,
-                                        (*state).lenbits,
-                                    ));
+                                here = *(*state).lencode.wrapping_add(
+                                    inflate_back_root_table_index(hold, (*state).lenbits),
+                                );
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
@@ -714,8 +728,11 @@ pub unsafe extern "C" fn inflateBack(
                                     inflate_back_consume_input_byte(have, hold, bits, input_byte);
                             }
                             if (here.val as ::core::ffi::c_int) < 16 as ::core::ffi::c_int {
-                                hold >>= here.bits as ::core::ffi::c_int;
-                                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                (hold, bits) = inflate_back_discard_bits(
+                                    hold,
+                                    bits,
+                                    here.bits as ::core::ffi::c_uint,
+                                );
                                 let c2rust_fresh7 = (*state).have;
                                 (*state).have = (*state).have.wrapping_add(1);
                                 (*state).lens[c2rust_fresh7 as usize] = here.val;
@@ -741,8 +758,11 @@ pub unsafe extern "C" fn inflateBack(
                                         have, hold, bits, input_byte,
                                     );
                                 }
-                                hold >>= here.bits as ::core::ffi::c_int;
-                                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                (hold, bits) = inflate_back_discard_bits(
+                                    hold,
+                                    bits,
+                                    here.bits as ::core::ffi::c_uint,
+                                );
                                 let previous_length = if (*state).have == 0 {
                                     None
                                 } else {
@@ -773,17 +793,14 @@ pub unsafe extern "C" fn inflateBack(
                                     (*state).mode = crate::src::inflate::BAD;
                                     break;
                                 } else {
-                                    loop {
-                                        let c2rust_fresh11 = copy;
-                                        copy = copy.wrapping_sub(1);
-                                        if !(c2rust_fresh11 != 0) {
-                                            break;
-                                        }
-                                        let c2rust_fresh12 = (*state).have;
-                                        (*state).have = (*state).have.wrapping_add(1);
-                                        (*state).lens[c2rust_fresh12 as usize] =
-                                            len as ::core::ffi::c_ushort;
-                                    }
+                                    let state = &mut *state;
+                                    state.have = inflate_back_fill_code_length_run(
+                                        &mut state.lens,
+                                        state.have as usize,
+                                        copy as usize,
+                                        len as ::core::ffi::c_ushort,
+                                    )
+                                        as ::core::ffi::c_uint;
                                 }
                             }
                         }
@@ -932,11 +949,10 @@ pub unsafe extern "C" fn inflateBack(
                     (have, hold, bits) =
                         inflate_back_consume_input_byte(have, hold, bits, input_byte);
                 }
-                hold >>= last.bits as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
+                (hold, bits) =
+                    inflate_back_discard_bits(hold, bits, last.bits as ::core::ffi::c_uint);
             }
-            hold >>= here.bits as ::core::ffi::c_int;
-            bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+            (hold, bits) = inflate_back_discard_bits(hold, bits, here.bits as ::core::ffi::c_uint);
             (*state).length = here.val as ::core::ffi::c_uint;
             match inflate_back_litlen_action(here.op) {
                 InflateBackLitLenAction::Literal => {
@@ -993,10 +1009,7 @@ pub unsafe extern "C" fn inflateBack(
                     loop {
                         here = *(*state)
                             .distcode
-                            .wrapping_add(inflate_back_root_table_index(
-                                hold,
-                                (*state).distbits,
-                            ));
+                            .wrapping_add(inflate_back_root_table_index(hold, (*state).distbits));
                         if here.bits as ::core::ffi::c_uint <= bits {
                             break;
                         }
@@ -1018,11 +1031,9 @@ pub unsafe extern "C" fn inflateBack(
                     {
                         last = here;
                         loop {
-                            here = *(*state).distcode.wrapping_add(
-                                inflate_back_subtable_index(
-                                    hold, last.val, last.bits, last.op,
-                                ),
-                            );
+                            here = *(*state).distcode.wrapping_add(inflate_back_subtable_index(
+                                hold, last.val, last.bits, last.op,
+                            ));
                             if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                                 as ::core::ffi::c_uint
                                 <= bits
@@ -1045,11 +1056,11 @@ pub unsafe extern "C" fn inflateBack(
                             (have, hold, bits) =
                                 inflate_back_consume_input_byte(have, hold, bits, input_byte);
                         }
-                        hold >>= last.bits as ::core::ffi::c_int;
-                        bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
+                        (hold, bits) =
+                            inflate_back_discard_bits(hold, bits, last.bits as ::core::ffi::c_uint);
                     }
-                    hold >>= here.bits as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                    (hold, bits) =
+                        inflate_back_discard_bits(hold, bits, here.bits as ::core::ffi::c_uint);
                     if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
                         (*strm).msg = b"invalid distance code\0".as_ptr()
                             as *const ::core::ffi::c_char
@@ -1176,14 +1187,14 @@ mod tests {
         inflate_back_align_to_byte_boundary, inflate_back_block_header,
         inflate_back_code_length_repeat, inflate_back_code_length_repeat_extra_bits,
         inflate_back_code_length_repeat_plan, inflate_back_consume_input_byte,
-        inflate_back_copy_count, inflate_back_copy_match, inflate_back_distance_exceeds_window,
+        inflate_back_copy_count, inflate_back_copy_match, inflate_back_discard_bits,
+        inflate_back_distance_exceeds_window, inflate_back_fill_code_length_run,
         inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
         inflate_back_litlen_action, inflate_back_low_bits, inflate_back_match_copy_plan,
         inflate_back_root_table_index, inflate_back_stored_block_length,
-        inflate_back_subtable_index,
-        inflate_back_take_bits, inflate_back_window_bits_are_valid, inflate_back_window_size,
-        InflateBackBlockKind, InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan,
-        InflateBackLitLenAction, InflateBackMatchSource,
+        inflate_back_subtable_index, inflate_back_take_bits, inflate_back_window_bits_are_valid,
+        inflate_back_window_size, InflateBackBlockKind, InflateBackCodeLengthRepeat,
+        InflateBackCodeLengthRepeatPlan, InflateBackLitLenAction, InflateBackMatchSource,
     };
 
     #[test]
@@ -1230,6 +1241,20 @@ mod tests {
     fn inflate_back_take_bits_returns_low_bits_and_advances_buffer() {
         assert_eq!(inflate_back_take_bits(0b101101, 6, 3), (0b101, 0b101, 3));
         assert_eq!(inflate_back_take_bits(0x1234, 16, 4), (0x4, 0x123, 12));
+    }
+
+    #[test]
+    fn inflate_back_discard_bits_advances_the_bit_buffer() {
+        assert_eq!(inflate_back_discard_bits(0b101101, 6, 3), (0b101, 3));
+        assert_eq!(inflate_back_discard_bits(0b101101, 6, 0), (0b101101, 6));
+    }
+
+    #[test]
+    fn inflate_back_fill_code_length_run_updates_only_requested_entries() {
+        let mut lens = [1, 2, 3, 4, 5, 6];
+
+        assert_eq!(inflate_back_fill_code_length_run(&mut lens, 2, 3, 9), 5);
+        assert_eq!(lens, [1, 2, 9, 9, 9, 6]);
     }
 
     #[test]
