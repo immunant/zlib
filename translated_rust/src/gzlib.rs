@@ -224,6 +224,21 @@ impl<'a> GzBufferedInput<'a> {
         })
     }
 
+    // The gzip owner stores an input cursor as a checked index.  Keep this
+    // constructor alongside the ABI-cursor conversion above so refill code
+    // can operate entirely on the owner representation once the boundary has
+    // made that conversion.
+    pub(crate) fn from_index(buffer: &'a mut [u8], start: usize, have: u32) -> Option<Self> {
+        let have = have as usize;
+        let end = start.checked_add(have)?;
+        buffer.get(start..end)?;
+        Some(Self {
+            buffer,
+            start,
+            have,
+        })
+    }
+
     // Compact the checked unread range and expose the remaining initialized
     // suffix for a refill.  Read-side code can then keep its byte count as an
     // index instead of retaining an ABI stream cursor between I/O calls.
@@ -261,6 +276,13 @@ impl<'a> GzBufferedInput<'a> {
 
     pub(crate) fn have(&self) -> Option<u32> {
         u32::try_from(self.have).ok()
+    }
+
+    // Return the checked owner representation after compaction/refill.  The
+    // caller may publish it to an ABI cursor at the boundary, but core code
+    // should retain only this index and count.
+    pub(crate) fn cursor(&self) -> Option<(usize, u32)> {
+        Some((self.start, u32::try_from(self.have).ok()?))
     }
 }
 

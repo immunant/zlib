@@ -168,7 +168,7 @@ struct GzCopyLoadState<'a> {
 struct GzAvailState<'a> {
     err: &'a mut ::core::ffi::c_int,
     eof: &'a mut ::core::ffi::c_int,
-    avail_in: &'a mut crate::stdlib::uInt,
+    input_cursor: &'a mut GzCodecInput,
     size: usize,
     input: &'a mut Option<Box<[u8]>>,
     fd: &'a rustix::fd::OwnedFd,
@@ -176,7 +176,53 @@ struct GzAvailState<'a> {
     message: &'a mut Option<Box<[u8]>>,
     buffered: &'a mut ::core::ffi::c_uint,
     path: Option<&'a [u8]>,
-    cursor_address: usize,
+}
+
+// This is the owner-side representation of gzip's codec-input cursor.  It
+// deliberately retains an index rather than a pointer, so refill and
+// compaction can become safe owner operations before the embedded ABI stream
+// is removed.  The current callers perform the raw cursor conversion only at
+// their short-lived state boundary.
+struct GzCodecInput {
+    cursor: usize,
+    available: crate::stdlib::uInt,
+}
+
+impl GzCodecInput {
+    fn from_owned_buffer(
+        buffer: &[u8],
+        cursor_address: usize,
+        available: crate::stdlib::uInt,
+    ) -> Option<Self> {
+        if available == 0 {
+            return Some(Self {
+                cursor: 0,
+                available: 0,
+            });
+        }
+        let cursor = cursor_address.checked_sub(buffer.as_ptr().addr())?;
+        let end = cursor.checked_add(available as usize)?;
+        buffer.get(cursor..end)?;
+        Some(Self { cursor, available })
+    }
+
+    fn available(&self) -> crate::stdlib::uInt {
+        self.available
+    }
+
+    fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    fn bytes<'a>(&self, buffer: &'a [u8]) -> Option<&'a [u8]> {
+        let end = self.cursor.checked_add(self.available as usize)?;
+        buffer.get(self.cursor..end)
+    }
+
+    fn update(&mut self, cursor: usize, available: crate::stdlib::uInt) {
+        self.cursor = cursor;
+        self.available = available;
+    }
 }
 
 // Skipping buffered gzip output needs only a checked buffer offset and scalar
@@ -357,7 +403,7 @@ fn gz_avail(state: GzAvailState<'_>) -> Option<()> {
     let GzAvailState {
         err,
         eof,
-        avail_in,
+        input_cursor,
         size,
         input,
         fd,
@@ -365,26 +411,26 @@ fn gz_avail(state: GzAvailState<'_>) -> Option<()> {
         message,
         buffered,
         path,
-        cursor_address,
     } = state;
     if *err != crate::zlib_h::Z_OK && *err != crate::zlib_h::Z_BUF_ERROR {
         return None;
     }
     if *eof == 0 {
-        let pending = *avail_in;
+        let pending = input_cursor.available();
         let Some(mut buffer) = input.take() else {
             return None;
         };
         errno::set_errno(errno::Errno(0));
         let ret = (|| {
-            // `strm.next_in` is a cursor in `in_0` only while input is
-            // pending.  A zero count intentionally accepts its null cursor.
+            // A zero count intentionally uses an empty owner cursor.  A
+            // nonzero count was range-checked when this pointer-free cursor
+            // was built at the ABI boundary.
             let Some(mut input) = (if pending == 0 {
                 crate::src::gzlib::GzBufferedInput::empty(buffer.as_mut(), size)
             } else {
-                crate::src::gzlib::GzBufferedInput::from_owned_buffer(
+                crate::src::gzlib::GzBufferedInput::from_index(
                     buffer.as_mut(),
-                    cursor_address,
+                    input_cursor.cursor(),
                     pending,
                 )
             }) else {
@@ -397,9 +443,9 @@ fn gz_avail(state: GzAvailState<'_>) -> Option<()> {
             let added = match load {
                 GzLoad::Loaded { have, .. } | GzLoad::Error { have, .. } => have as usize,
             };
-            let Some(available) = input.extend(added) else {
+            if input.extend(added).is_none() {
                 return None;
-            };
+            }
             match apply_gz_load(
                 GzLoadTarget {
                     again,
@@ -412,7 +458,10 @@ fn gz_avail(state: GzAvailState<'_>) -> Option<()> {
                 load,
             ) {
                 Ok(_) => {
-                    *avail_in = available;
+                    let Some((cursor, available)) = input.cursor() else {
+                        return None;
+                    };
+                    input_cursor.update(cursor, available);
                     Some(())
                 }
                 Err(_) => None,
@@ -475,11 +524,15 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    let cursor_address = state.strm.next_in.addr();
+    let Some(mut input_cursor) = state.in_0.as_deref().and_then(|buffer| {
+        GzCodecInput::from_owned_buffer(buffer, state.strm.next_in.addr(), state.strm.avail_in)
+    }) else {
+        return -1 as ::core::ffi::c_int;
+    };
     if gz_avail(GzAvailState {
         err: &mut state.err,
         eof: &mut state.eof,
-        avail_in: &mut state.strm.avail_in,
+        input_cursor: &mut input_cursor,
         size: state.size as usize,
         input: &mut state.in_0,
         fd: state.fd.as_ref().expect("gzip state has an open file"),
@@ -487,33 +540,30 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         message: &mut state.msg,
         buffered: &mut state.x.have,
         path: state.path.as_deref(),
-        cursor_address,
     })
     .is_none()
     {
         return -1 as ::core::ffi::c_int;
     }
     state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
-    if state.strm.avail_in == 0 as crate::stdlib::uInt
-        || state.again != 0 && state.strm.avail_in < 4 as crate::stdlib::uInt
+    state.strm.avail_in = input_cursor.available();
+    if input_cursor.available() == 0 as crate::stdlib::uInt
+        || state.again != 0 && input_cursor.available() < 4 as crate::stdlib::uInt
     {
         return 0 as ::core::ffi::c_int;
     }
-    let avail_in = state.strm.avail_in as usize;
-    let next_in = state.strm.next_in;
-    // The successful refill above installs `next_in` in this owned buffer,
-    // and inflate only advances that cursor. Validate it before deriving the
-    // input view.
-    let Some(input) = state.in_0.as_deref().and_then(|buffer| {
-        crate::src::gzlib::GzCodecInputView::from_owned_buffer(
-            buffer,
-            next_in.addr(),
-            state.strm.avail_in,
-        )
-    }) else {
+    let avail_in = input_cursor.available() as usize;
+    // The successful refill above leaves a checked owner cursor.  Retain that
+    // index through copy detection instead of rebuilding a view from the ABI
+    // stream pointer that is published only for the subsequent codec call.
+    let Some(input) = state
+        .in_0
+        .as_deref()
+        .and_then(|buffer| input_cursor.bytes(buffer))
+    else {
         return -1 as ::core::ffi::c_int;
     };
-    if is_gzip_header(input.bytes()) {
+    if is_gzip_header(input) {
         crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
@@ -527,7 +577,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     else {
         return -1 as ::core::ffi::c_int;
     };
-    copy_buffered_input(input.bytes(), output.bytes_mut());
+    copy_buffered_input(input, output.bytes_mut());
     state.x.next = output.bytes_mut().as_mut_ptr();
     state.x.have = avail_in as ::core::ffi::c_uint;
     state.strm.avail_in = 0 as crate::stdlib::uInt;
@@ -567,11 +617,16 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     let output_start = strm.next_out;
     loop {
         if decomp.needs_input() {
-            let cursor_address = strm.next_in.addr();
+            let Some(mut input_cursor) = state.in_0.as_deref().and_then(|buffer| {
+                GzCodecInput::from_owned_buffer(buffer, strm.next_in.addr(), strm.avail_in)
+            }) else {
+                ret = -1 as ::core::ffi::c_int;
+                break;
+            };
             if gz_avail(GzAvailState {
                 err: &mut state.err,
                 eof: &mut state.eof,
-                avail_in: &mut strm.avail_in,
+                input_cursor: &mut input_cursor,
                 size: state.size as usize,
                 input: &mut state.in_0,
                 fd: state.fd.as_ref().expect("gzip state has an open file"),
@@ -579,7 +634,6 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 message: &mut state.msg,
                 buffered: &mut state.x.have,
                 path: state.path.as_deref(),
-                cursor_address,
             })
             .is_none()
             {
@@ -587,7 +641,8 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 break;
             }
             strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
-            decomp.record_input_available(strm.avail_in);
+            strm.avail_in = input_cursor.available();
+            decomp.record_input_available(input_cursor.available());
         }
         if decomp.needs_input() {
             if state.again == 0 {
