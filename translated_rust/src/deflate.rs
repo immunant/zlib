@@ -3278,7 +3278,6 @@ struct DeflateCopyPlan {
     pending_buf_items: crate::stdlib::uInt,
     window_len: usize,
     prev_len: usize,
-    pending_buf_len: usize,
     pending: ::core::ops::Range<usize>,
     symbols: ::core::ops::Range<usize>,
 }
@@ -3319,7 +3318,6 @@ fn deflate_copy_plan(
         pending_buf_items: source.lit_bufsize,
         window_len,
         prev_len,
-        pending_buf_len,
         pending: deflate_copy_range(pending_offset, source.pending as usize, pending_buf_len)?,
         symbols: deflate_copy_range(
             source.lit_bufsize as usize,

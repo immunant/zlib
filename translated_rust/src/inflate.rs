@@ -988,7 +988,6 @@ impl InflateHeaderBindings<'_> {
 // and read-only inspection behind this existing implementation boundary so
 // ABI wrappers never need to bind that state-owned raw pointer themselves.
 pub(crate) enum InflateWindowAccess<'a> {
-    Ensure,
     Update(&'a [crate::stdlib::Bytef]),
     // `inflateCopy()` needs to populate an already-allocated destination
     // history buffer without changing the copied state's window cursors.
@@ -998,11 +997,10 @@ pub(crate) enum InflateWindowAccess<'a> {
     Existing,
 }
 
-// A first `Ensure` call keeps the allocator callback separate from use of the
-// resulting slice. `Update` consumes produced output, while `Inspect` lends
-// the bound window to a reference-only implementation such as dictionary
-// retrieval. `Existing` is the no-allocation counterpart for a decoder that
-// can use a prior window when one is already present.
+// `Update` consumes produced output, while `Inspect` lends the bound window to
+// a reference-only implementation such as dictionary retrieval. `Existing`
+// is the no-allocation counterpart for a decoder that can use a prior window
+// when one is already present.
 pub(crate) fn updatewindow<T>(
     stream: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
@@ -1038,7 +1036,7 @@ pub(crate) fn updatewindow<T>(
         window_storage.resize(layout.len, 0);
         state.window_storage = window_storage;
     }
-    let needs_window = !matches!(access, InflateWindowAccess::Ensure) && !state.window.is_null();
+    let needs_window = !state.window.is_null();
     // Move the Rust-owned bytes out while state and the slice are borrowed
     // together. `window` remains the observable custom-allocator pointer,
     // but implementation indexing never needs to reopen it as a raw slice.
@@ -1049,7 +1047,6 @@ pub(crate) fn updatewindow<T>(
         None
     };
     let result = match access {
-        InflateWindowAccess::Ensure => Ok(operation(stream, state, None)),
         InflateWindowAccess::Update(output) => {
             update_window(
                 state,

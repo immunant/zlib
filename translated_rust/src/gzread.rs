@@ -168,11 +168,7 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         Ok(plan) => plan,
         Err(()) => return -1,
     };
-    if let crate::src::gzlib::GzAvailPlan::Load {
-        buffered,
-        requested: _,
-    } = plan
-    {
+    if let crate::src::gzlib::GzAvailPlan::Load { buffered } = plan {
         // `gz_look()` publishes this fixed-size allocation in the owned
         // buffer registry before `gz_avail()` can refill it. Borrow the Vec
         // there instead of rebuilding a slice from `state.in_0`.
@@ -1256,9 +1252,6 @@ pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     };
 }
 
-fn gzclose_r_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
-    state.map_or(crate::zlib_h::Z_STREAM_ERROR, gzclose_r)
-}
 #[export_name = "gzclose_r"]
 
 pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {

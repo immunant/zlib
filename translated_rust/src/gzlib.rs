@@ -295,10 +295,7 @@ pub(crate) fn gz_load_result(
 
 pub(crate) enum GzAvailPlan {
     Done,
-    Load {
-        buffered: ::core::ffi::c_uint,
-        requested: ::core::ffi::c_uint,
-    },
+    Load { buffered: ::core::ffi::c_uint },
 }
 
 // Decide whether the raw gzip input adapter needs another read.  Pointer
@@ -318,10 +315,7 @@ pub(crate) fn gz_avail_plan(state: &crate::gzguts_h::gz_state) -> Result<GzAvail
     if buffered > state.size {
         return Err(());
     }
-    Ok(GzAvailPlan::Load {
-        buffered,
-        requested: state.size.wrapping_sub(buffered),
-    })
+    Ok(GzAvailPlan::Load { buffered })
 }
 
 pub(crate) fn gz_avail_after_load(
