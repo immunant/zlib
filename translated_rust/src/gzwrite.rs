@@ -105,6 +105,19 @@ fn gz_write_uses_buffered_path(len: crate::stdlib::z_size_t, size: ::core::ffi::
     len < size as crate::stdlib::z_size_t
 }
 
+fn gz_write_buffered_copy_len(
+    size: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+    remaining: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_uint {
+    let available = size.wrapping_sub(have);
+    if available as crate::stdlib::z_size_t > remaining {
+        remaining as ::core::ffi::c_uint
+    } else {
+        available
+    }
+}
+
 fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
     if ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t > remaining {
         remaining as ::core::ffi::c_uint
@@ -368,10 +381,7 @@ unsafe extern "C" fn gz_write(
                 .offset((*state).strm.avail_in as isize)
                 .offset_from((*state).in_0) as ::core::ffi::c_long
                 as ::core::ffi::c_uint;
-            copy = (*state).size.wrapping_sub(have);
-            if copy as crate::stdlib::z_size_t > len {
-                copy = len as ::core::ffi::c_uint;
-            }
+            copy = gz_write_buffered_copy_len((*state).size, have, len);
             crate::stdlib::memcpy(
                 (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
@@ -738,9 +748,9 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_write_chunk_len, gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
-        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
-        gzwrite_len_fits_int,
+        gz_write_buffered_copy_len, gz_write_chunk_len, gz_write_error_result,
+        gz_write_uses_buffered_path, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
+        gzputs_len_fits_int, gzputs_result, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -853,6 +863,22 @@ mod tests {
         assert!(gz_write_uses_buffered_path(1023, 1024));
         assert!(!gz_write_uses_buffered_path(1024, 1024));
         assert!(!gz_write_uses_buffered_path(1025, 1024));
+    }
+
+    #[test]
+    fn gz_write_buffered_copy_len_uses_available_buffer_space() {
+        assert_eq!(gz_write_buffered_copy_len(1024, 1000, 99), 24);
+        assert_eq!(gz_write_buffered_copy_len(1024, 1024, 1), 0);
+    }
+
+    #[test]
+    fn gz_write_buffered_copy_len_limits_to_remaining_input() {
+        assert_eq!(gz_write_buffered_copy_len(1024, 1000, 12), 12);
+    }
+
+    #[test]
+    fn gz_write_buffered_copy_len_preserves_wrapping_accounting() {
+        assert_eq!(gz_write_buffered_copy_len(0, 1, 5), 5);
     }
 
     #[test]

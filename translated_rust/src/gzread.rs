@@ -146,6 +146,52 @@ fn gz_read_needs_fetch(
     how == crate::gzguts_h::LOOK || chunk_len < size << 1 as ::core::ffi::c_int
 }
 
+enum GzReadAction {
+    DrainBuffered,
+    StopAtEof,
+    Fetch,
+    Load,
+    Decompress,
+}
+
+fn gz_read_action(
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    how: ::core::ffi::c_int,
+    chunk_len: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> GzReadAction {
+    if have != 0 {
+        GzReadAction::DrainBuffered
+    } else if eof != 0 && avail_in == 0 {
+        GzReadAction::StopAtEof
+    } else if gz_read_needs_fetch(how, chunk_len, size) {
+        GzReadAction::Fetch
+    } else if how == crate::gzguts_h::COPY {
+        GzReadAction::Load
+    } else {
+        GzReadAction::Decompress
+    }
+}
+
+fn gz_read_progress(
+    len: crate::stdlib::z_size_t,
+    got: crate::stdlib::z_size_t,
+    pos: crate::stdlib::off64_t,
+    chunk_len: ::core::ffi::c_uint,
+) -> (
+    crate::stdlib::z_size_t,
+    crate::stdlib::z_size_t,
+    crate::stdlib::off64_t,
+) {
+    (
+        len.wrapping_sub(chunk_len as crate::stdlib::z_size_t),
+        got.wrapping_add(chunk_len as crate::stdlib::z_size_t),
+        pos + chunk_len as crate::stdlib::off64_t,
+    )
+}
+
 enum GzUngetcBufferState {
     Empty,
     Full,
@@ -641,6 +687,63 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_action_prioritizes_buffered_data() {
+        assert!(matches!(
+            gz_read_action(1, 1, 0, crate::gzguts_h::LOOK, 1, 8),
+            GzReadAction::DrainBuffered
+        ));
+    }
+
+    #[test]
+    fn gz_read_action_stops_only_after_eof_with_no_input() {
+        assert!(matches!(
+            gz_read_action(0, 1, 0, crate::gzguts_h::COPY, 16, 8),
+            GzReadAction::StopAtEof
+        ));
+        assert!(matches!(
+            gz_read_action(0, 1, 1, crate::gzguts_h::COPY, 16, 8),
+            GzReadAction::Load
+        ));
+    }
+
+    #[test]
+    fn gz_read_action_fetches_for_look_or_small_requests() {
+        assert!(matches!(
+            gz_read_action(0, 0, 0, crate::gzguts_h::LOOK, 16, 8),
+            GzReadAction::Fetch
+        ));
+        assert!(matches!(
+            gz_read_action(0, 0, 0, crate::gzguts_h::COPY, 15, 8),
+            GzReadAction::Fetch
+        ));
+    }
+
+    #[test]
+    fn gz_read_action_selects_load_or_decompression() {
+        assert!(matches!(
+            gz_read_action(0, 0, 0, crate::gzguts_h::COPY, 16, 8),
+            GzReadAction::Load
+        ));
+        assert!(matches!(
+            gz_read_action(0, 0, 0, crate::gzguts_h::GZIP, 16, 8),
+            GzReadAction::Decompress
+        ));
+    }
+
+    #[test]
+    fn gz_read_progress_updates_remaining_total_and_position() {
+        assert_eq!(gz_read_progress(10, 4, 42, 3), (7, 7, 45));
+    }
+
+    #[test]
+    fn gz_read_progress_preserves_wrapping_byte_counts() {
+        assert_eq!(
+            gz_read_progress(0, crate::stdlib::z_size_t::MAX, 0, 1),
+            (crate::stdlib::z_size_t::MAX, 0, 1)
+        );
+    }
+
+    #[test]
     fn gz_ungetc_buffer_state_prioritizes_empty_buffer() {
         assert!(matches!(
             gz_ungetc_buffer_state(0, 8),
@@ -730,54 +833,55 @@ unsafe extern "C" fn gz_read(
     }
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
-    let mut c2rust_current_block_30: u64;
     loop {
         n = gz_read_chunk_len(len, (*state).x.have);
-        if (*state).x.have != 0 {
-            crate::stdlib::memcpy(
-                buf as *mut ::core::ffi::c_void,
-                (*state).x.next as *const ::core::ffi::c_void,
-                n as crate::__stddef_size_t_h::size_t,
-            );
-            (*state).x.next = (*state).x.next.offset(n as isize);
-            (*state).x.have = (*state).x.have.wrapping_sub(n);
-            if (*state).err != crate::zlib_h::Z_OK {
-                err = -1 as ::core::ffi::c_int;
+        let advance = match gz_read_action(
+            (*state).x.have,
+            (*state).eof,
+            (*state).strm.avail_in,
+            (*state).how,
+            n,
+            (*state).size,
+        ) {
+            GzReadAction::DrainBuffered => {
+                crate::stdlib::memcpy(
+                    buf as *mut ::core::ffi::c_void,
+                    (*state).x.next as *const ::core::ffi::c_void,
+                    n as crate::__stddef_size_t_h::size_t,
+                );
+                (*state).x.next = (*state).x.next.offset(n as isize);
+                (*state).x.have = (*state).x.have.wrapping_sub(n);
+                if (*state).err != crate::zlib_h::Z_OK {
+                    err = -1 as ::core::ffi::c_int;
+                }
+                true
             }
-            c2rust_current_block_30 = 2719512138335094285;
-        } else {
-            if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
-                break;
-            }
-            if gz_read_needs_fetch((*state).how, n, (*state).size) {
+            GzReadAction::StopAtEof => break,
+            GzReadAction::Fetch => {
                 if gz_fetch(state) == -1 as ::core::ffi::c_int
                     && (*state).x.have == 0 as ::core::ffi::c_uint
                 {
                     err = -1 as ::core::ffi::c_int;
                 }
-                c2rust_current_block_30 = 15240798224410183470;
-            } else {
-                if (*state).how == crate::gzguts_h::COPY {
-                    err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
-                } else {
-                    (*state).strm.avail_out = n as crate::stdlib::uInt;
-                    (*state).strm.next_out =
-                        buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
-                    err = gz_decomp(state);
-                    n = (*state).x.have;
-                    (*state).x.have = 0 as ::core::ffi::c_uint;
-                }
-                c2rust_current_block_30 = 2719512138335094285;
+                false
             }
-        }
-        match c2rust_current_block_30 {
-            2719512138335094285 => {
-                len = len.wrapping_sub(n as crate::stdlib::z_size_t);
-                buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
-                got = got.wrapping_add(n as crate::stdlib::z_size_t);
-                (*state).x.pos += n as crate::stdlib::off64_t;
+            GzReadAction::Load => {
+                err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
+                true
             }
-            _ => {}
+            GzReadAction::Decompress => {
+                (*state).strm.avail_out = n as crate::stdlib::uInt;
+                (*state).strm.next_out =
+                    buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
+                err = gz_decomp(state);
+                n = (*state).x.have;
+                (*state).x.have = 0 as ::core::ffi::c_uint;
+                true
+            }
+        };
+        if advance {
+            (len, got, (*state).x.pos) = gz_read_progress(len, got, (*state).x.pos, n);
+            buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
         }
         if !(len != 0 && err == 0) {
             break;
