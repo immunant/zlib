@@ -3082,13 +3082,28 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state)) = inflateStateCheck(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    // SAFETY: a non-empty zlib input cursor is required to point at
+    // `avail_in` readable bytes. An empty input cursor is not dereferenced.
     let input = if strm.avail_in == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+        unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
+    };
+    inflateSync(strm, input)
+}
+
+// The ABI adapter binds the caller-owned input range once.  Keep inflater
+// validation and the sync state transition reference- and slice-bound so
+// direct Rust callers do not need to recreate the raw cursor adapter.
+pub fn inflateSync(
+    strm: &mut crate::zlib_h::z_stream,
+    input: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    if input.len() != strm.avail_in as usize {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some((strm, state)) = inflateStateCheck(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_sync(strm, state, input)
 }
