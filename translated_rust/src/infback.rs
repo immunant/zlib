@@ -562,6 +562,46 @@ fn inflate_back_code_length_repeat(
     }
 }
 
+// A repeat carries bits after the resolved table entry. Keep the raw refill
+// loop responsible for obtaining those bits, and leave the entry's effect on
+// owned decoder state to the helper below.
+fn inflate_back_code_length_bits_required(code: crate::src::inftrees::code) -> ::core::ffi::c_uint {
+    if code.val < 16 {
+        code.bits as ::core::ffi::c_uint
+    } else {
+        let (_, _, repeat_bits) = inflate_back_code_length_repeat(code.val);
+        code.bits as ::core::ffi::c_uint + repeat_bits
+    }
+}
+
+// This runs only after the caller has refilled the number of bits returned by
+// `inflate_back_code_length_bits_required()`. It deliberately does not touch
+// input cursors or callbacks: a dynamic code-length entry changes only the
+// decoder's owned lens array, count, and bit-buffer bookkeeping.
+fn inflate_back_apply_code_length(
+    state: &mut crate::src::inflate::inflate_state,
+    code: crate::src::inftrees::code,
+    hold: &mut ::core::ffi::c_ulong,
+    bits: &mut ::core::ffi::c_uint,
+) -> Result<(), InflateBackError> {
+    inflate_back_drop_bits(hold, bits, code.bits as ::core::ffi::c_uint);
+    if code.val < 16 {
+        inflate_back_push_code_length(&mut state.lens, &mut state.have, code.val);
+        return Ok(());
+    }
+
+    let (repeat_kind, repeat_base, repeat_bits) = inflate_back_code_length_repeat(code.val);
+    let Some(length) = inflate_back_repeat_length(&state.lens, state.have, repeat_kind) else {
+        return Err(InflateBackError::InvalidBitLengthRepeat);
+    };
+    let repeat = repeat_base.wrapping_add(inflate_back_take_bits(hold, bits, repeat_bits));
+    if !inflate_back_repeat_fits(state.have, repeat, state.nlen, state.ndist) {
+        return Err(InflateBackError::InvalidBitLengthRepeat);
+    }
+    inflate_back_push_repeated_code_length(&mut state.lens, &mut state.have, length, repeat);
+    Ok(())
+}
+
 fn inflate_back_length_code(code: crate::src::inftrees::code) -> InflateBackLengthCode {
     let op = code.op as ::core::ffi::c_uint;
     if op == 0 {
@@ -984,7 +1024,6 @@ pub unsafe extern "C" fn inflateBack(
         bits: 0,
         val: 0,
     };
-    let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
     if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -1192,21 +1231,8 @@ pub unsafe extern "C" fn inflateBack(
                                     .wrapping_add((*c2rust_fresh6 as ::core::ffi::c_ulong) << bits);
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             }
-                            if (here.val as ::core::ffi::c_int) < 16 as ::core::ffi::c_int {
-                                inflate_back_drop_bits(
-                                    &mut hold,
-                                    &mut bits,
-                                    here.bits as ::core::ffi::c_uint,
-                                );
-                                inflate_back_push_code_length(
-                                    &mut state_ref.lens,
-                                    &mut state_ref.have,
-                                    here.val,
-                                );
-                            } else {
-                                let (repeat_kind, repeat_base, repeat_bits) =
-                                    inflate_back_code_length_repeat(here.val);
-                                while bits < here.bits as ::core::ffi::c_uint + repeat_bits {
+                            if here.val >= 16 {
+                                while bits < inflate_back_code_length_bits_required(here) {
                                     if have == 0 as ::core::ffi::c_uint {
                                         have = inflate_back_refill!(in_0, in_desc, next);
                                         if have == 0 as ::core::ffi::c_uint {
@@ -1223,49 +1249,15 @@ pub unsafe extern "C" fn inflateBack(
                                     );
                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                 }
-                                inflate_back_drop_bits(
-                                    &mut hold,
-                                    &mut bits,
-                                    here.bits as ::core::ffi::c_uint,
-                                );
-                                let Some(repeated_length) = inflate_back_repeat_length(
-                                    &state_ref.lens,
-                                    state_ref.have,
-                                    repeat_kind,
-                                ) else {
-                                    inflate_back_report_error(
-                                        strm,
-                                        state_ref,
-                                        InflateBackError::InvalidBitLengthRepeat,
-                                    );
-                                    break;
-                                };
-                                len = repeated_length;
-                                copy = repeat_base.wrapping_add(inflate_back_take_bits(
-                                    &mut hold,
-                                    &mut bits,
-                                    repeat_bits,
-                                ));
-                                if !inflate_back_repeat_fits(
-                                    state_ref.have,
-                                    copy,
-                                    state_ref.nlen,
-                                    state_ref.ndist,
-                                ) {
-                                    inflate_back_report_error(
-                                        strm,
-                                        state_ref,
-                                        InflateBackError::InvalidBitLengthRepeat,
-                                    );
-                                    break;
-                                } else {
-                                    inflate_back_push_repeated_code_length(
-                                        &mut state_ref.lens,
-                                        &mut state_ref.have,
-                                        len,
-                                        copy,
-                                    );
-                                }
+                            }
+                            if let Err(error) = inflate_back_apply_code_length(
+                                state_ref,
+                                here,
+                                &mut hold,
+                                &mut bits,
+                            ) {
+                                inflate_back_report_error(strm, state_ref, error);
+                                break;
                             }
                         }
                         if state_ref.mode as ::core::ffi::c_uint
