@@ -1664,15 +1664,16 @@ pub unsafe extern "C" fn inflate_ffi(
                         hold >>= here.bits as ::core::ffi::c_int;
                         bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
                         let previous_len = if repeat_code == 16 as ::core::ffi::c_uint {
-                            if (*state).have == 0 as ::core::ffi::c_uint {
+                            let state_ref = &mut *state;
+                            if state_ref.have == 0 as ::core::ffi::c_uint {
                                 (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
-                                (*state).mode = crate::src::inflate::BAD;
+                                state_ref.mode = crate::src::inflate::BAD;
                                 break;
                             }
-                            (*state).lens
-                                [(*state).have.wrapping_sub(1 as ::core::ffi::c_uint) as usize]
+                            state_ref.lens
+                                [state_ref.have.wrapping_sub(1 as ::core::ffi::c_uint) as usize]
                                 as ::core::ffi::c_uint
                         } else {
                             0 as ::core::ffi::c_uint
@@ -1687,29 +1688,25 @@ pub unsafe extern "C" fn inflate_ffi(
                         copy = repeat.copy;
                         hold = repeat.hold;
                         bits = repeat.bits;
+                        let state_ref = &mut *state;
                         if !crate::src::inflate::inflate_code_length_repeat_fits(
-                            (*state).have,
+                            state_ref.have,
                             copy,
-                            (*state).nlen,
-                            (*state).ndist,
+                            state_ref.nlen,
+                            state_ref.ndist,
                         ) {
                             (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
+                            state_ref.mode = crate::src::inflate::BAD;
                             break;
                         } else {
-                            loop {
-                                let c2rust_fresh22 = copy;
-                                copy = copy.wrapping_sub(1);
-                                if !(c2rust_fresh22 != 0) {
-                                    break;
-                                }
-                                let c2rust_fresh23 = (*state).have;
-                                (*state).have = (*state).have.wrapping_add(1);
-                                (*state).lens[c2rust_fresh23 as usize] =
-                                    len as ::core::ffi::c_ushort;
-                            }
+                            let start = state_ref.have as usize;
+                            let end = start + copy as usize;
+                            state_ref.lens[start..end].fill(len as ::core::ffi::c_ushort);
+                            state_ref.have = state_ref.have.wrapping_add(copy);
+                            copy = 0 as ::core::ffi::c_uint;
+                            copy = copy.wrapping_sub(1);
                         }
                     }
                 }

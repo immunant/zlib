@@ -321,12 +321,20 @@ fn slide_hash_entries(entries: &mut [crate::src::deflate::Posf], wsize: crate::s
     }
 }
 
+fn slide_hash_entries_pair(
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    wsize: crate::stdlib::uInt,
+) {
+    slide_hash_entries(head, wsize);
+    slide_hash_entries(prev, wsize);
+}
+
 fn slide_hash(s: &mut crate::src::deflate::deflate_state) {
     let wsize = s.w_size;
     let head = unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(s.head, s.hash_size as usize) };
-    slide_hash_entries(head, wsize);
     let prev = unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(s.prev, wsize as usize) };
-    slide_hash_entries(prev, wsize);
+    slide_hash_entries_pair(head, prev, wsize);
     s.slid = 1 as ::core::ffi::c_int;
 }
 
@@ -434,30 +442,35 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
             if state.lookahead.wrapping_add(state.insert)
                 >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             {
+                let window = &mut *::core::ptr::slice_from_raw_parts_mut(
+                    state.window,
+                    state.window_size as usize,
+                );
+                let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, wsize as usize);
+                let head = &mut *::core::ptr::slice_from_raw_parts_mut(
+                    state.head,
+                    state.hash_size as usize,
+                );
                 let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
-                state.ins_h = *state.window.wrapping_add(str as usize) as crate::stdlib::uInt;
+                state.ins_h = window[str as usize] as crate::stdlib::uInt;
                 state.ins_h = deflate_hash_update(
                     state.ins_h,
                     state.hash_shift,
                     state.hash_mask,
-                    *state
-                        .window
-                        .wrapping_add(str.wrapping_add(1 as crate::stdlib::uInt) as usize),
+                    window[str.wrapping_add(1 as crate::stdlib::uInt) as usize],
                 );
                 while state.insert != 0 {
                     state.ins_h = deflate_hash_update(
                         state.ins_h,
                         state.hash_shift,
                         state.hash_mask,
-                        *state.window.wrapping_add(
-                            str.wrapping_add(3 as crate::stdlib::uInt)
-                                .wrapping_sub(1 as crate::stdlib::uInt)
-                                as usize,
-                        ),
+                        window[str
+                            .wrapping_add(3 as crate::stdlib::uInt)
+                            .wrapping_sub(1 as crate::stdlib::uInt)
+                            as usize],
                     );
-                    *state.prev.wrapping_add((str & state.w_mask) as usize) =
-                        *state.head.wrapping_add(state.ins_h as usize);
-                    *state.head.wrapping_add(state.ins_h as usize) =
+                    prev[(str & state.w_mask) as usize] = head[state.ins_h as usize];
+                    head[state.ins_h as usize] =
                         str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                     str = str.wrapping_add(1);
                     state.insert = state.insert.wrapping_sub(1);
@@ -3612,12 +3625,16 @@ fn deflate_huff(
                 state.match_length = 0 as crate::stdlib::uInt;
                 let mut cc: crate::zutil_h::uch =
                     *state.window.wrapping_add(state.strstart as usize) as crate::zutil_h::uch;
-                for byte in crate::src::trees::tr_tally_literal_update(&mut state.dyn_ltree, cc) {
-                    let sym_next = state.sym_next;
-                    state.sym_next = state.sym_next.wrapping_add(1);
-                    *state.sym_buf.wrapping_add(sym_next as usize) = byte;
-                }
-                bflush = (state.sym_next == state.sym_end) as ::core::ffi::c_int;
+                let sym_buf = &mut *::core::ptr::slice_from_raw_parts_mut(
+                    state.sym_buf,
+                    state.sym_end as usize,
+                );
+                bflush = crate::src::trees::tr_tally_impl(
+                    state,
+                    sym_buf,
+                    0 as ::core::ffi::c_uint,
+                    cc as ::core::ffi::c_uint,
+                );
                 state.lookahead = state.lookahead.wrapping_sub(1);
                 state.strstart = state.strstart.wrapping_add(1);
             }
