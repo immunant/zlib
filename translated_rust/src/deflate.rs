@@ -1176,9 +1176,9 @@ pub unsafe extern "C" fn deflatePrime(
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
         || state.sym_buf
-            < state.pending_out.offset(
+            < state.pending_out.wrapping_add(
                 (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as isize,
+                    as usize,
             )
     {
         return crate::zlib_h::Z_BUF_ERROR;
