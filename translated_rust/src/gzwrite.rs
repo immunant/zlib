@@ -67,6 +67,42 @@ enum GzDeflateOperation {
     },
 }
 
+enum GzWriteBufferError {
+    Input,
+    Output,
+}
+
+/// Allocate the gzip writer's owned staging buffers before the legacy stream
+/// is pointed at them.  This is deliberately independent of `gz_state`: the
+/// buffers have ordinary Rust ownership, while synchronizing their cursors to
+/// the ABI stream remains at the deflate boundary.
+fn gz_prepare_write_buffers(
+    input: &mut Vec<u8>,
+    output: &mut Vec<u8>,
+    want: crate::stdlib::uInt,
+    direct: bool,
+) -> Result<(), GzWriteBufferError> {
+    let input_len = (want as usize)
+        .checked_mul(2)
+        .ok_or(GzWriteBufferError::Input)?;
+    input
+        .try_reserve_exact(input_len)
+        .map_err(|_| GzWriteBufferError::Input)?;
+    input.resize(input_len, 0);
+
+    if !direct {
+        let output_len = want as usize;
+        if output.try_reserve_exact(output_len).is_err() {
+            return Err(GzWriteBufferError::Output);
+        }
+        output.resize(output_len, 0);
+        if output.len() != output_len {
+            return Err(GzWriteBufferError::Output);
+        }
+    }
+    Ok(())
+}
+
 /// A short-lived view of the legacy deflate stream used by gzip writing.
 ///
 /// The gzip state still carries the ABI stream while deflate is being
@@ -101,15 +137,15 @@ unsafe fn gz_init(
     let mut ret: ::core::ffi::c_int = 0;
     let strm: &mut crate::zlib_h::z_stream = &mut state.strm;
     if state.size == 0 {
-        let Some(input_len) = (state.want as usize).checked_mul(2) else {
-            crate::src::gzlib::gz_error_state(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                Some(c"out of memory"),
-            );
-            return -1 as ::core::ffi::c_int;
-        };
-        if state.in_0.try_reserve_exact(input_len).is_err() {
+        if let Err(error) = gz_prepare_write_buffers(
+            &mut state.in_0,
+            &mut state.out,
+            state.want,
+            state.direct != 0,
+        ) {
+            if matches!(error, GzWriteBufferError::Output) {
+                state.in_0.clear();
+            }
             crate::src::gzlib::gz_error_state(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -117,21 +153,7 @@ unsafe fn gz_init(
             );
             return -1 as ::core::ffi::c_int;
         }
-        state.in_0.resize(input_len, 0);
         if state.direct == 0 {
-            let output_len = state.want as usize;
-            if state.out.try_reserve_exact(output_len).is_ok() {
-                state.out.resize(output_len, 0);
-            }
-            if state.out.len() != output_len {
-                state.in_0.clear();
-                crate::src::gzlib::gz_error_state(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    Some(c"out of memory"),
-                );
-                return -1 as ::core::ffi::c_int;
-            }
             strm.zalloc = None;
             strm.zfree = None;
             strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
