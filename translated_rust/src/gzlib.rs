@@ -1072,8 +1072,8 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     }
 }
 
-/// The scalar consequences of replacing a gzip error.  Message ownership and
-/// all ABI-state writes remain at the FFI boundary.
+/// The scalar consequences of replacing a gzip error.  Message allocation,
+/// ownership, and raw ABI conversion remain at the FFI boundary.
 #[derive(Clone, Copy)]
 struct GzErrorTransition {
     clear_available: bool,
