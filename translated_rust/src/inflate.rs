@@ -234,6 +234,37 @@ fn inflate_exit_checksum(
     }
 }
 
+/// Normalize the checksum word from an inflate trailer before comparing it to
+/// the checksum accumulated by the decoder.  Gzip carries the word in native
+/// little-endian bit-buffer order; zlib carries it in network order.  Keeping
+/// this scalar-only conversion out of the cursor loop makes the trailer
+/// decision independent of ABI records and raw output lends.
+fn inflate_trailer_checksum(
+    flags: ::core::ffi::c_int,
+    hold: ::core::ffi::c_ulong,
+) -> ::core::ffi::c_ulong {
+    if flags != 0 {
+        hold
+    } else {
+        (hold >> 24 & 0xff as ::core::ffi::c_ulong)
+            .wrapping_add(hold >> 8 & 0xff00 as ::core::ffi::c_ulong)
+            .wrapping_add((hold & 0xff00 as ::core::ffi::c_ulong) << 8 as ::core::ffi::c_int)
+            .wrapping_add((hold & 0xff as ::core::ffi::c_ulong) << 24 as ::core::ffi::c_int)
+    }
+}
+
+/// Ordinary inflate only validates a trailer when the active wrapper has a
+/// checksum.  This preserves the raw decoder's no-wrapper path while keeping
+/// the comparison as a safe scalar operation.
+fn inflate_trailer_checksum_matches(
+    wrap: ::core::ffi::c_int,
+    flags: ::core::ffi::c_int,
+    hold: ::core::ffi::c_ulong,
+    check: ::core::ffi::c_ulong,
+) -> bool {
+    wrap & 4 as ::core::ffi::c_int == 0 || inflate_trailer_checksum(flags, hold) == check
+}
+
 /// Update the gzip-header CRC from an already-bounded byte span.  The
 /// transitional decoder owns any raw cursor lending; header parsing itself
 /// only carries this scalar checksum and a safe byte slice.
@@ -1606,40 +1637,30 @@ pub unsafe fn inflate(
                                                                                                         state_ref.total = state_ref
                                                                                                             .total
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
-                                                                                                        if state_ref.wrap & 4 as ::core::ffi::c_int != 0 && out != 0
+                                                                                                        if state_ref.wrap & 4 as ::core::ffi::c_int != 0
+                                                                                                            && out != 0
                                                                                                         {
                                                                                                             let output = core::slice::from_raw_parts(
                                                                                                                 put.wrapping_sub(out as usize),
                                                                                                                 out as usize,
                                                                                                             );
-                                                                                                            state_ref.check = inflate_output_checksum(
+                                                                                                            if let Some(check) = inflate_exit_checksum(
+                                                                                                                state_ref.wrap,
                                                                                                                 state_ref.check as crate::stdlib::uLong,
                                                                                                                 state_ref.flags,
                                                                                                                 output,
-                                                                                                            );
-                                                                                                            strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+                                                                                                            ) {
+                                                                                                                state_ref.check = check;
+                                                                                                                strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+                                                                                                            }
                                                                                                         }
                                                                                                         out = left;
-                                                                                                        if state_ref.wrap & 4 as ::core::ffi::c_int != 0
-                                                                                                            && (if state_ref.flags != 0 {
-                                                                                                                hold
-                                                                                                            } else {
-                                                                                                                (hold >> 24 as ::core::ffi::c_int
-                                                                                                                    & 0xff as ::core::ffi::c_ulong)
-                                                                                                                    .wrapping_add(
-                                                                                                                        hold >> 8 as ::core::ffi::c_int
-                                                                                                                            & 0xff00 as ::core::ffi::c_ulong,
-                                                                                                                    )
-                                                                                                                    .wrapping_add(
-                                                                                                                        (hold & 0xff00 as ::core::ffi::c_ulong)
-                                                                                                                            << 8 as ::core::ffi::c_int,
-                                                                                                                    )
-                                                                                                                    .wrapping_add(
-                                                                                                                        (hold & 0xff as ::core::ffi::c_ulong)
-                                                                                                                            << 24 as ::core::ffi::c_int,
-                                                                                                                    )
-                                                                                                            }) != state_ref.check
-                                                                                                        {
+                                                                                                        if !inflate_trailer_checksum_matches(
+                                                                                                            state_ref.wrap,
+                                                                                                            state_ref.flags,
+                                                                                                            hold,
+                                                                                                            state_ref.check,
+                                                                                                        ) {
                                                                                                             strm_ref.msg = INFLATE_ERROR_MESSAGES[6].as_ptr()
                                                                                                                 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
                                                                                                             state_ref.mode = crate::src::inflate::BAD;
