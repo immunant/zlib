@@ -275,7 +275,7 @@ unsafe fn gz_write(
                 plan.len as crate::__stddef_size_t_h::size_t,
             );
             crate::src::gzlib::gz_buffered_copy_progress(state, &mut len, plan.len);
-            buf = (buf as *const ::core::ffi::c_char)
+            buf = (buf as *const crate::stdlib::Bytef)
                 .wrapping_add(plan.len as usize)
                 as crate::stdlib::voidpc;
             if len == 0 as crate::stdlib::z_size_t {

@@ -452,7 +452,7 @@ unsafe fn gz_read(
             }
         }
         crate::src::gzlib::gz_read_progress(state, &mut len, &mut got, n, consumed_buffered);
-        buf = (buf as *mut ::core::ffi::c_char).wrapping_add(n as usize) as crate::stdlib::voidp;
+        buf = (buf as *mut crate::stdlib::Bytef).wrapping_add(n as usize) as crate::stdlib::voidp;
         if !(len != 0 && err == 0) {
             break;
         }
