@@ -157,9 +157,39 @@ pub(crate) struct PendingStorageLayout {
     pub symbol_flush_threshold: crate::stdlib::uInt,
 }
 
+/// The single callback allocation that backs both pending output and symbols.
+///
+/// The byte count must be computed in zlib's `uInt` domain: this is the
+/// `zalloc(opaque, lit_bufsize, 4)` request, not an unrestricted `usize`
+/// allocation.  Keeping the calculation here lets future ownership code
+/// reject impossible requests before it crosses the callback boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PendingStorageAllocationPlan {
+    pub items: crate::stdlib::uInt,
+    pub item_size: crate::stdlib::uInt,
+    pub total_len: usize,
+}
+
+pub(crate) fn pending_storage_allocation_plan(
+    lit_bufsize: crate::stdlib::uInt,
+) -> Option<PendingStorageAllocationPlan> {
+    const ITEM_SIZE: crate::stdlib::uInt = 4;
+
+    let total_in_c_domain = lit_bufsize.checked_mul(ITEM_SIZE)?;
+    Some(PendingStorageAllocationPlan {
+        items: lit_bufsize,
+        item_size: ITEM_SIZE,
+        total_len: usize::try_from(total_in_c_domain).ok()?,
+    })
+}
+
 pub(crate) fn pending_storage_layout(lit_bufsize: crate::stdlib::uInt) -> PendingStorageLayout {
     let symbol_offset = lit_bufsize as usize;
-    let total_len = symbol_offset.wrapping_mul(4);
+    // Valid deflate states use the checked callback allocation plan.  Retain
+    // the translated wrapping layout for malformed/internal state so the
+    // callers that only inspect layout keep their existing behavior.
+    let total_len = pending_storage_allocation_plan(lit_bufsize)
+        .map_or_else(|| symbol_offset.wrapping_mul(4), |plan| plan.total_len);
 
     PendingStorageLayout {
         total_len,
@@ -5666,6 +5696,34 @@ mod tests {
                 symbol_len: 3,
                 symbol_flush_threshold: 0,
             }
+        );
+    }
+
+    #[test]
+    fn pending_storage_allocation_plan_preserves_the_single_c_domain_request() {
+        assert_eq!(
+            super::pending_storage_allocation_plan(16),
+            Some(super::PendingStorageAllocationPlan {
+                items: 16,
+                item_size: 4,
+                total_len: 64,
+            })
+        );
+    }
+
+    #[test]
+    fn pending_storage_allocation_plan_rejects_c_uint_multiplication_overflow() {
+        assert_eq!(
+            super::pending_storage_allocation_plan(crate::stdlib::uInt::MAX),
+            None
+        );
+        assert_eq!(
+            super::pending_storage_allocation_plan(crate::stdlib::uInt::MAX / 4),
+            Some(super::PendingStorageAllocationPlan {
+                items: crate::stdlib::uInt::MAX / 4,
+                item_size: 4,
+                total_len: (crate::stdlib::uInt::MAX / 4 * 4) as usize,
+            })
         );
     }
 
