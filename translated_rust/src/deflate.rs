@@ -503,6 +503,13 @@ enum DeflateHuffRefillAction {
     Done,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeflateFinalFlushAction {
+    Finish,
+    FlushPendingSymbols,
+    Done,
+}
+
 fn deflate_match_refill_action(
     lookahead: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
@@ -545,6 +552,19 @@ fn deflate_huff_refill_action(
         DeflateHuffRefillAction::NeedMore
     } else {
         DeflateHuffRefillAction::Done
+    }
+}
+
+fn deflate_final_flush_action(
+    flush: ::core::ffi::c_int,
+    sym_next: crate::stdlib::uInt,
+) -> DeflateFinalFlushAction {
+    if flush == crate::zlib_h::Z_FINISH {
+        DeflateFinalFlushAction::Finish
+    } else if sym_next != 0 {
+        DeflateFinalFlushAction::FlushPendingSymbols
+    } else {
+        DeflateFinalFlushAction::Done
     }
 }
 
@@ -4151,7 +4171,8 @@ unsafe fn deflate_rle(
         }
     }
     (*s).insert = 0 as crate::stdlib::uInt;
-    if flush == crate::zlib_h::Z_FINISH {
+    let final_flush_action = deflate_final_flush_action(flush, (*s).sym_next);
+    if final_flush_action == DeflateFinalFlushAction::Finish {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
@@ -4175,7 +4196,7 @@ unsafe fn deflate_rle(
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
+    if final_flush_action == DeflateFinalFlushAction::FlushPendingSymbols {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
@@ -4255,7 +4276,8 @@ unsafe fn deflate_huff(
         }
     }
     (*s).insert = 0 as crate::stdlib::uInt;
-    if flush == crate::zlib_h::Z_FINISH {
+    let final_flush_action = deflate_final_flush_action(flush, (*s).sym_next);
+    if final_flush_action == DeflateFinalFlushAction::Finish {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
@@ -4279,7 +4301,7 @@ unsafe fn deflate_huff(
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
+    if final_flush_action == DeflateFinalFlushAction::FlushPendingSymbols {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             if (*s).block_start >= 0 as ::core::ffi::c_long {
@@ -4311,11 +4333,12 @@ mod tests {
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
         deflate_dictionary_state_after_load, deflate_fast_match_progress,
-        deflate_fast_should_insert_match, deflate_flush_rank, deflate_huff_literal_progress,
-        deflate_insert_after_block, deflate_literal_state_after_emit, deflate_match_refill_action,
-        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
-        deflate_rle_clamp_match_length, deflate_rle_literal_tally_plan, deflate_rle_match_length,
+        deflate_fast_should_insert_match, deflate_final_flush_action, deflate_flush_rank,
+        deflate_huff_literal_progress, deflate_insert_after_block,
+        deflate_literal_state_after_emit, deflate_match_refill_action, deflate_pending_value,
+        deflate_preflight, deflate_prime_bits_valid, deflate_request_is_invalid,
+        deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
+        deflate_rle_literal_tally_plan, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
         deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_check_impl,
@@ -4334,8 +4357,8 @@ mod tests {
         stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
         stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
         symbol_buffer_is_full, symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress,
-        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
-        ReadBufChecksum,
+        DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
+        DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
     };
 
     #[test]
@@ -4596,6 +4619,26 @@ mod tests {
         assert_eq!(
             deflate_huff_literal_progress(7, 6, 0, crate::stdlib::uInt::MAX),
             (7, crate::stdlib::uInt::MAX, 0, false)
+        );
+    }
+
+    #[test]
+    fn deflate_final_flush_action_prioritizes_finish_and_pending_symbols() {
+        assert_eq!(
+            deflate_final_flush_action(crate::zlib_h::Z_FINISH, 0),
+            DeflateFinalFlushAction::Finish
+        );
+        assert_eq!(
+            deflate_final_flush_action(crate::zlib_h::Z_FINISH, 7),
+            DeflateFinalFlushAction::Finish
+        );
+        assert_eq!(
+            deflate_final_flush_action(crate::zlib_h::Z_NO_FLUSH, 7),
+            DeflateFinalFlushAction::FlushPendingSymbols
+        );
+        assert_eq!(
+            deflate_final_flush_action(crate::zlib_h::Z_NO_FLUSH, 0),
+            DeflateFinalFlushAction::Done
         );
     }
 

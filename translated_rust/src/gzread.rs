@@ -1080,6 +1080,15 @@ fn gz_decomp_output_progress(
     }
 }
 
+fn gz_decomp_apply_output_progress(
+    output: &mut crate::zlib_h::gzFile_s,
+    stream: &crate::zlib_h::z_stream,
+    progress: &GzDecompOutputProgress,
+) {
+    output.have = progress.have;
+    output.next = stream.next_out.wrapping_sub(progress.rewind_len);
+}
+
 fn gz_decomp_should_continue(ret: ::core::ffi::c_int, avail_out: crate::stdlib::uInt) -> bool {
     avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END
 }
@@ -1240,10 +1249,8 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             GzDecompAction::Continue => {}
         }
     }
-    let (avail_out, next_out) = ((*strm).avail_out, (*strm).next_out);
-    let progress = gz_decomp_output_progress(had, avail_out);
-    state.x.have = progress.have;
-    state.x.next = next_out.wrapping_sub(progress.rewind_len);
+    let progress = gz_decomp_output_progress(had, (*strm).avail_out);
+    gz_decomp_apply_output_progress(&mut state.x, &state.strm, &progress);
     gz_decomp_apply_result(&mut state.how, &mut state.junk, ret)
 }
 
@@ -1905,6 +1912,44 @@ mod tests {
                 rewind_len: ::core::ffi::c_uint::MAX as usize,
             }
         );
+    }
+
+    #[test]
+    fn gz_decomp_apply_output_progress_rewinds_stream_output_cursor() {
+        let mut buffer = [0; 10];
+        let mut output = crate::zlib_h::gzFile_s {
+            have: 0,
+            next: buffer.as_mut_ptr(),
+            pos: 0,
+        };
+        let stream = crate::zlib_h::z_stream_s {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: buffer.as_mut_ptr().wrapping_add(8),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        gz_decomp_apply_output_progress(
+            &mut output,
+            &stream,
+            &GzDecompOutputProgress {
+                have: 3,
+                rewind_len: 3,
+            },
+        );
+
+        assert_eq!(output.have, 3);
+        assert_eq!(output.next, buffer.as_mut_ptr().wrapping_add(5));
     }
 
     #[test]

@@ -4130,6 +4130,16 @@ fn canonical_code_assignments(
         .collect()
 }
 
+fn assign_canonical_codes(
+    tree: &mut [crate::src::deflate::ct_data],
+    lengths: &[crate::zutil_h::ush],
+    bl_count: &[crate::zutil_h::ush; 16],
+) {
+    for (index, code) in canonical_code_assignments(lengths, bl_count) {
+        tree[index].fc.value = code;
+    }
+}
+
 unsafe fn gen_codes(
     tree: *mut crate::src::deflate::ct_data,
     max_code: ::core::ffi::c_int,
@@ -4140,9 +4150,7 @@ unsafe fn gen_codes(
     for entry in tree.iter() {
         lengths.push(entry.dl.len);
     }
-    for (index, code) in canonical_code_assignments(&lengths, bl_count) {
-        tree[index].fc.value = code;
-    }
+    assign_canonical_codes(tree, &lengths, bl_count);
 }
 
 fn tr_static_init() {}
@@ -5673,11 +5681,11 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        bi_flush_core, bi_reverse, bi_windup_core, bit_buffer_would_overflow,
-        bit_length_correction, bl_code_index_at_rank, bl_order, bl_tree_header_bit_length,
-        block_bit_length_bytes, block_header_bits, canonical_code_assignments,
-        canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
-        combined_tree_frequency, compress_block_symbol, decode_symbol_triplet,
+        assign_canonical_codes, bi_flush_core, bi_reverse, bi_windup_core,
+        bit_buffer_would_overflow, bit_length_correction, bl_code_index_at_rank, bl_order,
+        bl_tree_header_bit_length, block_bit_length_bytes, block_header_bits,
+        canonical_code_assignments, canonical_codes_for_lengths, clamped_tree_bit_length,
+        classify_tree_run, combined_tree_frequency, compress_block_symbol, decode_symbol_triplet,
         detect_data_type_from_ltree, dist_code_index, dynamic_tree_header_counts,
         gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
         last_nonzero_bl_code_rank, length_extra_bits, mark_bl_code_nonzero_at_rank,
@@ -6107,6 +6115,22 @@ mod tests {
         let assignments = canonical_code_assignments(&[0, 1, 2, 2, 0], &counts);
 
         assert_eq!(assignments, vec![(1, 0), (2, 1), (3, 3)]);
+    }
+
+    #[test]
+    fn canonical_code_assignment_updates_only_symbols_with_code_lengths() {
+        let entry = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 99 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { dad: 0 },
+        };
+        let mut tree = [entry; 5];
+        let mut counts = [0; 16];
+        counts[1] = 1;
+        counts[2] = 2;
+
+        assign_canonical_codes(&mut tree, &[0, 1, 2, 2, 0], &counts);
+
+        assert_eq!(tree.map(|entry| entry.fc.value), [99, 0, 1, 3, 99]);
     }
 
     #[test]
