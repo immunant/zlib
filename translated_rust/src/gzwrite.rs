@@ -1380,6 +1380,20 @@ fn gzsetparams_requires_deflate(action: GzSetParamsAction) -> bool {
     )
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzSetParamsZeroAction {
+    Skip,
+    Zero,
+}
+
+fn gzsetparams_zero_action(has_skip: bool) -> GzSetParamsZeroAction {
+    if has_skip {
+        GzSetParamsZeroAction::Zero
+    } else {
+        GzSetParamsZeroAction::Skip
+    }
+}
+
 fn gzclose_mode_is_writable(mode: ::core::ffi::c_int) -> bool {
     mode == crate::gzguts_h::GZ_WRITE
 }
@@ -1619,7 +1633,11 @@ pub unsafe extern "C" fn gzsetparams(
     if matches!(action, GzSetParamsAction::ReturnOk) {
         return crate::zlib_h::Z_OK;
     }
-    if gz_has_pending_skip(state.skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if matches!(
+        gzsetparams_zero_action(gz_has_pending_skip(state.skip)),
+        GzSetParamsZeroAction::Zero
+    ) && gz_zero(state) == -1 as ::core::ffi::c_int
+    {
         return state.err;
     }
     if matches!(action, GzSetParamsAction::FlushThenDeflate)
@@ -1724,13 +1742,14 @@ mod tests {
         gzclose_w_result, gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result,
         gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_action,
         gzsetparams_buffer_action, gzsetparams_requires_deflate, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
-        GzCompDirectWriteProgress, GzCompDirectWriteResult, GzCompOutputBufferAction,
-        GzCompOutputBufferProgress, GzCompOutputWriteProgress, GzCompOutputWriteResult,
-        GzCompResetAction, GzCompWriteFailure, GzCompWriteResult, GzFlushAction,
-        GzInitAllocationPlan, GzInitMode, GzPutcWriteAction, GzSetParamsAction,
-        GzSetParamsBufferAction, GzWriteBufferedInputAction, GzWriteDirectAction,
-        GzWritePreparation, GzZeroAction, GzZeroChunkLimits, GzZeroPreparedChunk, GzZeroStep,
+        gzsetparams_state_is_usable, gzsetparams_zero_action, gzwrite_request, GzCloseBufferAction,
+        GzCompDeflateAction, GzCompDirectWriteProgress, GzCompDirectWriteResult,
+        GzCompOutputBufferAction, GzCompOutputBufferProgress, GzCompOutputWriteProgress,
+        GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure, GzCompWriteResult,
+        GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction, GzSetParamsAction,
+        GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedInputAction,
+        GzWriteDirectAction, GzWritePreparation, GzZeroAction, GzZeroChunkLimits,
+        GzZeroPreparedChunk, GzZeroStep,
     };
 
     #[test]
@@ -2199,6 +2218,12 @@ mod tests {
         assert!(gzsetparams_requires_deflate(
             GzSetParamsAction::FlushThenDeflate
         ));
+    }
+
+    #[test]
+    fn gzsetparams_zero_action_only_zero_fills_pending_skip() {
+        assert_eq!(gzsetparams_zero_action(false), GzSetParamsZeroAction::Skip);
+        assert_eq!(gzsetparams_zero_action(true), GzSetParamsZeroAction::Zero);
     }
 
     #[test]

@@ -326,6 +326,20 @@ fn gz_fread_action(len: crate::stdlib::z_size_t) -> GzFreadAction {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum GzgetcAction {
+    ConsumeBuffered,
+    Read,
+}
+
+fn gzgetc_action(buffered_have: ::core::ffi::c_uint) -> GzgetcAction {
+    if buffered_have != 0 {
+        GzgetcAction::ConsumeBuffered
+    } else {
+        GzgetcAction::Read
+    }
+}
+
 fn gzgetc_read_result(
     bytes_read: crate::stdlib::z_size_t,
     byte: ::core::ffi::c_uchar,
@@ -2432,6 +2446,20 @@ mod tests {
     }
 
     #[test]
+    fn gzgetc_action_consumes_available_buffered_data() {
+        assert_eq!(gzgetc_action(1), GzgetcAction::ConsumeBuffered);
+        assert_eq!(
+            gzgetc_action(::core::ffi::c_uint::MAX),
+            GzgetcAction::ConsumeBuffered
+        );
+    }
+
+    #[test]
+    fn gzgetc_action_reads_when_no_buffered_data_is_available() {
+        assert_eq!(gzgetc_action(0), GzgetcAction::Read);
+    }
+
+    #[test]
     fn gzgetc_read_result_returns_error_when_no_byte_was_read() {
         assert_eq!(gzgetc_read_result(0, 42), -1);
     }
@@ -3716,14 +3744,17 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     let state_ref = &mut *state;
-    let buffered = &mut state_ref.x;
-    if buffered.have != 0 {
-        let next = buffered.next;
-        let (have, pos, result) = gzgetc_buffered_result(buffered.have, buffered.pos, *next);
-        buffered.have = have;
-        buffered.pos = pos;
-        buffered.next = next.wrapping_add(1);
-        return result;
+    match gzgetc_action(state_ref.x.have) {
+        GzgetcAction::ConsumeBuffered => {
+            let buffered = &mut state_ref.x;
+            let next = buffered.next;
+            let (have, pos, result) = gzgetc_buffered_result(buffered.have, buffered.pos, *next);
+            buffered.have = have;
+            buffered.pos = pos;
+            buffered.next = next.wrapping_add(1);
+            return result;
+        }
+        GzgetcAction::Read => {}
     }
     return gzgetc_read_result(
         gz_read(

@@ -1468,7 +1468,7 @@ pub unsafe extern "C" fn inflate(
                 hold = 0 as ::core::ffi::c_ulong;
                 bits = 0 as ::core::ffi::c_uint;
                 (*state).mode = crate::src::inflate::COPY_;
-                if flush == crate::zlib_h::Z_TREES {
+                if inflate_flush_stops_after_fixed_trees(flush) {
                     break;
                 }
                 c2rust_current_block = 17610290921369817802;
@@ -1890,7 +1890,7 @@ pub unsafe extern "C" fn inflate(
                             continue;
                         } else {
                             (*state).mode = crate::src::inflate::LEN_;
-                            if flush == crate::zlib_h::Z_TREES {
+                            if inflate_flush_stops_after_fixed_trees(flush) {
                                 break;
                             }
                         }
@@ -1950,7 +1950,7 @@ pub unsafe extern "C" fn inflate(
                 c2rust_current_block = 14452068164804587099;
             }
             11604185039344352166 => {
-                if flush == crate::zlib_h::Z_BLOCK || flush == crate::zlib_h::Z_TREES {
+                if inflate_flush_stops_at_block_boundary(flush) {
                     break;
                 }
                 c2rust_current_block = 9224094624523183306;
@@ -1989,7 +1989,7 @@ pub unsafe extern "C" fn inflate(
                         InflateBlockKind::Fixed => {
                             crate::src::inftrees::inflate_fixed(&mut *state);
                             (*state).mode = crate::src::inflate::LEN_;
-                            if flush == crate::zlib_h::Z_TREES {
+                            if inflate_flush_stops_after_fixed_trees(flush) {
                                 break;
                             }
                         }
@@ -2697,6 +2697,14 @@ fn inflate_needs_buffer_error(
         && result == crate::zlib_h::Z_OK
 }
 
+fn inflate_flush_stops_at_block_boundary(flush: ::core::ffi::c_int) -> bool {
+    flush == crate::zlib_h::Z_BLOCK || flush == crate::zlib_h::Z_TREES
+}
+
+fn inflate_flush_stops_after_fixed_trees(flush: ::core::ffi::c_int) -> bool {
+    flush == crate::zlib_h::Z_TREES
+}
+
 fn inflate_header_crc_enabled(flags: ::core::ffi::c_int, wrap: ::core::ffi::c_int) -> bool {
     inflate_gzip_header_has_crc(flags) && wrap & 4 != 0
 }
@@ -3288,11 +3296,12 @@ mod tests {
         inflate_call_progress, inflate_can_use_fast_path, inflate_codes_used_offset_value,
         inflate_copy_match_from_output, inflate_copy_progress, inflate_data_type_value,
         inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_distance_extra_update, inflate_get_dictionary_result, inflate_gzip_extra_progress,
-        inflate_gzip_flags, inflate_gzip_flags_error, inflate_gzip_flags_validation,
-        inflate_gzip_header_crc_bytes, inflate_gzip_header_crc_is_valid,
-        inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
-        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflate_distance_extra_update, inflate_flush_stops_after_fixed_trees,
+        inflate_flush_stops_at_block_boundary, inflate_get_dictionary_result,
+        inflate_gzip_extra_progress, inflate_gzip_flags, inflate_gzip_flags_error,
+        inflate_gzip_flags_validation, inflate_gzip_header_crc_bytes,
+        inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
+        inflate_gzip_header_has_crc, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_text_field_should_continue,
         inflate_gzip_window_bits, inflate_head_skip_mode, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
@@ -3954,6 +3963,25 @@ mod tests {
             0,
             crate::zlib_h::Z_FINISH,
             crate::zlib_h::Z_STREAM_END
+        ));
+    }
+
+    #[test]
+    fn inflate_flush_predicates_preserve_block_and_tree_boundaries() {
+        assert!(!inflate_flush_stops_at_block_boundary(
+            crate::zlib_h::Z_NO_FLUSH
+        ));
+        assert!(inflate_flush_stops_at_block_boundary(
+            crate::zlib_h::Z_BLOCK
+        ));
+        assert!(inflate_flush_stops_at_block_boundary(
+            crate::zlib_h::Z_TREES
+        ));
+        assert!(!inflate_flush_stops_after_fixed_trees(
+            crate::zlib_h::Z_BLOCK
+        ));
+        assert!(inflate_flush_stops_after_fixed_trees(
+            crate::zlib_h::Z_TREES
         ));
     }
 
