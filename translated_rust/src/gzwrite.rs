@@ -1151,7 +1151,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     0 as ::core::ffi::c_int
 }
 
-unsafe fn gz_comp(
+fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -1170,23 +1170,29 @@ unsafe fn gz_comp(
             gz_comp_direct_loop_action(state.strm.avail_in),
             GzCompDirectLoopAction::Write
         ) {
-            *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+            unsafe {
+                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+            }
             state.again = 0 as ::core::ffi::c_int;
             put = gz_comp_write_chunk_len(state.strm.avail_in as usize, max);
-            writ = crate::stdlib::write(
-                state.fd,
-                state.strm.next_in as *const ::core::ffi::c_void,
-                put as crate::__stddef_size_t_h::size_t,
-            ) as ::core::ffi::c_int;
-            let errno = *crate::stdlib::__errno_location();
+            writ = unsafe {
+                crate::stdlib::write(
+                    state.fd,
+                    state.strm.next_in as *const ::core::ffi::c_void,
+                    put as crate::__stddef_size_t_h::size_t,
+                ) as ::core::ffi::c_int
+            };
+            let errno = unsafe { *crate::stdlib::__errno_location() };
             match gz_comp_direct_write_result(state.strm.avail_in, writ, errno) {
                 GzCompDirectWriteResult::Error { again } => {
                     state.again = again;
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(errno),
-                    );
+                    unsafe {
+                        crate::src::gzlib::gz_error(
+                            state as *mut crate::gzguts_h::gz_state,
+                            crate::zlib_h::Z_ERRNO,
+                            crate::stdlib::strerror(errno),
+                        );
+                    }
                     return -1 as ::core::ffi::c_int;
                 }
                 GzCompDirectWriteResult::Progress(progress) => {
@@ -1202,9 +1208,11 @@ unsafe fn gz_comp(
     match reset_action {
         GzCompResetAction::Skip => return 0 as ::core::ffi::c_int,
         GzCompResetAction::Reset => {
-            crate::src::deflate::deflateReset_ffi(
-                &mut state.strm as *mut crate::zlib_h::z_stream_s,
-            );
+            unsafe {
+                crate::src::deflate::deflateReset_ffi(
+                    &mut state.strm as *mut crate::zlib_h::z_stream_s,
+                );
+            }
         }
         GzCompResetAction::Continue => {}
     }
@@ -1220,23 +1228,29 @@ unsafe fn gz_comp(
                     max,
                 ) {
                     GzCompOutputFlushStep::Write { len } => {
-                        *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+                        unsafe {
+                            *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+                        }
                         state.again = 0 as ::core::ffi::c_int;
                         put = len;
-                        writ = crate::stdlib::write(
-                            state.fd,
-                            state.x.next as *const ::core::ffi::c_void,
-                            put as crate::__stddef_size_t_h::size_t,
-                        ) as ::core::ffi::c_int;
-                        let errno = *crate::stdlib::__errno_location();
+                        writ = unsafe {
+                            crate::stdlib::write(
+                                state.fd,
+                                state.x.next as *const ::core::ffi::c_void,
+                                put as crate::__stddef_size_t_h::size_t,
+                            ) as ::core::ffi::c_int
+                        };
+                        let errno = unsafe { *crate::stdlib::__errno_location() };
                         match gz_comp_output_write_result(state.out_pending, writ, errno) {
                             GzCompOutputWriteResult::Error { again } => {
                                 state.again = again;
-                                crate::src::gzlib::gz_error(
-                                    state as *mut crate::gzguts_h::gz_state,
-                                    crate::zlib_h::Z_ERRNO,
-                                    crate::stdlib::strerror(errno),
-                                );
+                                unsafe {
+                                    crate::src::gzlib::gz_error(
+                                        state as *mut crate::gzguts_h::gz_state,
+                                        crate::zlib_h::Z_ERRNO,
+                                        crate::stdlib::strerror(errno),
+                                    );
+                                }
                                 return -1 as ::core::ffi::c_int;
                             }
                             GzCompOutputWriteResult::Progress(progress) => {
@@ -1258,8 +1272,12 @@ unsafe fn gz_comp(
             }
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
-        ret =
-            crate::src::deflate::deflate(&mut state.strm as *mut crate::zlib_h::z_stream_s, flush);
+        ret = unsafe {
+            crate::src::deflate::deflate(
+                &mut state.strm as *mut crate::zlib_h::z_stream_s,
+                flush,
+            )
+        };
         match gz_comp_apply_deflate_result(
             &mut state.out_pending,
             have,
@@ -1267,12 +1285,14 @@ unsafe fn gz_comp(
             ret,
         ) {
             GzCompDeflateAction::Error => {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"internal error: deflate stream corrupt\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                );
+                unsafe {
+                    crate::src::gzlib::gz_error(
+                        state as *mut crate::gzguts_h::gz_state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal error: deflate stream corrupt\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                    );
+                }
                 return -1 as ::core::ffi::c_int;
             }
             GzCompDeflateAction::Done => break,
@@ -1526,7 +1546,7 @@ macro_rules! gz_write_at_ffi_boundary {
                         break;
                     }
                     if let Some(result) = gz_write_buffered_comp_result(
-                        unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) },
+                        gz_comp(state, crate::zlib_h::Z_NO_FLUSH),
                         state.again,
                         put,
                         len,
@@ -1536,7 +1556,7 @@ macro_rules! gz_write_at_ffi_boundary {
                 }
             } else {
                 if gz_has_pending_input(state.strm.avail_in)
-                    && gz_write_comp_failed(unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) })
+                    && gz_write_comp_failed(gz_comp(state, crate::zlib_h::Z_NO_FLUSH))
                 {
                     break 'write 0 as crate::stdlib::z_size_t;
                 }
@@ -1544,7 +1564,7 @@ macro_rules! gz_write_at_ffi_boundary {
                 loop {
                     let n = gz_write_chunk_len(len);
                     state.strm.avail_in = n as crate::stdlib::uInt;
-                    let ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
+                    let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
                     match gz_write_apply_direct_progress(
                         &mut state.x.pos,
                         &mut len,
@@ -1685,7 +1705,7 @@ macro_rules! gz_zero_at_ffi_boundary {
         if matches!(
             zero.initial_action(state.strm.avail_in),
             GzZeroInitialAction::FlushPending
-        ) && unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) } == -1 as ::core::ffi::c_int
+        ) && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
             -1 as ::core::ffi::c_int
         } else {
@@ -1695,7 +1715,7 @@ macro_rules! gz_zero_at_ffi_boundary {
                 };
                 state.strm.avail_in = chunk.len;
                 state.strm.next_in = state.in_0;
-                let ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
+                let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
                 let action = zero.apply_compression(chunk.len, state.strm.avail_in, ret);
                 state.x.pos = zero.pos;
                 state.skip = zero.skip;
@@ -1898,7 +1918,7 @@ pub unsafe extern "C" fn gzflush_ffi(
     if matches!(gzflush_action(zero_result), GzFlushAction::ReturnStateError) {
         return (*state).err;
     }
-    unsafe { gz_comp(state, flush) };
+    gz_comp(state, flush);
     return (*state).err;
 }
 #[export_name = "gzsetparams"]
@@ -1941,7 +1961,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         return state.err;
     }
     if matches!(action, GzSetParamsAction::FlushThenDeflate)
-        && unsafe { gz_comp(state, crate::zlib_h::Z_BLOCK) } == -1 as ::core::ffi::c_int
+        && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
     {
         return state.err;
     }
@@ -1974,7 +1994,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     } else {
         None
     };
-    let result = unsafe { gz_comp(state, crate::zlib_h::Z_FINISH) };
+    let result = gz_comp(state, crate::zlib_h::Z_FINISH);
     let finish_error = gzclose_operation_error(result, (*state).err);
     match gzclose_buffer_action((*state).size, (*state).direct) {
         GzCloseBufferAction::Keep => {}
