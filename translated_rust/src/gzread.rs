@@ -63,6 +63,25 @@ struct GzLoadResult {
     failed: bool,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum GzAvailLoadAction {
+    Error,
+    Commit { avail_in: crate::stdlib::uInt },
+}
+
+fn gz_avail_load_action(
+    prior_avail_in: crate::stdlib::uInt,
+    load: &GzLoadResult,
+) -> GzAvailLoadAction {
+    if load.failed {
+        GzAvailLoadAction::Error
+    } else {
+        GzAvailLoadAction::Commit {
+            avail_in: prior_avail_in.wrapping_add(load.have),
+        }
+    }
+}
+
 fn gz_load_decision(
     have: ::core::ffi::c_uint,
     len: ::core::ffi::c_uint,
@@ -659,7 +678,7 @@ unsafe fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int 
         GzAvailAction::Error => return -1 as ::core::ffi::c_int,
         GzAvailAction::Done => return 0 as ::core::ffi::c_int,
         GzAvailAction::Refill { compact_input } => {
-            let (buf, len) = {
+            let (buf, len, prior_avail_in) = {
                 let state_ref = &mut *state;
                 let p = state_ref.in_0;
                 let q = state_ref.strm.next_in;
@@ -671,15 +690,18 @@ unsafe fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int 
                         .in_0
                         .wrapping_add(state_ref.strm.avail_in as usize),
                     gz_avail_refill_len(state_ref.size, state_ref.strm.avail_in),
+                    state_ref.strm.avail_in,
                 )
             };
             let load = gz_load(state, buf, len);
-            if load.failed {
-                return -1 as ::core::ffi::c_int;
+            match gz_avail_load_action(prior_avail_in, &load) {
+                GzAvailLoadAction::Error => return -1 as ::core::ffi::c_int,
+                GzAvailLoadAction::Commit { avail_in } => {
+                    let state_ref = &mut *state;
+                    state_ref.strm.avail_in = avail_in;
+                    state_ref.strm.next_in = state_ref.in_0 as *mut crate::stdlib::Bytef;
+                }
             }
-            let state_ref = &mut *state;
-            state_ref.strm.avail_in = state_ref.strm.avail_in.wrapping_add(load.have);
-            state_ref.strm.next_in = state_ref.in_0 as *mut crate::stdlib::Bytef;
         }
     }
     return 0 as ::core::ffi::c_int;
@@ -1378,6 +1400,55 @@ mod tests {
 
         assert_eq!(eof, -1);
         assert_eq!(again, 1);
+    }
+
+    #[test]
+    fn gz_avail_load_action_rejects_failed_loads_with_data() {
+        let load = GzLoadResult {
+            have: 3,
+            failed: true,
+        };
+
+        assert_eq!(gz_avail_load_action(4, &load), GzAvailLoadAction::Error);
+    }
+
+    #[test]
+    fn gz_avail_load_action_commits_successful_empty_loads() {
+        let load = GzLoadResult {
+            have: 0,
+            failed: false,
+        };
+
+        assert_eq!(
+            gz_avail_load_action(4, &load),
+            GzAvailLoadAction::Commit { avail_in: 4 }
+        );
+    }
+
+    #[test]
+    fn gz_avail_load_action_adds_loaded_input() {
+        let load = GzLoadResult {
+            have: 3,
+            failed: false,
+        };
+
+        assert_eq!(
+            gz_avail_load_action(4, &load),
+            GzAvailLoadAction::Commit { avail_in: 7 }
+        );
+    }
+
+    #[test]
+    fn gz_avail_load_action_wraps_input_count() {
+        let load = GzLoadResult {
+            have: 1,
+            failed: false,
+        };
+
+        assert_eq!(
+            gz_avail_load_action(::core::ffi::c_uint::MAX, &load),
+            GzAvailLoadAction::Commit { avail_in: 0 }
+        );
     }
 
     #[test]

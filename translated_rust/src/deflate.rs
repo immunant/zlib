@@ -415,6 +415,28 @@ enum DeflateRleRefillAction {
     Done,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeflateMatchRefillAction {
+    Continue,
+    NeedMore,
+    EndBlock,
+}
+
+fn deflate_match_refill_action(
+    lookahead: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> DeflateMatchRefillAction {
+    if lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+        && flush == crate::zlib_h::Z_NO_FLUSH
+    {
+        DeflateMatchRefillAction::NeedMore
+    } else if lookahead == 0 {
+        DeflateMatchRefillAction::EndBlock
+    } else {
+        DeflateMatchRefillAction::Continue
+    }
+}
+
 fn deflate_rle_refill_action(
     lookahead: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
@@ -3089,13 +3111,10 @@ unsafe extern "C" fn deflate_fast(
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
-            if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                && flush == crate::zlib_h::Z_NO_FLUSH
-            {
-                return need_more;
-            }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
-                break;
+            match deflate_match_refill_action((*s).lookahead, flush) {
+                DeflateMatchRefillAction::Continue => {}
+                DeflateMatchRefillAction::NeedMore => return need_more,
+                DeflateMatchRefillAction::EndBlock => break,
             }
         }
         hash_head = NIL as crate::src::deflate::IPos;
@@ -3327,13 +3346,10 @@ unsafe extern "C" fn deflate_slow(
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
-            if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                && flush == crate::zlib_h::Z_NO_FLUSH
-            {
-                return need_more;
-            }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
-                break;
+            match deflate_match_refill_action((*s).lookahead, flush) {
+                DeflateMatchRefillAction::Continue => {}
+                DeflateMatchRefillAction::NeedMore => return need_more,
+                DeflateMatchRefillAction::EndBlock => break,
             }
         }
         hash_head = NIL as crate::src::deflate::IPos;
@@ -3958,9 +3974,9 @@ mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_flush_rank,
-        deflate_huff_literal_progress, deflate_pending_value, deflate_preflight,
-        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
-        deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
+        deflate_huff_literal_progress, deflate_match_refill_action, deflate_pending_value,
+        deflate_preflight, deflate_prime_bits_valid, deflate_request_is_invalid,
+        deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_refill_action,
         deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
         deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
@@ -3974,7 +3990,8 @@ mod tests {
         read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
         stored_block_available_output, stored_block_can_emit, stored_block_is_last,
         stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
-        symbol_triplet_cursors, zlib_header, DeflatePreflight, DeflateRleRefillAction,
+        symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction, DeflatePreflight,
+        DeflateRleRefillAction,
     };
 
     #[test]
@@ -4017,6 +4034,28 @@ mod tests {
         assert!(!deflate_rle_can_scan_match(min_match.wrapping_sub(1), 1));
         assert!(!deflate_rle_can_scan_match(min_match, 0));
         assert!(deflate_rle_can_scan_match(min_match, 1));
+    }
+
+    #[test]
+    fn deflate_match_refill_action_preserves_flush_and_lookahead_boundaries() {
+        let min_lookahead = crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
+
+        assert_eq!(
+            deflate_match_refill_action(0, crate::zlib_h::Z_NO_FLUSH),
+            DeflateMatchRefillAction::NeedMore
+        );
+        assert_eq!(
+            deflate_match_refill_action(0, crate::zlib_h::Z_FINISH),
+            DeflateMatchRefillAction::EndBlock
+        );
+        assert_eq!(
+            deflate_match_refill_action(min_lookahead.wrapping_sub(1), crate::zlib_h::Z_FINISH),
+            DeflateMatchRefillAction::Continue
+        );
+        assert_eq!(
+            deflate_match_refill_action(min_lookahead, crate::zlib_h::Z_NO_FLUSH),
+            DeflateMatchRefillAction::Continue
+        );
     }
 
     #[test]
