@@ -125,6 +125,39 @@ pub(crate) fn with_callback_state_slot<T, R>(
     let state = unsafe { slot.as_mut().write(value) };
     Some(initialize(strm, state))
 }
+
+/// Keep a callback allocation as the ABI state token while owning its typed
+/// Rust state separately.  The token remains the exact pointer later passed
+/// to the matching `zfree` callback; implementation code addresses the Rust
+/// value only through the pointer-free identity owner.
+pub(crate) fn allocate_callback_owned_state<T, R>(
+    strm: &mut crate::zlib_h::z_stream,
+    owner: &IdentityOwner<T>,
+    value: T,
+    initialize: impl FnOnce(&mut crate::zlib_h::z_stream, &mut T) -> R,
+) -> Option<R> {
+    let allocation = (strm.zalloc?)(
+        strm.opaque,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<T>() as crate::stdlib::uInt,
+    );
+    if allocation.is_null() {
+        return None;
+    }
+    let identity = allocation.addr();
+    if let Err(value) = owner.try_insert(identity, value) {
+        Some(strm.zfree.expect("allocator pair checked"))
+            .expect("non-null function pointer")(strm.opaque, allocation);
+        drop(value);
+        return None;
+    }
+    strm.state = allocation.cast::<crate::src::deflate::internal_state>();
+    let result = owner.with_mut(identity, |state| initialize(strm, state));
+    if strm.state.is_null() {
+        drop(owner.take(identity));
+    }
+    result
+}
 #[no_mangle]
 
 pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; 10] = [
