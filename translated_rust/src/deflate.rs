@@ -2013,6 +2013,37 @@ fn deflate_gzip_xfl(
     }
 }
 
+// Initializing a zlib stream only updates the already-bound stream, deflater,
+// and pending output.  Keep the header calculation and transition
+// reference-based so the raw entry point only supplies those established
+// views.
+fn deflate_start_zlib_stream(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) {
+    let mut header: crate::stdlib::uInt =
+        (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt).wrapping_add(
+            state.w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int,
+        ) << 8 as ::core::ffi::c_int;
+    let level_flags = deflate_zlib_level_flags(state.level, state.strategy);
+    header |= level_flags << 6 as ::core::ffi::c_int;
+    if state.strstart != 0 as crate::stdlib::uInt {
+        header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
+    }
+    header = header.wrapping_add(
+        (31 as crate::stdlib::uInt).wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
+    );
+    let dictionary_adler = if state.strstart != 0 as crate::stdlib::uInt {
+        Some(stream.adler)
+    } else {
+        None
+    };
+    write_zlib_header(state, pending_buf, header, dictionary_adler);
+    stream.adler = crate::src::adler32::adler32_buffer(0 as crate::stdlib::uLong, None);
+    state.status = crate::src::deflate::BUSY_STATE;
+}
+
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -2092,34 +2123,15 @@ pub unsafe extern "C" fn deflate(
         (*s).status = crate::src::deflate::BUSY_STATE;
     }
     if (*s).status == crate::src::deflate::INIT_STATE {
-        let mut header: crate::stdlib::uInt =
-            (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt).wrapping_add(
-                (*s).w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int,
-            ) << 8 as ::core::ffi::c_int;
-        let level_flags = deflate_zlib_level_flags((*s).level, (*s).strategy);
-        header |= level_flags << 6 as ::core::ffi::c_int;
-        if (*s).strstart != 0 as crate::stdlib::uInt {
-            header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
-        }
-        header = header.wrapping_add(
-            (31 as crate::stdlib::uInt)
-                .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
-        );
-        let dictionary_adler = if (*s).strstart != 0 as crate::stdlib::uInt {
-            Some((*strm).adler)
-        } else {
-            None
-        };
         {
             let state = &mut *s;
+            let stream = &mut *strm;
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
             );
-            write_zlib_header(state, pending_buf, header, dictionary_adler);
+            deflate_start_zlib_stream(state, stream, pending_buf);
         }
-        (*strm).adler = crate::src::adler32::adler32_buffer(0 as crate::stdlib::uLong, None);
-        (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
