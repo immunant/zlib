@@ -1139,6 +1139,11 @@ pub fn inflate(
             bytes: input,
             start: strm.next_in.addr(),
         };
+        // The ABI validation above established one caller-owned output span
+        // for this invocation. Keep that span borrowed for the engine so
+        // literal, stored-block, fast-path, history, and checksum handling
+        // can use checked slice access instead of rebuilding raw views.
+        let output = ::core::slice::from_raw_parts_mut(output_start, strm.avail_out as usize);
         put = output_start as *mut ::core::ffi::c_uchar;
         left = strm.avail_out as ::core::ffi::c_uint;
         next = strm.next_in as *mut ::core::ffi::c_uchar;
@@ -1530,9 +1535,14 @@ pub fn inflate(
                                                                                                     if left == 0 as ::core::ffi::c_uint {
                                                                                                         break '_inf_leave;
                                                                                                     }
-                                                                                                    let c2rust_fresh32 = put;
+                                                                                                    let Some(output_index) = produced_output_len(out, left) else {
+                                                                                                        return crate::zlib_h::Z_STREAM_ERROR;
+                                                                                                    };
+                                                                                                    let Some(destination) = output.get_mut(output_index) else {
+                                                                                                        return crate::zlib_h::Z_STREAM_ERROR;
+                                                                                                    };
                                                                                                     put = put.wrapping_add(1);
-                                                                                                    *c2rust_fresh32 = state.length as ::core::ffi::c_uchar;
+                                                                                                    *destination = state.length as ::core::ffi::c_uchar;
                                                                                                     left = left.wrapping_sub(1);
                                                                                                     state.mode = crate::src::inflate::LEN;
                                                                                                     continue '_inf_leave;
@@ -1565,14 +1575,7 @@ pub fn inflate(
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
                                                                                                         if state.wrap & 4 as ::core::ffi::c_int != 0 && out != 0
                                                                                                         {
-                                                                                                            // `produced_len` was checked against the call's original
-                                                                                                            // output availability before forming this one temporary
-                                                                                                            // checksum view. It starts at the validated ABI output
-                                                                                                            // pointer, rather than deriving a new span from `put`.
-                                                                                                            let produced_output = ::core::slice::from_raw_parts(
-                                                                                                                output_start,
-                                                                                                                produced_len,
-                                                                                                            );
+                                                                                                            let produced_output = &output[..produced_len];
                                                                                                             state.check = (if state.flags != 0 {
                                                                                                                 crate::src::crc32::crc32(
                                                                                                                     state.check as crate::stdlib::uLong,
@@ -2054,10 +2057,15 @@ pub fn inflate(
                                                                             ) else {
                                                                                 return crate::zlib_h::Z_STREAM_ERROR;
                                                                             };
-                                                                            let output = ::core::slice::from_raw_parts_mut(
-                                                                                put,
-                                                                                copy as usize,
-                                                                            );
+                                                                            let Some(output_index) = produced_output_len(out, left) else {
+                                                                                return crate::zlib_h::Z_STREAM_ERROR;
+                                                                            };
+                                                                            let Some(output_end) = output_index.checked_add(copy as usize) else {
+                                                                                return crate::zlib_h::Z_STREAM_ERROR;
+                                                                            };
+                                                                            let Some(output) = output.get_mut(output_index..output_end) else {
+                                                                                return crate::zlib_h::Z_STREAM_ERROR;
+                                                                            };
                                                                             copy_literal_block(
                                                                                 stored_input, output,
                                                                             );
@@ -2325,9 +2333,8 @@ pub fn inflate(
                                                 };
                                                 // `input` remains the one checked span for this
                                                 // inflate call. `next` and `have` select its live
-                                                // suffix, while `out` is the original caller output
-                                                // capacity and therefore bounds the fast loop's
-                                                // temporary full-output view.
+                                                // suffix, while `output` is the original caller
+                                                // output span and therefore bounds the fast loop.
                                                 let Some(fast_input) = input.slice_at(
                                                     next.addr(),
                                                     have as usize,
@@ -2335,10 +2342,6 @@ pub fn inflate(
                                                     state.mode = crate::src::inflate::BAD;
                                                     break 'c_2322;
                                                 };
-                                                let fast_output = ::core::slice::from_raw_parts_mut(
-                                                    output_start,
-                                                    out as usize,
-                                                );
                                                 crate::src::inffast::inflate_fast(
                                                     strm,
                                                     state,
@@ -2346,7 +2349,7 @@ pub fn inflate(
                                                     history,
                                                     false,
                                                     fast_input,
-                                                    fast_output,
+                                                    output,
                                                 );
                                                 put = strm.next_out as *mut ::core::ffi::c_uchar;
                                                 left = strm.avail_out as ::core::ffi::c_uint;
@@ -2846,7 +2849,10 @@ pub fn inflate(
                     copy = state.length;
                 }
             } else {
-                from = put.wrapping_offset(-(state.offset as isize));
+                // `state.offset` has already been validated against the
+                // produced output, so this bounded backward cursor move does
+                // not need raw-pointer offset arithmetic.
+                from = put.wrapping_sub(state.offset as usize);
                 copy = state.length;
             }
             if copy > left {
@@ -2880,13 +2886,9 @@ pub fn inflate(
         };
         let produced = produced_len as ::core::ffi::c_uint;
         // The output cursor above now marks the end of this call's produced
-        // bytes. Borrow that one range once for both history and checksum
-        // updates, instead of rebuilding equivalent raw slices below.
-        let produced_output = if produced == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(output_start, produced_len)
-        };
+        // bytes. Reuse the invocation's checked output span for history and
+        // checksum updates.
+        let produced_output = &output[..produced_len];
         if state.wsize != 0
             || produced != 0
                 && (state.mode as ::core::ffi::c_uint)
