@@ -46,6 +46,44 @@ pub(crate) const fn allocator_pair_is_fully_default(provenance: &AllocatorProven
     matches!(provenance, AllocatorProvenance::DefaultPair)
 }
 
+/// Own values behind stable, pointer-free identity keys.
+///
+/// ABI code may retain its allocator token in a public pointer field while
+/// implementation state stays here as ordinary Rust ownership.  The existing
+/// default-allocation registry uses this now; stream state can adopt the same
+/// owner only when every ABI state consumer has stopped treating that token as
+/// a typed allocation.
+pub(crate) struct IdentityOwner<T> {
+    values: Mutex<HashMap<usize, T>>,
+}
+
+impl<T> IdentityOwner<T> {
+    pub(crate) fn new() -> Self {
+        Self {
+            values: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub(crate) fn try_insert(&self, identity: usize, value: T) -> Result<(), T> {
+        let mut values = self
+            .values
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if values.contains_key(&identity) || values.try_reserve(1).is_err() {
+            return Err(value);
+        }
+        values.insert(identity, value);
+        Ok(())
+    }
+
+    pub(crate) fn take(&self, identity: usize) -> Option<T> {
+        self.values
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&identity)
+    }
+}
+
 /// Allocate, initialize, and expose one opaque stream-state value.
 ///
 /// A zlib allocator callback returns uninitialized foreign storage.  Keep the
@@ -177,9 +215,9 @@ pub fn zError(mut err: ::core::ffi::c_int) -> &'static AtomicPtr<::core::ffi::c_
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     zError(err).load(Ordering::Relaxed)
 }
-fn zallocations() -> &'static Mutex<HashMap<usize, ZAllocation>> {
-    static ALLOCATIONS: OnceLock<Mutex<HashMap<usize, ZAllocation>>> = OnceLock::new();
-    ALLOCATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+fn zallocations() -> &'static IdentityOwner<ZAllocation> {
+    static ALLOCATIONS: OnceLock<IdentityOwner<ZAllocation>> = OnceLock::new();
+    ALLOCATIONS.get_or_init(IdentityOwner::new)
 }
 
 /// Install zlib's default allocator pair when a caller did not provide one.
@@ -222,12 +260,6 @@ pub extern "C" fn zcalloc(
     else {
         return ::core::ptr::null_mut();
     };
-    let mut allocations = zallocations()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if allocations.try_reserve(1).is_err() {
-        return ::core::ptr::null_mut();
-    }
     let mut allocation = if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 {
         let mut allocation = Vec::new();
         if allocation.try_reserve_exact(units).is_err() {
@@ -247,7 +279,9 @@ pub extern "C" fn zcalloc(
         ZAllocation::Zeroed(bytes) => bytes.as_mut_ptr().cast::<::core::ffi::c_void>(),
     };
     if len != 0 {
-        allocations.insert(pointer.addr(), allocation);
+        if zallocations().try_insert(pointer.addr(), allocation).is_err() {
+            return ::core::ptr::null_mut();
+        }
     }
     pointer
 }
@@ -264,10 +298,7 @@ pub extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib:
     if ptr.is_null() {
         return;
     }
-    let allocation = zallocations()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(&ptr.addr());
+    let allocation = zallocations().take(ptr.addr());
     drop(allocation);
 }
 #[export_name = "zcfree"]
