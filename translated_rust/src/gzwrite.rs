@@ -671,11 +671,16 @@ pub unsafe fn gzclose_w(
             state.in_0.clear();
         }
         crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-        let close = match state.fd.take() {
-            Some(fd) => crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)),
-            None => -1,
+        let close_failed = match state.fd.take() {
+            // `OwnedFd` closes exactly once when dropped.  This state owns the
+            // descriptor, so no raw descriptor transfer is required here.
+            Some(fd) => {
+                drop(fd);
+                false
+            }
+            None => true,
         };
-        if close == -1 as ::core::ffi::c_int {
+        if close_failed {
             ret = crate::zlib_h::Z_ERRNO;
         }
         ret
