@@ -3915,6 +3915,28 @@ mod tests {
     }
 
     #[test]
+    fn gz_zero_drive_rejects_an_undersized_owned_buffer_before_compression() {
+        let mut buffer = [0xff; 4];
+        let mut requests = 0;
+
+        let result = gz_zero_drive(&mut buffer, 5, 10, 6, 0, |_| {
+            requests += 1;
+            Ok(0)
+        });
+
+        assert_eq!(
+            result,
+            GzZeroDriveOutcome {
+                pos: 10,
+                skip: 6,
+                status: GzZeroDriveStatus::InvalidBuffer,
+            }
+        );
+        assert_eq!(requests, 0);
+        assert_eq!(buffer, [0xff; 4]);
+    }
+
+    #[test]
     fn gz_zero_drive_retries_partial_compression_without_reinitializing_buffer() {
         let mut buffer = [0xff; 4];
         let mut chunk_lengths = Vec::new();

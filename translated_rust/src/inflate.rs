@@ -976,6 +976,22 @@ impl<'a> WindowStorage<'a> {
         self.history.copy_dictionary_to(self.bytes, dictionary)
     }
 
+    /// Copy exactly the initialized prefix into newly allocated window
+    /// storage.
+    ///
+    /// `inflateCopy` preserves C's initialization boundary: when a history
+    /// has not filled its window, bytes after `whave` are deliberately left
+    /// untouched in the destination allocation.  Keeping that rule on the
+    /// validated view means the allocation boundary only has to supply the
+    /// two bounded slices; it does not need to reproduce the cursor logic.
+    fn copy_initialized_to(&self, destination: &mut [crate::stdlib::Bytef]) -> Option<()> {
+        let initialized = self.history.have as usize;
+        let source = self.bytes.get(..initialized)?;
+        let destination = destination.get_mut(..initialized)?;
+        destination.copy_from_slice(source);
+        Some(())
+    }
+
     fn match_bytes(
         &self,
         index: ::core::ffi::c_uint,
@@ -4142,11 +4158,15 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     copy.strm = dest;
     copy.next = state.next;
     if let Some(initialized_len) = window_plan.initialized_len() {
-        crate::stdlib::memcpy(
-            window as *mut ::core::ffi::c_void,
-            state.window as *const ::core::ffi::c_void,
-            initialized_len as crate::__stddef_size_t_h::size_t,
-        );
+        // The clone plan has already validated the source cursor and the
+        // destination allocation size.  Form bounded views at this FFI
+        // boundary, then let the safe window view preserve the initialized
+        // prefix rule (including the zero-length, not-yet-used window case).
+        let source_window = core::slice::from_raw_parts(state.window, state.wsize as usize);
+        let destination_window = core::slice::from_raw_parts_mut(window, initialized_len);
+        WindowStorage::new(source_window, state.wnext, state.whave)
+            .and_then(|storage| storage.copy_initialized_to(destination_window))
+            .expect("window clone plan was validated");
     }
     copy.window = window;
     copy.window_ownership = if window_plan.initialized_len().is_none() {
@@ -6691,6 +6711,23 @@ mod tests {
 
         assert_eq!(storage.copy_dictionary_to(&mut dictionary), Some(()));
         assert_eq!(dictionary, *b"defghabc");
+    }
+
+    #[test]
+    fn window_storage_clone_copy_preserves_the_initialized_prefix_boundary() {
+        let partial_window = *b"abc_____";
+        let partial = super::WindowStorage::new(&partial_window, 3, 3).unwrap();
+        let mut partial_clone = *b"preserve";
+
+        assert_eq!(partial.copy_initialized_to(&mut partial_clone), Some(()));
+        assert_eq!(partial_clone, *b"abcserve");
+
+        let wrapped_window = *b"abcdefgh";
+        let wrapped = super::WindowStorage::new(&wrapped_window, 3, 8).unwrap();
+        let mut wrapped_clone = *b"________";
+
+        assert_eq!(wrapped.copy_initialized_to(&mut wrapped_clone), Some(()));
+        assert_eq!(wrapped_clone, wrapped_window);
     }
 
     #[test]

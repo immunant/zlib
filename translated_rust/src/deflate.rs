@@ -380,6 +380,74 @@ pub(crate) struct DeflateWorkingSet<'a> {
     prev: &'a mut [crate::src::deflate::Posf],
 }
 
+/// The subset of a deflate call's callback-backed storage needed while a
+/// strategy emits symbols.  It deliberately excludes the hash chains: a
+/// Huffman-only pass neither reads nor updates them, so borrowing them would
+/// widen the FFI boundary for no algorithmic benefit.
+pub(crate) struct DeflateSymbolWorkingSet<'a> {
+    pending: PendingStorageView<'a>,
+    window: &'a [crate::stdlib::Bytef],
+}
+
+impl<'a> DeflateSymbolWorkingSet<'a> {
+    /// Bind the pending/symbol allocation and the bounded window used by one
+    /// symbol-emission step.  Metadata is checked before either safe view is
+    /// exposed to the strategy core.
+    pub(crate) fn new(
+        state: &internal_state,
+        pending: &'a mut [crate::stdlib::Bytef],
+        window: &'a [crate::stdlib::Bytef],
+    ) -> Option<Self> {
+        let layout = pending_storage_layout_for_state(state)?;
+        let window_len = usize::try_from(state.window_size).ok()?;
+
+        Some(Self {
+            pending: PendingStorageView::new(pending, layout)?,
+            window: window.get(..window_len)?,
+        })
+    }
+
+    pub(crate) fn pending(&mut self) -> &mut PendingStorageView<'a> {
+        &mut self.pending
+    }
+
+    pub(crate) fn literal_at(&self, position: crate::stdlib::uInt) -> Option<crate::zutil_h::uch> {
+        self.window.get(position as usize).copied()
+    }
+
+    /// Return the buffered payload for a block only when its state cursor and
+    /// length fit within the bounded window.  A negative block start denotes
+    /// that no buffered payload exists, just as it does in the C state.
+    pub(crate) fn block_data(
+        &self,
+        block_start: ::core::ffi::c_long,
+        stored_len: crate::zutil_h::ulg,
+    ) -> Option<&[crate::stdlib::Bytef]> {
+        let start = usize::try_from(block_start).ok()?;
+        let len = usize::try_from(stored_len).ok()?;
+        let end = start.checked_add(len)?;
+        self.window.get(start..end)
+    }
+
+    /// Split the disjoint pending and window borrows needed by the tree core.
+    /// This preserves the no-payload meaning of a negative block start while
+    /// avoiding a second alias-prone view of either callback allocation.
+    pub(crate) fn pending_and_block_data(
+        &mut self,
+        block_start: ::core::ffi::c_long,
+        stored_len: crate::zutil_h::ulg,
+    ) -> Option<(&mut PendingStorageView<'a>, Option<&[crate::stdlib::Bytef]>)> {
+        let Self { pending, window } = self;
+        if block_start < 0 {
+            return Some((pending, None));
+        }
+        let start = usize::try_from(block_start).ok()?;
+        let len = usize::try_from(stored_len).ok()?;
+        let end = start.checked_add(len)?;
+        Some((pending, Some(window.get(start..end)?)))
+    }
+}
+
 impl<'a> DeflateWorkingSet<'a> {
     /// Build bounded views for one established deflate state.  Reject stale
     /// scalar metadata before exposing any storage to the safe core.
@@ -5714,17 +5782,14 @@ macro_rules! deflate_huff_at_ffi_boundary {
                 }
                 let state = &mut *s;
                 state.match_length = 0 as crate::stdlib::uInt;
-                // The Huffman-only path reads both the literal and, on a full symbol
-                // buffer, the block payload from this same callback-backed window.
-                // Establish the short-lived view once instead of doing a separate raw
-                // literal dereference before the checked range reads below.
-                if state.window.is_null() {
+                // The Huffman-only path reads both the literal and, on a full
+                // symbol buffer, the block payload from its callback-backed
+                // window.  Keep that window and the shared pending/symbol
+                // allocation in one bounded safe view for this iteration.
+                if state.window.is_null() || state.pending_buf.is_none() {
                     break 'huff need_more;
                 }
                 let window = core::slice::from_raw_parts(state.window, state.window_size as usize);
-                let Some(&literal) = window.get(state.strstart as usize) else {
-                    break 'huff need_more;
-                };
                 let layout = pending_storage_layout_for_state(state)
                     .expect("validated pending storage layout");
                 let pending = &mut *core::ptr::slice_from_raw_parts_mut(
@@ -5734,9 +5799,13 @@ macro_rules! deflate_huff_at_ffi_boundary {
                         .as_ptr(),
                     layout.total_len,
                 );
-                let mut storage = PendingStorageView::new(pending, layout)
-                    .expect("pending storage layout matches its allocation");
-                if !deflate_tally_literal(&mut storage, state, literal) {
+                let Some(mut working) = DeflateSymbolWorkingSet::new(state, pending, window) else {
+                    break 'huff need_more;
+                };
+                let Some(literal) = working.literal_at(state.strstart) else {
+                    break 'huff need_more;
+                };
+                if !deflate_tally_literal(working.pending(), state, literal) {
                     break 'huff need_more;
                 }
                 bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
@@ -5744,28 +5813,20 @@ macro_rules! deflate_huff_at_ffi_boundary {
                     deflate_literal_state_after_emit(state.lookahead, state.strstart);
                 if bflush != 0 {
                     let stored_len = deflate_block_len(state.strstart, state.block_start);
-                    let stored_data = if state.block_start >= 0 as ::core::ffi::c_long {
-                        let start = state.block_start as ::core::ffi::c_uint as usize;
-                        let Some(end) = start.checked_add(stored_len as usize) else {
-                            break 'huff need_more;
-                        };
-                        let Some(data) = window.get(start..end) else {
-                            break 'huff need_more;
-                        };
-                        Some(data)
-                    } else {
-                        None
+                    let Some((storage, stored_data)) =
+                        working.pending_and_block_data(state.block_start, stored_len)
+                    else {
+                        break 'huff need_more;
                     };
                     let stream = &mut *state.strm;
                     crate::src::trees::tr_flush_block_core(
-                        &mut storage,
+                        storage,
                         state,
                         Some(stream),
                         stored_data,
                         stored_len,
                         0 as ::core::ffi::c_int,
                     );
-                    drop(storage);
                     state.block_start = state.strstart as ::core::ffi::c_long;
                     flush_pending(state.strm);
                     if let Some(state) =
@@ -5878,9 +5939,10 @@ mod tests {
         symbol_buffer_is_full, symbol_triplet_cursors, take_pending_header_len_override,
         with_pending_storage, zlib_header, DeflateBoundGzipHeader, DeflateBoundState,
         DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, DeflateWorkingSet,
-        FlushPendingResult, LongestMatchResult, PendingDrainState, PendingStorageReadView,
-        PendingStorageView, ReadBufChecksum, ReadBufResult, StoredHistoryState,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, DeflateSymbolWorkingSet,
+        DeflateWorkingSet, FlushPendingResult, LongestMatchResult, PendingDrainState,
+        PendingStorageReadView, PendingStorageView, ReadBufChecksum, ReadBufResult,
+        StoredHistoryState,
     };
 
     #[test]
@@ -7487,6 +7549,34 @@ mod tests {
         assert_eq!(window, [0xb2; 8]);
         assert_eq!(head, [0xc3; 8]);
         assert_eq!(prev, [0xd4; 4]);
+    }
+
+    #[test]
+    fn deflate_symbol_working_set_binds_only_pending_and_window_storage() {
+        let mut state = super::internal_state::newly_allocated();
+        let layout = pending_storage_layout(4);
+        state.lit_bufsize = 4;
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        state.sym_buf_offset = layout.symbol_offset;
+        state.sym_end = layout.symbol_flush_threshold;
+        state.window_size = 8;
+
+        let mut pending = [0; 16];
+        let window = [0, 1, 2, 3, 4, 5, 6, 7];
+        let mut working = DeflateSymbolWorkingSet::new(&state, &mut pending, &window).unwrap();
+
+        assert_eq!(working.literal_at(3), Some(3));
+        assert_eq!(working.block_data(2, 3), Some(&[2, 3, 4][..]));
+        assert_eq!(working.block_data(-1, 1), None);
+        assert_eq!(working.block_data(7, 2), None);
+
+        let (storage, block) = working.pending_and_block_data(4, 2).unwrap();
+        assert_eq!(block, Some(&[4, 5][..]));
+        assert!(storage.append_pending(&mut state.pending, &[0xa5]));
+        drop(working);
+
+        assert_eq!(pending[0], 0xa5);
+        assert_eq!(state.pending, 1);
     }
 
     #[test]
