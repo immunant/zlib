@@ -1462,40 +1462,49 @@ fn gzdopen(
     fd: ::core::ffi::c_int,
     mode: Option<&::core::ffi::CStr>,
 ) -> crate::zlib_h::gzFile {
-    let mut path: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut gz: crate::zlib_h::gzFile = ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     if fd == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    // SAFETY: this allocation is used only for the transient descriptor
-    // label, which is initialized before being bound as a C string and freed
-    // after `gz_open` has copied it.
-    unsafe {
-        path = crate::stdlib::malloc(
-            (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-                (3 as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()),
-            ),
-        ) as *mut ::core::ffi::c_char;
-        if path.is_null() {
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
-        crate::stdlib::snprintf(
-            path,
-            (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-                (3 as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()),
-            ),
-            b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
-            fd,
-        );
-        gz = match mode {
-            Some(mode) => gz_open(::core::ffi::CStr::from_ptr(path), fd, mode),
-            None => ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>(),
-        };
-        crate::stdlib::free(path as *mut ::core::ffi::c_void);
-        gz
+    let mut path = [0_u8; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()];
+    let path = gz_fd_label(fd, &mut path);
+    match mode {
+        Some(mode) => gz_open(path, fd, mode),
+        None => ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>(),
     }
+}
+
+// `gzdopen()` needs only a transient copy of the descriptor label while
+// `gz_open()` copies the path into its owned state.  Construct the same
+// "<fd:%d>" C string on the stack so that this coordination remains safe and
+// does not need a temporary C allocation or raw C-string binding.
+fn gz_fd_label<'a>(fd: ::core::ffi::c_int, path: &'a mut [u8]) -> &'a ::core::ffi::CStr {
+    let mut value = fd.unsigned_abs();
+    let mut digits = [0_u8; 10];
+    let mut count = 0;
+    loop {
+        digits[count] = b'0' + (value % 10) as u8;
+        count += 1;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+
+    let mut used = 0;
+    path[used..used + 4].copy_from_slice(b"<fd:");
+    used += 4;
+    if fd < 0 {
+        path[used] = b'-';
+        used += 1;
+    }
+    for digit in digits[..count].iter().rev() {
+        path[used] = *digit;
+        used += 1;
+    }
+    path[used] = b'>';
+    path[used + 1] = 0;
+    ::core::ffi::CStr::from_bytes_with_nul(&path[..used + 2])
+        .expect("descriptor label is always a valid C string")
 }
 #[export_name = "gzdopen"]
 
