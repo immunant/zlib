@@ -947,6 +947,11 @@ pub fn inflate(
                                                                                                     break 'c_2327;
                                                                                                 }
                                                                                                 16189 => {
+                                                                                                    // DICTID only updates the validated inflate
+                                                                                                    // state and the stream checksum.  Borrow the
+                                                                                                    // state once for this bounded phase instead of
+                                                                                                    // repeatedly dereferencing its raw handle.
+                                                                                                    let state = &mut *state;
                                                                                                     while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                                     {
                                                                                                         if have == 0 as ::core::ffi::c_uint {
@@ -961,7 +966,7 @@ pub fn inflate(
                                                                                                             );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
-                                                                                                    (*state).check = (hold >> 24 as ::core::ffi::c_int
+                                                                                                    state.check = (hold >> 24 as ::core::ffi::c_int
                                                                                                         & 0xff as ::core::ffi::c_ulong)
                                                                                                         .wrapping_add(
                                                                                                             hold >> 8 as ::core::ffi::c_int
@@ -975,10 +980,10 @@ pub fn inflate(
                                                                                                             (hold & 0xff as ::core::ffi::c_ulong)
                                                                                                                 << 24 as ::core::ffi::c_int,
                                                                                                         );
-                                                                                                    (*strm).adler = (*state).check as crate::stdlib::uLong;
+                                                                                                    (*strm).adler = state.check as crate::stdlib::uLong;
                                                                                                     hold = 0 as ::core::ffi::c_ulong;
                                                                                                     bits = 0 as ::core::ffi::c_uint;
-                                                                                                    (*state).mode = crate::src::inflate::DICT;
+                                                                                                    state.mode = crate::src::inflate::DICT;
                                                                                                     break 'c_2336;
                                                                                                 }
                                                                                                 16190 => {
@@ -991,6 +996,10 @@ pub fn inflate(
                                                                                                     break 'c_2340;
                                                                                                 }
                                                                                                 16193 => {
+                                                                                                    // Stored-block validation has no aliasing output
+                                                                                                    // work, so keep its state updates on the
+                                                                                                    // validated reference.
+                                                                                                    let state = &mut *state;
                                                                                                     hold >>= bits & 7 as ::core::ffi::c_uint;
                                                                                                     bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
                                                                                                     while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -1013,14 +1022,14 @@ pub fn inflate(
                                                                                                     {
                                                                                                         (*strm).msg = INFLATE_MESSAGES[4].as_ptr()
                                                                                                             as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                        (*state).mode = crate::src::inflate::BAD;
+                                                                                                        state.mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
-                                                                                                        (*state).length = hold as ::core::ffi::c_uint
+                                                                                                        state.length = hold as ::core::ffi::c_uint
                                                                                                             & 0xffff as ::core::ffi::c_uint;
                                                                                                         hold = 0 as ::core::ffi::c_ulong;
                                                                                                         bits = 0 as ::core::ffi::c_uint;
-                                                                                                        (*state).mode = crate::src::inflate::COPY_;
+                                                                                                        state.mode = crate::src::inflate::COPY_;
                                                                                                         if flush == crate::zlib_h::Z_TREES {
                                                                                                             break '_inf_leave;
                                                                                                         } else {
