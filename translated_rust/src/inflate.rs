@@ -602,54 +602,58 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     };
     inflate_prime_from_state(allocators_present, state, bits, value)
 }
-unsafe fn updatewindow(
-    state: &mut crate::src::inflate::inflate_state,
+fn updatewindow(
+    window: &mut Option<Vec<crate::stdlib::Bytef>>,
+    wbits: crate::stdlib::uInt,
+    wsize: &mut crate::stdlib::uInt,
+    wnext: &mut crate::stdlib::uInt,
+    whave: &mut crate::stdlib::uInt,
     end: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    if state.window.is_none() {
-        let wsize = 1usize << state.wbits;
-        let mut window = Vec::new();
-        if window.try_reserve_exact(wsize).is_err() {
+    if window.is_none() {
+        let window_size = 1usize << wbits;
+        let mut buffer = Vec::new();
+        if buffer.try_reserve_exact(window_size).is_err() {
             return 1 as ::core::ffi::c_int;
         }
-        window.resize(wsize, 0);
-        state.window = Some(window);
+        buffer.resize(window_size, 0);
+        *window = Some(buffer);
     }
-    if state.wsize == 0 as ::core::ffi::c_uint {
-        state.wsize = (1 as ::core::ffi::c_uint) << state.wbits;
-        state.wnext = 0 as ::core::ffi::c_uint;
-        state.whave = 0 as ::core::ffi::c_uint;
+    if *wsize == 0 as ::core::ffi::c_uint {
+        *wsize = (1 as ::core::ffi::c_uint) << wbits;
+        *wnext = 0 as ::core::ffi::c_uint;
+        *whave = 0 as ::core::ffi::c_uint;
     }
-    let wsize = state.wsize as usize;
-    let wnext = state.wnext as usize;
-    if wnext > wsize {
+    let window_size = *wsize as usize;
+    let window_next = *wnext as usize;
+    if window_next > window_size {
         return 1 as ::core::ffi::c_int;
     }
-    let Some(window) = state.window.as_deref_mut() else {
+    let Some(window) = window.as_deref_mut() else {
         return 1 as ::core::ffi::c_int;
     };
-    if window.len() != wsize {
+    if window.len() != window_size {
         return 1 as ::core::ffi::c_int;
     }
-    if end.len() >= wsize {
-        window.copy_from_slice(&end[end.len() - wsize..]);
-        state.wnext = 0 as ::core::ffi::c_uint;
-        state.whave = state.wsize;
+    if end.len() >= window_size {
+        window.copy_from_slice(&end[end.len() - window_size..]);
+        *wnext = 0 as ::core::ffi::c_uint;
+        *whave = *wsize;
     } else {
-        let dist = (wsize - wnext).min(end.len());
-        window[wnext..wnext + dist].copy_from_slice(&end[..dist]);
+        let dist = (window_size - window_next).min(end.len());
+        window[window_next..window_next + dist].copy_from_slice(&end[..dist]);
         let copy = end.len() - dist;
         if copy != 0 {
             window[..copy].copy_from_slice(&end[dist..]);
-            state.wnext = copy as ::core::ffi::c_uint;
-            state.whave = state.wsize;
+            *wnext = copy as ::core::ffi::c_uint;
+            *whave = *wsize;
         } else {
-            state.wnext = state.wnext.wrapping_add(dist as ::core::ffi::c_uint);
-            if state.wnext == state.wsize {
-                state.wnext = 0 as ::core::ffi::c_uint;
+            *wnext = (*wnext).wrapping_add(dist as ::core::ffi::c_uint);
+            if *wnext == *wsize {
+                *wnext = 0 as ::core::ffi::c_uint;
             }
-            if state.whave < state.wsize {
-                state.whave = state.whave.wrapping_add(dist as ::core::ffi::c_uint);
+            if *whave < *wsize {
+                *whave = (*whave).wrapping_add(dist as ::core::ffi::c_uint);
             }
         }
     }
@@ -2410,7 +2414,15 @@ pub unsafe fn inflate(
                 || flush != crate::zlib_h::Z_FINISH)
     {
         let copied = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint) as usize;
-        if updatewindow(&mut *state, &output[put - copied..put]) != 0 {
+        let state = &mut *state;
+        let (window, wbits, wsize, wnext, whave) = (
+            &mut state.window,
+            state.wbits,
+            &mut state.wsize,
+            &mut state.wnext,
+            &mut state.whave,
+        );
+        if updatewindow(window, wbits, wsize, wnext, whave, &output[put - copied..put]) != 0 {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2627,7 +2639,14 @@ pub unsafe fn inflateSetDictionary(
             return crate::zlib_h::Z_DATA_ERROR;
         }
     }
-    if updatewindow(state, dictionary) != 0 {
+    if updatewindow(
+        &mut state.window,
+        state.wbits,
+        &mut state.wsize,
+        &mut state.wnext,
+        &mut state.whave,
+        dictionary,
+    ) != 0 {
         state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
