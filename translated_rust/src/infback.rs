@@ -324,7 +324,12 @@ where
                             state.mode = crate::src::inflate::STORED;
                         }
                         1 => {
-                            unsafe { crate::src::inftrees::inflate_fixed(state) };
+                            crate::src::inftrees::inflate_fixed(
+                                &mut state.lencode,
+                                &mut state.lenbits,
+                                &mut state.distcode,
+                                &mut state.distbits,
+                            );
                             state.mode = crate::src::inflate::LEN;
                         }
                         2 => {
