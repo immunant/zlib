@@ -996,45 +996,51 @@ pub fn gzdirect(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     gzdirect((file as crate::gzguts_h::gz_statep).as_mut())
 }
-pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if (*state).size != 0 {
-        crate::src::inflate::inflateEnd(
-            &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
+fn gzclose_r_cleanup(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    if state.size != 0 {
         let output = ::core::mem::replace(
-            &mut (*state).out,
+            &mut state.out,
             ::core::mem::ManuallyDrop::new(Vec::new()),
         );
         drop(::core::mem::ManuallyDrop::into_inner(output));
         let input = ::core::mem::replace(
-            &mut (*state).in_0,
+            &mut state.in_0,
             ::core::mem::ManuallyDrop::new(Vec::new()),
         );
         drop(::core::mem::ManuallyDrop::into_inner(input));
     }
-    err = if (*state).err == crate::zlib_h::Z_BUF_ERROR {
+    let err = if state.err == crate::zlib_h::Z_BUF_ERROR {
         crate::zlib_h::Z_BUF_ERROR
     } else {
         crate::zlib_h::Z_OK
     };
-    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
     let path = ::core::mem::replace(
-        &mut (*state).path,
+        &mut state.path,
         ::core::mem::ManuallyDrop::new(None),
     );
     drop(::core::mem::ManuallyDrop::into_inner(path));
-    ret = crate::stdlib::close((*state).fd);
+    err
+}
+pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = file as crate::gzguts_h::gz_statep;
+    let (fd, err) = {
+        let state = &mut *state;
+        if state.mode != crate::gzguts_h::GZ_READ {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        if state.size != 0 {
+            crate::src::inflate::inflateEnd(
+                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+            );
+        }
+        let err = gzclose_r_cleanup(state);
+        (state.fd, err)
+    };
+    let ret = crate::stdlib::close(fd);
     drop(Box::from_raw(::core::ptr::slice_from_raw_parts_mut(state, 1)));
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO

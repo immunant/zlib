@@ -701,47 +701,54 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     };
     gzsetparams(state, level, strategy)
 }
-pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if (*state).skip != 0 && gz_zero(&mut *state) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
-    if gz_comp(&mut *state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
-    if (*state).size != 0 {
-        if (*state).direct == 0 {
-            crate::src::deflate::deflateEnd(
-                &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
+fn gzclose_w_cleanup(state: &mut crate::gzguts_h::gz_state) {
+    if state.size != 0 {
+        if state.direct == 0 {
             let output = ::core::mem::replace(
-                &mut (*state).out,
+                &mut state.out,
                 ::core::mem::ManuallyDrop::new(Vec::new()),
             );
             drop(::core::mem::ManuallyDrop::into_inner(output));
         }
         let input = ::core::mem::replace(
-            &mut (*state).in_0,
+            &mut state.in_0,
             ::core::mem::ManuallyDrop::new(Vec::new()),
         );
         drop(::core::mem::ManuallyDrop::into_inner(input));
     }
-    crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
     let path = ::core::mem::replace(
-        &mut (*state).path,
+        &mut state.path,
         ::core::mem::ManuallyDrop::new(None),
     );
     drop(::core::mem::ManuallyDrop::into_inner(path));
-    if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
+}
+pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = file as crate::gzguts_h::gz_statep;
+    let fd = {
+        let state = &mut *state;
+        if state.mode != crate::gzguts_h::GZ_WRITE {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+            ret = state.err;
+        }
+        if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
+            ret = state.err;
+        }
+        if state.size != 0 && state.direct == 0 {
+            crate::src::deflate::deflateEnd(
+                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+            );
+        }
+        gzclose_w_cleanup(state);
+        state.fd
+    };
+    if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
     drop(Box::from_raw(::core::ptr::slice_from_raw_parts_mut(state, 1)));
