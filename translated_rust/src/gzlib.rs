@@ -78,6 +78,50 @@ pub fn gz_syscall_chunk(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if len > max { max } else { len }
 }
 
+// Classify a POSIX I/O result without coupling the decision to the raw
+// descriptor and buffer adapters.  A non-negative result is a byte count;
+// a negative result preserves whether a non-blocking operation stalled.
+pub(crate) fn gz_syscall_result(
+    result: ::core::ffi::c_int,
+    errno: ::core::ffi::c_int,
+) -> Result<::core::ffi::c_uint, bool> {
+    if result < 0 {
+        Err(errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK)
+    } else {
+        Ok(result as ::core::ffi::c_uint)
+    }
+}
+
+// gz_comp writes a completed output buffer, or writes while flushing except
+// before Z_FINISH reaches the end of the stream.
+pub(crate) fn gz_comp_needs_write(
+    avail_out: ::core::ffi::c_uint,
+    flush: ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+) -> bool {
+    avail_out == 0
+        || (flush != crate::zlib_h::Z_NO_FLUSH
+            && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END))
+}
+
+pub(crate) fn gz_comp_should_reset(flush: ::core::ffi::c_int) -> bool {
+    flush == crate::zlib_h::Z_FINISH
+}
+
+// On a non-blocking write failure, gzip reports only the input consumed so
+// far.  Other write failures report no input consumed.
+pub(crate) fn gz_write_result(
+    requested: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+    stalled: bool,
+) -> crate::stdlib::z_size_t {
+    if stalled {
+        requested.wrapping_sub(remaining)
+    } else {
+        0
+    }
+}
+
 // Choose the amount a bulk gzip operation may handle in one stream request.
 // `available` is only a bound when data is already buffered.
 pub(crate) fn gz_buffered_chunk(

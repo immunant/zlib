@@ -52,8 +52,8 @@ fn gz_load_result(
     have: ::core::ffi::c_uint,
     errno: ::core::ffi::c_int,
 ) -> Result<(), ::core::ffi::c_int> {
-    if ret < 0 {
-        if errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK {
+    if let Err(again) = crate::src::gzlib::gz_syscall_result(ret, errno) {
+        if again {
             state.again = 1;
             if have != 0 {
                 return Ok(());

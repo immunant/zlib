@@ -126,16 +126,15 @@ unsafe extern "C" fn gz_comp(
                 (*strm).next_in as *const ::core::ffi::c_void,
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
-            if writ < 0 as ::core::ffi::c_int {
-                if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                    || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                {
+            let errno = *crate::stdlib::__errno_location();
+            if let Err(again) = crate::src::gzlib::gz_syscall_result(writ, errno) {
+                if again {
                     (*state).again = 1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                    crate::stdlib::strerror(errno),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -153,10 +152,7 @@ unsafe extern "C" fn gz_comp(
     }
     ret = crate::zlib_h::Z_OK;
     loop {
-        if (*strm).avail_out == 0 as crate::stdlib::uInt
-            || flush != crate::zlib_h::Z_NO_FLUSH
-                && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
-        {
+        if crate::src::gzlib::gz_comp_needs_write((*strm).avail_out, flush, ret) {
             while (*strm).next_out > (*state).x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 (*state).again = 0 as ::core::ffi::c_int;
@@ -168,16 +164,15 @@ unsafe extern "C" fn gz_comp(
                     (*state).x.next as *const ::core::ffi::c_void,
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
-                if writ < 0 as ::core::ffi::c_int {
-                    if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                        || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                    {
+                let errno = *crate::stdlib::__errno_location();
+                if let Err(again) = crate::src::gzlib::gz_syscall_result(writ, errno) {
+                    if again {
                         (*state).again = 1 as ::core::ffi::c_int;
                     }
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                        crate::stdlib::strerror(errno),
                     );
                     return -1 as ::core::ffi::c_int;
                 }
@@ -204,7 +199,7 @@ unsafe extern "C" fn gz_comp(
             break;
         }
     }
-    if flush == crate::zlib_h::Z_FINISH {
+    if crate::src::gzlib::gz_comp_should_reset(flush) {
         (*state).reset = 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -291,11 +286,7 @@ unsafe extern "C" fn gz_write(
                 break;
             }
             if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return crate::src::gzlib::gz_write_result(put, len, (*state).again != 0);
             }
         }
     } else {
@@ -313,11 +304,7 @@ unsafe extern "C" fn gz_write(
             crate::src::gzlib::gz_advance_pos(state, n);
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return crate::src::gzlib::gz_write_result(put, len, (*state).again != 0);
             }
             if len == 0 {
                 break;
