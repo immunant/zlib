@@ -3214,14 +3214,21 @@ fn build_inflate_table(
             val: 0,
         }
     }; crate::src::inftrees::ENOUGH_LENS as usize];
-    let table_capacity = match type_0 {
-        crate::src::inftrees::CODES => 128,
-        crate::src::inftrees::LENS => crate::src::inftrees::ENOUGH_LENS as usize,
-        crate::src::inftrees::DISTS => crate::src::inftrees::ENOUGH_DISTS as usize,
-        _ => return (1, 0, built),
+    let table_capacity = inflate_table_capacity(type_0);
+    let Some(table_capacity) = table_capacity else {
+        return (1, 0, built);
     };
     let (status, used) = inflate_table(type_0, lens, &mut built[..table_capacity], bits, work);
     (status, used, built)
+}
+
+fn inflate_table_capacity(type_0: crate::src::inftrees::codetype) -> Option<usize> {
+    Some(match type_0 {
+        crate::src::inftrees::CODES => 128,
+        crate::src::inftrees::LENS => crate::src::inftrees::ENOUGH_LENS as usize,
+        crate::src::inftrees::DISTS => crate::src::inftrees::ENOUGH_DISTS as usize,
+        _ => return None,
+    })
 }
 
 #[export_name = "inflate_table"]
@@ -3238,11 +3245,18 @@ pub unsafe extern "C" fn inflate_table_ffi(
     let work = unsafe { ::core::slice::from_raw_parts_mut(work, codes as usize) };
     let table_start = unsafe { *table };
     let bits = unsafe { &mut *bits };
+    let Some(table_capacity) = inflate_table_capacity(type_0) else {
+        return 1;
+    };
     let (status, used, built) = build_inflate_table(type_0, lens, bits, work);
     if status == 0 {
-        // The table cursor may point into a combined caller allocation.  Copy
-        // only the extent built for this invocation, never the type maximum.
-        let output = unsafe { ::core::slice::from_raw_parts_mut(table_start, used) };
+        // The table cursor may point into a combined caller allocation.  Its
+        // table-kind bound is the remaining capacity available at that cursor;
+        // `used` is only the number of entries this invocation initialized.
+        let output = unsafe { ::core::slice::from_raw_parts_mut(table_start, table_capacity) };
+        let Some(output) = output.get_mut(..used) else {
+            return 1;
+        };
         for (output, built) in output.iter_mut().zip(&built[..used]) {
             *output = crate::src::inftrees::code::copied_from(built);
         }
