@@ -1386,9 +1386,17 @@ pub unsafe extern "C" fn deflateParams(
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-    deflate_params(state, head, prev, level, strategy)
+    // `fill_window()` already owns the one validated binding of these
+    // deflater allocations. Reuse it here rather than creating a second raw
+    // slice view solely for the parameter update.
+    fill_window(
+        state,
+        _strm,
+        false,
+        |state, _stream, _window, head, prev, _input| {
+            deflate_params(state, head, prev, level, strategy)
+        },
+    )
 }
 
 fn deflate_params(
