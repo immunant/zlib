@@ -3672,6 +3672,15 @@ fn heap_node_precedes(
         || left_frequency == right_frequency && left_depth <= right_depth
 }
 
+fn supplemental_tree_node(max_code: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if *max_code < 2 {
+        *max_code += 1;
+        *max_code
+    } else {
+        0
+    }
+}
+
 fn rebalance_overflowed_bit_lengths(
     bl_count: &mut [crate::zutil_h::ush; 16],
     max_length: ::core::ffi::c_int,
@@ -4033,12 +4042,7 @@ unsafe extern "C" fn build_tree(
     }
     while (*s).heap_len < 2 as ::core::ffi::c_int {
         (*s).heap_len += 1;
-        (*s).heap[(*s).heap_len as usize] = if max_code < 2 as ::core::ffi::c_int {
-            max_code += 1;
-            max_code
-        } else {
-            0 as ::core::ffi::c_int
-        };
+        (*s).heap[(*s).heap_len as usize] = supplemental_tree_node(&mut max_code);
         node = (*s).heap[(*s).heap_len as usize];
         (*tree.offset(node as isize)).fc.value = 1 as crate::zutil_h::ush;
         (*s).depth[node as usize] = 0 as crate::zutil_h::uch;
@@ -5188,9 +5192,9 @@ mod tests {
         block_header_bits, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
         last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
         rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
-        static_d_desc, static_l_desc, symbol_buffer_is_full, symbol_triplet_cursors,
-        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_continues,
-        tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
+        static_d_desc, static_l_desc, supplemental_tree_node, symbol_buffer_is_full,
+        symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor,
+        tree_run_continues, tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5416,6 +5420,21 @@ mod tests {
         assert!(heap_node_precedes(3, 4, 3, 4));
         assert!(heap_node_precedes(3, 4, 3, 5));
         assert!(!heap_node_precedes(3, 5, 3, 4));
+    }
+
+    #[test]
+    fn supplemental_tree_node_advances_only_available_codes() {
+        let mut max_code = -1;
+        assert_eq!(supplemental_tree_node(&mut max_code), 0);
+        assert_eq!(max_code, 0);
+
+        let mut max_code = 1;
+        assert_eq!(supplemental_tree_node(&mut max_code), 2);
+        assert_eq!(max_code, 2);
+
+        let mut max_code = 2;
+        assert_eq!(supplemental_tree_node(&mut max_code), 0);
+        assert_eq!(max_code, 2);
     }
 
     #[test]

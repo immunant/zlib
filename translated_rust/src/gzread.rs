@@ -318,6 +318,14 @@ fn gz_read_fetch_failed_without_buffer(
     fetch_result == -1 as ::core::ffi::c_int && have == 0
 }
 
+fn gz_read_load_status(load_failed: bool) -> ::core::ffi::c_int {
+    if load_failed {
+        -1
+    } else {
+        0
+    }
+}
+
 fn gz_cursor_advance(
     pos: crate::stdlib::off64_t,
     consumed: ::core::ffi::c_uint,
@@ -2059,6 +2067,12 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_load_status_maps_load_success_and_failure() {
+        assert_eq!(gz_read_load_status(false), 0);
+        assert_eq!(gz_read_load_status(true), -1);
+    }
+
+    #[test]
     fn gzdirect_result_accepts_only_direct_mode() {
         assert_eq!(gzdirect_result(1), 1);
         assert_eq!(gzdirect_result(0), 0);
@@ -2141,7 +2155,7 @@ unsafe extern "C" fn gz_read(
             GzReadAction::Load => {
                 let load = gz_load(state, buf as *mut ::core::ffi::c_uchar, n);
                 n = load.have;
-                err = if load.failed { -1 } else { 0 };
+                err = gz_read_load_status(load.failed);
                 true
             }
             GzReadAction::Decompress => {

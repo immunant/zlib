@@ -248,6 +248,25 @@ fn gzseek_plan_read_buffer_consumption(
     }
 }
 
+fn gzseek_read_buffer_plan_for_mode(
+    mode: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    offset: crate::stdlib::off64_t,
+    int_and_off64_same_width: bool,
+    int_max: crate::stdlib::uInt,
+) -> Option<GzSeekReadBufferPlan> {
+    if !gzseek_uses_read_buffer(mode) {
+        return None;
+    }
+
+    Some(gzseek_plan_read_buffer_consumption(
+        avail_in,
+        offset,
+        int_and_off64_same_width,
+        int_max,
+    ))
+}
+
 fn gzseek_apply_read_buffer_plan(
     state: &mut crate::gzguts_h::gz_state,
     plan: GzSeekReadBufferPlan,
@@ -829,14 +848,14 @@ pub unsafe extern "C" fn gzseek64(
     if seek_plan.rewind && gzrewind_ffi(file) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
-    if gzseek_uses_read_buffer((*state).mode) {
-        let read_buffer_plan = gzseek_plan_read_buffer_consumption(
-            (*state).x.have,
-            offset,
-            ::core::mem::size_of::<::core::ffi::c_int>()
-                == ::core::mem::size_of::<crate::stdlib::off64_t>(),
-            gz_intmax(),
-        );
+    if let Some(read_buffer_plan) = gzseek_read_buffer_plan_for_mode(
+        (*state).mode,
+        (*state).x.have,
+        offset,
+        ::core::mem::size_of::<::core::ffi::c_int>()
+            == ::core::mem::size_of::<crate::stdlib::off64_t>(),
+        gz_intmax(),
+    ) {
         gzseek_apply_read_buffer_plan(&mut *state, read_buffer_plan);
         offset = read_buffer_plan.remaining_offset;
     }
@@ -1140,9 +1159,10 @@ mod tests {
         gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_read_buffer_consumed,
-        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid, gzseek_uses_read_buffer,
-        gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan,
-        GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
+        gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
+        gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
+        GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan,
+        GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1559,6 +1579,28 @@ mod tests {
                 remaining_offset: 0,
             }
         );
+    }
+
+    #[test]
+    fn gzseek_read_buffer_plan_for_mode_plans_read_cursor_consumption() {
+        assert_eq!(
+            gzseek_read_buffer_plan_for_mode(crate::gzguts_h::GZ_READ, 7, 3, false, 0),
+            Some(GzSeekReadBufferPlan {
+                consumed: 3,
+                remaining_offset: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn gzseek_read_buffer_plan_for_mode_skips_non_read_modes() {
+        for mode in [
+            crate::gzguts_h::GZ_WRITE,
+            crate::gzguts_h::GZ_NONE,
+            crate::gzguts_h::GZ_APPEND,
+        ] {
+            assert_eq!(gzseek_read_buffer_plan_for_mode(mode, 7, 3, false, 0), None);
+        }
     }
 
     #[test]
