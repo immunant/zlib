@@ -1067,11 +1067,7 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     if state
         .fd
         .take()
-        .map(|fd| unsafe {
-            rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(
-                fd,
-            ))
-        })
+        .map(crate::src::gzlib::gz_close_fd)
         .transpose()
         .is_err()
     {

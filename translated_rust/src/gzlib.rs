@@ -61,6 +61,18 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+// `OwnedFd` normally closes on drop, but gzip close reports a close failure
+// to its caller.  Consume the owner in this pointer-free boundary so the
+// read and write close paths preserve that observable result without each
+// repeating a raw-FD handoff.
+pub(crate) fn gz_close_fd(fd: rustix::fd::OwnedFd) -> rustix::io::Result<()> {
+    unsafe {
+        rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(
+            fd,
+        ))
+    }
+}
+
 // A write handle's paired allocations are owned by `GzBuffers`, but embedded
 // deflate setup needs only the bounded compressed-output allocation and its
 // checked size.  Keeping that hand-off separate from the input allocation
