@@ -53,8 +53,12 @@ pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
     zlib_compile_flags()
 }
 
+fn has_error_message_index(err: ::core::ffi::c_int) -> bool {
+    (-6..=2).contains(&err)
+}
+
 fn error_message_index(err: ::core::ffi::c_int) -> usize {
-    if !(-6..=2).contains(&err) {
+    if !has_error_message_index(err) {
         9
     } else {
         (2 - err) as usize
@@ -103,7 +107,18 @@ pub unsafe extern "C" fn zcfree_ffi(opaque: crate::stdlib::voidpf, ptr: crate::s
 
 #[cfg(test)]
 mod tests {
-    use super::{allocation_request, error_message_index, zlib_version, AllocationRequest};
+    use super::{
+        allocation_request, error_message_index, has_error_message_index, zlib_version,
+        AllocationRequest,
+    };
+
+    #[test]
+    fn error_message_index_range_matches_zlib_error_codes() {
+        assert!(has_error_message_index(-6));
+        assert!(has_error_message_index(2));
+        assert!(!has_error_message_index(-7));
+        assert!(!has_error_message_index(3));
+    }
 
     #[test]
     fn error_messages_use_zlib_error_indexing() {

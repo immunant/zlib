@@ -45,24 +45,24 @@ fn gz_close_mode(mode: ::core::ffi::c_int) -> GzCloseMode {
     }
 }
 
-fn gz_close_action(file_is_null: bool, mode: ::core::ffi::c_int) -> GzCloseAction {
-    if file_is_null {
-        GzCloseAction::Return(crate::zlib_h::Z_STREAM_ERROR)
-    } else {
-        GzCloseAction::Close(gz_close_mode(mode))
+fn gz_close_action(mode: Option<::core::ffi::c_int>) -> GzCloseAction {
+    match mode {
+        Some(mode) => GzCloseAction::Close(gz_close_mode(mode)),
+        None => GzCloseAction::Return(crate::zlib_h::Z_STREAM_ERROR),
     }
 }
 
 #[export_name = "gzclose"]
 pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let file_is_null = file.is_null();
-    let mode = if file_is_null {
-        crate::gzguts_h::GZ_NONE
+    let mode = if file.is_null() {
+        None
     } else {
-        unsafe { (*(file as *const crate::gzguts_h::gz_state)).mode }
+        Some(unsafe {
+            (*(file as *const crate::gzguts_h::gz_state)).mode
+        })
     };
 
-    match gz_close_action(file_is_null, mode) {
+    match gz_close_action(mode) {
         GzCloseAction::Return(status) => status,
         GzCloseAction::Close(GzCloseMode::Read) => unsafe {
             crate::src::gzread::gzclose_r(file as *mut crate::zlib_h::gzFile_s)
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn close_action_routes_read_mode_to_read_close() {
         assert_eq!(
-            gz_close_action(false, crate::gzguts_h::GZ_READ),
+            gz_close_action(Some(crate::gzguts_h::GZ_READ)),
             GzCloseAction::Close(GzCloseMode::Read)
         );
     }
@@ -108,23 +108,19 @@ mod tests {
     #[test]
     fn close_action_routes_non_read_modes_to_write_close() {
         assert_eq!(
-            gz_close_action(false, crate::gzguts_h::GZ_WRITE),
+            gz_close_action(Some(crate::gzguts_h::GZ_WRITE)),
             GzCloseAction::Close(GzCloseMode::Write)
         );
         assert_eq!(
-            gz_close_action(false, crate::gzguts_h::GZ_NONE),
+            gz_close_action(Some(crate::gzguts_h::GZ_NONE)),
             GzCloseAction::Close(GzCloseMode::Write)
         );
     }
 
     #[test]
-    fn close_action_rejects_null_file_before_mode_dispatch() {
+    fn close_action_rejects_missing_mode_before_dispatch() {
         assert_eq!(
-            gz_close_action(true, crate::gzguts_h::GZ_READ),
-            GzCloseAction::Return(crate::zlib_h::Z_STREAM_ERROR)
-        );
-        assert_eq!(
-            gz_close_action(true, crate::gzguts_h::GZ_WRITE),
+            gz_close_action(None),
             GzCloseAction::Return(crate::zlib_h::Z_STREAM_ERROR)
         );
     }
