@@ -148,6 +148,27 @@ impl GzWriteCloseResult {
     }
 }
 
+// This is the pointer-free proof that the embedded deflater was initialized
+// and therefore needs exactly one matching teardown.  It is deliberately
+// detached from the paired buffer owner before the ABI stream is borrowed for
+// `deflateEnd()`: resource release can then consume this lifecycle fact
+// without inferring it from allocation state or stream counters.
+struct GzEmbeddedDeflaterClose {
+    initialized: bool,
+}
+
+impl GzEmbeddedDeflaterClose {
+    fn take(buffers: &mut crate::gzguts_h::GzBuffers) -> Self {
+        Self {
+            initialized: buffers.take_embedded_deflater().is_some(),
+        }
+    }
+
+    fn needs_teardown(&self) -> bool {
+        self.initialized
+    }
+}
+
 // Once the final embedded-deflater request has ended, the remaining writer
 // resources have no ABI cursors or callback-backed state.  Move them as one
 // owner so close ordering and descriptor-error precedence can eventually be
@@ -1305,10 +1326,11 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     let status = gz_comp(state, crate::zlib_h::Z_FINISH, None, None);
     result.record_codec_result(status, state.err);
     // The lifecycle tag, not mode or allocated-buffer size, authorizes the
-    // matching codec end operation.  Consume it before either buffer is
-    // detached so a partial setup cannot erase an initialized deflater.
-    let had_embedded_deflater = state.buffers.take_embedded_deflater().is_some();
-    if had_embedded_deflater {
+    // matching codec end operation.  Consume its pointer-free proof before
+    // either buffer is detached, then keep the lone ABI-stream action at this
+    // boundary.
+    let deflater = GzEmbeddedDeflaterClose::take(&mut state.buffers);
+    if deflater.needs_teardown() {
         crate::src::deflate::deflateEnd(::core::ptr::NonNull::from(&mut state.strm));
     }
     let mut resources = GzWriteCloseResources::take(
@@ -1318,7 +1340,7 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
         &mut state.msg,
         &mut state.err,
     );
-    resources.release_write_buffers(had_embedded_deflater);
+    resources.release_write_buffers(deflater.needs_teardown());
     result.finish(resources.finish())
 }
 #[export_name = "gzclose_w"]
