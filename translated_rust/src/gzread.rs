@@ -674,12 +674,8 @@ pub unsafe extern "C" fn gzfread_ffi(
     };
     gzfread(state.as_mut(), output, size, nitems)
 }
-pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
     if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
@@ -715,21 +711,23 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
 #[export_name = "gzgetc"]
 
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    gzgetc(state)
 }
 #[export_name = "gzgetc_"]
 
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
-}
-pub unsafe extern "C" fn gzungetc(
-    mut c: ::core::ffi::c_int,
-    mut file: crate::zlib_h::gzFile,
-) -> ::core::ffi::c_int {
-    if file.is_null() {
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    };
+    gzgetc(state)
+}
+unsafe fn gzungetc(
+    mut c: ::core::ffi::c_int,
+    state: &mut crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
@@ -809,7 +807,10 @@ pub unsafe extern "C" fn gzungetc_ffi(
     mut c: ::core::ffi::c_int,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
-    gzungetc(c, file)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    gzungetc(c, state)
 }
 unsafe fn gzgets(
     mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
