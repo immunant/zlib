@@ -184,25 +184,25 @@ pub(crate) fn gz_set_copy_input(
 
 // Once gzip input is available, the look adapter either waits for a complete
 // signature, starts a gzip member, or retains the input as a transparent
-// copy.  Signature access remains at the raw input-buffer adapter; all
-// classification and state choices stay here.
+// copy.  Signature access remains at the raw input-buffer adapter; this
+// helper only receives the scalar facts needed for classification.
 pub(crate) enum GzLookPlan {
     NeedMore,
     Gzip,
-    Copy,
+    Copy { copied: ::core::ffi::c_uint },
 }
 
 pub(crate) fn gz_look_plan(
-    state: &crate::gzguts_h::gz_state,
-    header: Option<[::core::ffi::c_uchar; 4]>,
+    available: ::core::ffi::c_uint,
+    stalled: bool,
+    gzip_header: bool,
 ) -> GzLookPlan {
-    let available = state.strm.avail_in as ::core::ffi::c_uint;
-    if available == 0 || (state.again != 0 && available < 4) {
+    if available == 0 || (stalled && available < 4) {
         GzLookPlan::NeedMore
-    } else if header.is_some_and(gz_is_gzip_header) {
+    } else if gzip_header {
         GzLookPlan::Gzip
     } else {
-        GzLookPlan::Copy
+        GzLookPlan::Copy { copied: available }
     }
 }
 

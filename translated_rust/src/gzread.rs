@@ -186,29 +186,35 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         return -1 as ::core::ffi::c_int;
     }
     let available = state.strm.avail_in;
-    let signature = if available > 3 {
+    let gzip_header = if available > 3 {
         // Only the raw input adapter touches the untrusted input pointer.
         let input = state.strm.next_in;
-        Some([*input, *input.offset(1), *input.offset(2), *input.offset(3)])
+        crate::src::gzlib::gz_is_gzip_header([
+            *input,
+            *input.offset(1),
+            *input.offset(2),
+            *input.offset(3),
+        ])
     } else {
-        None
+        false
     };
-    match crate::src::gzlib::gz_look_plan(state, signature) {
+    match crate::src::gzlib::gz_look_plan(available, state.again != 0, gzip_header) {
         crate::src::gzlib::GzLookPlan::NeedMore => return 0 as ::core::ffi::c_int,
         crate::src::gzlib::GzLookPlan::Gzip => {
             crate::src::inflate::inflateReset(&mut state.strm);
             crate::src::gzlib::gz_set_gzip_input(state, true);
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::gzlib::GzLookPlan::Copy => {}
+        crate::src::gzlib::GzLookPlan::Copy { copied } => {
+            crate::stdlib::memcpy(
+                state.out as *mut ::core::ffi::c_void,
+                state.strm.next_in as *const ::core::ffi::c_void,
+                copied as crate::__stddef_size_t_h::size_t,
+            );
+            crate::src::gzlib::gz_set_copy_input(state, copied);
+            return 0 as ::core::ffi::c_int;
+        }
     }
-    crate::stdlib::memcpy(
-        state.out as *mut ::core::ffi::c_void,
-        state.strm.next_in as *const ::core::ffi::c_void,
-        available as crate::__stddef_size_t_h::size_t,
-    );
-    crate::src::gzlib::gz_set_copy_input(state, available);
-    return 0 as ::core::ffi::c_int;
 }
 
 unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
