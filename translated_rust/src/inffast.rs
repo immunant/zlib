@@ -1,281 +1,292 @@
-pub use crate::src::inflate::BAD;
-pub use crate::src::inflate::CHECK;
-pub use crate::src::inflate::CODELENS;
-pub use crate::src::inflate::COMMENT;
-pub use crate::src::inflate::COPY_;
-pub use crate::src::inflate::COPY_1;
-pub use crate::src::inflate::DICT;
-pub use crate::src::inflate::DICTID;
-pub use crate::src::inflate::DIST;
-pub use crate::src::inflate::DISTEXT;
-pub use crate::src::inflate::DONE;
-pub use crate::src::inflate::EXLEN;
-pub use crate::src::inflate::EXTRA;
-pub use crate::src::inflate::FLAGS;
-pub use crate::src::inflate::HCRC;
-pub use crate::src::inflate::HEAD;
-pub use crate::src::inflate::LEN;
-pub use crate::src::inflate::LENEXT;
-pub use crate::src::inflate::LENGTH;
-pub use crate::src::inflate::LENLENS;
-pub use crate::src::inflate::LEN_;
-pub use crate::src::inflate::LIT;
-pub use crate::src::inflate::MATCH;
-pub use crate::src::inflate::MEM;
-pub use crate::src::inflate::NAME;
-pub use crate::src::inflate::OS;
-pub use crate::src::inflate::STORED;
-pub use crate::src::inflate::SYNC;
-pub use crate::src::inflate::TABLE;
-pub use crate::src::inflate::TIME;
-pub use crate::src::inflate::TYPE;
-pub use crate::src::inflate::TYPEDO;
-pub use crate::src::inftrees::code;
+pub use crate::src::inflate::{BAD, TYPE};
 
-pub use crate::src::deflate::internal_state;
-pub use crate::stdlib::uInt;
-pub use crate::stdlib::uLong;
-pub use crate::stdlib::voidpf;
-pub use crate::stdlib::Byte;
-pub use crate::stdlib::Bytef;
-pub use crate::zlib_h::alloc_func;
-pub use crate::zlib_h::free_func;
-pub use crate::zlib_h::gz_header;
-pub use crate::zlib_h::gz_header_s;
-pub use crate::zlib_h::gz_headerp;
-pub use crate::zlib_h::z_stream;
-pub use crate::zlib_h::z_stream_s;
-pub use crate::zlib_h::z_streamp;
-pub unsafe fn inflate_fast(
-    mut strm: crate::zlib_h::z_streamp,
-    state: &mut crate::src::inflate::inflate_state,
-    mut start: ::core::ffi::c_uint,
-) {
-    let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut last: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut beg: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut end: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut wsize: ::core::ffi::c_uint = 0;
-    let mut whave: ::core::ffi::c_uint = 0;
-    let mut wnext: ::core::ffi::c_uint = 0;
-    let mut hold: ::core::ffi::c_ulong = 0;
-    let mut bits: ::core::ffi::c_uint = 0;
-    let mut lcode = crate::src::inflate::CodeTable::Empty;
-    let mut dcode = crate::src::inflate::CodeTable::Empty;
-    let mut lmask: ::core::ffi::c_uint = 0;
-    let mut dmask: ::core::ffi::c_uint = 0;
-    let mut here = crate::src::inftrees::code {
-        op: 0,
-        bits: 0,
-        val: 0,
-    };
-    let mut op: ::core::ffi::c_uint = 0;
-    let mut len: ::core::ffi::c_uint = 0;
-    let mut dist: ::core::ffi::c_uint = 0;
-    in_0 = crate::input_pointer!((*strm).next_in) as *mut ::core::ffi::c_uchar;
-    last = in_0.offset((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
-    out = crate::output_pointer!((*strm).next_out) as *mut ::core::ffi::c_uchar;
-    beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as isize));
-    end = out.offset((*strm).avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
-    wsize = (*state).wsize;
-    whave = (*state).whave;
-    wnext = (*state).wnext;
-    hold = (*state).hold;
-    bits = (*state).bits;
-    lcode = (*state).lencode;
-    dcode = (*state).distcode;
-    lmask = ((1 as ::core::ffi::c_uint) << (*state).lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
-    dmask =
-        ((1 as ::core::ffi::c_uint) << (*state).distbits).wrapping_sub(1 as ::core::ffi::c_uint);
-    's_627: loop {
-        if bits < 15 as ::core::ffi::c_uint {
-            let c2rust_fresh0 = in_0;
-            in_0 = in_0.offset(1);
-            hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
-            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-            let c2rust_fresh1 = in_0;
-            in_0 = in_0.offset(1);
-            hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
-            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+use crate::src::inflate::inflate_state;
+
+/// The effect of one fast inflate pass on its caller's buffers.
+pub struct InflateFastResult {
+    pub input_used: usize,
+    pub output_used: usize,
+    pub message: Option<&'static ::core::ffi::CStr>,
+}
+
+/// Inflate as many literal/length codes as can be decoded without refilling
+/// `input` or growing `output`.
+///
+/// `output[..out]` is the data already emitted in the current window and
+/// `output[out..]` is free space.  Keeping both in one slice is important:
+/// matches may refer to data emitted before this call as well as to the
+/// sliding history window in `state`.
+pub fn inflate_fast(
+    input: &[u8],
+    output: &mut [u8],
+    mut out: usize,
+    state: &mut inflate_state,
+    history_is_output: bool,
+) -> InflateFastResult {
+    let input_len = input.len();
+    let out_start = out;
+    let mut input_at = 0usize;
+    let mut hold = state.hold;
+    let mut bits = state.bits;
+    let lcode = state.lencode;
+    let dcode = state.distcode;
+    let lmask = 1u32.checked_shl(state.lenbits).unwrap_or(0).wrapping_sub(1);
+    let dmask = 1u32
+        .checked_shl(state.distbits)
+        .unwrap_or(0)
+        .wrapping_sub(1);
+    let mut message = None;
+
+    // The C fast path needs these reserves before its first iteration.  The
+    // regular decoder handles smaller buffers.
+    if input_len < 6 || output.len().saturating_sub(out) < 258 {
+        return InflateFastResult {
+            input_used: 0,
+            output_used: 0,
+            message,
+        };
+    }
+    let last = input_len - 5;
+    let end = output.len() - 257;
+
+    'decode: loop {
+        if bits < 15 {
+            let Some(&byte) = input.get(input_at) else {
+                break 'decode;
+            };
+            input_at += 1;
+            hold = hold.wrapping_add((byte as u64) << bits);
+            bits += 8;
+            let Some(&byte) = input.get(input_at) else {
+                break 'decode;
+            };
+            input_at += 1;
+            hold = hold.wrapping_add((byte as u64) << bits);
+            bits += 8;
         }
-        here = (*state).code_at(lcode, (hold & lmask as ::core::ffi::c_ulong) as usize);
-        's_92: loop {
-            op = here.bits as ::core::ffi::c_uint;
+
+        let mut here = state.code_at(lcode, (hold as u32 & lmask) as usize);
+        loop {
+            let mut op = here.bits as u32;
             hold >>= op;
-            bits = bits.wrapping_sub(op);
-            op = here.op as ::core::ffi::c_uint;
-            if op == 0 as ::core::ffi::c_uint {
-                let c2rust_fresh2 = out;
-                out = out.offset(1);
-                *c2rust_fresh2 = here.val as ::core::ffi::c_uchar;
+            bits -= op;
+            op = here.op as u32;
+            if op == 0 {
+                if out == output.len() {
+                    break 'decode;
+                }
+                output[out] = here.val as u8;
+                out += 1;
                 break;
-            } else if op & 16 as ::core::ffi::c_uint != 0 {
-                len = here.val as ::core::ffi::c_uint;
-                op &= 15 as ::core::ffi::c_uint;
+            }
+
+            if op & 16 != 0 {
+                let mut len = here.val as u32;
+                op &= 15;
                 if op != 0 {
                     if bits < op {
-                        let c2rust_fresh3 = in_0;
-                        in_0 = in_0.offset(1);
-                        hold = hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
-                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                        let Some(&byte) = input.get(input_at) else {
+                            break 'decode;
+                        };
+                        input_at += 1;
+                        hold = hold.wrapping_add((byte as u64) << bits);
+                        bits += 8;
                     }
-                    len = len.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << op)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                    );
+                    len = len.wrapping_add(hold as u32 & ((1u32 << op) - 1));
                     hold >>= op;
-                    bits = bits.wrapping_sub(op);
+                    bits -= op;
                 }
-                if bits < 15 as ::core::ffi::c_uint {
-                    let c2rust_fresh4 = in_0;
-                    in_0 = in_0.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh4 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                    let c2rust_fresh5 = in_0;
-                    in_0 = in_0.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh5 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+
+                if bits < 15 {
+                    let Some(&byte) = input.get(input_at) else {
+                        break 'decode;
+                    };
+                    input_at += 1;
+                    hold = hold.wrapping_add((byte as u64) << bits);
+                    bits += 8;
+                    let Some(&byte) = input.get(input_at) else {
+                        break 'decode;
+                    };
+                    input_at += 1;
+                    hold = hold.wrapping_add((byte as u64) << bits);
+                    bits += 8;
                 }
-                here = (*state).code_at(dcode, (hold & dmask as ::core::ffi::c_ulong) as usize);
+
+                here = state.code_at(dcode, (hold as u32 & dmask) as usize);
                 loop {
-                    op = here.bits as ::core::ffi::c_uint;
+                    op = here.bits as u32;
                     hold >>= op;
-                    bits = bits.wrapping_sub(op);
-                    op = here.op as ::core::ffi::c_uint;
-                    if op & 16 as ::core::ffi::c_uint != 0 {
-                        dist = here.val as ::core::ffi::c_uint;
-                        op &= 15 as ::core::ffi::c_uint;
+                    bits -= op;
+                    op = here.op as u32;
+                    if op & 16 != 0 {
+                        let mut dist = here.val as u32;
+                        op &= 15;
                         if bits < op {
-                            let c2rust_fresh6 = in_0;
-                            in_0 = in_0.offset(1);
-                            hold =
-                                hold.wrapping_add((*c2rust_fresh6 as ::core::ffi::c_ulong) << bits);
-                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            let Some(&byte) = input.get(input_at) else {
+                                break 'decode;
+                            };
+                            input_at += 1;
+                            hold = hold.wrapping_add((byte as u64) << bits);
+                            bits += 8;
                             if bits < op {
-                                let c2rust_fresh7 = in_0;
-                                in_0 = in_0.offset(1);
-                                hold = hold
-                                    .wrapping_add((*c2rust_fresh7 as ::core::ffi::c_ulong) << bits);
-                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                            }
-                        }
-                        dist = dist.wrapping_add(
-                            hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << op)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                        );
-                        hold >>= op;
-                        bits = bits.wrapping_sub(op);
-                        op = out.offset_from(beg) as ::core::ffi::c_uint;
-                        if dist > op {
-                            op = dist.wrapping_sub(op);
-                            if op > whave {
-                                if (*state).sane != 0 {
-                                    crate::zlib_h::set_stream_message(
-                                        &mut *strm,
-                                        c"invalid distance too far back",
-                                    );
-                                    (*state).mode = crate::src::inflate::BAD;
-                                    break 's_627;
-                                }
-                            }
-                            let window = (*state)
-                                .window
-                                .as_ref()
-                                .expect("a referenced history has a window");
-                            let mut history = op;
-                            while len != 0 {
-                                let byte = if history != 0 {
-                                    let index = (wnext as usize + wsize as usize
-                                        - history as usize)
-                                        % wsize as usize;
-                                    history = history.wrapping_sub(1);
-                                    window[index]
-                                } else {
-                                    *out.offset(-(dist as isize))
+                                let Some(&byte) = input.get(input_at) else {
+                                    break 'decode;
                                 };
-                                *out = byte;
-                                out = out.offset(1);
-                                len = len.wrapping_sub(1);
+                                input_at += 1;
+                                hold = hold.wrapping_add((byte as u64) << bits);
+                                bits += 8;
                             }
-                            break 's_92;
-                        } else {
-                            while len != 0 {
-                                *out = *out.offset(-(dist as isize));
-                                out = out.offset(1);
-                                len = len.wrapping_sub(1);
-                            }
-                            break 's_92;
                         }
-                    } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                        here = (*state).code_at(
+                        dist = dist.wrapping_add(hold as u32 & ((1u32 << op) - 1));
+                        hold >>= op;
+                        bits -= op;
+
+                        let distance = dist as usize;
+                        if distance > out {
+                            let mut history = distance - out;
+                            if history > state.whave as usize && state.sane != 0 {
+                                state.mode = BAD;
+                                message = Some(c"invalid distance too far back");
+                                break 'decode;
+                            }
+                            while len != 0 {
+                                if out == output.len() {
+                                    break 'decode;
+                                }
+                                let byte = if history != 0 {
+                                    let wsize = state.wsize as usize;
+                                    let Some(index) = wsize
+                                        .checked_add(state.wnext as usize)
+                                        .and_then(|index| index.checked_sub(history))
+                                        .map(|index| index % wsize)
+                                    else {
+                                        state.mode = BAD;
+                                        message = Some(c"invalid distance too far back");
+                                        break 'decode;
+                                    };
+                                    let byte = if history_is_output {
+                                        let Some(&byte) = output.get(index) else {
+                                            state.mode = BAD;
+                                            message = Some(c"invalid distance too far back");
+                                            break 'decode;
+                                        };
+                                        byte
+                                    } else {
+                                        let Some(window) = state.window.as_ref() else {
+                                            state.mode = BAD;
+                                            message = Some(c"invalid distance too far back");
+                                            break 'decode;
+                                        };
+                                        let Some(&byte) = window.get(index) else {
+                                            state.mode = BAD;
+                                            message = Some(c"invalid distance too far back");
+                                            break 'decode;
+                                        };
+                                        byte
+                                    };
+                                    history -= 1;
+                                    byte
+                                } else {
+                                    let Some(source) = out.checked_sub(distance) else {
+                                        state.mode = BAD;
+                                        message = Some(c"invalid distance too far back");
+                                        break 'decode;
+                                    };
+                                    output[source]
+                                };
+                                output[out] = byte;
+                                out += 1;
+                                len -= 1;
+                            }
+                            break;
+                        }
+
+                        while len != 0 {
+                            if out == output.len() {
+                                break 'decode;
+                            }
+                            output[out] = output[out - distance];
+                            out += 1;
+                            len -= 1;
+                        }
+                        break;
+                    }
+                    if op & 64 == 0 {
+                        here = state.code_at(
                             dcode,
-                            here.val as usize
-                                + (hold
-                                    & ((1 as ::core::ffi::c_uint) << op)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint)
-                                        as ::core::ffi::c_ulong)
-                                    as usize,
+                            here.val as usize + (hold as u32 & ((1u32 << op) - 1)) as usize,
                         );
                     } else {
-                        crate::zlib_h::set_stream_message(&mut *strm, c"invalid distance code");
-                        (*state).mode = crate::src::inflate::BAD;
-                        break 's_627;
+                        state.mode = BAD;
+                        message = Some(c"invalid distance code");
+                        break 'decode;
                     }
                 }
-            } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                here = (*state).code_at(
+                break;
+            }
+
+            if op & 64 == 0 {
+                here = state.code_at(
                     lcode,
-                    here.val as usize
-                        + (hold
-                            & ((1 as ::core::ffi::c_uint) << op)
-                                .wrapping_sub(1 as ::core::ffi::c_uint)
-                                as ::core::ffi::c_ulong) as usize,
+                    here.val as usize + (hold as u32 & ((1u32 << op) - 1)) as usize,
                 );
-            } else if op & 32 as ::core::ffi::c_uint != 0 {
-                (*state).mode = crate::src::inflate::TYPE;
-                break 's_627;
+            } else if op & 32 != 0 {
+                state.mode = TYPE;
+                break 'decode;
             } else {
-                crate::zlib_h::set_stream_message(&mut *strm, c"invalid literal/length code");
-                (*state).mode = crate::src::inflate::BAD;
-                break 's_627;
+                state.mode = BAD;
+                message = Some(c"invalid literal/length code");
+                break 'decode;
             }
         }
-        if !(in_0 < last && out < end) {
+
+        if input_at >= last || out >= end {
             break;
         }
     }
-    len = bits >> 3 as ::core::ffi::c_int;
-    in_0 = in_0.offset(-(len as isize));
-    bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
-    hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
-        as ::core::ffi::c_ulong;
-    (*strm).next_in = crate::input_cursor!(in_0);
-    (*strm).next_out = crate::output_cursor!(out);
-    (*strm).avail_in = (if in_0 < last {
-        5 as isize + last.offset_from(in_0)
-    } else {
-        5 as isize - in_0.offset_from(last)
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
-    (*strm).avail_out = (if out < end {
-        257 as isize + end.offset_from(out)
-    } else {
-        257 as isize - out.offset_from(end)
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
-    (*state).hold = hold;
-    (*state).bits = bits;
-}
-#[export_name = "inflate_fast"]
 
-pub unsafe extern "C" fn inflate_fast_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
-) {
-    if let Some(state_handle) = (&*strm).inflate_state() {
-        inflate_fast(strm, &mut state_handle.borrow_mut(), start)
+    let unused = (bits >> 3) as usize;
+    input_at = input_at.saturating_sub(unused);
+    bits -= (unused as u32) << 3;
+    hold &= (1u64.checked_shl(bits).unwrap_or(0)).wrapping_sub(1);
+    state.hold = hold;
+    state.bits = bits;
+    InflateFastResult {
+        input_used: input_at.min(input_len),
+        output_used: out.saturating_sub(out_start),
+        message,
     }
 }
-pub use crate::src::inflate::inflate_mode;
-pub use crate::src::inflate::inflate_state;
+
+#[export_name = "inflate_fast"]
+pub unsafe extern "C" fn inflate_fast_ffi(
+    strm: crate::zlib_h::z_streamp,
+    start: ::core::ffi::c_uint,
+) {
+    let Some(strm) = strm.as_mut() else {
+        return;
+    };
+    let Some(state_handle) = strm.inflate_state() else {
+        return;
+    };
+    let mut state = state_handle.borrow_mut();
+    let input_len = strm.avail_in as usize;
+    let output_free = strm.avail_out as usize;
+    let start = start as usize;
+    let written = start.saturating_sub(output_free);
+    let input = if input_len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(crate::input_pointer!(strm.next_in), input_len)
+    };
+    let output_start = crate::output_pointer!(strm.next_out).sub(written);
+    let output = ::core::slice::from_raw_parts_mut(output_start, start);
+    let result = inflate_fast(input, output, written, &mut state, false);
+    strm.next_in = strm.next_in.advance(result.input_used);
+    strm.avail_in = (input_len - result.input_used) as crate::stdlib::uInt;
+    strm.next_out = strm.next_out.advance(result.output_used);
+    strm.avail_out = (output_free - result.output_used) as crate::stdlib::uInt;
+    if let Some(message) = result.message {
+        crate::zlib_h::set_stream_message(strm, message);
+    }
+}

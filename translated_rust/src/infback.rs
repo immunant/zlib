@@ -726,26 +726,26 @@ pub unsafe extern "C" fn inflateBack(
             }
         }
         if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
-            (*strm).next_out = crate::output_cursor!(put);
-            (*strm).avail_out = left as crate::stdlib::uInt;
-            (*strm).next_in = crate::input_cursor!(next);
-            (*strm).avail_in = have as crate::stdlib::uInt;
             (*state).hold = hold;
             (*state).bits = bits;
-            let wsize = (*state).wsize;
-            crate::src::inffast::inflate_fast(
-                strm as *mut crate::zlib_h::z_stream_s,
-                &mut *state,
-                wsize,
-            );
-            put = crate::output_pointer!((*strm).next_out) as *mut ::core::ffi::c_uchar;
-            left = (*strm).avail_out as ::core::ffi::c_uint;
-            let input_cursor = (*strm).next_in;
-            next = match input_cursor.0 {
-                Some(address) => ::core::ptr::with_exposed_provenance_mut(address.get()),
-                None => ::core::ptr::null_mut(),
-            } as *mut ::core::ffi::c_uchar;
-            have = (*strm).avail_in as ::core::ffi::c_uint;
+            let written = (*state).wsize as usize - left as usize;
+            let mut window = (*state)
+                .window
+                .take()
+                .expect("inflate-back initialization created a window");
+            let input = ::core::slice::from_raw_parts(next, have as usize);
+            let result =
+                crate::src::inffast::inflate_fast(input, &mut window, written, &mut *state, true);
+            next = next.wrapping_add(result.input_used);
+            have = have.wrapping_sub(result.input_used as ::core::ffi::c_uint);
+            put = window
+                .as_mut_ptr()
+                .wrapping_add(written + result.output_used);
+            left = left.wrapping_sub(result.output_used as ::core::ffi::c_uint);
+            (*state).window = Some(window);
+            if let Some(message) = result.message {
+                crate::zlib_h::set_stream_message(&mut *strm, message);
+            }
             hold = (*state).hold;
             bits = (*state).bits;
         } else {
@@ -852,7 +852,7 @@ pub unsafe extern "C" fn inflateBack(
                         }
                         have = have.wrapping_sub(1);
                         let c2rust_fresh16 = next;
-                        next = next.offset(1);
+                        next = next.wrapping_add(1);
                         hold = hold.wrapping_add((*c2rust_fresh16 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
@@ -1045,7 +1045,6 @@ pub unsafe extern "C" fn inflateBack(
     return ret;
 }
 #[export_name = "inflateBack"]
-
 pub unsafe extern "C" fn inflateBack_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut in_0: crate::zlib_h::in_func,
