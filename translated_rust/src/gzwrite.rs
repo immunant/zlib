@@ -262,9 +262,7 @@ macro_rules! gz_comp_at_boundary {
                 let output_start = state_ref.strm.next_out as usize;
                 let output_len = state_ref.strm.avail_out as usize;
                 let (strm, buffers) = (&mut state_ref.strm, &mut state_ref.buffers);
-                let Some(backing) = buffers
-                    .as_mut()
-                    .and_then(|buffers| buffers.output.as_mut())
+                let Some(backing) = buffers.as_mut().and_then(|buffers| buffers.output.as_mut())
                 else {
                     break 'gz_comp_result -1;
                 };
@@ -279,9 +277,23 @@ macro_rules! gz_comp_at_boundary {
                     break 'gz_comp_result -1;
                 };
                 let mut output = crate::src::deflate::DeflateOutput::new(output);
+                let pending_state = strm.state as *mut crate::src::deflate::deflate_state;
+                if pending_state.is_null() {
+                    break 'gz_comp_result -1;
+                }
+                let pending_len = (*pending_state).pending_buf_size as usize;
+                if pending_len != 0 && (*pending_state).pending_buf.is_null() {
+                    break 'gz_comp_result -1;
+                }
+                let pending_buf = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut((*pending_state).pending_buf, pending_len)
+                };
                 ret = crate::src::deflate::deflate(
                     strm,
                     &mut input,
+                    pending_buf,
                     &mut output,
                     crate::src::deflate::DeflateGzipPayloads::empty(),
                     flush,

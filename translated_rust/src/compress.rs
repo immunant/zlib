@@ -127,9 +127,25 @@ macro_rules! compress2_z_at_boundary {
                 ::core::slice::from_raw_parts_mut(stream.next_out, output_len)
             };
             let mut output = crate::src::deflate::DeflateOutput::new(output);
+            let state = stream.state as *mut crate::src::deflate::deflate_state;
+            if state.is_null() {
+                err = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            }
+            let pending_len = (*state).pending_buf_size as usize;
+            if pending_len != 0 && (*state).pending_buf.is_null() {
+                err = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            }
+            let pending_buf = if pending_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut((*state).pending_buf, pending_len)
+            };
             err = crate::src::deflate::deflate(
                 &mut stream,
                 &mut input,
+                pending_buf,
                 &mut output,
                 crate::src::deflate::DeflateGzipPayloads::empty(),
                 if sourceLen != 0 {

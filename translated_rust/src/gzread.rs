@@ -260,9 +260,7 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             // move and the descriptor refill. Keeping this as a normal slice
             // also avoids repeatedly traversing Box's raw representation.
             let input = buffers.input.as_mut();
-            if state.strm.avail_in != 0
-                && gz_avail_retain_input(input, refill.retain).is_none()
-            {
+            if state.strm.avail_in != 0 && gz_avail_retain_input(input, refill.retain).is_none() {
                 return -1;
             }
             let Some(load) = input.get_mut(refill.load) else {
@@ -517,10 +515,7 @@ macro_rules! gz_decomp_at_boundary {
                         break;
                     }
                 };
-                ret = crate::src::inflate::inflate(
-                    &mut state.strm,
-                    crate::zlib_h::Z_NO_FLUSH,
-                );
+                ret = crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH);
                 let Some(next_input_index) = gz_input_advance(
                     state.input_index,
                     input_before,

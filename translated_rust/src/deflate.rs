@@ -1808,11 +1808,12 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     let s = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || s.pending_out.checked_add(
-            (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                as usize,
-        )
-        .map_or(true, |pending_end| pending_end > s.lit_bufsize as usize)
+        || s.pending_out
+            .checked_add(
+                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
+                    as usize,
+            )
+            .map_or(true, |pending_end| pending_end > s.lit_bufsize as usize)
     {
         return crate::zlib_h::Z_BUF_ERROR;
     }
@@ -1937,17 +1938,17 @@ macro_rules! deflate_params_at_boundary {
             }
             let s = (*strm).state as *mut crate::src::deflate::deflate_state;
             let Some(plan) = ({
-                    let state = &*s;
-                    crate::src::deflate::deflate_params_plan(
-                        level,
-                        strategy,
-                        state.level,
-                        state.strategy,
-                        state.last_flush,
-                    )
-                }) else {
-                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                };
+                let state = &*s;
+                crate::src::deflate::deflate_params_plan(
+                    level,
+                    strategy,
+                    state.level,
+                    state.strategy,
+                    state.last_flush,
+                )
+            }) else {
+                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+            };
             if plan.needs_block_flush {
                 let input_len = (*strm).avail_in as usize;
                 if input_len != 0 && (*strm).next_in.is_null() {
@@ -1968,6 +1969,17 @@ macro_rules! deflate_params_at_boundary {
                     ::core::slice::from_raw_parts_mut((*strm).next_out, output_len)
                 };
                 let mut output = crate::src::deflate::DeflateOutput::new(output);
+                let Ok(pending_len) = usize::try_from((&*s).pending_buf_size) else {
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if pending_len != 0 && (&*s).pending_buf.is_null() {
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let pending_buf = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut((&*s).pending_buf, pending_len)
+                };
                 let Some(gzip_payloads) =
                     crate::src::deflate::deflate_gzip_payloads_at_boundary!(strm)
                 else {
@@ -1976,6 +1988,7 @@ macro_rules! deflate_params_at_boundary {
                 let err = crate::src::deflate::deflate(
                     &mut *strm,
                     &mut input,
+                    pending_buf,
                     &mut output,
                     gzip_payloads,
                     crate::zlib_h::Z_BLOCK,
@@ -2000,9 +2013,8 @@ macro_rules! deflate_params_at_boundary {
             // the checked core commits every scalar field only after it has
             // accepted the complete hash update.
             let state = &mut *s;
-            let needs_hash_update = state.level != plan.level
-                && state.level == 0
-                && state.matches != 0;
+            let needs_hash_update =
+                state.level != plan.level && state.level == 0 && state.matches != 0;
             let (head, prev) = if needs_hash_update {
                 let Ok(head_len) = usize::try_from(state.hash_size) else {
                     break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
@@ -2782,7 +2794,6 @@ impl<'a> DeflateOutput<'a> {
         self.used = next;
         true
     }
-
 }
 
 /// Flush pending output and return its post-flush progress.
@@ -2792,97 +2803,87 @@ impl<'a> DeflateOutput<'a> {
 fn flush_pending(
     strm: &mut crate::zlib_h::z_stream,
     s: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Byte],
     output: &mut DeflateOutput<'_>,
     mark_last_flush: FlushPendingMark,
 ) -> (crate::stdlib::uInt, Option<crate::zutil_h::ulg>) {
-    // The callers already own the validated stream and state records. Only
-    // their callback-owned cursor buffers remain a raw ABI boundary here.
-    unsafe {
-        // Tree construction keeps this derived value in opaque state.  Publish
-        // it while this existing ABI stream/state boundary is already active.
-        strm.data_type = s.data_type;
-        let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
-            return (strm.avail_out, Some(s.pending));
-        };
-        if pending_len != 0 && s.pending_buf.is_null() {
-            return (strm.avail_out, Some(s.pending));
-        }
-        let pending_buf = if pending_len == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
-        };
-        crate::src::trees::flush_bits_state(s, pending_buf);
-        let Some((len, reset_pending_out)) =
-            flush_pending_state(s.pending_buf_size, &mut s.pending, strm.avail_out)
-        else {
-            return (strm.avail_out, Some(s.pending));
-        };
-        if len == 0 {
-            return (strm.avail_out, Some(s.pending));
-        }
-        let Ok(len) = usize::try_from(len) else {
-            return (strm.avail_out, Some(s.pending));
-        };
-        if len > output.remaining_len() || output.remaining_len() != strm.avail_out as usize {
-            return (strm.avail_out, Some(s.pending));
-        }
-        // `memcpy` required raw cursors even after their bounds had been
-        // validated.  Keep the ABI lends here, reject aliasing just as C
-        // `memcpy` requires, then perform the actual copy in the slice core.
-        let Some(pending_end) = s.pending_out.checked_add(len) else {
-            return (strm.avail_out, Some(s.pending));
-        };
-        if pending_end > pending_buf.len() {
-            return (strm.avail_out, Some(s.pending));
-        }
-        let Some(pending_address) = (s.pending_buf as usize).checked_add(s.pending_out) else {
-            return (strm.avail_out, Some(s.pending));
-        };
-        let Some(output_buf) = output.remaining_mut() else {
-            return (strm.avail_out, Some(s.pending));
-        };
-        if !deflate_spans_are_disjoint(
-            output_buf.as_mut_ptr() as usize,
-            len,
-            pending_address,
-            len,
-        ) {
-            return (strm.avail_out, Some(s.pending));
-        }
-        let Some(pending) = pending_buf.get(s.pending_out..pending_end) else {
-            return (strm.avail_out, Some(s.pending));
-        };
-        let Some(output_slice) = output_buf.get_mut(..len) else {
-            return (strm.avail_out, Some(s.pending));
-        };
-        if !flush_pending_copy_state(output_slice, pending) {
-            return (strm.avail_out, Some(s.pending));
-        }
-        if !output.advance(len) {
-            return (strm.avail_out, Some(s.pending));
-        }
-        // The copied length is bounded by the validated output and pending
-        // spans above. Preserve zlib's cursor advance without an unsafe pointer
-        // offset operation in this transitional ABI adapter.
-        strm.next_out = strm.next_out.wrapping_add(len);
-        s.pending_out = pending_end;
-        strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
-        strm.avail_out = strm.avail_out.wrapping_sub(len as crate::stdlib::uInt);
-        if reset_pending_out {
-            s.pending_out = 0;
-        }
-        // The initial ordinary-deflate pending flush historically reset this
-        // marker immediately after a full output span.  Keep that scalar
-        // state commit in the existing stream/state boundary so its caller
-        // does not need to re-adopt the raw state record after flushing.
-        if matches!(mark_last_flush, FlushPendingMark::OutputFull) && strm.avail_out == 0
-            || matches!(mark_last_flush, FlushPendingMark::PendingRemains) && s.pending != 0
-        {
-            s.last_flush = -1 as ::core::ffi::c_int;
-        }
-        (strm.avail_out, Some(s.pending))
+    // The ABI boundary lends the callback-owned pending allocation once for
+    // this codec transition. This implementation only validates its retained
+    // capacity and performs checked slice operations.
+    let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
+        return (strm.avail_out, Some(s.pending));
+    };
+    if pending_buf.len() != pending_len {
+        return (strm.avail_out, Some(s.pending));
     }
+    // Tree construction keeps this derived value in opaque state.  Publish
+    // it while this existing stream/state boundary is active.
+    strm.data_type = s.data_type;
+    crate::src::trees::flush_bits_state(s, pending_buf);
+    let Some((len, reset_pending_out)) =
+        flush_pending_state(s.pending_buf_size, &mut s.pending, strm.avail_out)
+    else {
+        return (strm.avail_out, Some(s.pending));
+    };
+    if len == 0 {
+        return (strm.avail_out, Some(s.pending));
+    }
+    let Ok(len) = usize::try_from(len) else {
+        return (strm.avail_out, Some(s.pending));
+    };
+    if len > output.remaining_len() || output.remaining_len() != strm.avail_out as usize {
+        return (strm.avail_out, Some(s.pending));
+    }
+    // `memcpy` required raw cursors even after their bounds had been
+    // validated.  Keep the ABI lends here, reject aliasing just as C
+    // `memcpy` requires, then perform the actual copy in the slice core.
+    let Some(pending_end) = s.pending_out.checked_add(len) else {
+        return (strm.avail_out, Some(s.pending));
+    };
+    if pending_end > pending_buf.len() {
+        return (strm.avail_out, Some(s.pending));
+    }
+    let Some(pending_address) = (s.pending_buf as usize).checked_add(s.pending_out) else {
+        return (strm.avail_out, Some(s.pending));
+    };
+    let Some(output_buf) = output.remaining_mut() else {
+        return (strm.avail_out, Some(s.pending));
+    };
+    if !deflate_spans_are_disjoint(output_buf.as_mut_ptr() as usize, len, pending_address, len) {
+        return (strm.avail_out, Some(s.pending));
+    }
+    let Some(pending) = pending_buf.get(s.pending_out..pending_end) else {
+        return (strm.avail_out, Some(s.pending));
+    };
+    let Some(output_slice) = output_buf.get_mut(..len) else {
+        return (strm.avail_out, Some(s.pending));
+    };
+    if !flush_pending_copy_state(output_slice, pending) {
+        return (strm.avail_out, Some(s.pending));
+    }
+    if !output.advance(len) {
+        return (strm.avail_out, Some(s.pending));
+    }
+    // The copied length is bounded by the validated output and pending
+    // spans above. Preserve zlib's cursor advance without an unsafe pointer
+    // offset operation in this transitional ABI adapter.
+    strm.next_out = strm.next_out.wrapping_add(len);
+    s.pending_out = pending_end;
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm.avail_out = strm.avail_out.wrapping_sub(len as crate::stdlib::uInt);
+    if reset_pending_out {
+        s.pending_out = 0;
+    }
+    // The initial ordinary-deflate pending flush historically reset this
+    // marker immediately after a full output span.  Keep that scalar
+    // state commit in the existing stream/state boundary so its caller
+    // does not need to re-adopt the raw state record after flushing.
+    if matches!(mark_last_flush, FlushPendingMark::OutputFull) && strm.avail_out == 0
+        || matches!(mark_last_flush, FlushPendingMark::PendingRemains) && s.pending != 0
+    {
+        s.last_flush = -1 as ::core::ffi::c_int;
+    }
+    (strm.avail_out, Some(s.pending))
 }
 
 /// Build the big-endian words emitted at the start of a zlib-wrapped stream.
@@ -3019,6 +3020,7 @@ fn deflate_reborrow<T: ?Sized>(value: &T) -> &T {
 pub fn deflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     mut input: &mut &[crate::stdlib::Byte],
+    pending_buf: &mut [crate::stdlib::Byte],
     output: &mut DeflateOutput<'_>,
     gzip_payloads: DeflateGzipPayloads<'_>,
     mut flush: ::core::ffi::c_int,
@@ -3097,7 +3099,9 @@ pub fn deflate(
             if flush_pending(
                 strm_ref,
                 s,
-                output, FlushPendingMark::OutputFull,
+                pending_buf,
+                output,
+                FlushPendingMark::OutputFull,
             )
             .0 == 0 as crate::stdlib::uInt
             {
@@ -3160,14 +3164,9 @@ pub fn deflate(
             let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            if pending_len != 0 && state.pending_buf.is_null() {
+            if pending_buf.len() != pending_len {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
-            let pending_buf = if pending_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-            };
             let header_written = match dictionary_adler {
                 Some((adler_high, adler_low)) => append_zlib_words_state(
                     pending_buf,
@@ -3194,7 +3193,9 @@ pub fn deflate(
             if flush_pending(
                 strm_ref,
                 s,
-                output, FlushPendingMark::PendingRemains,
+                pending_buf,
+                output,
+                FlushPendingMark::PendingRemains,
             )
             .1 != Some(0)
             {
@@ -3220,21 +3221,16 @@ pub fn deflate(
                     has_extra: header.has_extra,
                     has_name: header.has_name,
                     has_comment: header.has_comment,
-                        time: header.time,
-                        os: header.os,
-                        extra_len: header.extra_len,
-                    });
+                    time: header.time,
+                    os: header.os,
+                    extra_len: header.extra_len,
+                });
                 let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
-                if pending_len != 0 && state.pending_buf.is_null() {
+                if pending_buf.len() != pending_len {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                let pending_buf = if pending_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                };
                 if !append_gzip_fixed_header_state(
                     pending_buf,
                     &mut state.pending,
@@ -3256,7 +3252,9 @@ pub fn deflate(
                 if flush_pending(
                     strm_ref,
                     s,
-                    output, FlushPendingMark::PendingRemains,
+                    pending_buf,
+                    output,
+                    FlushPendingMark::PendingRemains,
                 )
                 .1 != Some(0)
                 {
@@ -3275,21 +3273,16 @@ pub fn deflate(
             // The header value was snapshotted at the ABI boundary; ordinary
             // state and stream borrows handle every chunk commit.
             if let Some(extra) = gzip_payloads.extra {
-                    loop {
-                        let state = deflate_reborrow_mut(s);
-                        let stream = deflate_reborrow_mut(strm_ref);
-                        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                loop {
+                    let state = deflate_reborrow_mut(s);
+                    let stream = deflate_reborrow_mut(strm_ref);
+                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                        if pending_len != 0 && state.pending_buf.is_null() {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        let pending_buf = if pending_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                        };
-                        let Some(done) = append_gzip_extra_chunk_state(
+                    if pending_buf.len() != pending_len {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    let Some(done) = append_gzip_extra_chunk_state(
                         pending_buf,
                         &mut state.pending,
                         &mut state.gzindex,
@@ -3299,23 +3292,25 @@ pub fn deflate(
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                        if done {
-                            state.gzindex = 0 as crate::zutil_h::ulg;
-                            break;
-                        }
-                        if state.pending != state.pending_buf_size {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        if flush_pending(
-                            strm_ref,
-                            s,
-                            output, FlushPendingMark::PendingRemains,
-                        )
-                        .1 != Some(0)
-                        {
-                            return crate::zlib_h::Z_OK;
-                        }
+                    if done {
+                        state.gzindex = 0 as crate::zutil_h::ulg;
+                        break;
                     }
+                    if state.pending != state.pending_buf_size {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    if flush_pending(
+                        strm_ref,
+                        s,
+                        pending_buf,
+                        output,
+                        FlushPendingMark::PendingRemains,
+                    )
+                    .1 != Some(0)
+                    {
+                        return crate::zlib_h::Z_OK;
+                    }
+                }
             }
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::NAME_STATE;
@@ -3328,21 +3323,16 @@ pub fn deflate(
         };
         if gzip_name_pending {
             if let Some(name) = gzip_payloads.name {
-                    loop {
-                        let state = deflate_reborrow_mut(s);
-                        let stream = deflate_reborrow_mut(strm_ref);
-                        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                loop {
+                    let state = deflate_reborrow_mut(s);
+                    let stream = deflate_reborrow_mut(strm_ref);
+                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                        if pending_len != 0 && state.pending_buf.is_null() {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        let pending_buf = if pending_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                        };
-                        let Some(done) = append_gzip_cstring_chunk_state(
+                    if pending_buf.len() != pending_len {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    let Some(done) = append_gzip_cstring_chunk_state(
                         pending_buf,
                         &mut state.pending,
                         &mut state.gzindex,
@@ -3352,23 +3342,25 @@ pub fn deflate(
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                        if done {
-                            state.gzindex = 0 as crate::zutil_h::ulg;
-                            break;
-                        }
-                        if state.pending != state.pending_buf_size {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        if flush_pending(
-                            strm_ref,
-                            s,
-                            output, FlushPendingMark::PendingRemains,
-                        )
-                        .1 != Some(0)
-                        {
-                            return crate::zlib_h::Z_OK;
-                        }
+                    if done {
+                        state.gzindex = 0 as crate::zutil_h::ulg;
+                        break;
                     }
+                    if state.pending != state.pending_buf_size {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    if flush_pending(
+                        strm_ref,
+                        s,
+                        pending_buf,
+                        output,
+                        FlushPendingMark::PendingRemains,
+                    )
+                    .1 != Some(0)
+                    {
+                        return crate::zlib_h::Z_OK;
+                    }
+                }
             }
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::COMMENT_STATE;
@@ -3379,21 +3371,16 @@ pub fn deflate(
         };
         if gzip_comment_pending {
             if let Some(comment) = gzip_payloads.comment {
-                    loop {
-                        let state = deflate_reborrow_mut(s);
-                        let stream = deflate_reborrow_mut(strm_ref);
-                        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                loop {
+                    let state = deflate_reborrow_mut(s);
+                    let stream = deflate_reborrow_mut(strm_ref);
+                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                        if pending_len != 0 && state.pending_buf.is_null() {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        let pending_buf = if pending_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                        };
-                        let Some(done) = append_gzip_cstring_chunk_state(
+                    if pending_buf.len() != pending_len {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    let Some(done) = append_gzip_cstring_chunk_state(
                         pending_buf,
                         &mut state.pending,
                         &mut state.gzindex,
@@ -3403,23 +3390,25 @@ pub fn deflate(
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                        if done {
-                            state.gzindex = 0 as crate::zutil_h::ulg;
-                            break;
-                        }
-                        if state.pending != state.pending_buf_size {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        if flush_pending(
-                            strm_ref,
-                            s,
-                            output, FlushPendingMark::PendingRemains,
-                        )
-                        .1 != Some(0)
-                        {
-                            return crate::zlib_h::Z_OK;
-                        }
+                    if done {
+                        state.gzindex = 0 as crate::zutil_h::ulg;
+                        break;
                     }
+                    if state.pending != state.pending_buf_size {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    if flush_pending(
+                        strm_ref,
+                        s,
+                        pending_buf,
+                        output,
+                        FlushPendingMark::PendingRemains,
+                    )
+                    .1 != Some(0)
+                    {
+                        return crate::zlib_h::Z_OK;
+                    }
+                }
             }
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::HCRC_STATE;
@@ -3449,7 +3438,9 @@ pub fn deflate(
                     if flush_pending(
                         strm_ref,
                         s,
-                        output, FlushPendingMark::PendingRemains,
+                        pending_buf,
+                        output,
+                        FlushPendingMark::PendingRemains,
                     )
                     .1 != Some(0)
                     {
@@ -3464,14 +3455,9 @@ pub fn deflate(
                 let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
-                if pending_len != 0 && state.pending_buf.is_null() {
+                if pending_buf.len() != pending_len {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                let pending_buf = if pending_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                };
                 if !append_gzip_hcrc_state(pending_buf, &mut state.pending, hcrc) {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
@@ -3483,7 +3469,9 @@ pub fn deflate(
             if flush_pending(
                 strm_ref,
                 s,
-                output, FlushPendingMark::PendingRemains,
+                pending_buf,
+                output,
+                FlushPendingMark::PendingRemains,
             )
             .1 != Some(0)
             {
@@ -3509,11 +3497,21 @@ pub fn deflate(
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
                 match compressor {
-                    DeflateCompressor::Stored => deflate_stored(state, strm_ref, &mut input, output, flush),
-                    DeflateCompressor::Huffman => deflate_huff(state, strm_ref, &mut input, output, flush),
-                    DeflateCompressor::Rle => deflate_rle(state, strm_ref, &mut input, output, flush),
-                    DeflateCompressor::Fast => deflate_fast(state, strm_ref, &mut input, output, flush),
-                    DeflateCompressor::Slow => deflate_slow(state, strm_ref, &mut input, output, flush),
+                    DeflateCompressor::Stored => {
+                        deflate_stored(state, strm_ref, &mut input, pending_buf, output, flush)
+                    }
+                    DeflateCompressor::Huffman => {
+                        deflate_huff(state, strm_ref, &mut input, pending_buf, output, flush)
+                    }
+                    DeflateCompressor::Rle => {
+                        deflate_rle(state, strm_ref, &mut input, pending_buf, output, flush)
+                    }
+                    DeflateCompressor::Fast => {
+                        deflate_fast(state, strm_ref, &mut input, pending_buf, output, flush)
+                    }
+                    DeflateCompressor::Slow => {
+                        deflate_slow(state, strm_ref, &mut input, pending_buf, output, flush)
+                    }
                 }
             };
             if bstate as ::core::ffi::c_uint
@@ -3550,14 +3548,9 @@ pub fn deflate(
                     let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                    if pending_len != 0 && state.pending_buf.is_null() {
+                    if pending_buf.len() != pending_len {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     }
-                    let pending_buf = if pending_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                    };
                     crate::src::trees::tr_align_state(
                         pending_buf,
                         &mut state.pending,
@@ -3572,14 +3565,9 @@ pub fn deflate(
                     let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                    if pending_len != 0 && state.pending_buf.is_null() {
+                    if pending_buf.len() != pending_len {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     }
-                    let pending_buf = if pending_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                    };
                     if !crate::src::trees::tr_stored_block_state(
                         pending_buf,
                         &mut state.pending,
@@ -3614,7 +3602,9 @@ pub fn deflate(
                 if flush_pending(
                     strm_ref,
                     s,
-                    output, FlushPendingMark::OutputFull,
+                    pending_buf,
+                    output,
+                    FlushPendingMark::OutputFull,
                 )
                 .0 == 0 as crate::stdlib::uInt
                 {
@@ -3637,14 +3627,9 @@ pub fn deflate(
             let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            if pending_len != 0 && state.pending_buf.is_null() {
+            if pending_buf.len() != pending_len {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
-            let pending_buf = if pending_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-            };
             let trailer_written = match trailer {
                 DeflateTrailerPlan::Gzip { check, total_in } => {
                     append_gzip_trailer_state(pending_buf, &mut state.pending, check, total_in)
@@ -3663,11 +3648,7 @@ pub fn deflate(
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
         };
-        flush_pending(
-            strm_ref,
-            s,
-            output, FlushPendingMark::Never,
-        );
+        flush_pending(strm_ref, s, pending_buf, output, FlushPendingMark::Never);
         let pending_after_flush = {
             let state = deflate_reborrow_mut(s);
             if state.wrap > 0 as ::core::ffi::c_int {
@@ -3713,7 +3694,29 @@ pub unsafe extern "C" fn deflate_ffi(
         let Some(gzip_payloads) = deflate_gzip_payloads_at_boundary!(strm) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        deflate(&mut *strm, &mut input, &mut output, gzip_payloads, flush)
+        let state = (*strm).state as *mut crate::src::deflate::deflate_state;
+        if state.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let Ok(pending_len) = usize::try_from((*state).pending_buf_size) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if pending_len != 0 && (*state).pending_buf.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let pending_buf = if pending_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut((*state).pending_buf, pending_len)
+        };
+        deflate(
+            &mut *strm,
+            &mut input,
+            pending_buf,
+            &mut output,
+            gzip_payloads,
+            flush,
+        )
     }
 }
 fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
@@ -4472,6 +4475,7 @@ fn deflate_stored(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    pending_buf: &mut [crate::stdlib::Byte],
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -4526,18 +4530,13 @@ fn deflate_stored(
             let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
                 return need_more;
             };
-            if pending_len != 0 && s.pending_buf.is_null() {
+            if pending_buf.len() != pending_len {
                 return need_more;
             }
-            let pending_buf = if pending_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
-            };
             if !emit_stored_direct_header_state(s, pending_buf, len, last) {
                 return need_more;
             }
-            flush_pending(strm, s, output, FlushPendingMark::Never);
+            flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never);
             if left != 0 || len != 0 {
                 let Ok(output_len) = usize::try_from(strm.avail_out) else {
                     return need_more;
@@ -4653,8 +4652,7 @@ fn deflate_stored(
             } else {
                 ::core::slice::from_raw_parts_mut(s.window, window_len)
             };
-            let Some(next_have) = rebalance_stored_window_state(s, window, strm.avail_in)
-            else {
+            let Some(next_have) = rebalance_stored_window_state(s, window, strm.avail_in) else {
                 return need_more;
             };
             have = next_have;
@@ -4672,8 +4670,7 @@ fn deflate_stored(
                 if stored_input_progress_state(s, have).is_none() {
                     return need_more;
                 }
-                let Some(write_span) =
-                    fill_window_write_span(window.len(), s.strstart, 0, have)
+                let Some(write_span) = fill_window_write_span(window.len(), s.strstart, 0, have)
                 else {
                     return need_more;
                 };
@@ -4700,19 +4697,13 @@ fn deflate_stored(
                 let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
                     return need_more;
                 };
-                if pending_len != 0 && s.pending_buf.is_null() {
+                if pending_buf.len() != pending_len {
                     return need_more;
                 }
-                let pending_buf = if pending_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
-                };
                 let stored = if len == 0 {
                     &[]
                 } else {
-                    let Some(stored) = stored_block_window_slice(window, s.block_start, len)
-                    else {
+                    let Some(stored) = stored_block_window_slice(window, s.block_start, len) else {
                         return need_more;
                     };
                     stored
@@ -4720,7 +4711,7 @@ fn deflate_stored(
                 if !emit_stored_window_block_state(s, pending_buf, stored, last) {
                     return need_more;
                 }
-                flush_pending(strm, s, output, FlushPendingMark::Never);
+                flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never);
             }
         }
         return (if last != 0 {
@@ -4735,6 +4726,7 @@ fn deflate_fast(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    pending_buf: &mut [crate::stdlib::Byte],
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -4763,17 +4755,14 @@ fn deflate_fast(
             // and pending allocation. Lend each once per no-refill
             // transition; only the match path additionally needs hash views.
             let state: &mut crate::src::deflate::deflate_state = s;
-            let has_min_match =
-                state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+            let has_min_match = state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
             let (Ok(window_len), Ok(pending_len)) = (
                 usize::try_from(state.window_size),
                 usize::try_from(state.pending_buf_size),
             ) else {
                 return need_more;
             };
-            if (window_len != 0 && state.window.is_null())
-                || (pending_len != 0 && state.pending_buf.is_null())
-            {
+            if (window_len != 0 && state.window.is_null()) || pending_buf.len() != pending_len {
                 return need_more;
             }
             let window = if window_len == 0 {
@@ -4781,11 +4770,7 @@ fn deflate_fast(
             } else {
                 ::core::slice::from_raw_parts(state.window, window_len)
             };
-            let pending_and_symbols = if pending_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-            };
+            let pending_and_symbols = &mut *pending_buf;
             if has_min_match {
                 let (Ok(head_len), Ok(prev_len)) = (
                     usize::try_from(state.hash_size),
@@ -4913,7 +4898,7 @@ fn deflate_fast(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, output, FlushPendingMark::Never).0
+                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -4941,7 +4926,7 @@ fn deflate_fast(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, output, FlushPendingMark::Never).0
+                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -4973,9 +4958,7 @@ fn deflate_fast(
                 ) else {
                     return need_more;
                 };
-                if (window_len != 0 && state.window.is_null())
-                    || (pending_len != 0 && state.pending_buf.is_null())
-                {
+                if (window_len != 0 && state.window.is_null()) || pending_buf.len() != pending_len {
                     return need_more;
                 }
                 let window = if window_len == 0 {
@@ -4983,11 +4966,7 @@ fn deflate_fast(
                 } else {
                     ::core::slice::from_raw_parts(state.window, window_len)
                 };
-                let pending_and_symbols = if pending_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                };
+                let pending_and_symbols = &mut *pending_buf;
                 let last = flush == crate::zlib_h::Z_FINISH;
                 flush_tree_window_block_state(
                     state,
@@ -5002,7 +4981,7 @@ fn deflate_fast(
             let avail_out = {
                 let state: &mut crate::src::deflate::deflate_state = s;
                 state.block_start = state.strstart as ::core::ffi::c_long;
-                flush_pending(strm, state, output, FlushPendingMark::Never).0
+                flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
             };
             if let Some(result) = deflate_post_flush_result(avail_out, last) {
                 return result;
@@ -5019,6 +4998,7 @@ fn deflate_slow(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    pending_buf: &mut [crate::stdlib::Byte],
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -5029,9 +5009,8 @@ fn deflate_slow(
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
-            let needs_input = {
-                s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            };
+            let needs_input =
+                { s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt };
             if needs_input {
                 fill_window(s, strm, input);
                 if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
@@ -5064,9 +5043,7 @@ fn deflate_slow(
                 ) else {
                     return need_more;
                 };
-                if (window_len != 0 && state.window.is_null())
-                    || (pending_len != 0 && state.pending_buf.is_null())
-                {
+                if (window_len != 0 && state.window.is_null()) || pending_buf.len() != pending_len {
                     return need_more;
                 }
                 let window = if window_len == 0 {
@@ -5078,11 +5055,7 @@ fn deflate_slow(
                 // allocation. Keep the existing no-refill window/hash lends
                 // through a possible tree flush instead of rebuilding either
                 // raw cursor at the block boundary.
-                let pending_and_symbols = if pending_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                };
+                let pending_and_symbols = &mut *pending_buf;
                 if has_min_match {
                     let (Ok(head_len), Ok(prev_len)) = (
                         usize::try_from(state.hash_size),
@@ -5167,10 +5140,11 @@ fn deflate_slow(
                             return need_more;
                         };
                         bflush = flush_now as ::core::ffi::c_int;
-                        state.lookahead = state.lookahead.wrapping_sub(
-                            state.prev_length.wrapping_sub(1 as crate::stdlib::uInt),
-                        );
-                        state.prev_length = state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
+                        state.lookahead = state
+                            .lookahead
+                            .wrapping_sub(state.prev_length.wrapping_sub(1 as crate::stdlib::uInt));
+                        state.prev_length =
+                            state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
                         loop {
                             state.strstart = state.strstart.wrapping_add(1);
                             if state.strstart <= max_insert {
@@ -5239,9 +5213,8 @@ fn deflate_slow(
                 }
             }
             if bflush != 0 {
-                let avail_out = {
-                    flush_pending(strm, s, output, FlushPendingMark::Never).0
-                };
+                let avail_out =
+                    { flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never).0 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
                 }
@@ -5270,9 +5243,7 @@ fn deflate_slow(
                 ) else {
                     return need_more;
                 };
-                if (window_len != 0 && state.window.is_null())
-                    || (pending_len != 0 && state.pending_buf.is_null())
-                {
+                if (window_len != 0 && state.window.is_null()) || pending_buf.len() != pending_len {
                     return need_more;
                 }
                 let window = if window_len == 0 {
@@ -5280,11 +5251,7 @@ fn deflate_slow(
                 } else {
                     ::core::slice::from_raw_parts(state.window, window_len)
                 };
-                let pending_and_symbols = if pending_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                };
+                let pending_and_symbols = &mut *pending_buf;
                 if match_available {
                     let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
                         return need_more;
@@ -5307,13 +5274,11 @@ fn deflate_slow(
                     state.match_available = 0 as ::core::ffi::c_int;
                 }
                 state.insert = if state.strstart
-                    < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
-                        as crate::stdlib::uInt
+                    < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
                 {
                     state.strstart
                 } else {
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
-                        as crate::stdlib::uInt
+                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
                 };
                 if flush == crate::zlib_h::Z_FINISH {
                     flush_tree_window_block_state(state, pending_and_symbols, window, 1);
@@ -5326,13 +5291,11 @@ fn deflate_slow(
                 }
             } else {
                 state.insert = if state.strstart
-                    < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
-                        as crate::stdlib::uInt
+                    < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
                 {
                     state.strstart
                 } else {
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
-                        as crate::stdlib::uInt
+                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
                 };
                 None
             }
@@ -5340,7 +5303,7 @@ fn deflate_slow(
         if let Some(last) = tail_last {
             let avail_out = {
                 s.block_start = s.strstart as ::core::ffi::c_long;
-                flush_pending(strm, s, output, FlushPendingMark::Never).0
+                flush_pending(strm, s, pending_buf, output, FlushPendingMark::Never).0
             };
             if let Some(result) = deflate_post_flush_result(avail_out, last) {
                 return result;
@@ -5670,6 +5633,7 @@ fn deflate_rle(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    pending_buf: &mut [crate::stdlib::Byte],
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -5678,8 +5642,7 @@ fn deflate_rle(
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
-            let needs_input =
-                s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt;
+            let needs_input = s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt;
             if needs_input {
                 fill_window(s, strm, input);
                 if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
@@ -5711,24 +5674,20 @@ fn deflate_rle(
             let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                 return need_more;
             };
-            if pending_len != 0 && state.pending_buf.is_null() {
+            if pending_buf.len() != pending_len {
                 return need_more;
             }
             // `sym_start` is the literal-buffer offset inside `pending_buf`.
             // Keep this existing callback-owned lend alive for a possible
             // checked tree flush instead of re-entering its raw adapter.
-            let pending_and_symbols = if pending_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-            };
+            let pending_and_symbols = &mut *pending_buf;
             if state.lookahead == 0 as crate::stdlib::uInt {
                 let tail_action = deflate_tail_action_state(state, flush);
                 if matches!(tail_action, DeflateTailAction::Finish) {
                     flush_tree_window_block_state(state, pending_and_symbols, window, 1);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, output, FlushPendingMark::Never).0
+                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, true) {
                         return result;
@@ -5739,7 +5698,7 @@ fn deflate_rle(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, output, FlushPendingMark::Never).0
+                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -5770,7 +5729,7 @@ fn deflate_rle(
                 flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                 let avail_out = {
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(strm, state, output, FlushPendingMark::Never).0
+                    flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
@@ -5784,6 +5743,7 @@ fn deflate_huff(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
+    pending_buf: &mut [crate::stdlib::Byte],
     output: &mut DeflateOutput<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -5796,9 +5756,7 @@ fn deflate_huff(
             let needs_input = s.lookahead == 0 as crate::stdlib::uInt;
             if needs_input {
                 fill_window(s, strm, input);
-                if s.lookahead == 0 as crate::stdlib::uInt
-                    && flush == crate::zlib_h::Z_NO_FLUSH
-                {
+                if s.lookahead == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
                 }
             }
@@ -5817,24 +5775,20 @@ fn deflate_huff(
             let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                 return need_more;
             };
-            if pending_len != 0 && state.pending_buf.is_null() {
+            if pending_buf.len() != pending_len {
                 return need_more;
             }
             // `sym_start` is initialized as the literal-buffer offset within
             // `pending_buf`. Lend that one callback-owned allocation once,
             // then split its symbol storage with checked slice arithmetic.
-            let pending_and_symbols = if pending_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-            };
+            let pending_and_symbols = &mut *pending_buf;
             if state.lookahead == 0 as crate::stdlib::uInt {
                 let tail_action = deflate_tail_action_state(state, flush);
                 if matches!(tail_action, DeflateTailAction::Finish) {
                     flush_tree_window_block_state(state, pending_and_symbols, window, 1);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, output, FlushPendingMark::Never).0
+                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, true) {
                         return result;
@@ -5845,7 +5799,7 @@ fn deflate_huff(
                     flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
-                        flush_pending(strm, state, output, FlushPendingMark::Never).0
+                        flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -5878,7 +5832,7 @@ fn deflate_huff(
                 flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                 let avail_out = {
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(strm, state, output, FlushPendingMark::Never).0
+                    flush_pending(strm, state, pending_buf, output, FlushPendingMark::Never).0
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;

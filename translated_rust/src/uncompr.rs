@@ -153,10 +153,7 @@ macro_rules! uncompress2_z_at_boundary {
                     stream.avail_in = chunk;
                     len = remaining;
                 }
-                err = crate::src::inflate::inflate(
-                    &mut stream,
-                    crate::zlib_h::Z_NO_FLUSH,
-                );
+                err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH);
                 if err != crate::zlib_h::Z_OK {
                     break;
                 }
