@@ -1234,14 +1234,7 @@ pub unsafe extern "C" fn deflatePrime(
     let Some((_strm, state)) = deflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if bits < 0 as ::core::ffi::c_int
-        || bits > 16 as ::core::ffi::c_int
-        || state.sym_buf
-            < state.pending_out.wrapping_add(
-                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as usize,
-            )
-    {
+    if !deflate_prime_can_reserve(state, bits) {
         return crate::zlib_h::Z_BUF_ERROR;
     }
     let pending = ::core::slice::from_raw_parts_mut(
@@ -1249,6 +1242,22 @@ pub unsafe extern "C" fn deflatePrime(
         state.pending_buf_size as usize,
     );
     deflate_prime(state, pending, bits, value)
+}
+
+// The reservation decision only inspects already-bound deflater state. Keep
+// it separate from the raw entry point, which is responsible for binding the
+// pending allocation after this preflight succeeds.
+fn deflate_prime_can_reserve(
+    state: &crate::src::deflate::deflate_state,
+    bits: ::core::ffi::c_int,
+) -> bool {
+    bits >= 0 as ::core::ffi::c_int
+        && bits <= 16 as ::core::ffi::c_int
+        && state.sym_buf
+            >= state.pending_out.wrapping_add(
+                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
+                    as usize,
+            )
 }
 
 fn deflate_prime(
