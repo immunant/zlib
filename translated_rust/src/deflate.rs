@@ -2738,6 +2738,12 @@ pub fn deflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    // A copy onto the same initialized stream is a no-op. Keep this zlib
+    // behavior in the named implementation so the ABI adapter below remains
+    // only a dispatcher.
+    if !dest.is_null() && dest == source {
+        return crate::zlib_h::Z_OK;
+    }
     // SAFETY: this implementation preserves zlib's raw stream and allocator
     // protocol. Each raw allocation or stream binding is validated before it
     // is turned into a reference, and no such reference spans an allocator
@@ -2747,7 +2753,7 @@ pub fn deflateCopy(
     // from preserving zlib's observable publication order, this keeps the
     // copy plan reference-bound instead of repeatedly dereferencing the
     // source state through the allocation sequence below.
-    let (pending_offset, plan) = {
+    let (pending_offset, plan, zalloc, opaque) = {
         let Some((source_stream, source_state)) = deflateStateCheck(source) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -2757,7 +2763,8 @@ pub fn deflateCopy(
         // Publish the source stream fields before the allocator callbacks, as
         // zlib's original whole-struct copy does. A typed copy preserves every
         // observable stream field without an untyped foreign-memory operation.
-        *dest = *source_stream;
+        let dest_stream = &mut *dest;
+        *dest_stream = *source_stream;
         let pending_offset = source_state
             .pending_out
             .addr()
@@ -2765,18 +2772,11 @@ pub fn deflateCopy(
         let Some(plan) = deflate_copy_plan(source_state, pending_offset) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        (pending_offset, plan)
-    };
-    // Snapshot every source-derived allocation request before any callback.
-    // A custom allocator is allowed to inspect the destination stream, so
-    // later requests must not need to revisit the source state through raw
-    // pointers.
-    // Capture this allocation callback and its argument together before it
-    // runs, matching the original evaluation order without retaining a
-    // stream reference across the foreign callback.
-    let (zalloc, opaque) = {
-        let dest_stream = &mut *dest;
-        (
+        // Snapshot the first allocation callback and its argument before it
+        // runs. The source-derived copy plan and this destination snapshot are
+        // both complete before a re-entrant allocator can inspect either
+        // stream.
+        (pending_offset, plan,
             dest_stream.zalloc.expect("non-null function pointer"),
             dest_stream.opaque,
         )
