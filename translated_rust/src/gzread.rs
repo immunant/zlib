@@ -1043,7 +1043,6 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     err = gzclose_read_status(state.err);
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     crate::src::gzlib::gz_remove_error_info(state);
-    crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
     ret = crate::stdlib::close(state.fd);
     crate::stdlib::free(file as *mut ::core::ffi::c_void);
     return gzclose_r_final_status(ret, err);

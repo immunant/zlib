@@ -188,7 +188,7 @@ struct GzOwnedBuffers {
 }
 
 static GZ_OWNED_BUFFERS: Mutex<Vec<(usize, GzOwnedBuffers)>> = Mutex::new(Vec::new());
-static GZ_ERROR_PATHS: Mutex<Vec<(usize, Vec<u8>)>> = Mutex::new(Vec::new());
+static GZ_ERROR_PATHS: Mutex<Vec<(usize, ::std::ffi::CString)>> = Mutex::new(Vec::new());
 static GZ_ERROR_MESSAGES: Mutex<Vec<(usize, ::std::ffi::CString)>> = Mutex::new(Vec::new());
 
 fn gz_state_key(state: &crate::gzguts_h::gz_state) -> usize {
@@ -227,8 +227,10 @@ pub(crate) fn gz_remove_owned_buffers(state: &crate::gzguts_h::gz_state) {
     }
 }
 
-fn gz_store_error_path(state: &crate::gzguts_h::gz_state, path: &::core::ffi::CStr) {
-    let owned_path = path.to_bytes().to_vec();
+fn gz_store_error_path(state: &mut crate::gzguts_h::gz_state, path: &::core::ffi::CStr) {
+    let owned_path = ::std::ffi::CString::new(path.to_bytes()).expect("CStr contains no nul");
+    let path_ptr = owned_path.as_ptr() as *mut ::core::ffi::c_char;
+    let path_len = owned_path.as_bytes().len();
     let mut paths = GZ_ERROR_PATHS
         .lock()
         .expect("gz error path registry poisoned");
@@ -238,6 +240,8 @@ fn gz_store_error_path(state: &crate::gzguts_h::gz_state, path: &::core::ffi::CS
     } else {
         paths.push((key, owned_path));
     }
+    state.path = path_ptr;
+    state.path_len = path_len as crate::__stddef_size_t_h::size_t;
 }
 
 fn gz_with_error_path<R>(
@@ -250,10 +254,10 @@ fn gz_with_error_path<R>(
     let (_, path) = paths
         .iter()
         .find(|(stored_key, _)| *stored_key == gz_state_key(state))?;
-    Some(f(path))
+    Some(f(path.to_bytes()))
 }
 
-fn gz_remove_error_path(state: &crate::gzguts_h::gz_state) {
+fn gz_remove_error_path(state: &mut crate::gzguts_h::gz_state) {
     let mut paths = GZ_ERROR_PATHS
         .lock()
         .expect("gz error path registry poisoned");
@@ -261,6 +265,8 @@ fn gz_remove_error_path(state: &crate::gzguts_h::gz_state) {
     if let Some(pos) = paths.iter().position(|(stored_key, _)| *stored_key == key) {
         paths.swap_remove(pos);
     }
+    state.path = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    state.path_len = 0 as crate::__stddef_size_t_h::size_t;
 }
 
 fn gz_store_error_message(state: &mut crate::gzguts_h::gz_state, message: ::std::ffi::CString) {
@@ -293,7 +299,7 @@ fn gz_remove_error_message(state: &crate::gzguts_h::gz_state) {
     }
 }
 
-pub(crate) fn gz_remove_error_info(state: &crate::gzguts_h::gz_state) {
+pub(crate) fn gz_remove_error_info(state: &mut crate::gzguts_h::gz_state) {
     gz_remove_error_message(state);
     gz_remove_error_path(state);
 }
@@ -379,15 +385,6 @@ fn gz_open(
         }
         let mut oflag = parsed_mode.oflag;
         let exclusive = parsed_mode.exclusive;
-        let len = path.to_bytes().len() as crate::stdlib::z_size_t;
-        let state_path = crate::stdlib::malloc(
-            (len as crate::__stddef_size_t_h::size_t)
-                .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-        ) as *mut ::core::ffi::c_char;
-        if state_path.is_null() {
-            crate::stdlib::free(state as *mut ::core::ffi::c_void);
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
         let state_ref = &mut *state;
         state_ref.size = 0 as ::core::ffi::c_uint;
         state_ref.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
@@ -397,14 +394,8 @@ fn gz_open(
         state_ref.level = parsed_mode.level;
         state_ref.strategy = parsed_mode.strategy;
         state_ref.direct = parsed_mode.direct;
-        state_ref.path = state_path;
-        crate::stdlib::snprintf(
-            state_path,
-            (len as crate::__stddef_size_t_h::size_t)
-                .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-            b"%s\0".as_ptr() as *const ::core::ffi::c_char,
-            path.as_ptr(),
-        );
+        state_ref.path = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        state_ref.path_len = 0 as crate::__stddef_size_t_h::size_t;
         gz_store_error_path(state_ref, path);
         oflag = gz_open_oflag_for_mode(oflag, parsed_mode.mode, exclusive);
         if fd == -1 as ::core::ffi::c_int {
@@ -426,10 +417,8 @@ fn gz_open(
             }
         }
         state_ref.fd = fd;
-        state_ref.path_len = len as crate::__stddef_size_t_h::size_t;
         if state_ref.fd == -1 as ::core::ffi::c_int {
             gz_remove_error_path(state_ref);
-            crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
