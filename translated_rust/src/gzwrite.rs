@@ -17,7 +17,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateParams;
 pub use crate::src::deflate::deflateReset;
 pub use crate::src::deflate::internal_state;
 
@@ -502,7 +501,14 @@ pub unsafe extern "C" fn gzputc_ffi(
 ) -> ::core::ffi::c_int {
     gzputc(file, c)
 }
-pub unsafe extern "C" fn gzputs(
+fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
+    (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
+        && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
+}
+
+#[export_name = "gzputs"]
+
+pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
@@ -525,9 +531,7 @@ pub unsafe extern "C" fn gzputs(
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
-        || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
-    {
+    if !gzputs_len_fits_int(len) {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -541,14 +545,6 @@ pub unsafe extern "C" fn gzputs(
     } else {
         put as ::core::ffi::c_int
     };
-}
-#[export_name = "gzputs"]
-
-pub unsafe extern "C" fn gzputs_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut s: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    gzputs(file, s)
 }
 fn gzflush_valid_flush(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 as ::core::ffi::c_int && flush <= crate::zlib_h::Z_FINISH
@@ -583,7 +579,17 @@ pub unsafe extern "C" fn gzflush_ffi(
     gz_comp(state, flush);
     return (*state).err;
 }
-pub unsafe extern "C" fn gzsetparams(
+fn gzsetparams_unchanged(
+    state: &crate::gzguts_h::gz_state,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> bool {
+    level == state.level && strategy == state.strategy
+}
+
+#[export_name = "gzsetparams"]
+
+pub unsafe extern "C" fn gzsetparams_ffi(
     mut file: crate::zlib_h::gzFile,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
@@ -607,7 +613,7 @@ pub unsafe extern "C" fn gzsetparams(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if level == (*state).level && strategy == (*state).strategy {
+    if gzsetparams_unchanged(&*state, level, strategy) {
         return crate::zlib_h::Z_OK;
     }
     if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
@@ -619,20 +625,15 @@ pub unsafe extern "C" fn gzsetparams(
         {
             return (*state).err;
         }
-        crate::src::deflate::deflateParams(strm as *mut crate::zlib_h::z_stream_s, level, strategy);
+        crate::src::deflate::deflateParams_ffi(
+            strm as *mut crate::zlib_h::z_stream_s,
+            level,
+            strategy,
+        );
     }
     (*state).level = level;
     (*state).strategy = strategy;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "gzsetparams"]
-
-pub unsafe extern "C" fn gzsetparams_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzsetparams(file, level, strategy)
 }
 pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;

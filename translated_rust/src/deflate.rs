@@ -1129,41 +1129,73 @@ pub unsafe extern "C" fn deflatePrime_ffi(
 ) -> ::core::ffi::c_int {
     deflatePrime(strm, bits, value)
 }
-pub unsafe extern "C" fn deflateParams(
+fn deflate_params_level(level: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
+        6 as ::core::ffi::c_int
+    } else {
+        level
+    }
+}
+
+fn deflate_params_valid(level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) -> bool {
+    (0 as ::core::ffi::c_int..=9 as ::core::ffi::c_int).contains(&level)
+        && (0 as ::core::ffi::c_int..=crate::zlib_h::Z_FIXED).contains(&strategy)
+}
+
+fn deflate_params_needs_flush(
+    state: &crate::src::deflate::deflate_state,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> bool {
+    let func = configuration_table[state.level as usize].func;
+    (strategy != state.strategy || func != configuration_table[level as usize].func)
+        && state.last_flush != -2 as ::core::ffi::c_int
+}
+
+fn deflate_params_drained(
+    state: &crate::src::deflate::deflate_state,
+    avail_in: crate::stdlib::uInt,
+) -> bool {
+    avail_in == 0
+        && state.strstart as ::core::ffi::c_long - state.block_start
+            + state.lookahead as ::core::ffi::c_long
+            == 0
+}
+
+fn deflate_params_apply_config(
+    state: &mut crate::src::deflate::deflate_state,
+    level: ::core::ffi::c_int,
+) {
+    state.level = level;
+    state.max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
+    state.good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
+    state.nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
+    state.max_chain_length = configuration_table[level as usize].max_chain as crate::stdlib::uInt;
+}
+
+#[export_name = "deflateParams"]
+
+pub unsafe extern "C" fn deflateParams_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut func: compress_func = None;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
-        level = 6 as ::core::ffi::c_int;
-    }
-    if level < 0 as ::core::ffi::c_int
-        || level > 9 as ::core::ffi::c_int
-        || strategy < 0 as ::core::ffi::c_int
-        || strategy > crate::zlib_h::Z_FIXED
-    {
+    level = deflate_params_level(level);
+    if !deflate_params_valid(level, strategy) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    func = configuration_table[(*s).level as usize].func;
-    if (strategy != (*s).strategy || func != configuration_table[level as usize].func)
-        && (*s).last_flush != -2 as ::core::ffi::c_int
-    {
+    if deflate_params_needs_flush(&*s, level, strategy) {
         let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if (*strm).avail_in != 0
-            || (*s).strstart as ::core::ffi::c_long - (*s).block_start
-                + (*s).lookahead as ::core::ffi::c_long
-                != 0
-        {
+        if !deflate_params_drained(&*s, (*strm).avail_in) {
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
@@ -1188,24 +1220,10 @@ pub unsafe extern "C" fn deflateParams(
             }
             (*s).matches = 0 as crate::stdlib::uInt;
         }
-        (*s).level = level;
-        (*s).max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        (*s).good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        (*s).nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        (*s).max_chain_length =
-            configuration_table[level as usize].max_chain as crate::stdlib::uInt;
+        deflate_params_apply_config(&mut *s, level);
     }
     (*s).strategy = strategy;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "deflateParams"]
-
-pub unsafe extern "C" fn deflateParams_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    deflateParams(strm, level, strategy)
 }
 pub fn deflateTune(
     s: &mut crate::src::deflate::deflate_state,
