@@ -1411,13 +1411,11 @@ pub unsafe extern "C" fn gzsetparams(
 ) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut strm: crate::zlib_h::z_streamp = ::core::ptr::null_mut::<crate::zlib_h::z_stream>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
     let state = &mut *state;
-    strm = &raw mut state.strm as crate::zlib_h::z_streamp;
     if !gzsetparams_state_is_usable(state.mode, state.err, state.again, state.direct) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1432,24 +1430,28 @@ pub unsafe extern "C" fn gzsetparams(
         strategy,
         state.strategy,
         state.size,
-        (*strm).avail_in,
+        state.strm.avail_in,
     );
     if matches!(action, GzSetParamsAction::ReturnOk) {
         return crate::zlib_h::Z_OK;
     }
-    if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
-        return (*state).err;
+    if gz_has_pending_skip(state.skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
+        return state.err;
     }
     if matches!(action, GzSetParamsAction::FlushThenDeflate)
         && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
     {
-        return (*state).err;
+        return state.err;
     }
     if !matches!(action, GzSetParamsAction::SetOnly) {
-        crate::src::deflate::deflateParams(strm as *mut crate::zlib_h::z_stream_s, level, strategy);
+        crate::src::deflate::deflateParams(
+            &mut state.strm as *mut crate::zlib_h::z_stream_s,
+            level,
+            strategy,
+        );
     }
-    (*state).level = level;
-    (*state).strategy = strategy;
+    state.level = level;
+    state.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "gzsetparams"]

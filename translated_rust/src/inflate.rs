@@ -1149,7 +1149,6 @@ pub unsafe extern "C" fn inflate(
     let mut in_0: ::core::ffi::c_uint = 0;
     let mut out: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -2390,7 +2389,7 @@ pub unsafe extern "C" fn inflate(
             (*state).mode = crate::src::inflate::BAD;
             continue;
         };
-        from = match source {
+        let mut from = match source {
             InflateMatchSource::Window { index } => (*state).window.wrapping_add(index as usize),
             InflateMatchSource::Output { offset } => put.wrapping_sub(offset as usize),
         };

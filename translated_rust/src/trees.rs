@@ -3629,6 +3629,18 @@ fn symbol_triplet_cursors(
     crate::src::deflate::symbol_triplet_cursors(start)
 }
 
+fn decode_symbol_triplet(
+    distance_low: crate::zutil_h::uch,
+    distance_high: crate::zutil_h::uch,
+    literal_or_length: crate::zutil_h::uch,
+) -> (::core::ffi::c_uint, ::core::ffi::c_int) {
+    (
+        (distance_low as ::core::ffi::c_uint)
+            | (distance_high as ::core::ffi::c_uint) << 8 as ::core::ffi::c_int,
+        literal_or_length as ::core::ffi::c_int,
+    )
+}
+
 fn symbol_buffer_is_full(next: crate::stdlib::uInt, end: crate::stdlib::uInt) -> bool {
     next == end
 }
@@ -5177,8 +5189,6 @@ unsafe fn compress_block(
     mut ltree: *const crate::src::deflate::ct_data,
     mut dtree: *const crate::src::deflate::ct_data,
 ) {
-    let mut dist: ::core::ffi::c_uint = 0;
-    let mut lc: ::core::ffi::c_int = 0;
     let mut sx: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut code: ::core::ffi::c_uint = 0;
     let mut extra: ::core::ffi::c_int = 0;
@@ -5186,14 +5196,11 @@ unsafe fn compress_block(
         loop {
             let (cursors, next_sx) = symbol_triplet_cursors(sx);
             sx = next_sx;
-            dist = (*(*s).sym_buf.offset(cursors[0] as isize) as ::core::ffi::c_int
-                & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint;
-            dist = dist.wrapping_add(
-                ((*(*s).sym_buf.offset(cursors[1] as isize) as ::core::ffi::c_int
-                    & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint)
-                    << 8 as ::core::ffi::c_int,
+            let (mut dist, mut lc) = decode_symbol_triplet(
+                *(*s).sym_buf.offset(cursors[0] as isize),
+                *(*s).sym_buf.offset(cursors[1] as isize),
+                *(*s).sym_buf.offset(cursors[2] as isize),
             );
-            lc = *(*s).sym_buf.offset(cursors[2] as isize) as ::core::ffi::c_int;
             if dist == 0 as ::core::ffi::c_uint {
                 let mut len: ::core::ffi::c_int =
                     (*ltree.offset(lc as isize)).dl.len as ::core::ffi::c_int;
@@ -5617,7 +5624,7 @@ mod tests {
         reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
         static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
         supplemental_tree_static_len, symbol_buffer_has_entries, symbol_buffer_is_full,
-        symbol_triplet_cursors, tally_match_tree_indices, tally_scan_tree_action,
+        symbol_triplet_cursors, decode_symbol_triplet, tally_match_tree_indices, tally_scan_tree_action,
         tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_heap_has_pair, tree_next_cursor, tree_parent_depth,
         tree_run_continues, tree_run_extra_bits, tree_run_limits, tree_run_step, BlockEncoding,
@@ -6062,6 +6069,12 @@ mod tests {
                 1
             )
         );
+    }
+
+    #[test]
+    fn symbol_triplet_decoding_combines_little_endian_distance_and_length() {
+        assert_eq!(decode_symbol_triplet(0x34, 0x12, 0x56), (0x1234, 0x56));
+        assert_eq!(decode_symbol_triplet(0xff, 0xff, 0), (0xffff, 0));
     }
 
     #[test]
