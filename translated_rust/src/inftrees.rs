@@ -2887,6 +2887,10 @@ pub unsafe extern "C" fn inflate_table(
     };
     let mut next: *mut crate::src::inftrees::code =
         ::core::ptr::null_mut::<crate::src::inftrees::code>();
+    // Keep the subtable location as an index as well as the transitional
+    // boundary cursor.  This avoids deriving an index with raw-pointer
+    // subtraction when a root entry points at a newly allocated subtable.
+    let mut next_index: ::core::ffi::c_uint = 0;
     // The base and extra tables are immutable local data.  Keep them as
     // slices so table selection and lookup do not manufacture raw pointers.
     let mut base: Option<&[::core::ffi::c_ushort]> = None;
@@ -3127,6 +3131,7 @@ pub unsafe extern "C" fn inflate_table(
     sym = 0 as ::core::ffi::c_uint;
     len = min;
     next = *table;
+    next_index = 0;
     curr = root;
     drop_0 = 0 as ::core::ffi::c_uint;
     low = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
@@ -3202,6 +3207,7 @@ pub unsafe extern "C" fn inflate_table(
                 drop_0 = root;
             }
             next = next.wrapping_offset(min as isize);
+            next_index = next_index.wrapping_add(min);
             curr = len.wrapping_sub(drop_0);
             left = (1 as ::core::ffi::c_int) << curr;
             while curr.wrapping_add(drop_0) < max {
@@ -3225,8 +3231,7 @@ pub unsafe extern "C" fn inflate_table(
             low = huff & mask;
             (*(*table).wrapping_offset(low as isize)).op = curr as ::core::ffi::c_uchar;
             (*(*table).wrapping_offset(low as isize)).bits = root as ::core::ffi::c_uchar;
-            (*(*table).wrapping_offset(low as isize)).val =
-                next.offset_from(*table) as ::core::ffi::c_ushort;
+            (*(*table).wrapping_offset(low as isize)).val = next_index as ::core::ffi::c_ushort;
         }
     }
     if huff != 0 as ::core::ffi::c_uint {
