@@ -31,11 +31,10 @@ fn accumulate_block(mut sum1: u64, mut sum2: u64, block: &[Bytef]) -> (u64, u64)
 }
 
 fn reduce_combine_sums(mut sum1: u64, mut sum2: u64) -> (u64, u64) {
-    if sum1 >= BASE_U64 {
-        sum1 -= BASE_U64;
-    }
-    if sum1 >= BASE_U64 {
-        sum1 -= BASE_U64;
+    for _ in 0..2 {
+        if sum1 >= BASE_U64 {
+            sum1 -= BASE_U64;
+        }
     }
     if sum2 >= BASE_U64 << 1 {
         sum2 -= BASE_U64 << 1;
@@ -204,6 +203,11 @@ mod tests {
             (BASE_U64 - 1, BASE_U64 - 1),
         );
         assert_eq!(reduce_combine_sums(BASE_U64 << 1, BASE_U64 * 3), (0, 0));
+    }
+
+    #[test]
+    fn reduce_combine_sums_subtracts_sum1_at_most_twice() {
+        assert_eq!(reduce_combine_sums(BASE_U64 * 3, 0).0, BASE_U64);
     }
 
     #[test]

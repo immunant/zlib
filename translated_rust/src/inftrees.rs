@@ -2930,6 +2930,9 @@ fn table_usage_fits(type_0: CodeType, used: u32, table_cursor: TableCursor) -> b
 }
 
 fn next_huffman_code(mut huff: u32, length: u32) -> u32 {
+    if !(1..=MAXBITS as u32).contains(&length) {
+        return huff;
+    }
     let mut increment = 1u32 << (length - 1);
     while huff & increment != 0 {
         increment >>= 1;
@@ -3284,6 +3287,12 @@ mod tests {
         assert_eq!(next_huffman_code(0b0100, 3), 0b0010);
         assert_eq!(next_huffman_code(0b0110, 3), 0b0001);
         assert_eq!(next_huffman_code(0b0111, 3), 0);
+    }
+
+    #[test]
+    fn next_huffman_code_leaves_invalid_lengths_unchanged() {
+        assert_eq!(next_huffman_code(0b1010, 0), 0b1010);
+        assert_eq!(next_huffman_code(0b1010, 32), 0b1010);
     }
 
     #[test]

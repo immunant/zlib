@@ -69,14 +69,12 @@ fn normalize_uncompress_status(
     err: ::core::ffi::c_int,
     input_remaining: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    if err == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else if err == crate::zlib_h::Z_NEED_DICT {
-        crate::zlib_h::Z_DATA_ERROR
-    } else if err == crate::zlib_h::Z_BUF_ERROR && input_remaining == 0 {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        err
+    match (err, input_remaining == 0) {
+        (crate::zlib_h::Z_STREAM_END, _) => crate::zlib_h::Z_OK,
+        (crate::zlib_h::Z_NEED_DICT, _) | (crate::zlib_h::Z_BUF_ERROR, true) => {
+            crate::zlib_h::Z_DATA_ERROR
+        }
+        _ => err,
     }
 }
 
@@ -257,8 +255,8 @@ pub unsafe extern "C" fn uncompress_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        has_invalid_uncompress_buffers, replenish_scalar, uncompress_outcome, ChunkedProgress,
-        LegacyUncompressLengths,
+        has_invalid_uncompress_buffers, normalize_uncompress_status, replenish_scalar,
+        uncompress_outcome, ChunkedProgress, LegacyUncompressLengths,
     };
 
     #[test]
@@ -361,6 +359,30 @@ mod tests {
         assert_eq!(available, 0);
         assert_eq!(progress.remaining(available), 0);
         assert_eq!(progress.consumed(available), 0);
+    }
+
+    #[test]
+    fn status_normalization_preserves_all_result_cases() {
+        assert_eq!(
+            normalize_uncompress_status(crate::zlib_h::Z_STREAM_END, 3),
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(
+            normalize_uncompress_status(crate::zlib_h::Z_NEED_DICT, 3),
+            crate::zlib_h::Z_DATA_ERROR
+        );
+        assert_eq!(
+            normalize_uncompress_status(crate::zlib_h::Z_BUF_ERROR, 0),
+            crate::zlib_h::Z_DATA_ERROR
+        );
+        assert_eq!(
+            normalize_uncompress_status(crate::zlib_h::Z_BUF_ERROR, 1),
+            crate::zlib_h::Z_BUF_ERROR
+        );
+        assert_eq!(
+            normalize_uncompress_status(crate::zlib_h::Z_STREAM_ERROR, 0),
+            crate::zlib_h::Z_STREAM_ERROR
+        );
     }
 
     #[test]
