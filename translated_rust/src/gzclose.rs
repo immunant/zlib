@@ -71,7 +71,7 @@ macro_rules! gzclose_read_at_boundary {
             } else {
                 let state_ref = &mut *state;
                 if state_ref.size != 0 {
-                    crate::src::inflate::inflateEnd(
+                    crate::src::inflate::inflate_end_at_boundary!(
                         &raw mut state_ref.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
                     );
                 }

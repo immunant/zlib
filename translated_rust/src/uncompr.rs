@@ -3,7 +3,6 @@ pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
-pub use crate::src::inflate::inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -144,7 +143,7 @@ macro_rules! uncompress2_z_at_boundary {
             left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
             *source_len = (*source_len).wrapping_sub(len);
             *dest_len = (*dest_len).wrapping_sub(left);
-            crate::src::inflate::inflateEnd(
+            crate::src::inflate::inflate_end_at_boundary!(
                 &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
             uncompress_result(err, len)

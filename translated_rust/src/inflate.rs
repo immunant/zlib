@@ -187,7 +187,9 @@ fn inflate_state_values_are_valid(
         && (crate::src::inflate::HEAD..=crate::src::inflate::SYNC).contains(&mode)
 }
 
-unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+pub(crate) unsafe extern "C" fn inflateStateCheck(
+    mut strm: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1;
     }
@@ -2283,30 +2285,39 @@ pub unsafe extern "C" fn inflate_ffi(
 ) -> ::core::ffi::c_int {
     inflate(strm, flush)
 }
-pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if !(*state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
-        );
-    }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
+// This expands only in export-attributed ABI functions (including the
+// boundary macros used by gzip and one-shot decompression).  Destruction
+// invokes caller-provided allocation callbacks, so it must remain at that
+// boundary until inflate state owns its allocation safely.
+macro_rules! inflate_end_at_boundary {
+    ($strm:expr $(,)?) => {{
+        let strm = $strm;
+        if crate::src::inflate::inflateStateCheck(strm) != 0 {
+            crate::zlib_h::Z_STREAM_ERROR
+        } else {
+            let state = (*strm).state as *mut crate::src::inflate::inflate_state;
+            if !(*state).window.is_null() {
+                Some((*strm).zfree.expect("non-null function pointer"))
+                    .expect("non-null function pointer")(
+                    (*strm).opaque,
+                    (*state).window as crate::stdlib::voidpf,
+                );
+            }
+            Some((*strm).zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                (*strm).opaque,
+                (*strm).state as crate::stdlib::voidpf,
+            );
+            (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+            crate::zlib_h::Z_OK
+        }
+    }};
 }
+pub(crate) use inflate_end_at_boundary;
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    inflateEnd(strm)
+    inflate_end_at_boundary!(strm)
 }
 #[export_name = "inflateGetDictionary"]
 pub unsafe extern "C" fn inflateGetDictionary_ffi(
