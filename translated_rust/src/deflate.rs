@@ -846,24 +846,22 @@ pub fn deflateSetDictionary(
     let Some((stream, state)) = deflateStateCheck(strm as *mut _) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let avail_in = stream.avail_in;
-    let next_in = stream.next_in;
-    stream.avail_in = dictionary.len() as crate::stdlib::uInt;
-    stream.next_in = dictionary.as_ptr() as *mut crate::stdlib::Bytef;
-    let result = fill_window(
+    // `deflate_set_dictionary()` binds its (possibly shortened) dictionary
+    // tail immediately before filling the window, then restores the caller's
+    // cursor. Do not first publish the full dictionary through the generic
+    // input adapter: that adapter only needs the deflater-owned allocations
+    // for this operation.
+    fill_window(
         state,
         stream,
-        true,
-        |state, stream, window, head, prev, dictionary| {
+        false,
+        |state, stream, window, head, prev, _input| {
             deflate_set_dictionary(state, stream, window, head, prev, dictionary)
         },
-    );
-    stream.next_in = next_in;
-    stream.avail_in = avail_in;
-    result
+    )
 }
 
-// After the raw caller dictionary and deflater allocations are bound, zlib's
+// After the caller dictionary and deflater allocations are bound, zlib's
 // dictionary prefill is entirely cursor and slice work. In particular, keep
 // the temporary stream input binding local so the original caller input is
 // restored exactly as in the C implementation.
