@@ -708,13 +708,7 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     };
     gzbuffer(state, size)
 }
-unsafe fn gzrewind(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
-) -> ::core::ffi::c_int {
-    let Some(mut state) = state else {
-        return -1 as ::core::ffi::c_int;
-    };
-    let state = state.as_mut();
+unsafe fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_READ
         || state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR
     {
@@ -751,9 +745,10 @@ unsafe fn gzrewind(
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzrewind(::core::ptr::NonNull::new(
-        file as crate::gzguts_h::gz_statep,
-    ))
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    gzrewind(state)
 }
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
@@ -801,7 +796,7 @@ pub unsafe extern "C" fn gzseek64(
             return state.x.pos;
         }
         GzSeekAction::Rewind { offset } => {
-            if gzrewind(Some(::core::ptr::NonNull::from(&mut *state))) == -1 as ::core::ffi::c_int {
+            if gzrewind(state) == -1 as ::core::ffi::c_int {
                 return -1 as crate::stdlib::off64_t;
             }
             offset
