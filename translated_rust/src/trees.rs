@@ -3374,122 +3374,160 @@ unsafe extern "C" fn detect_data_type(
     }
     return crate::zlib_h::Z_BINARY;
 }
-pub unsafe extern "C" fn _tr_flush_block(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
+/// View a stored-block source only when it is wholly contained in the
+/// deflate window that owns it.  `_tr_flush_block` is called with a window
+/// cursor by the deflate engines, so this both records the actual allocation
+/// bound and keeps the FFI wrapper from manufacturing an unbounded slice.
+unsafe fn flush_block_data(
+    s: &crate::src::deflate::deflate_state,
+    buf: *mut crate::stdlib::charf,
+    stored_len: crate::zutil_h::ulg,
+) -> Option<Vec<u8>> {
+    if buf.is_null() {
+        return None;
+    }
+    let len = usize::try_from(stored_len).ok()?;
+    if len == 0 {
+        return Some(Vec::new());
+    }
+    let window_len = usize::try_from(s.window_size).ok()?;
+    if s.window.is_null() {
+        return None;
+    }
+    let start = (buf as *const u8) as usize;
+    let window_start = s.window as usize;
+    let offset = start.checked_sub(window_start)?;
+    let end = offset.checked_add(len)?;
+    if end > window_len {
+        return None;
+    }
+    Some(unsafe { core::slice::from_raw_parts(buf.cast::<u8>(), len) }.to_vec())
+}
+
+unsafe fn tr_flush_block_impl(
+    s: &mut crate::src::deflate::deflate_state,
+    buf: Option<&[u8]>,
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
 ) {
     let mut opt_lenb: crate::zutil_h::ulg = 0;
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    if (*s).level > 0 as ::core::ffi::c_int {
-        if (*(*s).strm).data_type == crate::zlib_h::Z_UNKNOWN {
-            (*(*s).strm).data_type = detect_data_type(s);
+    if s.level > 0 as ::core::ffi::c_int {
+        let unknown_data_type = unsafe { s.strm.as_ref() }
+            .is_some_and(|strm| strm.data_type == crate::zlib_h::Z_UNKNOWN);
+        if unknown_data_type {
+            let data_type = unsafe { detect_data_type(s as *mut crate::src::deflate::deflate_state) };
+            if let Some(strm) = unsafe { s.strm.as_mut() } {
+                strm.data_type = data_type;
+            }
         }
-        build_tree(&mut *s, crate::src::deflate::STATIC_TREE_LITERAL);
-        build_tree(&mut *s, crate::src::deflate::STATIC_TREE_DISTANCE);
-        max_blindex = build_bl_tree(s);
-        opt_lenb = (*s)
+        unsafe { build_tree(s, crate::src::deflate::STATIC_TREE_LITERAL) };
+        unsafe { build_tree(s, crate::src::deflate::STATIC_TREE_DISTANCE) };
+        max_blindex = unsafe { build_bl_tree(s as *mut crate::src::deflate::deflate_state) };
+        opt_lenb = s
             .opt_len
             .wrapping_add(3 as crate::zutil_h::ulg)
             .wrapping_add(7 as crate::zutil_h::ulg)
             >> 3 as ::core::ffi::c_int;
-        static_lenb = (*s)
+        static_lenb = s
             .static_len
             .wrapping_add(3 as crate::zutil_h::ulg)
             .wrapping_add(7 as crate::zutil_h::ulg)
             >> 3 as ::core::ffi::c_int;
-        if static_lenb <= opt_lenb || (*s).strategy == crate::zlib_h::Z_FIXED {
+        if static_lenb <= opt_lenb || s.strategy == crate::zlib_h::Z_FIXED {
             opt_lenb = static_lenb;
         }
     } else {
         static_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
         opt_lenb = static_lenb;
     }
-    if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
-        _tr_stored_block(s, buf, stored_len, last);
+    if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && buf.is_some() {
+        unsafe { tr_stored_block(s, buf.unwrap(), stored_len, last) };
     } else if static_lenb == opt_lenb {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-        if (*s).bi_valid > crate::src::deflate::Buf_size - len {
+        if s.bi_valid > crate::src::deflate::Buf_size - len {
             let mut val: ::core::ffi::c_int =
                 ((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+            s.bi_buf = (s.bi_buf as ::core::ffi::c_int
+                | (val as crate::zutil_h::ush as ::core::ffi::c_int) << s.bi_valid)
                 as crate::zutil_h::ush;
-            let c2rust_fresh3 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh3 as isize) = ((*s).bi_buf as ::core::ffi::c_int
+            s.put_pending_byte((s.bi_buf as ::core::ffi::c_int
                 & 0xff as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            let c2rust_fresh4 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh4 as isize) = ((*s).bi_buf as ::core::ffi::c_int
+                as crate::zutil_h::uch);
+            s.put_pending_byte((s.bi_buf as ::core::ffi::c_int
                 >> 8 as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
-                >> crate::src::deflate::Buf_size - (*s).bi_valid)
+                as crate::zutil_h::uch);
+            s.bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
+                >> crate::src::deflate::Buf_size - s.bi_valid)
                 as crate::zutil_h::ush;
-            (*s).bi_valid += len - crate::src::deflate::Buf_size;
+            s.bi_valid += len - crate::src::deflate::Buf_size;
         } else {
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
+            s.bi_buf = (s.bi_buf as ::core::ffi::c_int
                 | ((((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last)
                     as crate::zutil_h::ush as ::core::ffi::c_int)
-                    << (*s).bi_valid) as crate::zutil_h::ush;
-            (*s).bi_valid += len;
+                    << s.bi_valid) as crate::zutil_h::ush;
+            s.bi_valid += len;
         }
-        compress_block(
-            s,
+        unsafe { compress_block(
+            s as *mut crate::src::deflate::deflate_state,
             static_ltree.as_ptr().cast::<crate::src::deflate::ct_data>(),
             static_dtree.as_ptr().cast::<crate::src::deflate::ct_data>(),
-        );
+        ) };
     } else {
         let mut len_0: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-        if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
+        if s.bi_valid > crate::src::deflate::Buf_size - len_0 {
             let mut val_0: ::core::ffi::c_int =
                 ((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+            s.bi_buf = (s.bi_buf as ::core::ffi::c_int
+                | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << s.bi_valid)
                 as crate::zutil_h::ush;
-            let c2rust_fresh5 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh5 as isize) = ((*s).bi_buf as ::core::ffi::c_int
+            s.put_pending_byte((s.bi_buf as ::core::ffi::c_int
                 & 0xff as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            let c2rust_fresh6 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh6 as isize) = ((*s).bi_buf as ::core::ffi::c_int
+                as crate::zutil_h::uch);
+            s.put_pending_byte((s.bi_buf as ::core::ffi::c_int
                 >> 8 as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            (*s).bi_buf = (val_0 as crate::zutil_h::ush as ::core::ffi::c_int
-                >> crate::src::deflate::Buf_size - (*s).bi_valid)
+                as crate::zutil_h::uch);
+            s.bi_buf = (val_0 as crate::zutil_h::ush as ::core::ffi::c_int
+                >> crate::src::deflate::Buf_size - s.bi_valid)
                 as crate::zutil_h::ush;
-            (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
+            s.bi_valid += len_0 - crate::src::deflate::Buf_size;
         } else {
-            (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
+            s.bi_buf = (s.bi_buf as ::core::ffi::c_int
                 | ((((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last)
                     as crate::zutil_h::ush as ::core::ffi::c_int)
-                    << (*s).bi_valid) as crate::zutil_h::ush;
-            (*s).bi_valid += len_0;
+                    << s.bi_valid) as crate::zutil_h::ush;
+            s.bi_valid += len_0;
         }
-        send_all_trees(
-            s,
-            (*s).l_desc.max_code + 1 as ::core::ffi::c_int,
-            (*s).d_desc.max_code + 1 as ::core::ffi::c_int,
+        unsafe { send_all_trees(
+            s as *mut crate::src::deflate::deflate_state,
+            s.l_desc.max_code + 1 as ::core::ffi::c_int,
+            s.d_desc.max_code + 1 as ::core::ffi::c_int,
             max_blindex + 1 as ::core::ffi::c_int,
-        );
-        compress_block(
-            s,
-            &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-            &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-        );
+        ) };
+        unsafe { compress_block(
+            s as *mut crate::src::deflate::deflate_state,
+            s.dyn_ltree.as_ptr().cast::<crate::src::deflate::ct_data>(),
+            s.dyn_dtree.as_ptr().cast::<crate::src::deflate::ct_data>(),
+        ) };
     }
-    init_block(s);
+    unsafe { init_block(s as *mut crate::src::deflate::deflate_state) };
     if last != 0 {
-        bi_windup(s);
+        unsafe { bi_windup(s as *mut crate::src::deflate::deflate_state) };
     }
+}
+
+pub unsafe extern "C" fn _tr_flush_block(
+    s: *mut crate::src::deflate::deflate_state,
+    buf: *mut crate::stdlib::charf,
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
+) {
+    let Some(s) = (unsafe { s.as_mut() }) else {
+        return;
+    };
+    let buf = unsafe { flush_block_data(s, buf, stored_len) };
+    unsafe { tr_flush_block_impl(s, buf.as_deref(), stored_len, last) };
 }
 #[export_name = "_tr_flush_block"]
 
@@ -3499,7 +3537,11 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    _tr_flush_block(s, buf, stored_len, last)
+    let Some(s) = (unsafe { s.as_mut() }) else {
+        return;
+    };
+    let buf = unsafe { flush_block_data(s, buf, stored_len) };
+    unsafe { tr_flush_block_impl(s, buf.as_deref(), stored_len, last) };
 }
 pub unsafe fn _tr_tally(
     s: &mut crate::src::deflate::deflate_state,
