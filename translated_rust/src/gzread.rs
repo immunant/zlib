@@ -477,7 +477,9 @@ unsafe extern "C" fn gz_read(
     }
     return got;
 }
-pub unsafe extern "C" fn gzread(
+#[export_name = "gzread"]
+
+pub unsafe extern "C" fn gzread_ffi(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
@@ -525,15 +527,6 @@ pub unsafe extern "C" fn gzread(
         }
     }
     return len as ::core::ffi::c_int;
-}
-#[export_name = "gzread"]
-
-pub unsafe extern "C" fn gzread_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: crate::stdlib::voidp,
-    mut len: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    gzread(file, buf, len)
 }
 fn gzf_len(
     size: crate::stdlib::z_size_t,

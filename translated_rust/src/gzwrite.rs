@@ -439,7 +439,9 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         0 as crate::stdlib::z_size_t
     };
 }
-pub unsafe extern "C" fn gzputc(
+#[export_name = "gzputc"]
+
+pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -492,14 +494,6 @@ pub unsafe extern "C" fn gzputc(
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
-}
-#[export_name = "gzputc"]
-
-pub unsafe extern "C" fn gzputc_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut c: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzputc(file, c)
 }
 fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
     (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int

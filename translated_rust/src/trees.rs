@@ -2429,43 +2429,43 @@ unsafe extern "C" fn gen_codes(
     }
 }
 
-unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
+fn init_block(s: &mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
-    n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::L_CODES {
-        (*s).dyn_ltree[n as usize].freq = 0 as crate::zutil_h::ush;
+        s.dyn_ltree[n as usize].freq = 0 as crate::zutil_h::ush;
         n += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::D_CODES {
-        (*s).dyn_dtree[n as usize].freq = 0 as crate::zutil_h::ush;
+        s.dyn_dtree[n as usize].freq = 0 as crate::zutil_h::ush;
         n += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::BL_CODES {
-        (*s).bl_tree[n as usize].freq = 0 as crate::zutil_h::ush;
+        s.bl_tree[n as usize].freq = 0 as crate::zutil_h::ush;
         n += 1;
     }
-    (*s).dyn_ltree[END_BLOCK as usize].freq = 1 as crate::zutil_h::ush;
-    (*s).static_len = 0 as crate::zutil_h::ulg;
-    (*s).opt_len = (*s).static_len;
-    (*s).matches = 0 as crate::stdlib::uInt;
-    (*s).sym_next = (*s).matches;
+    s.dyn_ltree[END_BLOCK as usize].freq = 1 as crate::zutil_h::ush;
+    s.static_len = 0 as crate::zutil_h::ulg;
+    s.opt_len = s.static_len;
+    s.matches = 0 as crate::stdlib::uInt;
+    s.sym_next = s.matches;
 }
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
-    (*s).l_desc.dyn_tree = &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
+    let state = &mut *s;
+    state.l_desc.dyn_tree = &raw mut state.dyn_ltree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    (*s).l_desc.stat_desc_kind = STATIC_L_DESC_KIND;
-    (*s).d_desc.dyn_tree = &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
+    state.l_desc.stat_desc_kind = STATIC_L_DESC_KIND;
+    state.d_desc.dyn_tree = &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    (*s).d_desc.stat_desc_kind = STATIC_D_DESC_KIND;
-    (*s).bl_desc.dyn_tree = &raw mut (*s).bl_tree as *mut crate::src::deflate::ct_data_s
+    state.d_desc.stat_desc_kind = STATIC_D_DESC_KIND;
+    state.bl_desc.dyn_tree = &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    (*s).bl_desc.stat_desc_kind = STATIC_BL_DESC_KIND;
-    (*s).bi_buf = 0 as crate::zutil_h::ush;
-    (*s).bi_valid = 0 as ::core::ffi::c_int;
-    (*s).bi_used = 0 as ::core::ffi::c_int;
-    init_block(s);
+    state.bl_desc.stat_desc_kind = STATIC_BL_DESC_KIND;
+    state.bi_buf = 0 as crate::zutil_h::ush;
+    state.bi_valid = 0 as ::core::ffi::c_int;
+    state.bi_used = 0 as ::core::ffi::c_int;
+    init_block(state);
 }
 #[export_name = "_tr_init"]
 
@@ -3642,18 +3642,21 @@ pub unsafe extern "C" fn _tr_flush_block(
             &raw mut (*s).d_desc as *mut crate::src::deflate::tree_desc,
         );
         max_blindex = build_bl_tree(s);
-        opt_lenb = (*s)
-            .opt_len
-            .wrapping_add(3 as crate::zutil_h::ulg)
-            .wrapping_add(7 as crate::zutil_h::ulg)
-            >> 3 as ::core::ffi::c_int;
-        static_lenb = (*s)
-            .static_len
-            .wrapping_add(3 as crate::zutil_h::ulg)
-            .wrapping_add(7 as crate::zutil_h::ulg)
-            >> 3 as ::core::ffi::c_int;
-        if static_lenb <= opt_lenb || (*s).strategy == crate::zlib_h::Z_FIXED {
-            opt_lenb = static_lenb;
+        {
+            let state = &*s;
+            opt_lenb = state
+                .opt_len
+                .wrapping_add(3 as crate::zutil_h::ulg)
+                .wrapping_add(7 as crate::zutil_h::ulg)
+                >> 3 as ::core::ffi::c_int;
+            static_lenb = state
+                .static_len
+                .wrapping_add(3 as crate::zutil_h::ulg)
+                .wrapping_add(7 as crate::zutil_h::ulg)
+                >> 3 as ::core::ffi::c_int;
+            if static_lenb <= opt_lenb || state.strategy == crate::zlib_h::Z_FIXED {
+                opt_lenb = static_lenb;
+            }
         }
     } else {
         static_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
@@ -3738,7 +3741,7 @@ pub unsafe extern "C" fn _tr_flush_block(
                 as *const crate::src::deflate::ct_data,
         );
     }
-    init_block(s);
+    init_block(&mut *s);
     if last != 0 {
         bi_windup(s);
     }
