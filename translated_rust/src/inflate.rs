@@ -2546,6 +2546,17 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
 ) -> ::core::ffi::c_int {
     inflateUndermine(strm, subvert)
 }
+fn inflate_validate_wrap(
+    wrap: ::core::ffi::c_int,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if check != 0 && wrap != 0 {
+        wrap | 4 as ::core::ffi::c_int
+    } else {
+        wrap & !(4 as ::core::ffi::c_int)
+    }
+}
+
 pub unsafe extern "C" fn inflateValidate(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
@@ -2556,11 +2567,7 @@ pub unsafe extern "C" fn inflateValidate(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if check != 0 && (*state).wrap != 0 {
-        (*state).wrap |= 4 as ::core::ffi::c_int;
-    } else {
-        (*state).wrap &= !(4 as ::core::ffi::c_int);
-    }
+    (*state).wrap = inflate_validate_wrap((*state).wrap, check);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateValidate"]
@@ -2614,9 +2621,17 @@ mod tests {
     use super::{
         apply_window_update, dynamic_header_counts, inflate_mark_value, inflate_mode_is_valid,
         inflate_prime_update, inflate_reset2_params, inflate_state_metadata_is_valid,
-        inflate_sync_search_core, initial_window_metadata, syncsearch_safe, window_update_plan,
+        inflate_sync_search_core, inflate_validate_wrap, initial_window_metadata, syncsearch_safe, window_update_plan,
         InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, SYNC,
     };
+
+    #[test]
+    fn inflate_validate_wrap_updates_only_the_validation_bit() {
+        assert_eq!(inflate_validate_wrap(1, 1), 5);
+        assert_eq!(inflate_validate_wrap(4, -1), 4);
+        assert_eq!(inflate_validate_wrap(9, 0), 9);
+        assert_eq!(inflate_validate_wrap(0, 1), 0);
+    }
 
     #[test]
     fn code_length_order_matches_deflate_spec() {
