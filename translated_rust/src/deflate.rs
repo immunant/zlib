@@ -2617,7 +2617,9 @@ pub unsafe extern "C" fn deflateCopy(
         .pending_out
         .addr()
         .wrapping_sub((*ss).pending_buf.addr());
-    let plan = deflate_copy_plan(&*ss, pending_offset);
+    let Some(plan) = deflate_copy_plan(&*ss, pending_offset) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     // Capture this allocation callback and its argument together before it
     // runs, matching the original evaluation order without retaining a
     // stream reference across the foreign callback.
@@ -2750,38 +2752,57 @@ struct DeflateCopyPlan {
     prev_len: usize,
     head_len: usize,
     pending_buf_len: usize,
-    pending_offset: usize,
-    pending_len: usize,
-    sym_offset: usize,
-    sym_len: usize,
+    pending: ::core::ops::Range<usize>,
+    symbols: ::core::ops::Range<usize>,
+}
+
+fn deflate_copy_range(
+    offset: usize,
+    len: usize,
+    allocation_len: usize,
+) -> Option<::core::ops::Range<usize>> {
+    let end = offset.checked_add(len)?;
+    (end <= allocation_len).then_some(offset..end)
 }
 
 fn deflate_copy_plan(
     source: &crate::src::deflate::deflate_state,
     pending_offset: usize,
-) -> DeflateCopyPlan {
+) -> Option<DeflateCopyPlan> {
     let prev_entries =
         if source.slid != 0 || source.strstart.wrapping_sub(source.insert) > source.w_size {
             source.w_size
         } else {
             source.strstart.wrapping_sub(source.insert)
         };
-    DeflateCopyPlan {
+    let window_capacity = (source.w_size as usize).checked_mul(2)?;
+    let prev_len = (prev_entries as usize)
+        .checked_mul(::core::mem::size_of::<crate::src::deflate::Pos>())?;
+    let prev_capacity = (source.w_size as usize)
+        .checked_mul(::core::mem::size_of::<crate::src::deflate::Pos>())?;
+    let head_len = (source.hash_size as usize)
+        .checked_mul(::core::mem::size_of::<crate::src::deflate::Pos>())?;
+    let pending_buf_len = (source.lit_bufsize as usize).checked_mul(4)?;
+    let window_len = source.high_water as usize;
+    if window_len > window_capacity || prev_len > prev_capacity {
+        return None;
+    }
+    Some(DeflateCopyPlan {
         window_items: source.w_size,
         prev_items: source.w_size,
         head_items: source.hash_size,
         pending_buf_items: source.lit_bufsize,
-        window_len: source.high_water as usize,
-        prev_len: (prev_entries as usize)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-        head_len: (source.hash_size as usize)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-        pending_buf_len: (source.lit_bufsize as usize).wrapping_mul(4),
-        pending_offset,
-        pending_len: source.pending as usize,
-        sym_offset: source.lit_bufsize as usize,
-        sym_len: source.sym_next as usize,
-    }
+        window_len,
+        prev_len,
+        head_len,
+        pending_buf_len,
+        pending: deflate_copy_range(pending_offset, source.pending as usize, pending_buf_len)?,
+        symbols: deflate_copy_range(
+            source.lit_bufsize as usize,
+            source.sym_next as usize,
+            pending_buf_len,
+        )?,
+    })
 }
 
 fn deflate_copy_buffers(
@@ -2795,10 +2816,10 @@ fn deflate_copy_buffers(
 ) {
     destination_window.copy_from_slice(source_window);
     destination_prev.copy_from_slice(source_prev);
-    let pending = plan.pending_offset..plan.pending_offset + plan.pending_len;
-    destination_pending[pending.clone()].copy_from_slice(&source_pending[pending]);
-    let symbols = plan.sym_offset..plan.sym_offset + plan.sym_len;
-    destination_pending[symbols.clone()].copy_from_slice(&source_pending[symbols]);
+    destination_pending[plan.pending.clone()]
+        .copy_from_slice(&source_pending[plan.pending.clone()]);
+    destination_pending[plan.symbols.clone()]
+        .copy_from_slice(&source_pending[plan.symbols.clone()]);
 }
 #[export_name = "deflateCopy"]
 
