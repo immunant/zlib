@@ -50,6 +50,7 @@ pub unsafe extern "C" fn compress2_z(
     let mut err: ::core::ffi::c_int = 0;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;
+    let dest_capacity: crate::stdlib::z_size_t;
     if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
         || destLen.is_null()
         || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
@@ -57,6 +58,7 @@ pub unsafe extern "C" fn compress2_z(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     left = *destLen;
+    dest_capacity = left;
     *destLen = 0 as crate::stdlib::z_size_t;
     stream.zalloc = None;
     stream.zfree = None;
@@ -103,7 +105,13 @@ pub unsafe extern "C" fn compress2_z(
             break;
         }
     }
-    *destLen = stream.next_out.offset_from(dest) as crate::stdlib::z_size_t;
+    // `left` has not yet been assigned to the stream, while `avail_out` is
+    // assigned but not written.  Their complement is exactly the amount the
+    // stream advanced `next_out`, without deriving an offset from raw
+    // destination pointers.
+    *destLen = dest_capacity
+        .wrapping_sub(left)
+        .wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
     crate::src::deflate::deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
