@@ -4412,17 +4412,9 @@ unsafe fn deflate_huff(
         (*s).match_length = 0 as crate::stdlib::uInt;
         let mut cc: crate::zutil_h::uch =
             *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        let tally = deflate_literal_tally_plan(cc, (*s).sym_next);
-        *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
-        *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
-        *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
-        (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
-            [tally.literal_tree_index]
-            .fc
-            .value
-            .wrapping_add(1);
+        crate::src::trees::_tr_tally_ffi(s, 0, cc as ::core::ffi::c_uint);
         let (sym_next, lookahead, strstart, must_flush_block) = deflate_huff_literal_progress(
-            tally.next_sym,
+            (*s).sym_next,
             (*s).sym_end,
             (*s).lookahead,
             (*s).strstart,
