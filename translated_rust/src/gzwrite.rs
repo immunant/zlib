@@ -363,9 +363,21 @@ fn gz_reset_write_output(state: &mut crate::gzguts_h::gz_state) {
 }
 
 fn gz_buffered_input_used(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_uint {
-    (state.strm.next_in as usize)
-        .wrapping_add(state.strm.avail_in as usize)
-        .wrapping_sub(state.in_0 as usize) as ::core::ffi::c_uint
+    gz_buffered_input_used_addrs(
+        state.strm.next_in as usize,
+        state.strm.avail_in,
+        state.in_0 as usize,
+    )
+}
+
+fn gz_buffered_input_used_addrs(
+    next_in_addr: usize,
+    avail_in: crate::stdlib::uInt,
+    base_addr: usize,
+) -> ::core::ffi::c_uint {
+    next_in_addr
+        .wrapping_add(avail_in as usize)
+        .wrapping_sub(base_addr) as ::core::ffi::c_uint
 }
 
 fn gz_buffered_write_copy_len(
@@ -385,12 +397,18 @@ fn gz_pending_output_chunk(
     state: &crate::gzguts_h::gz_state,
     max: ::core::ffi::c_uint,
 ) -> Option<::core::ffi::c_uint> {
-    let next_out = state.strm.next_out as usize;
-    let next = state.x.next as usize;
-    if next_out <= next {
+    gz_pending_output_chunk_addrs(state.strm.next_out as usize, state.x.next as usize, max)
+}
+
+fn gz_pending_output_chunk_addrs(
+    next_out_addr: usize,
+    next_addr: usize,
+    max: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    if next_out_addr <= next_addr {
         return None;
     }
-    let pending = next_out - next;
+    let pending = next_out_addr - next_addr;
     Some(if pending > max as usize {
         max
     } else {

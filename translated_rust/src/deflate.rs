@@ -365,6 +365,17 @@ static configuration_table: [config; 10] = [
     },
 ];
 
+fn slide_hash_entry(
+    m: ::core::ffi::c_uint,
+    wsize: crate::stdlib::uInt,
+) -> crate::src::deflate::Posf {
+    (if m >= wsize {
+        m.wrapping_sub(wsize as ::core::ffi::c_uint)
+    } else {
+        NIL as ::core::ffi::c_uint
+    }) as crate::src::deflate::Pos as crate::src::deflate::Posf
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut m: ::core::ffi::c_uint = 0;
@@ -376,11 +387,7 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
     loop {
         p = p.offset(-1);
         m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
+        *p = slide_hash_entry(m, wsize);
         n = n.wrapping_sub(1);
         if !(n != 0) {
             break;
@@ -391,11 +398,7 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
     loop {
         p = p.offset(-1);
         m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
+        *p = slide_hash_entry(m, wsize);
         n = n.wrapping_sub(1);
         if !(n != 0) {
             break;

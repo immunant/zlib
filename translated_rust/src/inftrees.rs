@@ -2857,8 +2857,10 @@ pub unsafe extern "C" fn inflate_table_ffi(
     };
     let mut next: *mut crate::src::inftrees::code =
         ::core::ptr::null_mut::<crate::src::inftrees::code>();
-    let mut base: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
-    let mut extra: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
+    let mut base_extra: Option<(
+        &'static [::core::ffi::c_ushort],
+        &'static [::core::ffi::c_ushort],
+    )> = None;
     let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
     let mut offs: [::core::ffi::c_ushort; 16] = [0; 16];
@@ -3081,13 +3083,11 @@ pub unsafe extern "C" fn inflate_table_ffi(
             match_0 = 20 as ::core::ffi::c_uint;
         }
         1 => {
-            base = &raw const lbase as *const ::core::ffi::c_ushort;
-            extra = &raw const lext as *const ::core::ffi::c_ushort;
+            base_extra = Some((&lbase, &lext));
             match_0 = 257 as ::core::ffi::c_uint;
         }
         2 => {
-            base = &raw const dbase as *const ::core::ffi::c_ushort;
-            extra = &raw const dext as *const ::core::ffi::c_ushort;
+            base_extra = Some((&dbase, &dext));
         }
         _ => {}
     }
@@ -3118,12 +3118,12 @@ pub unsafe extern "C" fn inflate_table_ffi(
             here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.val = *work.offset(sym as isize);
         } else if *work.offset(sym as isize) as ::core::ffi::c_uint >= match_0 {
-            here.op = *extra.offset(
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as isize,
-            ) as ::core::ffi::c_uchar;
-            here.val = *base.offset(
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as isize,
-            );
+            let table_index =
+                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as usize;
+            let (base, extra) =
+                base_extra.expect("base/extra tables are selected for this code type");
+            here.op = extra[table_index] as ::core::ffi::c_uchar;
+            here.val = base[table_index];
         } else {
             here.op = (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
             here.val = 0 as ::core::ffi::c_ushort;
