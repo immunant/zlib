@@ -2523,24 +2523,12 @@ pub unsafe extern "C" fn inflateSetDictionary(
     if let Err(error) = inflate_dictionary_check(state, dictionary) {
         return error;
     }
-    let layout = inflate_window_layout(state.wbits);
-    if state.window.is_null() {
-        state.window = Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            layout.alloc_items,
-            layout.alloc_size,
-        ) as *mut ::core::ffi::c_uchar;
-    }
-    if state.window.is_null() {
+    if updatewindow(strm, state, Some(dictionary)) != 0 {
         state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let window = ::core::slice::from_raw_parts_mut(
-        state.window,
-        layout.len,
-    );
-    inflate_set_dictionary(state, window, dictionary)
+    state.havedict = 1;
+    crate::zlib_h::Z_OK
 }
 
 // zlib accepts an empty dictionary with a null pointer, but a non-empty
@@ -2574,15 +2562,6 @@ fn inflate_dictionary_check(
     Ok(())
 }
 
-fn inflate_set_dictionary(
-    state: &mut crate::src::inflate::inflate_state,
-    window: &mut [crate::stdlib::Bytef],
-    dictionary: &[crate::stdlib::Bytef],
-) -> ::core::ffi::c_int {
-    update_window(state, window, dictionary);
-    state.havedict = 1;
-    crate::zlib_h::Z_OK
-}
 #[export_name = "inflateSetDictionary"]
 
 pub unsafe extern "C" fn inflateSetDictionary_ffi(
