@@ -455,6 +455,21 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     };
     inflateReset2(strm, windowBits)
 }
+// Version and stream-layout validation precedes the optional stream binding:
+// zlib reports a version error even when the stream pointer is null. Keep the
+// scalar check shared by both initializers without moving their raw stream or
+// allocator work out of the established ABI boundary.
+fn inflate_init_version_and_size_valid(
+    version: Option<::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
+) -> bool {
+    let Some(version) = version else {
+        return false;
+    };
+    version as ::core::ffi::c_int == crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
+        && stream_size == ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+}
+
 pub unsafe extern "C" fn inflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -463,11 +478,8 @@ pub unsafe extern "C" fn inflateInit2_(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if version.is_null()
-        || *version as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-    {
+    let version_first = if version.is_null() { None } else { Some(*version) };
+    if !inflate_init_version_and_size_valid(version_first, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     if strm.is_null() {
@@ -522,24 +534,24 @@ pub fn inflateInit_(
     version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(version) = version else {
+    let version_first = version.copied();
+    if !inflate_init_version_and_size_valid(version_first, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
-    };
+    }
     let Some(strm) = strm else {
-        // Match `inflateInit2_`'s version/size validation before its stream
-        // binding so the FFI dispatcher remains behaviorally identical.
-        return if *version as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
-            || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-        {
-            crate::zlib_h::Z_VERSION_ERROR
-        } else {
-            crate::zlib_h::Z_STREAM_ERROR
-        };
+        return crate::zlib_h::Z_STREAM_ERROR;
     };
     // SAFETY: references prove the stream and version byte are valid for the
-    // initializer's checks and setup.
-    unsafe { inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size) }
+    // initializer's checks and setup. The shared preflight above preserved
+    // `inflateInit2_`'s required validation order.
+    unsafe {
+        inflateInit2_(
+            strm,
+            crate::zutil_h::DEF_WBITS,
+            &version_first.expect("preflight accepted version"),
+            stream_size,
+        )
+    }
 }
 #[export_name = "inflateInit_"]
 
