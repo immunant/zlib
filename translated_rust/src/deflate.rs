@@ -1801,7 +1801,7 @@ fn deflate_bound_from_state(
 // here so Rust callers do not inherit an unsafe-function contract; the C ABI
 // wrapper below remains the thin exported dispatcher.
 pub fn deflateBound_z(
-    mut strm: crate::zlib_h::z_streamp,
+    strm: Option<&mut crate::zlib_h::z_stream>,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     // SAFETY: `deflateStateCheck()` validates the stream/state association
@@ -1809,30 +1809,34 @@ pub fn deflateBound_z(
     // caller-owned C strings for the duration of this synchronous bound
     // calculation, matching zlib's stream contract.
     unsafe {
-        let (state, gzip_header) = if let Some((_strm, state)) = deflateStateCheck(strm) {
-            let gzip_header = if state.gzhead.is_null() {
-                None
-            } else {
-                let header = &*state.gzhead;
-                let name = if header.name.is_null() {
-                    None
-                } else {
-                    Some(::core::ffi::CStr::from_ptr(
-                        header.name as *const ::core::ffi::c_char,
-                    ))
-                };
-                let comment = if header.comment.is_null() {
-                    None
-                } else {
-                    Some(::core::ffi::CStr::from_ptr(
-                        header.comment as *const ::core::ffi::c_char,
-                    ))
-                };
-                Some(deflate_bound_gzip_header(header, name, comment))
-            };
-            (Some(state), gzip_header)
-        } else {
-            (None, None)
+        let (state, gzip_header) = match strm {
+            Some(strm) => match deflateStateCheck(strm as *mut _) {
+                Some((_strm, state)) => {
+                    let gzip_header = if state.gzhead.is_null() {
+                        None
+                    } else {
+                        let header = &*state.gzhead;
+                        let name = if header.name.is_null() {
+                            None
+                        } else {
+                            Some(::core::ffi::CStr::from_ptr(
+                                header.name as *const ::core::ffi::c_char,
+                            ))
+                        };
+                        let comment = if header.comment.is_null() {
+                            None
+                        } else {
+                            Some(::core::ffi::CStr::from_ptr(
+                                header.comment as *const ::core::ffi::c_char,
+                            ))
+                        };
+                        Some(deflate_bound_gzip_header(header, name, comment))
+                    };
+                    (Some(state), gzip_header)
+                }
+                None => (None, None),
+            },
+            None => (None, None),
         };
         deflate_bound_from_state(sourceLen, state.as_deref(), gzip_header)
     }
@@ -1843,6 +1847,9 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
+    // SAFETY: this ABI adapter only binds the optional foreign stream. The
+    // implementation retains the live gzip-header snapshot and bound math.
+    let strm = unsafe { strm.as_mut() };
     deflateBound_z(strm, sourceLen)
 }
 
@@ -1864,8 +1871,9 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    // Keep the public-width conversion at this thin dispatcher. The raw
-    // stream is handled only by the named size_t implementation above.
+    // SAFETY: this ABI adapter only binds the optional foreign stream. The
+    // implementation retains the live gzip-header snapshot and bound math.
+    let strm = unsafe { strm.as_mut() };
     deflate_bound_result(deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t))
 }
 fn put_short_msb_bytes(output: &mut [crate::stdlib::Bytef], b: crate::stdlib::uInt) {
