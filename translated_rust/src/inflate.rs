@@ -4065,11 +4065,14 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
 
 // The export validates the source handle and creates this scoped borrow.  The
 // destination remains a non-borrowing handle until the source projection has
-// ended, since zlib permits source and destination to alias.
+// ended, since zlib permits source and destination to alias.  The named
+// implementation maps its internal result to an ABI status and a completed
+// stream; the wrapper only performs the final ABI publication on success.
 pub unsafe fn inflateCopy(
     source: &mut crate::zlib_h::z_stream_s,
     destination_identity: usize,
-) -> Result<crate::zlib_h::z_stream_s, ::core::ffi::c_int> {
+    destination_stream: &mut Option<crate::zlib_h::z_stream_s>,
+) -> ::core::ffi::c_int {
     // Build the replacement before borrowing the destination.  This retains
     // C's behavior even for a source/destination alias while all state
     // access remains scoped to the checked source stream.
@@ -4084,10 +4087,10 @@ pub unsafe fn inflateCopy(
     )
     .status();
     if status != crate::zlib_h::Z_OK {
-        return Err(status);
+        return status;
     }
     let copy = copied_state.expect("successful copy publication returns state");
-    let destination_stream = crate::zlib_h::z_stream_s {
+    let copied_stream = crate::zlib_h::z_stream_s {
         next_in: source.next_in,
         avail_in: source.avail_in,
         total_in: source.total_in,
@@ -4103,11 +4106,11 @@ pub unsafe fn inflateCopy(
         adler: source.adler,
         reserved: source.reserved,
     };
-    // The ABI wrapper publishes this fully initialized stream only after the
-    // source projection above has ended. This keeps source/destination
-    // aliasing valid while leaving this implementation with no destination
-    // raw-pointer write.
-    Ok(destination_stream)
+    // Return the completed stream only after the source projection has
+    // ended. The wrapper publishes this ABI-shaped value to its validated
+    // destination handle without borrowing that handle during the copy.
+    *destination_stream = Some(copied_stream);
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateCopy"]
 
@@ -4121,12 +4124,12 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     let Some(source) = source.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let destination_stream = match inflateCopy(source, dest.addr()) {
-        Ok(destination_stream) => destination_stream,
-        Err(status) => return status,
-    };
-    *dest = destination_stream;
-    crate::zlib_h::Z_OK
+    let mut destination_stream = None;
+    let status = inflateCopy(source, dest.addr(), &mut destination_stream);
+    if status == crate::zlib_h::Z_OK {
+        *dest = destination_stream.expect("successful copy produces a destination stream");
+    }
+    status
 }
 
 fn inflate_undermine_sane(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
