@@ -190,6 +190,21 @@ fn gz_read_chunk_len(
     chunk
 }
 
+fn gz_read_drain_buffered(
+    have: ::core::ffi::c_uint,
+    state_err: ::core::ffi::c_int,
+    chunk_len: ::core::ffi::c_uint,
+) -> (::core::ffi::c_uint, ::core::ffi::c_int) {
+    (
+        have.wrapping_sub(chunk_len),
+        if state_err == crate::zlib_h::Z_OK {
+            0
+        } else {
+            -1
+        },
+    )
+}
+
 fn gz_read_needs_fetch(
     how: ::core::ffi::c_int,
     chunk_len: ::core::ffi::c_uint,
@@ -1172,6 +1187,19 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_drain_buffered_updates_healthy_buffer_state() {
+        assert_eq!(gz_read_drain_buffered(7, crate::zlib_h::Z_OK, 3), (4, 0));
+    }
+
+    #[test]
+    fn gz_read_drain_buffered_wraps_and_reports_state_errors() {
+        assert_eq!(
+            gz_read_drain_buffered(0, crate::zlib_h::Z_DATA_ERROR, 1),
+            (::core::ffi::c_uint::MAX, -1)
+        );
+    }
+
+    #[test]
     fn gz_read_needs_fetch_for_look_state() {
         assert!(gz_read_needs_fetch(crate::gzguts_h::LOOK, 16, 8));
     }
@@ -1551,10 +1579,7 @@ unsafe extern "C" fn gz_read(
                     n as crate::__stddef_size_t_h::size_t,
                 );
                 (*state).x.next = (*state).x.next.offset(n as isize);
-                (*state).x.have = (*state).x.have.wrapping_sub(n);
-                if (*state).err != crate::zlib_h::Z_OK {
-                    err = -1 as ::core::ffi::c_int;
-                }
+                ((*state).x.have, err) = gz_read_drain_buffered((*state).x.have, (*state).err, n);
                 true
             }
             GzReadAction::StopAtEof => break,

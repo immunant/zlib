@@ -284,12 +284,22 @@ fn gz_comp_output_produced(
     avail_out_before.wrapping_sub(avail_out_after)
 }
 
-fn gz_write_buffered_progress(
+fn gz_write_buffered_step(
+    size: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
     pos: crate::stdlib::off64_t,
     remaining: crate::stdlib::z_size_t,
-    copy: ::core::ffi::c_uint,
-) -> (crate::stdlib::off64_t, crate::stdlib::z_size_t) {
+) -> (
+    ::core::ffi::c_uint,
+    crate::stdlib::uInt,
+    crate::stdlib::off64_t,
+    crate::stdlib::z_size_t,
+) {
+    let copy = gz_write_buffered_copy_len(size, have, remaining);
     (
+        copy,
+        avail_in.wrapping_add(copy),
         pos + copy as crate::stdlib::off64_t,
         remaining.wrapping_sub(copy as crate::stdlib::z_size_t),
     )
@@ -526,18 +536,20 @@ unsafe extern "C" fn gz_write(
                 (*state).strm.next_in as usize,
                 (*state).strm.avail_in,
             );
-            copy = gz_write_buffered_copy_len((*state).size, have, len);
+            (copy, (*state).strm.avail_in, (*state).x.pos, len) = gz_write_buffered_step(
+                (*state).size,
+                have,
+                (*state).strm.avail_in,
+                (*state).x.pos,
+                len,
+            );
             crate::stdlib::memcpy(
                 (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
-            (*state).strm.avail_in = (*state).strm.avail_in.wrapping_add(copy);
-            let (next_pos, next_len) = gz_write_buffered_progress((*state).x.pos, len, copy);
-            (*state).x.pos = next_pos;
             buf =
                 (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
-            len = next_len;
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
@@ -900,7 +912,7 @@ mod tests {
         gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
         gz_comp_remaining_direct_input, gz_comp_reset_action, gz_comp_reset_after_flush,
         gz_comp_skips_empty_flush, gz_comp_write_chunk_len, gz_write_apply_direct_progress,
-        gz_write_buffered_copy_len, gz_write_buffered_progress, gz_write_chunk_consumed_len,
+        gz_write_buffered_copy_len, gz_write_buffered_step, gz_write_chunk_consumed_len,
         gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
         gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
         gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
@@ -1271,15 +1283,10 @@ mod tests {
     }
 
     #[test]
-    fn gz_write_buffered_progress_updates_position_and_remaining_input() {
-        assert_eq!(gz_write_buffered_progress(10, 100, 60), (70, 40));
-    }
-
-    #[test]
-    fn gz_write_buffered_progress_preserves_wrapping_remaining_input() {
+    fn gz_write_buffered_step_handles_partial_buffer() {
         assert_eq!(
-            gz_write_buffered_progress(0, 0, 1),
-            (1, crate::stdlib::z_size_t::MAX)
+            gz_write_buffered_step(1024, 1000, 17, 10, 99),
+            (24, 41, 34, 75)
         );
     }
 

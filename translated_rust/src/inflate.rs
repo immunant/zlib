@@ -2107,28 +2107,7 @@ pub unsafe extern "C" fn inflate(
         }) as ::core::ffi::c_ulong;
         (*strm).adler = (*state).check as crate::stdlib::uLong;
     }
-    (*strm).data_type = (*state).bits as ::core::ffi::c_int
-        + (if (*state).last != 0 {
-            64 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        })
-        + (if (*state).mode as ::core::ffi::c_uint
-            == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            128 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        })
-        + (if (*state).mode as ::core::ffi::c_uint
-            == crate::src::inflate::LEN_ as ::core::ffi::c_int as ::core::ffi::c_uint
-            || (*state).mode as ::core::ffi::c_uint
-                == crate::src::inflate::COPY_ as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            256 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        });
+    (*strm).data_type = inflate_data_type_value((*state).bits, (*state).last, (*state).mode);
     if (in_0 == 0 as ::core::ffi::c_uint && out == 0 as ::core::ffi::c_uint
         || flush == crate::zlib_h::Z_FINISH)
         && ret == crate::zlib_h::Z_OK
@@ -2291,6 +2270,35 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
 ) -> ::core::ffi::c_int {
     inflateGetHeader(strm, head)
 }
+fn inflate_data_type_value(
+    bits: ::core::ffi::c_uint,
+    last: ::core::ffi::c_int,
+    mode: inflate_mode,
+) -> ::core::ffi::c_int {
+    bits as ::core::ffi::c_int
+        + (if last != 0 {
+            64 as ::core::ffi::c_int
+        } else {
+            0 as ::core::ffi::c_int
+        })
+        + (if mode as ::core::ffi::c_uint
+            == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            128 as ::core::ffi::c_int
+        } else {
+            0 as ::core::ffi::c_int
+        })
+        + (if mode as ::core::ffi::c_uint
+            == crate::src::inflate::LEN_ as ::core::ffi::c_int as ::core::ffi::c_uint
+            || mode as ::core::ffi::c_uint
+                == crate::src::inflate::COPY_ as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            256 as ::core::ffi::c_int
+        } else {
+            0 as ::core::ffi::c_int
+        })
+}
+
 fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
     let mut got = *have;
     let mut next = 0_usize;
@@ -2625,12 +2633,22 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_window_update, dynamic_header_counts, inflate_mark_value, inflate_mode_is_valid,
-        inflate_prime_update, inflate_reset2_params, inflate_state_metadata_is_valid,
+        apply_window_update, dynamic_header_counts, inflate_data_type_value, inflate_mark_value,
+        inflate_mode_is_valid, inflate_prime_update, inflate_reset2_params, inflate_state_metadata_is_valid,
         inflate_sync_point_value, inflate_sync_search_core, inflate_validate_wrap,
         initial_window_metadata, syncsearch_safe, window_update_plan,
-        InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, STORED, SYNC,
+        InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH,
+        STORED, SYNC, TYPE,
     };
+
+    #[test]
+    fn inflate_data_type_value_sets_expected_flags() {
+        assert_eq!(inflate_data_type_value(5, 0, HEAD), 5);
+        assert_eq!(inflate_data_type_value(5, 1, HEAD), 5 + 64);
+        assert_eq!(inflate_data_type_value(5, 0, TYPE), 5 + 128);
+        assert_eq!(inflate_data_type_value(5, 0, LEN_), 5 + 256);
+        assert_eq!(inflate_data_type_value(5, 0, COPY_), 5 + 256);
+    }
 
     #[test]
     fn inflate_validate_wrap_updates_only_the_validation_bit() {
