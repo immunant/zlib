@@ -975,23 +975,23 @@ pub unsafe extern "C" fn gzgets_ffi(
         ::core::ptr::null_mut()
     }
 }
-pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return 0 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+#[inline(never)]
+fn gzdirect_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.mode == crate::gzguts_h::GZ_READ
         && state.how == crate::gzguts_h::LOOK
         && state.x.have == 0 as ::core::ffi::c_uint
     {
-        gz_look(state);
+        unsafe { gz_look(state) };
     }
-    return (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
+    (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int
 }
 #[export_name = "gzdirect"]
 
-pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzdirect(file)
+pub unsafe extern "C" fn gzdirect_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0;
+    };
+    gzdirect_impl(state)
 }
 pub unsafe fn gzclose_r(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     let ret = {
