@@ -998,6 +998,13 @@ pub(crate) fn updatewindow<T>(
             Ok(operation(stream, state, None))
         }
         InflateWindowAccess::CopyFrom(source) => {
+            // A copied inflater carries exactly `whave` initialized history
+            // bytes.  Keeping that relationship at the owner boundary means
+            // this bounded copy cannot silently accept a partial or oversized
+            // history snapshot before indexing the allocation below.
+            if source.len() != state.whave as usize {
+                return Err(());
+            }
             let window = window.expect("window copies require a bound window");
             // `inflateCopy()` preserves only the initialized history
             // (`whave` bytes), exactly as zlib's zmemcpy does.  In
