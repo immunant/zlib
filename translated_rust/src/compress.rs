@@ -93,6 +93,19 @@ struct CompressChunk {
     flush: ::core::ffi::c_int,
 }
 
+impl CompressChunk {
+    fn record_progress(
+        self,
+        source_progress: &mut CompressProgress,
+        dest_progress: &mut CompressProgress,
+        input_available: crate::stdlib::uInt,
+        output_available: crate::stdlib::uInt,
+    ) {
+        source_progress.record_available(self.input_len, input_available);
+        dest_progress.record_available(self.output_len, output_available);
+    }
+}
+
 fn next_compress_chunk(
     source_progress: CompressProgress,
     dest_progress: CompressProgress,
@@ -224,8 +237,12 @@ pub unsafe extern "C" fn compress2_z_ffi(
         stream.avail_out = output.len() as crate::stdlib::uInt;
 
         let status = crate::src::deflate::deflate(&mut stream, chunk.flush);
-        source_progress.record_available(chunk.input_len, stream.avail_in);
-        dest_progress.record_available(chunk.output_len, stream.avail_out);
+        chunk.record_progress(
+            &mut source_progress,
+            &mut dest_progress,
+            stream.avail_in,
+            stream.avail_out,
+        );
 
         if status != crate::zlib_h::Z_OK {
             break status;
@@ -396,6 +413,22 @@ mod tests {
     }
 
     #[test]
+    fn chunk_records_matching_input_and_output_progress() {
+        let mut source_progress = CompressProgress::new(10);
+        let mut dest_progress = CompressProgress::new(12);
+        let chunk = super::CompressChunk {
+            input_len: 7,
+            output_len: 9,
+            flush: crate::zlib_h::Z_NO_FLUSH,
+        };
+
+        chunk.record_progress(&mut source_progress, &mut dest_progress, 2, 3);
+
+        assert_eq!(source_progress.used, 5);
+        assert_eq!(dest_progress.used, 6);
+    }
+
+    #[test]
     fn progress_schedules_uint_sized_chunks_and_tracks_consumption() {
         let Some(total) = MAX_CHUNK.checked_add(3) else {
             return;
@@ -443,6 +476,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn compress_bound_preserves_the_overflow_sentinel() {
         assert_eq!(
             compress_bound_z_impl(crate::stdlib::z_size_t::MAX),

@@ -306,6 +306,20 @@ fn gzputc_result(c: ::core::ffi::c_int) -> ::core::ffi::c_int {
     c & 0xff as ::core::ffi::c_int
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum GzPutcWriteAction {
+    Error,
+    ReturnByte,
+}
+
+fn gzputc_write_action(written: crate::stdlib::z_size_t) -> GzPutcWriteAction {
+    if written == 1 {
+        GzPutcWriteAction::ReturnByte
+    } else {
+        GzPutcWriteAction::Error
+    }
+}
+
 fn gz_comp_needs_output_write(
     avail_out: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
@@ -905,13 +919,14 @@ pub unsafe extern "C" fn gzputc(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if gz_write(
+    let written = gz_write(
         state,
         buf.as_ptr() as crate::stdlib::voidpc,
         1 as crate::stdlib::z_size_t,
-    ) != 1 as crate::stdlib::z_size_t
-    {
-        return -1 as ::core::ffi::c_int;
+    );
+    match gzputc_write_action(written) {
+        GzPutcWriteAction::Error => return -1 as ::core::ffi::c_int,
+        GzPutcWriteAction::ReturnByte => {}
     }
     return gzputc_result(c);
 }
@@ -1111,10 +1126,10 @@ mod tests {
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_buffer_action, gzsetparams_settings_match, gzsetparams_state_is_usable,
-        gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure, GzSetParamsBufferAction,
-        GzWriteDirectAction, GzZeroAction,
+        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
+        gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
+        gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure,
+        GzPutcWriteAction, GzSetParamsBufferAction, GzWriteDirectAction, GzZeroAction,
     };
 
     #[test]
@@ -1305,6 +1320,13 @@ mod tests {
         assert_eq!(gzputc_result(0x7f), 0x7f);
         assert_eq!(gzputc_result(0x123), 0x23);
         assert_eq!(gzputc_result(-1), 0xff);
+    }
+
+    #[test]
+    fn gzputc_write_action_requires_exactly_one_written_byte() {
+        assert_eq!(gzputc_write_action(0), GzPutcWriteAction::Error);
+        assert_eq!(gzputc_write_action(1), GzPutcWriteAction::ReturnByte);
+        assert_eq!(gzputc_write_action(2), GzPutcWriteAction::Error);
     }
 
     #[test]
