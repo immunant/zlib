@@ -272,6 +272,29 @@ fn inflate_header_crc_update(check: ::core::ffi::c_ulong, bytes: &[u8]) -> ::cor
     crate::src::crc32::crc32_z(check as crate::stdlib::uLong, bytes) as ::core::ffi::c_ulong
 }
 
+/// Plan the bounded copy into a caller-provided gzip extra-field buffer.
+/// `extra_len` is the decoded total length and `remaining` is the portion
+/// still unread, so their wrapping difference deliberately retains zlib's
+/// compatibility arithmetic for malformed retained headers.  Pointer access
+/// and the actual copy stay at the decoder boundary.
+fn inflate_header_extra_copy_plan(
+    extra_len: crate::stdlib::uInt,
+    extra_max: crate::stdlib::uInt,
+    remaining: ::core::ffi::c_uint,
+    available: ::core::ffi::c_uint,
+) -> Option<(usize, usize)> {
+    let offset = extra_len.wrapping_sub(remaining);
+    if offset >= extra_max {
+        return None;
+    }
+    let copied = if offset.wrapping_add(available) > extra_max {
+        extra_max.wrapping_sub(offset)
+    } else {
+        available
+    };
+    Some((offset as usize, copied as usize))
+}
+
 /// Validate the low 16 bits carried by a gzip header CRC.  The wrapper bit,
 /// accumulated CRC, and bit-buffer value are all scalar state, so this policy
 /// does not need to remain in the transitional cursor loop.
@@ -2729,24 +2752,19 @@ pub unsafe fn inflate(
                                                 // to bound and copy its extra bytes.
                                                 let head = &mut *state_ref.head;
                                                 if !head.extra.is_null() {
-                                                    len = (head.extra_len as ::core::ffi::c_uint)
-                                                        .wrapping_sub(state_ref.length);
-                                                    if len < head.extra_max {
-                                                        let header_copy = if len.wrapping_add(copy)
-                                                            > head.extra_max
-                                                        {
-                                                            (head.extra_max
-                                                                as ::core::ffi::c_uint)
-                                                                .wrapping_sub(len)
-                                                        } else {
-                                                            copy
-                                                        };
+                                                    if let Some((header_offset, header_copy)) =
+                                                        inflate_header_extra_copy_plan(
+                                                            head.extra_len,
+                                                            head.extra_max,
+                                                            state_ref.length,
+                                                            copy,
+                                                        )
+                                                    {
                                                         let mut copied = 0usize;
-                                                        while copied < header_copy as usize {
-                                                            *head
-                                                                .extra
-                                                                .wrapping_add(len as usize + copied) =
-                                                                *next.wrapping_add(copied);
+                                                        while copied < header_copy {
+                                                            *head.extra.wrapping_add(
+                                                                header_offset + copied,
+                                                            ) = *next.wrapping_add(copied);
                                                             copied += 1;
                                                         }
                                                     }
@@ -2846,8 +2864,7 @@ pub unsafe fn inflate(
                                         // the compatibility pointer for its bounds and byte
                                         // commit.
                                         let head = &mut *state_ref.head;
-                                        if !head.name.is_null()
-                                            && state_ref.length < head.name_max
+                                        if !head.name.is_null() && state_ref.length < head.name_max
                                         {
                                             let c2rust_fresh6 = state_ref.length;
                                             state_ref.length = state_ref.length.wrapping_add(1);
@@ -3004,9 +3021,7 @@ pub unsafe fn inflate(
                                 // As in NAME, use one transition-local borrow of the retained
                                 // ABI header destination for the bounds check and byte commit.
                                 let head = &mut *state_ref.head;
-                                if !head.comment.is_null()
-                                    && state_ref.length < head.comm_max
-                                {
+                                if !head.comment.is_null() && state_ref.length < head.comm_max {
                                     let c2rust_fresh8 = state_ref.length;
                                     state_ref.length = state_ref.length.wrapping_add(1);
                                     *head.comment.wrapping_add(c2rust_fresh8 as usize) =
@@ -3088,8 +3103,7 @@ pub unsafe fn inflate(
             }
             if !state_ref.head.is_null() {
                 let head = &mut *state_ref.head;
-                head.hcrc =
-                    state_ref.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                head.hcrc = state_ref.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
                 head.done = 1 as ::core::ffi::c_int;
             }
             state_ref.check = inflate_header_crc_update(0, &[]);
