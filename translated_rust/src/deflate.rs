@@ -2725,6 +2725,18 @@ struct DeflateCopyDestinationViews<'a> {
 }
 
 impl DeflateOwnedStorage {
+    // Keep the source-side view construction with the owner as well.  A
+    // callback-pairing broker can hand the copy core two typed owners without
+    // teaching that core how either owner was allocated.
+    fn source_views(&self) -> DeflateCopySourceViews<'_> {
+        DeflateCopySourceViews {
+            window: self.window.as_ref(),
+            prev: self.prev.as_ref(),
+            head: self.head.as_ref(),
+            pending: self.pending.as_ref(),
+        }
+    }
+
     fn destination_views(&mut self) -> DeflateCopyDestinationViews<'_> {
         DeflateCopyDestinationViews {
             window: self.window.as_mut(),
@@ -2732,6 +2744,14 @@ impl DeflateOwnedStorage {
             head: self.head.as_mut(),
             pending: self.pending.as_mut(),
         }
+    }
+
+    // Deep-copy through the same bounded kernel used by callback-backed
+    // storage.  This gives the future owner conversion a wholly pointer-free
+    // transaction endpoint: allocation publication stays at the boundary,
+    // while the copied bytes remain in typed owners.
+    fn copy_from(&mut self, source: &Self, layout: &DeflateCopyLayout) -> bool {
+        copy_deflate_storage_views(source.source_views(), self.destination_views(), layout)
     }
 }
 
