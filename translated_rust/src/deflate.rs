@@ -216,8 +216,16 @@ pub const finish_started: block_state = 2;
 
 pub const need_more: block_state = 0;
 
-pub type compress_func =
-    Option<fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state>;
+// Compression strategies are private Rust implementations.  Their table
+// dispatch receives the stream/state pair already validated by `deflate()`,
+// so it need not recreate that relationship from a raw state pointer.
+pub type compress_func = Option<
+    fn(
+        &mut crate::src::deflate::deflate_state,
+        &mut crate::zlib_h::z_stream,
+        ::core::ffi::c_int,
+    ) -> block_state,
+>;
 
 pub type config = config_s;
 #[derive(Copy, Clone)]
@@ -246,100 +254,70 @@ static configuration_table: [config; 10] = [
         max_lazy: 0 as crate::zutil_h::ush,
         nice_length: 0 as crate::zutil_h::ush,
         max_chain: 0 as crate::zutil_h::ush,
-        func: Some(
-            deflate_stored
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_stored),
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 4 as crate::zutil_h::ush,
         nice_length: 8 as crate::zutil_h::ush,
         max_chain: 4 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_fast),
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 5 as crate::zutil_h::ush,
         nice_length: 16 as crate::zutil_h::ush,
         max_chain: 8 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_fast),
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 6 as crate::zutil_h::ush,
         nice_length: 32 as crate::zutil_h::ush,
         max_chain: 32 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_fast),
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 4 as crate::zutil_h::ush,
         nice_length: 16 as crate::zutil_h::ush,
         max_chain: 16 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 16 as crate::zutil_h::ush,
         nice_length: 32 as crate::zutil_h::ush,
         max_chain: 32 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 16 as crate::zutil_h::ush,
         nice_length: 128 as crate::zutil_h::ush,
         max_chain: 128 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 32 as crate::zutil_h::ush,
         nice_length: 128 as crate::zutil_h::ush,
         max_chain: 256 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 32 as crate::zutil_h::ush,
         max_lazy: 128 as crate::zutil_h::ush,
         nice_length: 258 as crate::zutil_h::ush,
         max_chain: 1024 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 32 as crate::zutil_h::ush,
         max_lazy: 258 as crate::zutil_h::ush,
         nice_length: 258 as crate::zutil_h::ush,
         max_chain: 4096 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
 ];
 
@@ -2315,17 +2293,25 @@ pub unsafe extern "C" fn deflate(
         || flush != crate::zlib_h::Z_NO_FLUSH && (*s).status != crate::src::deflate::FINISH_STATE
     {
         let mut bstate: block_state = need_more;
-        bstate = (if (*s).level == 0 as ::core::ffi::c_int {
-            deflate_stored(s, flush) as ::core::ffi::c_uint
-        } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(s, flush) as ::core::ffi::c_uint
-        } else if (*s).strategy == crate::zlib_h::Z_RLE {
-            deflate_rle(s, flush) as ::core::ffi::c_uint
-        } else {
-            configuration_table[(*s).level as usize]
-                .func
-                .expect("non-null function pointer")(s, flush) as ::core::ffi::c_uint
-        }) as block_state;
+        bstate = {
+            // The initial state check remains the public validation point.
+            // Rebind its already-validated pair only for this private Rust
+            // strategy dispatch, so strategy functions never accept a raw
+            // state handle.
+            let (stream, state) = deflateStateCheck(strm).expect("stream validated above");
+            (if state.level == 0 as ::core::ffi::c_int {
+                deflate_stored(state, stream, flush) as ::core::ffi::c_uint
+            } else if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
+                deflate_huff(state, stream, flush) as ::core::ffi::c_uint
+            } else if state.strategy == crate::zlib_h::Z_RLE {
+                deflate_rle(state, stream, flush) as ::core::ffi::c_uint
+            } else {
+                configuration_table[state.level as usize]
+                    .func
+                    .expect("non-null function pointer")(state, stream, flush)
+                    as ::core::ffi::c_uint
+            }) as block_state
+        };
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
             || bstate as ::core::ffi::c_uint
@@ -2939,21 +2925,18 @@ fn stored_block_size(
     ))
 }
 
-// This private adapter binds the deflater allocations and caller cursors once.
-// The stored-block algorithm below uses only those bounded views. Its only
-// callers are the validated compression dispatch, so keep that raw binding
-// local instead of requiring the slice-only strategy implementation to be
-// unsafe.
+// The stored-block strategy receives the stream/state relationship already
+// validated by the compression dispatch, then binds its owned allocations and
+// caller cursors once for the slice-only algorithm below.
 fn deflate_stored(
-    s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     // SAFETY: the compression dispatch invokes this only with the validated
     // state maintained by `deflate()`. Its allocations and caller cursors are
     // the bounded ranges for this compression call.
     unsafe {
-        let state = &mut *s;
-        let stream = &mut *state.strm;
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let pending =
             ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
@@ -3210,17 +3193,16 @@ fn deflate_stored_impl(
     }) as block_state;
 }
 
-// This private adapter binds a validated fast deflater's state, allocations,
-// and caller cursors once. The algorithm below only uses the bounded views.
+// The fast strategy receives validated state and stream references, then binds
+// its allocations and caller cursors once for the bounded algorithm below.
 fn deflate_fast(
-    s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     // SAFETY: the validated compression dispatch supplies one live deflater
     // and its bounded allocations and caller cursors for this call.
     unsafe {
-        let state = &mut *s;
-        let stream = &mut *state.strm;
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
         let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
@@ -3379,17 +3361,16 @@ fn deflate_fast_impl(
     block_done
 }
 
-// This private adapter binds a validated lazy deflater's state, allocations,
-// and caller cursors once. The algorithm below only uses the bounded views.
+// The lazy strategy receives validated state and stream references, then binds
+// its allocations and caller cursors once for the bounded algorithm below.
 fn deflate_slow(
-    s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     // SAFETY: the validated compression dispatch supplies one live deflater
     // and its bounded allocations and caller cursors for this call.
     unsafe {
-        let state = &mut *s;
-        let stream = &mut *state.strm;
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
         let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
@@ -3625,17 +3606,16 @@ fn rle_match_length(
     length as crate::stdlib::uInt
 }
 
-// This private adapter binds a validated RLE deflater's state, allocations,
-// and caller cursors once. The compression loop below only uses bounded views.
+// The RLE strategy receives validated state and stream references, then binds
+// its allocations and caller cursors once for the bounded compression loop.
 fn deflate_rle(
-    s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     // SAFETY: the validated compression dispatch supplies one live deflater
     // and its bounded allocations and caller cursors for this call.
     unsafe {
-        let state = &mut *s;
-        let stream = &mut *state.strm;
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
         let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
@@ -3763,17 +3743,16 @@ fn deflate_rle_impl(
     block_done
 }
 
-// This private adapter binds a validated Huffman-only deflater, stream,
-// allocations, and caller cursors once. The loop then uses bounded views.
+// The Huffman-only strategy receives validated state and stream references,
+// then binds its allocations and caller cursors once for the bounded loop.
 fn deflate_huff(
-    s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     // SAFETY: the validated compression dispatch supplies one live deflater
     // and its bounded allocations and caller cursors for this call.
     unsafe {
-        let state = &mut *s;
-        let stream = &mut *state.strm;
         let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
         let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
