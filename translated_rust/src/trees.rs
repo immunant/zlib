@@ -2465,6 +2465,17 @@ pub(crate) enum BitOutputAction {
     Align,
 }
 
+// Tree operations that need the callback-backed pending allocation share one
+// state adapter. Their byte/tree work runs below that adapter over bounded
+// slices and scalar state only.
+pub(crate) enum PendingTreeAction {
+    BitOutput(BitOutputAction),
+    Tally {
+        dist: ::core::ffi::c_uint,
+        lc: ::core::ffi::c_uint,
+    },
+}
+
 // This is the pointer-free portion of the deflate bit-output state.  The ABI
 // state owns the backing allocation; its callers construct this bounded view
 // at the projection boundary before dispatching the byte-only operation.
@@ -2503,8 +2514,8 @@ pub(crate) fn bi_flush_or_windup(state: BitOutputState<'_>, action: BitOutputAct
 // export remains only a conversion-and-dispatch boundary.
 unsafe fn bit_output_from_deflate_state(
     state: &mut crate::src::deflate::deflate_state,
-    action: BitOutputAction,
-) {
+    action: PendingTreeAction,
+) -> ::core::ffi::c_int {
     let pending_buf = ::core::slice::from_raw_parts_mut(
         state
             .pending_buf
@@ -2512,16 +2523,33 @@ unsafe fn bit_output_from_deflate_state(
             .as_ptr(),
         state.pending_buf_size as usize,
     );
-    bi_flush_or_windup(
-        BitOutputState {
-            pending_buf,
-            pending: &mut state.pending,
-            bi_buf: &mut state.bi_buf,
-            bi_valid: &mut state.bi_valid,
-            bi_used: &mut state.bi_used,
-        },
-        action,
-    );
+    match action {
+        PendingTreeAction::BitOutput(action) => {
+            bi_flush_or_windup(
+                BitOutputState {
+                    pending_buf,
+                    pending: &mut state.pending,
+                    bi_buf: &mut state.bi_buf,
+                    bi_valid: &mut state.bi_valid,
+                    bi_used: &mut state.bi_used,
+                },
+                action,
+            );
+            0
+        }
+        PendingTreeAction::Tally { dist, lc } => _tr_tally(
+            TallyState {
+                sym_buf: &mut pending_buf[state.sym_buf_start..],
+                sym_next: &mut state.sym_next,
+                sym_end: state.sym_end,
+                dyn_ltree: &mut state.dyn_ltree,
+                dyn_dtree: &mut state.dyn_dtree,
+                matches: &mut state.matches,
+            },
+            dist,
+            lc,
+        ),
+    }
 }
 
 fn tr_align_bytes(
@@ -3281,7 +3309,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     let Some(state) = s.as_mut() else {
         return;
     };
-    bit_output_from_deflate_state(state, BitOutputAction::Flush)
+    bit_output_from_deflate_state(state, PendingTreeAction::BitOutput(BitOutputAction::Flush));
 }
 #[export_name = "_tr_align"]
 
@@ -3289,7 +3317,7 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let Some(state) = s.as_mut() else {
         return;
     };
-    bit_output_from_deflate_state(state, BitOutputAction::Align)
+    bit_output_from_deflate_state(state, PendingTreeAction::BitOutput(BitOutputAction::Align));
 }
 fn compress_block(
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -3815,35 +3843,38 @@ pub(crate) fn tally_symbol(
     }
     (*sym_next == sym_end) as ::core::ffi::c_int
 }
-// The ABI wrapper establishes the opaque-state borrow.  This adapter keeps
-// the callback-backed pending-storage projection with the tree operation, so
-// the export itself remains a conversion-and-dispatch boundary.
-pub unsafe fn _tr_tally(
-    state: &mut crate::src::deflate::deflate_state,
+// This is the pointer-free tree-tally view.  The ABI state owns the pending
+// allocation; the state adapter below establishes this checked symbol-buffer
+// view before dispatching the tally operation.
+pub(crate) struct TallyState<'a> {
+    pub(crate) sym_buf: &'a mut [crate::zutil_h::uchf],
+    pub(crate) sym_next: &'a mut crate::stdlib::uInt,
+    pub(crate) sym_end: crate::stdlib::uInt,
+    pub(crate) dyn_ltree: &'a mut [crate::src::deflate::ct_data_s; 573],
+    pub(crate) dyn_dtree: &'a mut [crate::src::deflate::ct_data_s; 61],
+    pub(crate) matches: &'a mut crate::stdlib::uInt,
+}
+
+// Tallying itself is a bounded byte/tree operation.  It receives no ABI
+// state or callback storage handle, so callers other than the legacy ABI
+// adapter can use the same pointer-free operation directly.
+pub(crate) fn _tr_tally(
+    state: TallyState<'_>,
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    // The symbol region starts after the literal portion of `pending_buf`.
-    // Its remaining capacity is three bytes per literal slot.
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    let sym_buf = &mut pending_buf[state.sym_buf_start..];
     tally_symbol(
-        sym_buf,
-        &mut state.sym_next,
+        state.sym_buf,
+        state.sym_next,
         state.sym_end,
-        &mut state.dyn_ltree,
-        &mut state.dyn_dtree,
-        &mut state.matches,
+        state.dyn_ltree,
+        state.dyn_dtree,
+        state.matches,
         dist,
         lc,
     )
 }
+
 #[export_name = "_tr_tally"]
 
 pub unsafe extern "C" fn _tr_tally_ffi(
@@ -3854,5 +3885,5 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     let Some(state) = s.as_mut() else {
         return 0;
     };
-    _tr_tally(state, dist, lc)
+    bit_output_from_deflate_state(state, PendingTreeAction::Tally { dist, lc })
 }
