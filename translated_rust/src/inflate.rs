@@ -2463,7 +2463,8 @@ pub unsafe extern "C" fn inflateMark_ffi(
     let state = &*((*strm).state as *mut crate::src::inflate::inflate_state);
     inflateMark(state)
 }
-pub unsafe extern "C" fn inflateCodesUsed(
+#[export_name = "inflateCodesUsed"]
+pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
     let mut state: *mut crate::src::inflate::inflate_state =
@@ -2476,11 +2477,4 @@ pub unsafe extern "C" fn inflateCodesUsed(
         .next
         .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
         as ::core::ffi::c_long as ::core::ffi::c_ulong;
-}
-#[export_name = "inflateCodesUsed"]
-
-pub unsafe extern "C" fn inflateCodesUsed_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_ulong {
-    inflateCodesUsed(strm)
 }

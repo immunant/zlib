@@ -1286,7 +1286,8 @@ pub unsafe extern "C" fn deflateTune_ffi(
     let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     deflateTune(state, good_length, max_lazy, nice_length, max_chain)
 }
-pub unsafe extern "C" fn deflateBound_z(
+#[export_name = "deflateBound_z"]
+pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
@@ -1411,14 +1412,6 @@ pub unsafe extern "C" fn deflateBound_z(
         bound
     };
 }
-#[export_name = "deflateBound_z"]
-
-pub unsafe extern "C" fn deflateBound_z_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
-    deflateBound_z(strm, sourceLen)
-}
 #[export_name = "deflateBound"]
 
 pub unsafe extern "C" fn deflateBound_ffi(
@@ -1426,7 +1419,7 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
     let mut bound: crate::stdlib::z_size_t =
-        deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t);
+        deflateBound_z_ffi(strm, sourceLen as crate::stdlib::z_size_t);
     return if bound != bound {
         -1 as ::core::ffi::c_int as crate::stdlib::uLong
     } else {
