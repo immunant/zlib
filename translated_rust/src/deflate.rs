@@ -1200,6 +1200,30 @@ fn deflate_mark_initialization_memory_error(
         crate::src::zutil::z_errmsg[6] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
 }
 
+/// Apply zlib's stream defaults before validating init settings.  This is
+/// ordinary stream bookkeeping; allocation callbacks remain at the ABI
+/// boundary below.
+fn deflate_prepare_init_stream(strm: &mut crate::zlib_h::z_stream) {
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
+            crate::src::zutil::zcalloc_ffi
+                as unsafe extern "C" fn(
+                    crate::stdlib::voidpf,
+                    ::core::ffi::c_uint,
+                    ::core::ffi::c_uint,
+                ) -> crate::stdlib::voidpf,
+        ) as crate::zlib_h::alloc_func;
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
+            crate::src::zutil::zcfree_ffi
+                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+        ) as crate::zlib_h::free_func;
+    }
+}
+
 pub fn deflateInit2_(
     strm_ref: &mut crate::zlib_h::z_stream,
     level: ::core::ffi::c_int,
@@ -1208,32 +1232,16 @@ pub fn deflateInit2_(
     memLevel: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // zlib applies these defaults even when scalar validation fails.
+    deflate_prepare_init_stream(strm_ref);
+    let Some(settings) = deflate_init_settings(level, method, windowBits, memLevel, strategy)
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     // Allocation callbacks and the C-compatible stream/state records remain
     // an ABI boundary.  Keep their adoption confined here so callers use the
     // normal safe implementation interface.
     unsafe {
-        strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        if strm_ref.zalloc.is_none() {
-            strm_ref.zalloc = Some(
-                crate::src::zutil::zcalloc_ffi
-                    as unsafe extern "C" fn(
-                        crate::stdlib::voidpf,
-                        ::core::ffi::c_uint,
-                        ::core::ffi::c_uint,
-                    ) -> crate::stdlib::voidpf,
-            ) as crate::zlib_h::alloc_func;
-            strm_ref.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        }
-        if strm_ref.zfree.is_none() {
-            strm_ref.zfree = Some(
-                crate::src::zutil::zcfree_ffi
-                    as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-            ) as crate::zlib_h::free_func;
-        }
-        let Some(settings) = deflate_init_settings(level, method, windowBits, memLevel, strategy)
-        else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
         let Some(zalloc) = strm_ref.zalloc else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -3934,6 +3942,73 @@ fn deflate_state_can_end(
     )
 }
 
+/// Checked scalar ranges for a cloned deflate state.  Allocation handles and
+/// raw lends deliberately stay at the copy ABI boundary.
+struct DeflateCopyPlan {
+    window_len: usize,
+    window_len_to_copy: usize,
+    prev_capacity: usize,
+    prev_len: usize,
+    head_len: usize,
+    pending_capacity: usize,
+    pending_range: ::core::ops::Range<usize>,
+    src_sym: ::core::ops::Range<usize>,
+    dst_sym: ::core::ops::Range<usize>,
+}
+
+fn deflate_copy_plan(source: &deflate_state, dest: &deflate_state) -> Option<DeflateCopyPlan> {
+    let window_len = usize::try_from(dest.window_size).ok()?;
+    let prev_capacity = usize::try_from(dest.w_size).ok()?;
+    let head_len = usize::try_from(dest.hash_size).ok()?;
+    let pending_capacity = usize::try_from(dest.pending_buf_size).ok()?;
+    if (window_len != 0 && source.window.is_none())
+        || (prev_capacity != 0 && source.prev.is_none())
+        || (head_len != 0 && source.head.is_none())
+        || (pending_capacity != 0 && source.pending_buf.is_none())
+    {
+        return None;
+    }
+
+    let window_len_to_copy = usize::try_from(source.high_water)
+        .ok()
+        .filter(|len| *len <= window_len)?;
+    let prev_len = if source.slid != 0 || source.strstart.wrapping_sub(source.insert) > dest.w_size
+    {
+        prev_capacity
+    } else {
+        usize::try_from(source.strstart.wrapping_sub(source.insert))
+            .ok()
+            .filter(|len| *len <= prev_capacity)?
+    };
+    let pending_len = usize::try_from(source.pending).ok()?;
+    let pending_end = source.pending_out.checked_add(pending_len)?;
+    if pending_end > pending_capacity {
+        return None;
+    }
+    let sym_len = usize::try_from(source.sym_next).ok()?;
+    let src_sym_end = source.sym_start.checked_add(sym_len)?;
+    if src_sym_end > pending_capacity {
+        return None;
+    }
+    let dst_sym_start = usize::try_from(dest.lit_bufsize).ok()?;
+    let dst_sym_end = dst_sym_start.checked_add(sym_len)?;
+    if dst_sym_end > pending_capacity {
+        return None;
+    }
+
+    Some(DeflateCopyPlan {
+        window_len,
+        window_len_to_copy,
+        prev_capacity,
+        prev_len,
+        head_len,
+        pending_capacity,
+        pending_range: source.pending_out..pending_end,
+        src_sym: source.sym_start..src_sym_end,
+        dst_sym: dst_sym_start..dst_sym_end,
+    })
+}
+
 pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     // This compatibility teardown still has to adopt the ABI stream/state
     // records and invoke its C allocator. Keep that work at this codec
@@ -4048,85 +4123,21 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         deflateEnd(&mut *dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let Some(window_len) = usize::try_from(dest_state.window_size).ok() else {
+    let Some(copy_plan) = deflate_copy_plan(source_state, dest_state) else {
         deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(prev_capacity) = usize::try_from(dest_state.w_size).ok() else {
-        deflateEnd(&mut *dest);
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let Some(head_len) = usize::try_from(dest_state.hash_size).ok() else {
-        deflateEnd(&mut *dest);
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let Some(pending_capacity) = usize::try_from(dest_state.pending_buf_size).ok() else {
-        deflateEnd(&mut *dest);
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if (window_len != 0 && source_state.window.is_none())
-        || (prev_capacity != 0 && source_state.prev.is_none())
-        || (head_len != 0 && source_state.head.is_none())
-        || (pending_capacity != 0 && source_state.pending_buf.is_none())
-    {
-        deflateEnd(&mut *dest);
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let window_len_to_copy = usize::try_from(source_state.high_water)
-        .ok()
-        .filter(|len| *len <= window_len);
-    let prev_len = if source_state.slid != 0
-        || source_state.strstart.wrapping_sub(source_state.insert) > dest_state.w_size
-    {
-        Some(prev_capacity)
-    } else {
-        usize::try_from(source_state.strstart.wrapping_sub(source_state.insert))
-            .ok()
-            .filter(|len| *len <= prev_capacity)
-    };
-    let pending_len = usize::try_from(source_state.pending).ok();
-    let sym_len = usize::try_from(source_state.sym_next).ok();
-    let pending_range = pending_len.and_then(|len| {
-        source_state
-            .pending_out
-            .checked_add(len)
-            .filter(|end| *end <= pending_capacity)
-            .map(|end| source_state.pending_out..end)
-    });
-    let src_sym = sym_len.and_then(|len| {
-        source_state
-            .sym_start
-            .checked_add(len)
-            .filter(|end| *end <= pending_capacity)
-            .map(|end| source_state.sym_start..end)
-    });
-    let dst_sym = sym_len.and_then(|len| {
-        usize::try_from(dest_state.lit_bufsize)
-            .ok()
-            .and_then(|start| start.checked_add(len))
-            .filter(|end| *end <= pending_capacity)
-            .and_then(|end| end.checked_sub(len).map(|start| start..end))
-    });
-    let Some((window_len_to_copy, prev_len, pending_range, src_sym, dst_sym)) = window_len_to_copy
-        .zip(prev_len)
-        .zip(pending_range)
-        .zip(src_sym)
-        .zip(dst_sym)
-        .map(
-            |((((window_len_to_copy, prev_len), pending_range), src_sym), dst_sym)| {
-                (
-                    window_len_to_copy,
-                    prev_len,
-                    pending_range,
-                    src_sym,
-                    dst_sym,
-                )
-            },
-        )
-    else {
-        deflateEnd(&mut *dest);
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    let DeflateCopyPlan {
+        window_len,
+        window_len_to_copy,
+        prev_capacity,
+        prev_len,
+        head_len,
+        pending_capacity,
+        pending_range,
+        src_sym,
+        dst_sym,
+    } = copy_plan;
     let dest_sym_start = dst_sym.start;
     let src_window = if window_len == 0 {
         &[]
