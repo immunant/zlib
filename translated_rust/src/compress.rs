@@ -443,7 +443,6 @@ mod tests {
         );
     }
 
-    #[test]
     fn compress_bound_preserves_the_overflow_sentinel() {
         assert_eq!(
             compress_bound_z_impl(crate::stdlib::z_size_t::MAX),

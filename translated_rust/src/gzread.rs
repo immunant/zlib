@@ -340,6 +340,12 @@ fn gz_read_load_status(load_failed: bool) -> ::core::ffi::c_int {
     }
 }
 
+fn gz_read_take_decompressed(
+    have: ::core::ffi::c_uint,
+) -> (::core::ffi::c_uint, ::core::ffi::c_uint) {
+    (have, 0)
+}
+
 fn gz_cursor_advance(
     pos: crate::stdlib::off64_t,
     consumed: ::core::ffi::c_uint,
@@ -1635,6 +1641,15 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_take_decompressed_returns_output_and_clears_buffered_bytes() {
+        assert_eq!(gz_read_take_decompressed(17), (17, 0));
+        assert_eq!(
+            gz_read_take_decompressed(::core::ffi::c_uint::MAX),
+            (::core::ffi::c_uint::MAX, 0)
+        );
+    }
+
+    #[test]
     fn gz_read_needs_fetch_for_look_state() {
         assert!(gz_read_needs_fetch(crate::gzguts_h::LOOK, 16, 8));
     }
@@ -2208,8 +2223,8 @@ unsafe extern "C" fn gz_read(
                 (*state).strm.next_out =
                     buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
                 err = gz_decomp(state);
-                n = (*state).x.have;
-                (*state).x.have = 0 as ::core::ffi::c_uint;
+                let state_ref = &mut *state;
+                (n, state_ref.x.have) = gz_read_take_decompressed(state_ref.x.have);
                 true
             }
         };

@@ -586,24 +586,24 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
             let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
-            (*s).ins_h = *(*s).window.offset(str as isize) as crate::stdlib::uInt;
+            (*s).ins_h = *(*s).window.wrapping_add(str as usize) as crate::stdlib::uInt;
             (*s).ins_h = ((*s).ins_h << (*s).hash_shift
                 ^ *(*s)
                     .window
-                    .offset(str.wrapping_add(1 as crate::stdlib::uInt) as isize)
+                    .wrapping_add(str.wrapping_add(1 as crate::stdlib::uInt) as usize)
                     as crate::stdlib::uInt)
                 & (*s).hash_mask;
             while (*s).insert != 0 {
                 (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                    ^ *(*s).window.offset(
+                    ^ *(*s).window.wrapping_add(
                         str.wrapping_add(3 as crate::stdlib::uInt)
                             .wrapping_sub(1 as crate::stdlib::uInt)
-                            as isize,
+                            as usize,
                     ) as crate::stdlib::uInt)
                     & (*s).hash_mask;
-                *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                    *(*s).head.offset((*s).ins_h as isize);
-                *(*s).head.offset((*s).ins_h as isize) =
+                *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
+                    *(*s).head.wrapping_add((*s).ins_h as usize);
+                *(*s).head.wrapping_add((*s).ins_h as usize) =
                     str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 str = str.wrapping_add(1);
                 (*s).insert = (*s).insert.wrapping_sub(1);
@@ -627,7 +627,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         (*s).lookahead,
     ) {
         crate::stdlib::memset(
-            (*s).window.offset(start as isize) as *mut ::core::ffi::c_void,
+            (*s).window.wrapping_add(start as usize) as *mut ::core::ffi::c_void,
             0 as ::core::ffi::c_int,
             len as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
         );
@@ -682,12 +682,7 @@ pub unsafe extern "C" fn deflateInit2_(
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    if version.is_null()
-        || !deflate_version_matches(
-            *version.offset(0 as ::core::ffi::c_int as isize),
-            stream_size,
-        )
-    {
+    if version.is_null() || !deflate_version_matches(*version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     if strm.is_null() {
@@ -942,9 +937,9 @@ pub unsafe extern "C" fn deflateSetDictionary(
                         .wrapping_sub(1 as crate::stdlib::uInt) as isize,
                 ) as crate::stdlib::uInt)
                 & (*s).hash_mask;
-            *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            *(*s).head.offset((*s).ins_h as isize) =
+            *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
+                *(*s).head.wrapping_add((*s).ins_h as usize);
+            *(*s).head.wrapping_add((*s).ins_h as usize) =
                 str as crate::src::deflate::Pos as crate::src::deflate::Posf;
             str = str.wrapping_add(1);
             n = n.wrapping_sub(1);
@@ -2885,9 +2880,9 @@ unsafe extern "C" fn deflate_fast(
                 ) as isize) as crate::stdlib::uInt)
                 & (*s).hash_mask;
             let ref mut c2rust_fresh46 = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize);
-            *c2rust_fresh46 = *(*s).head.offset((*s).ins_h as isize);
+            *c2rust_fresh46 = *(*s).head.wrapping_add((*s).ins_h as usize);
             hash_head = *c2rust_fresh46 as crate::src::deflate::IPos;
-            *(*s).head.offset((*s).ins_h as isize) =
+            *(*s).head.wrapping_add((*s).ins_h as usize) =
                 (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
         }
         if hash_head != NIL as crate::src::deflate::IPos
@@ -2973,9 +2968,9 @@ unsafe extern "C" fn deflate_fast(
                         & (*s).hash_mask;
                     let ref mut c2rust_fresh50 =
                         *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize);
-                    *c2rust_fresh50 = *(*s).head.offset((*s).ins_h as isize);
+                    *c2rust_fresh50 = *(*s).head.wrapping_add((*s).ins_h as usize);
                     hash_head = *c2rust_fresh50 as crate::src::deflate::IPos;
-                    *(*s).head.offset((*s).ins_h as isize) =
+                    *(*s).head.wrapping_add((*s).ins_h as usize) =
                         (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
                     (*s).match_length = (*s).match_length.wrapping_sub(1);
                     if !((*s).match_length != 0 as crate::stdlib::uInt) {
@@ -3116,9 +3111,9 @@ unsafe extern "C" fn deflate_slow(
                 ) as isize) as crate::stdlib::uInt)
                 & (*s).hash_mask;
             let ref mut c2rust_fresh35 = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize);
-            *c2rust_fresh35 = *(*s).head.offset((*s).ins_h as isize);
+            *c2rust_fresh35 = *(*s).head.wrapping_add((*s).ins_h as usize);
             hash_head = *c2rust_fresh35 as crate::src::deflate::IPos;
-            *(*s).head.offset((*s).ins_h as isize) =
+            *(*s).head.wrapping_add((*s).ins_h as usize) =
                 (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
         }
         (*s).prev_length = (*s).match_length;
@@ -3226,9 +3221,9 @@ unsafe extern "C" fn deflate_slow(
                         & (*s).hash_mask;
                     let ref mut c2rust_fresh39 =
                         *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize);
-                    *c2rust_fresh39 = *(*s).head.offset((*s).ins_h as isize);
+                    *c2rust_fresh39 = *(*s).head.wrapping_add((*s).ins_h as usize);
                     hash_head = *c2rust_fresh39 as crate::src::deflate::IPos;
-                    *(*s).head.offset((*s).ins_h as isize) =
+                    *(*s).head.wrapping_add((*s).ins_h as usize) =
                         (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 }
                 (*s).prev_length = (*s).prev_length.wrapping_sub(1);

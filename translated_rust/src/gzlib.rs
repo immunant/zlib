@@ -86,6 +86,15 @@ fn gzseek_fast_forward_reset(state: &mut crate::gzguts_h::gz_state) {
     state.skip = 0;
 }
 
+fn gzseek_finish_fast_forward(
+    state: &mut crate::gzguts_h::gz_state,
+    offset: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    state.strm.avail_in = 0;
+    state.x.pos += offset;
+    state.x.pos
+}
+
 fn gzclearerr_core(
     mode: ::core::ffi::c_int,
     eof: &mut ::core::ffi::c_int,
@@ -845,15 +854,16 @@ pub unsafe extern "C" fn gzseek64(
         if !gz_lseek_succeeded(ret as crate::stdlib::__off64_t) {
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
-        gzseek_fast_forward_reset(&mut *state);
+        {
+            let state_ref = &mut *state;
+            gzseek_fast_forward_reset(state_ref);
+        }
         gz_error(
             state,
             crate::zlib_h::Z_OK,
             ::core::ptr::null::<::core::ffi::c_char>(),
         );
-        (*state).strm.avail_in = 0 as crate::stdlib::uInt;
-        (*state).x.pos += offset;
-        return (*state).x.pos;
+        return gzseek_finish_fast_forward(&mut *state, offset);
     }
     let seek_plan = match gzseek_plan_remaining_offset((*state).mode, (*state).x.pos, offset) {
         Some(plan) => plan,
@@ -1171,7 +1181,7 @@ mod tests {
         gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
         gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
         gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
-        gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
+        gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_read_buffer_consumed,
         gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
         gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
@@ -1211,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    fn gzseek_fast_forward_reset_clears_only_fast_forward_reset_fields() {
+    fn gzseek_fast_forward_completion_resets_and_updates_cursor_fields() {
         let mut state = crate::gzguts_h::gz_state {
             x: crate::zlib_h::gzFile_s {
                 have: 7,
@@ -1258,11 +1268,13 @@ mod tests {
         };
 
         gzseek_fast_forward_reset(&mut state);
+        let position = gzseek_finish_fast_forward(&mut state, 11);
 
         assert_eq!(state.x.have, 0);
         assert_eq!((state.eof, state.past, state.skip), (0, 0, 0));
-        assert_eq!(state.x.pos, 101);
-        assert_eq!(state.strm.avail_in, 31);
+        assert_eq!(position, 112);
+        assert_eq!(state.x.pos, 112);
+        assert_eq!(state.strm.avail_in, 0);
         assert_eq!(state.err, crate::zlib_h::Z_BUF_ERROR);
         assert_eq!(state.again, 23);
     }
