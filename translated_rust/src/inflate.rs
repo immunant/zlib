@@ -206,6 +206,37 @@ fn window_update_plan(
     }
 }
 
+fn apply_window_update(
+    window: &mut [crate::stdlib::Bytef],
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    produced: &[crate::stdlib::Bytef],
+) -> WindowUpdate {
+    let plan = window_update_plan(
+        window.len() as ::core::ffi::c_uint,
+        wnext,
+        whave,
+        produced.len() as ::core::ffi::c_uint,
+    );
+
+    if plan.replace {
+        let start = produced.len() - window.len();
+        window.copy_from_slice(&produced[start..]);
+    } else {
+        let first = plan.first as usize;
+        let second = plan.second as usize;
+        let copy = produced.len();
+        let next = wnext as usize;
+
+        window[next..next + first].copy_from_slice(&produced[..first]);
+        if second != 0 {
+            window[..second].copy_from_slice(&produced[copy - second..]);
+        }
+    }
+
+    plan
+}
+
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
@@ -485,27 +516,13 @@ unsafe extern "C" fn updatewindow(
         (*state).wnext = 0 as ::core::ffi::c_uint;
         (*state).whave = 0 as ::core::ffi::c_uint;
     }
-    plan = window_update_plan((*state).wsize, (*state).wnext, (*state).whave, copy);
-    if plan.replace {
-        crate::stdlib::memcpy(
-            (*state).window as *mut ::core::ffi::c_void,
-            end.offset(-((*state).wsize as isize)) as *const ::core::ffi::c_void,
-            (*state).wsize as crate::__stddef_size_t_h::size_t,
-        );
+    let window = core::slice::from_raw_parts_mut((*state).window, (*state).wsize as usize);
+    let produced = if copy == 0 {
+        &[]
     } else {
-        crate::stdlib::memcpy(
-            (*state).window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
-            end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-            plan.first as crate::__stddef_size_t_h::size_t,
-        );
-        if plan.second != 0 {
-            crate::stdlib::memcpy(
-                (*state).window as *mut ::core::ffi::c_void,
-                end.offset(-(plan.second as isize)) as *const ::core::ffi::c_void,
-                plan.second as crate::__stddef_size_t_h::size_t,
-            );
-        }
-    }
+        core::slice::from_raw_parts(end.sub(copy as usize), copy as usize)
+    };
+    plan = apply_window_update(window, (*state).wnext, (*state).whave, produced);
     (*state).wnext = plan.wnext;
     (*state).whave = plan.whave;
     return 0 as ::core::ffi::c_int;
@@ -2521,7 +2538,10 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{inflate_mode_is_valid, syncsearch_safe, window_update_plan, BAD, HEAD, SYNC};
+    use super::{
+        apply_window_update, inflate_mode_is_valid, syncsearch_safe, window_update_plan, BAD, HEAD,
+        SYNC,
+    };
 
     #[test]
     fn syncsearch_preserves_partial_marker_across_chunks() {
@@ -2580,5 +2600,35 @@ mod tests {
                 whave: 8,
             }
         );
+    }
+
+    #[test]
+    fn window_update_copies_replace_append_and_wrap_data() {
+        let mut replace_window = [0; 8];
+        let replace = apply_window_update(&mut replace_window, 3, 5, b"0123456789");
+        assert_eq!(replace.wnext, 0);
+        assert_eq!(replace.whave, 8);
+        assert_eq!(replace_window, *b"23456789");
+
+        let mut append_window = *b"abcdefgh";
+        let append = apply_window_update(&mut append_window, 3, 5, b"XY");
+        assert_eq!(append.wnext, 5);
+        assert_eq!(append.whave, 7);
+        assert_eq!(append_window, *b"abcXYfgh");
+
+        let mut wrap_window = *b"abcdefgh";
+        let wrap = apply_window_update(&mut wrap_window, 6, 8, b"WXYZ");
+        assert_eq!(wrap.wnext, 2);
+        assert_eq!(wrap.whave, 8);
+        assert_eq!(wrap_window, *b"YZcdefWX");
+    }
+
+    #[test]
+    fn window_update_ignores_empty_output() {
+        let mut window = *b"abcdefgh";
+        let update = apply_window_update(&mut window, 3, 5, b"");
+        assert_eq!(update.wnext, 3);
+        assert_eq!(update.whave, 5);
+        assert_eq!(window, *b"abcdefgh");
     }
 }
