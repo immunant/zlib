@@ -1868,43 +1868,46 @@ fn putShortMSB(s: &mut crate::src::deflate::deflate_state, b: crate::stdlib::uIn
     s.push_pending((b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte);
 }
 
-unsafe extern "C" fn flush_pending(strm: &mut crate::zlib_h::z_stream) {
-    let mut len: ::core::ffi::c_uint = 0;
-    let s = &mut *strm.state;
+/// Flush pending compressed bytes into a caller-provided output slice.
+///
+/// The stream ABI stores its output as a raw pointer, but the compressor's
+/// pending buffer is wholly Rust-owned.  Keeping this operation slice-based
+/// means the compression implementation cannot read or write through an ABI
+/// pointer.  The small adapter in `deflate` updates the ABI cursors after this
+/// function reports how many bytes were copied.
+fn flush_pending_bytes(
+    s: &mut crate::src::deflate::deflate_state,
+    output: &mut [crate::stdlib::Bytef],
+) -> usize {
     s.with_pending(|state, pending_buf| crate::src::trees::bi_flush(state, pending_buf));
-    strm.data_type = s.data_type;
-    len = if s.pending > strm.avail_out as crate::zutil_h::ulg {
-        strm.avail_out as ::core::ffi::c_uint
-    } else {
-        s.pending as ::core::ffi::c_uint
-    };
-    if len == 0 as ::core::ffi::c_uint {
-        return;
+    let len = (s.pending as usize).min(output.len());
+    if len == 0 {
+        return 0;
     }
     let output_end = s
         .pending_out
-        .checked_add(len as usize)
+        .checked_add(len)
         .expect("pending output overflow");
-    {
-        let pending_output = &s
-            .buffers
-            .as_ref()
-            .expect("deflate buffers initialized")
-            .pending[s.pending_out..output_end];
-        crate::stdlib::memcpy(
-            strm.next_out as *mut ::core::ffi::c_void,
-            pending_output.as_ptr() as *const ::core::ffi::c_void,
-            len as crate::__stddef_size_t_h::size_t,
-        );
-    }
-    strm.next_out = strm.next_out.offset(len as isize);
+    output[..len].copy_from_slice(&s.buffers().pending[s.pending_out..output_end]);
     s.pending_out = output_end;
-    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
-    strm.avail_out = strm.avail_out.wrapping_sub(len);
     s.pending = s.pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if s.pending == 0 as crate::zutil_h::ulg {
+    if s.pending == 0 {
         s.pending_out = 0;
     }
+    len
+}
+
+// This is the sole legacy `z_stream` adapter.  It remains unsafe until the
+// whole `deflate` entry path can receive borrowed input and output slices;
+// the pending-buffer operation above is independent of that ABI concern.
+unsafe extern "C" fn flush_pending(strm: &mut crate::zlib_h::z_stream) {
+    let state = &mut *strm.state;
+    strm.data_type = state.data_type;
+    let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+    let len = flush_pending_bytes(state, output);
+    strm.next_out = strm.next_out.add(len);
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm.avail_out = strm.avail_out.wrapping_sub(len as crate::stdlib::uInt);
 }
 
 fn flush_pending_io(s: &mut crate::src::deflate::deflate_state, io: &mut deflate_io) {
