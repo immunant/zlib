@@ -164,6 +164,18 @@ fn gzgetc_read_result(
     }
 }
 
+fn gzgetc_buffered_result(
+    have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    byte: ::core::ffi::c_uchar,
+) -> (
+    ::core::ffi::c_uint,
+    crate::stdlib::off64_t,
+    ::core::ffi::c_int,
+) {
+    (have.wrapping_sub(1), pos + 1, byte as ::core::ffi::c_int)
+}
+
 fn gz_read_chunk_len(
     len: crate::stdlib::z_size_t,
     buffered: ::core::ffi::c_uint,
@@ -1033,6 +1045,11 @@ mod tests {
     }
 
     #[test]
+    fn gzgetc_buffered_result_advances_state_and_returns_byte() {
+        assert_eq!(gzgetc_buffered_result(3, 42, 255), (2, 43, 255));
+    }
+
+    #[test]
     fn gz_fread_request_len_accepts_representable_products() {
         assert_eq!(
             gz_fread_request_len(crate::stdlib::z_size_t::MAX, 1),
@@ -1689,12 +1706,14 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).x.have != 0 {
-        (*state).x.have = (*state).x.have.wrapping_sub(1);
-        (*state).x.pos += 1;
-        let c2rust_fresh2 = (*state).x.next;
-        (*state).x.next = (*state).x.next.offset(1);
-        return *c2rust_fresh2 as ::core::ffi::c_int;
+    let buffered = &mut (*state).x;
+    if buffered.have != 0 {
+        let next = buffered.next;
+        let (have, pos, result) = gzgetc_buffered_result(buffered.have, buffered.pos, *next);
+        buffered.have = have;
+        buffered.pos = pos;
+        buffered.next = next.offset(1);
+        return result;
     }
     return gzgetc_read_result(
         gz_read(

@@ -63,7 +63,7 @@ fn error_message_index(err: ::core::ffi::c_int) -> usize {
 
 #[export_name = "zError"]
 pub unsafe extern "C" fn zError_ffi(err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    z_errmsg[error_message_index(err)]
+    z_errmsg[error_message_index(err)] as *const ::core::ffi::c_char
 }
 
 enum AllocationRequest {

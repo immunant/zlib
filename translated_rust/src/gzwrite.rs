@@ -121,6 +121,10 @@ fn gz_write_needs_pending_flush(avail_in: crate::stdlib::uInt) -> bool {
     avail_in != 0
 }
 
+fn gz_zero_needs_pending_flush(avail_in: crate::stdlib::uInt) -> bool {
+    avail_in != 0
+}
+
 fn gz_write_buffered_copy_len(
     size: ::core::ffi::c_uint,
     have: ::core::ffi::c_uint,
@@ -452,7 +456,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*strm).avail_in != 0
+    if gz_zero_needs_pending_flush((*strm).avail_in)
         && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
@@ -909,8 +913,8 @@ mod tests {
         gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
         gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
         gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
-        gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzwrite_len_fits_int,
+        gz_zero_needs_pending_flush, gzflush_mode_is_valid, gzfwrite_len, gzputc_result,
+        gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -939,6 +943,13 @@ mod tests {
         assert!(gz_zero_needs_initialization(1));
         assert!(gz_zero_needs_initialization(-1));
         assert!(!gz_zero_needs_initialization(0));
+    }
+
+    #[test]
+    fn gz_zero_needs_pending_flush_only_for_buffered_input() {
+        assert!(!gz_zero_needs_pending_flush(0));
+        assert!(gz_zero_needs_pending_flush(1));
+        assert!(gz_zero_needs_pending_flush(crate::stdlib::uInt::MAX));
     }
 
     #[test]
