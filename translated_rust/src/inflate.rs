@@ -3584,16 +3584,102 @@ fn inflate_sync_point(
         && bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int
 }
 
-// The export boundary validates the ABI handle before this state adapter is
-// entered.  Keeping the projection here makes the implementation's borrow
-// explicitly live for the full state access without retaining a raw stream
-// cursor in the core API.
-pub unsafe fn inflateSyncPoint(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflate_sync_point(state.decoder.normal.mode, state.decoder.normal.bits)
+// Scalar controls all need the same stream-bound opaque-state association.
+// Keep that one projection in this adapter; the action and result are fully
+// pointer-free, so each operation's policy remains independently testable
+// without reopening the ABI stream boundary.
+#[derive(Clone, Copy)]
+enum InflateNormalScalarAction {
+    SyncPoint,
+    Undermine,
+    Validate(::core::ffi::c_int),
+    Mark,
+    CodesUsed,
 }
+
+enum InflateNormalScalarResult {
+    Status(::core::ffi::c_int),
+    Mark(::core::ffi::c_long),
+    CodesUsed(::core::ffi::c_ulong),
+}
+
+impl InflateNormalScalarResult {
+    fn status(self) -> ::core::ffi::c_int {
+        match self {
+            Self::Status(status) => status,
+            Self::Mark(_) | Self::CodesUsed(_) => unreachable!("status scalar action"),
+        }
+    }
+
+    fn mark(self) -> ::core::ffi::c_long {
+        match self {
+            Self::Mark(mark) => mark,
+            Self::Status(_) | Self::CodesUsed(_) => unreachable!("mark scalar action"),
+        }
+    }
+
+    fn codes_used(self) -> ::core::ffi::c_ulong {
+        match self {
+            Self::CodesUsed(used) => used,
+            Self::Status(_) | Self::Mark(_) => unreachable!("codes-used scalar action"),
+        }
+    }
+}
+
+fn inflate_normal_scalar(
+    normal: &mut InflateNormalState,
+    action: InflateNormalScalarAction,
+) -> InflateNormalScalarResult {
+    match action {
+        InflateNormalScalarAction::SyncPoint => {
+            InflateNormalScalarResult::Status(inflate_sync_point(normal.mode, normal.bits))
+        }
+        InflateNormalScalarAction::Undermine => {
+            InflateNormalScalarResult::Status(inflate_undermine_sane(&mut normal.sane))
+        }
+        InflateNormalScalarAction::Validate(check) => {
+            InflateNormalScalarResult::Status(inflateValidate(normal, check))
+        }
+        InflateNormalScalarAction::Mark => InflateNormalScalarResult::Mark(inflate_mark_value(
+            normal.back,
+            normal.mode,
+            normal.length,
+            normal.was,
+        )),
+        InflateNormalScalarAction::CodesUsed => {
+            InflateNormalScalarResult::CodesUsed(inflate_codes_used(normal.next))
+        }
+    }
+}
+
+fn inflate_normal_scalar_stream_error(
+    action: InflateNormalScalarAction,
+) -> InflateNormalScalarResult {
+    match action {
+        InflateNormalScalarAction::Mark => InflateNormalScalarResult::Mark(
+            -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int),
+        ),
+        InflateNormalScalarAction::CodesUsed => {
+            InflateNormalScalarResult::CodesUsed(-1 as ::core::ffi::c_int as ::core::ffi::c_ulong)
+        }
+        InflateNormalScalarAction::SyncPoint
+        | InflateNormalScalarAction::Undermine
+        | InflateNormalScalarAction::Validate(_) => {
+            InflateNormalScalarResult::Status(crate::zlib_h::Z_STREAM_ERROR)
+        }
+    }
+}
+
+unsafe fn inflate_normal_scalar_from_stream(
+    strm: &mut crate::zlib_h::z_stream_s,
+    action: InflateNormalScalarAction,
+) -> InflateNormalScalarResult {
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return inflate_normal_scalar_stream_error(action);
+    };
+    inflate_normal_scalar(&mut state.decoder.normal, action)
+}
+
 #[export_name = "inflateSyncPoint"]
 
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
@@ -3602,7 +3688,7 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateSyncPoint(strm)
+    inflate_normal_scalar_from_stream(strm, InflateNormalScalarAction::SyncPoint).status()
 }
 
 // The export validates the source handle and creates this scoped borrow.  The
@@ -3746,25 +3832,16 @@ fn inflate_undermine_sane(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
     crate::zlib_h::Z_DATA_ERROR
 }
 
-pub unsafe fn inflateUndermine(
-    strm: &mut crate::zlib_h::z_stream_s,
-    _subvert: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflate_undermine_sane(&mut state.decoder.normal.sane)
-}
 #[export_name = "inflateUndermine"]
 
 pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
-    mut subvert: ::core::ffi::c_int,
+    _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateUndermine(strm, subvert)
+    inflate_normal_scalar_from_stream(strm, InflateNormalScalarAction::Undermine).status()
 }
 
 fn inflate_validate_wrap(
@@ -3786,17 +3863,6 @@ fn inflateValidate(
     inflate_validate_wrap(&mut normal.wrap, check)
 }
 
-// Keep the opaque-state association in one named implementation adapter.  The
-// validation transition itself only needs pointer-free normal decoder state.
-pub unsafe fn inflate_validate_from_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    check: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflateValidate(&mut state.decoder.normal, check)
-}
 #[export_name = "inflateValidate"]
 
 pub unsafe extern "C" fn inflateValidate_ffi(
@@ -3806,7 +3872,7 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_validate_from_stream(strm, check)
+    inflate_normal_scalar_from_stream(strm, InflateNormalScalarAction::Validate(check)).status()
 }
 
 fn inflate_mark_value(
@@ -3826,20 +3892,6 @@ fn inflate_mark_value(
         }) as ::core::ffi::c_long
 }
 
-// The export boundary validates the nullable stream handle.  The named
-// implementation keeps the stream-bound opaque-state projection together
-// with the scalar query, so the wrapper remains a conversion and dispatch.
-pub unsafe fn inflateMark(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_long {
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
-    };
-    inflate_mark_value(
-        state.decoder.normal.back,
-        state.decoder.normal.mode,
-        state.decoder.normal.length,
-        state.decoder.normal.was,
-    )
-}
 #[export_name = "inflateMark"]
 
 pub unsafe extern "C" fn inflateMark_ffi(
@@ -3848,24 +3900,13 @@ pub unsafe extern "C" fn inflateMark_ffi(
     let Some(strm) = strm.as_mut() else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
-    inflateMark(strm)
+    inflate_normal_scalar_from_stream(strm, InflateNormalScalarAction::Mark).mark()
 }
 
 fn inflate_codes_used(next: usize) -> ::core::ffi::c_ulong {
     next as ::core::ffi::c_ulong
 }
 
-// Keep the opaque-state association out of the export wrapper.  This named
-// adapter owns that projection; its caller has already validated and borrowed
-// the ABI stream handle.
-pub unsafe fn inflateCodesUsed(
-    strm: &mut crate::zlib_h::z_stream_s,
-) -> ::core::ffi::c_ulong {
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
-    };
-    inflate_codes_used(state.decoder.normal.next)
-}
 #[export_name = "inflateCodesUsed"]
 
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
@@ -3874,5 +3915,5 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     let Some(strm) = strm.as_mut() else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
-    inflateCodesUsed(strm)
+    inflate_normal_scalar_from_stream(strm, InflateNormalScalarAction::CodesUsed).codes_used()
 }
