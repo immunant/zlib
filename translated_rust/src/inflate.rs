@@ -2606,17 +2606,29 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
 
     inflateGetDictionary(state.whave, state.wnext, window, dictionary, dictLength)
 }
-pub unsafe fn inflateSetDictionary(
-    strm: &mut crate::zlib_h::z_stream_s,
+/// The safe pieces of an ABI stream needed to apply a preset dictionary.
+///
+/// The FFI wrapper resolves the opaque state pointer once.  This carrier
+/// deliberately retains only ordinary Rust references and scalar validation
+/// inputs, so dictionary handling never needs to follow an ABI pointer.
+struct InflateDictionaryTarget<'a> {
+    allocators_present: bool,
+    state: Option<&'a mut crate::src::inflate::inflate_state>,
+}
+
+fn inflate_set_dictionary(
+    target: InflateDictionaryTarget<'_>,
     dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
     if crate::stdlib::uInt::try_from(dictionary.len()).is_err() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // Validate the stream before borrowing the state behind its raw link.
-    let Some(state) = inflate_validate_state(strm) else {
+    let Some(state) = target.state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    if !target.allocators_present || !inflate_state_mode_valid(state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     if state.wrap != 0 as ::core::ffi::c_int
         && state.mode as ::core::ffi::c_uint
             != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -2667,7 +2679,14 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateSetDictionary(strm, dictionary)
+    let target = InflateDictionaryTarget {
+        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        state: strm
+            .state
+            .cast::<crate::src::inflate::inflate_state>()
+            .as_mut(),
+    };
+    inflate_set_dictionary(target, dictionary)
 }
 fn inflate_get_header_impl(wrap: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
