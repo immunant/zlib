@@ -2977,8 +2977,61 @@ fn update_callback_deflate_workspace(
     strm: &mut crate::zlib_h::z_stream,
     workspace: &mut DeflateWorkspace<'_>,
     flush: ::core::ffi::c_int,
-) -> Option<block_state> {
-    deflate_update(state, strm, workspace, flush)
+) -> Option<DeflateUpdateResult> {
+    let bstate = deflate_update(state, strm, workspace, flush)?;
+    let block_handled = bstate as ::core::ffi::c_uint
+        == block_done as ::core::ffi::c_int as ::core::ffi::c_uint;
+    if block_handled
+        && !finish_callback_deflate_block(
+            state,
+            workspace.pending_buf,
+            workspace.head.as_deref_mut(),
+            flush,
+        )
+    {
+        return None;
+    }
+    Some(DeflateUpdateResult {
+        bstate,
+        block_handled,
+    })
+}
+
+/// Complete a callback-owned update while its checked workspace is still
+/// borrowed.  In particular, a full flush clears the same hash-table view
+/// that the strategy update used, so the legacy engine does not need to
+/// recreate a separate raw head-table slice afterward.
+fn finish_callback_deflate_block(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    head: Option<&mut [crate::src::deflate::Posf]>,
+    flush: ::core::ffi::c_int,
+) -> bool {
+    if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
+        crate::src::trees::_tr_align(state, pending_buf);
+    } else if flush != crate::zlib_h::Z_BLOCK {
+        crate::src::trees::tr_stored_block(
+            state,
+            pending_buf,
+            None,
+            0 as crate::zutil_h::ulg,
+            0 as ::core::ffi::c_int,
+        );
+        if flush == crate::zlib_h::Z_FULL_FLUSH {
+            let Some(head) = head else {
+                return false;
+            };
+            if !clear_full_flush_hash(state, head) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+struct DeflateUpdateResult {
+    bstate: block_state,
+    block_handled: bool,
 }
 
 /// Borrow a callback-owned workspace for exactly one deflate update.
@@ -3413,7 +3466,7 @@ pub fn deflate(
         // This is the last raw stream/storage bridge for custom and mixed
         // allocator workspaces. The named safe update below owns level and
         // strategy selection for both allocation modes.
-        let bstate = if using_owned_workspace {
+        let update = if using_owned_workspace {
             let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
@@ -3424,7 +3477,10 @@ pub fn deflate(
             else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            bstate
+            DeflateUpdateResult {
+                bstate,
+                block_handled: false,
+            }
         } else {
             let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -3443,6 +3499,7 @@ pub fn deflate(
             };
             bstate
         };
+        let bstate = update.bstate;
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
             || bstate as ::core::ffi::c_uint
@@ -3459,7 +3516,9 @@ pub fn deflate(
             }
             return crate::zlib_h::Z_OK;
         }
-        if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
+        if !update.block_handled
+            && bstate as ::core::ffi::c_uint
+                == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
                 crate::src::trees::_tr_align(state, &mut pending_buffer);
