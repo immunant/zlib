@@ -1429,33 +1429,60 @@ fn lm_head_clear_len(hash_size: crate::stdlib::uInt) -> crate::__stddef_size_t_h
         )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct LmResetPlan {
+    window_size: crate::zutil_h::ulg,
+    prev_length: crate::stdlib::uInt,
+    max_lazy_match: crate::stdlib::uInt,
+    good_match: crate::stdlib::uInt,
+    nice_match: ::core::ffi::c_int,
+    max_chain_length: crate::stdlib::uInt,
+}
+
+fn lm_reset_plan(w_size: crate::stdlib::uInt, level: ::core::ffi::c_int) -> LmResetPlan {
+    let (window_size, prev_length) = lm_initial_state(w_size);
+    let (max_lazy_match, good_match, nice_match, max_chain_length) = lm_match_parameters(level);
+
+    LmResetPlan {
+        window_size,
+        prev_length,
+        max_lazy_match,
+        good_match,
+        nice_match,
+        max_chain_length,
+    }
+}
+
+fn lm_apply_reset(state: &mut crate::src::deflate::deflate_state, plan: LmResetPlan) {
+    state.window_size = plan.window_size;
+    state.slid = 0 as ::core::ffi::c_int;
+    state.max_lazy_match = plan.max_lazy_match;
+    state.good_match = plan.good_match;
+    state.nice_match = plan.nice_match;
+    state.max_chain_length = plan.max_chain_length;
+    state.strstart = 0 as crate::stdlib::uInt;
+    state.block_start = 0 as ::core::ffi::c_long;
+    state.lookahead = 0 as crate::stdlib::uInt;
+    state.insert = 0 as crate::stdlib::uInt;
+    state.prev_length = plan.prev_length;
+    state.match_length = state.prev_length;
+    state.match_available = 0 as ::core::ffi::c_int;
+    state.ins_h = 0 as crate::stdlib::uInt;
+}
+
 unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    let (window_size, prev_length) = lm_initial_state((*s).w_size);
-    (*s).window_size = window_size;
-    *(*s)
+    let state = &mut *s;
+    let plan = lm_reset_plan(state.w_size, state.level);
+    *state
         .head
-        .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
+        .wrapping_add(state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
         NIL as crate::src::deflate::Posf;
     crate::stdlib::memset(
-        (*s).head as *mut ::core::ffi::c_void,
+        state.head as *mut ::core::ffi::c_void,
         0 as ::core::ffi::c_int,
-        lm_head_clear_len((*s).hash_size),
+        lm_head_clear_len(state.hash_size),
     );
-    (*s).slid = 0 as ::core::ffi::c_int;
-    (
-        (*s).max_lazy_match,
-        (*s).good_match,
-        (*s).nice_match,
-        (*s).max_chain_length,
-    ) = lm_match_parameters((*s).level);
-    (*s).strstart = 0 as crate::stdlib::uInt;
-    (*s).block_start = 0 as ::core::ffi::c_long;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).insert = 0 as crate::stdlib::uInt;
-    (*s).prev_length = prev_length;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*s).ins_h = 0 as crate::stdlib::uInt;
+    lm_apply_reset(state, plan);
 }
 pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
@@ -4166,15 +4193,16 @@ mod tests {
         fill_window_should_slide, fill_window_state_after_slide, fill_window_zero_range,
         flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_pending_range, lm_head_clear_len, lm_initial_state, lm_match_parameters,
-        longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
-        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
-        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
-        read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
-        stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
-        stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
-        symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction, DeflatePreflight,
-        DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
+        lm_reset_plan, longest_match_candidate_update, longest_match_clamp_length,
+        longest_match_limit, longest_match_next_chain_length, longest_match_search_parameters,
+        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
+        pending_short_cursors, read_buf_checksum, read_buf_input_progress_after_copy, read_buf_len,
+        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
+        stored_block_available_output, stored_block_can_emit, stored_block_header_bytes,
+        stored_block_is_last, stored_block_min_size, stored_block_payload_len,
+        stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
+        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
+        ReadBufChecksum,
     };
 
     #[test]
@@ -4406,6 +4434,21 @@ mod tests {
                 (crate::stdlib::uInt::MAX as crate::zutil_h::ulg).wrapping_mul(2),
                 baseline,
             ),
+        );
+    }
+
+    #[test]
+    fn lm_reset_plan_preserves_window_and_level_initialization() {
+        assert_eq!(
+            lm_reset_plan(32, 6),
+            super::LmResetPlan {
+                window_size: 64,
+                prev_length: (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt,
+                max_lazy_match: 16,
+                good_match: 8,
+                nice_match: 128,
+                max_chain_length: 128,
+            },
         );
     }
 
