@@ -2469,17 +2469,11 @@ pub unsafe extern "C" fn deflateCopy(
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        ds as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
     (*dest).state = ds as *mut crate::src::deflate::internal_state;
-    crate::stdlib::memcpy(
-        ds as *mut ::core::ffi::c_void,
-        ss as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
+    // Copy the state before invoking the allocator again: custom allocation
+    // callbacks can inspect `dest->state`, just as they can in zlib's C
+    // implementation.  The assignment avoids an untyped whole-struct copy.
+    deflate_copy_state(&mut *ds, &*ss);
     (*ds).strm = dest;
     let window = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
@@ -2517,44 +2511,37 @@ pub unsafe extern "C" fn deflateCopy(
         .pending_out
         .addr()
         .wrapping_sub((*ss).pending_buf.addr());
-    deflate_copy_state(&mut *ds, &*ss);
-    (*ds).strm = dest;
+    let plan = deflate_copy_plan(&*ss, pending_offset);
     (*ds).window = window;
     (*ds).prev = prev;
     (*ds).head = head;
     (*ds).pending_buf = pending_buf;
     (*ds).pending_out = pending_buf.wrapping_add(pending_offset);
     (*ds).sym_buf = pending_buf.wrapping_add((*ds).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
-    crate::stdlib::memcpy(
-        (*ds).window as *mut ::core::ffi::c_void,
-        (*ss).window as *const ::core::ffi::c_void,
-        (*ss).high_water as crate::__stddef_size_t_h::size_t,
-    );
-    crate::stdlib::memcpy(
-        (*ds).prev as *mut ::core::ffi::c_void,
-        (*ss).prev as *const ::core::ffi::c_void,
-        ((if (*ss).slid != 0 || (*ss).strstart.wrapping_sub((*ss).insert) > (*ds).w_size {
-            (*ds).w_size
-        } else {
-            (*ss).strstart.wrapping_sub((*ss).insert)
-        }) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+    // These allocations are all owned by the validated source deflater and
+    // have the lengths captured in `plan`. Bind the window, chain table, and
+    // pending allocation once, then make four C memory copies ordinary
+    // bounded slice copies. The head-table copy stays on the existing raw
+    // path, avoiding an additional unsafe allocation bind here.
+    let source_window = ::core::slice::from_raw_parts((*ss).window, plan.window_len);
+    let destination_window = ::core::slice::from_raw_parts_mut((*ds).window, plan.window_len);
+    let source_prev = ::core::slice::from_raw_parts((*ss).prev as *const crate::stdlib::Bytef, plan.prev_len);
+    let destination_prev = ::core::slice::from_raw_parts_mut((*ds).prev as *mut crate::stdlib::Bytef, plan.prev_len);
+    let source_pending = ::core::slice::from_raw_parts((*ss).pending_buf, plan.pending_buf_len);
+    let destination_pending = ::core::slice::from_raw_parts_mut((*ds).pending_buf, plan.pending_buf_len);
+    deflate_copy_buffers(
+        &plan,
+        source_window,
+        destination_window,
+        source_prev,
+        destination_prev,
+        source_pending,
+        destination_pending,
     );
     crate::stdlib::memcpy(
         (*ds).head as *mut ::core::ffi::c_void,
         (*ss).head as *const ::core::ffi::c_void,
-        ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-    );
-    crate::stdlib::memcpy(
-        (*ds).pending_out as *mut ::core::ffi::c_void,
-        (*ss).pending_out as *const ::core::ffi::c_void,
-        (*ss).pending as crate::__stddef_size_t_h::size_t,
-    );
-    crate::stdlib::memcpy(
-        (*ds).sym_buf as *mut ::core::ffi::c_void,
-        (*ss).sym_buf as *const ::core::ffi::c_void,
-        (*ss).sym_next as crate::__stddef_size_t_h::size_t,
+        plan.head_len,
     );
     (*ds).l_desc.dyn_tree = &raw mut (*ds).dyn_ltree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
@@ -2570,6 +2557,60 @@ fn deflate_copy_state(
     source_state: &crate::src::deflate::deflate_state,
 ) {
     *destination_state = *source_state;
+}
+
+// The source state has passed `deflateStateCheck()` before this is called.
+// Keep all byte-count and range policy here, separate from the raw binding in
+// `deflateCopy()`, so the actual copies below are checked slice operations.
+struct DeflateCopyPlan {
+    window_len: usize,
+    prev_len: usize,
+    head_len: usize,
+    pending_buf_len: usize,
+    pending_offset: usize,
+    pending_len: usize,
+    sym_offset: usize,
+    sym_len: usize,
+}
+
+fn deflate_copy_plan(
+    source: &crate::src::deflate::deflate_state,
+    pending_offset: usize,
+) -> DeflateCopyPlan {
+    let prev_entries = if source.slid != 0
+        || source.strstart.wrapping_sub(source.insert) > source.w_size
+    {
+        source.w_size
+    } else {
+        source.strstart.wrapping_sub(source.insert)
+    };
+    DeflateCopyPlan {
+        window_len: source.high_water as usize,
+        prev_len: (prev_entries as usize).wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        head_len: (source.hash_size as usize).wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        pending_buf_len: (source.lit_bufsize as usize).wrapping_mul(4),
+        pending_offset,
+        pending_len: source.pending as usize,
+        sym_offset: source.lit_bufsize as usize,
+        sym_len: source.sym_next as usize,
+    }
+}
+
+fn deflate_copy_buffers(
+    plan: &DeflateCopyPlan,
+    source_window: &[crate::stdlib::Bytef],
+    destination_window: &mut [crate::stdlib::Bytef],
+    source_prev: &[crate::stdlib::Bytef],
+    destination_prev: &mut [crate::stdlib::Bytef],
+    source_pending: &[crate::stdlib::Bytef],
+    destination_pending: &mut [crate::stdlib::Bytef],
+) {
+    destination_window.copy_from_slice(source_window);
+    destination_prev.copy_from_slice(source_prev);
+    let pending = plan.pending_offset..plan.pending_offset + plan.pending_len;
+    destination_pending[pending.clone()].copy_from_slice(&source_pending[pending]);
+    let symbols = plan.sym_offset..plan.sym_offset + plan.sym_len;
+    destination_pending[symbols.clone()].copy_from_slice(&source_pending[symbols]);
 }
 #[export_name = "deflateCopy"]
 
