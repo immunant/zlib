@@ -2396,29 +2396,29 @@ fn bi_windup_bytes(
     *bi_valid = 0 as ::core::ffi::c_int;
 }
 
-pub unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
+pub(crate) unsafe fn bi_flush_or_windup(
+    mut s: *mut crate::src::deflate::deflate_state,
+    windup: bool,
+) {
     let state = &mut *s;
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    bi_flush_bytes(
-        pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-    );
-}
-
-unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    bi_windup_bytes(
-        pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-        &mut state.bi_used,
-    );
+    if windup {
+        bi_windup_bytes(
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+        );
+    } else {
+        bi_flush_bytes(
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+        );
+    }
 }
 
 fn gen_codes(
@@ -3319,7 +3319,7 @@ pub unsafe extern "C" fn _tr_stored_block(
                 << state.bi_valid) as crate::zutil_h::ush;
         state.bi_valid += len;
     }
-    bi_windup(s);
+    bi_flush_or_windup(s, true);
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let c2rust_fresh51 = state.pending;
@@ -3364,7 +3364,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s)
+    bi_flush_or_windup(s, false)
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
@@ -3416,7 +3416,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
             as crate::zutil_h::ush;
         (*s).bi_valid += len_0;
     }
-    bi_flush(s);
+    bi_flush_or_windup(s, false);
 }
 #[export_name = "_tr_align"]
 
@@ -3815,7 +3815,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         &mut state.sym_next,
     );
     if last != 0 {
-        bi_windup(s);
+        bi_flush_or_windup(s, true);
     }
 }
 #[export_name = "_tr_flush_block"]

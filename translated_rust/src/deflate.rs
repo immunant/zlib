@@ -1121,7 +1121,10 @@ pub unsafe extern "C" fn deflatePrime(
                 << (*s).bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
             as crate::zutil_h::ush;
         (*s).bi_valid += put;
-        crate::src::trees::bi_flush(s as *mut crate::src::deflate::internal_state);
+        crate::src::trees::bi_flush_or_windup(
+            s as *mut crate::src::deflate::internal_state,
+            false,
+        );
         value >>= put;
         bits -= put;
         if bits == 0 {
@@ -1504,7 +1507,10 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
-    crate::src::trees::bi_flush(s as *mut crate::src::deflate::internal_state);
+    crate::src::trees::bi_flush_or_windup(
+        s as *mut crate::src::deflate::internal_state,
+        false,
+    );
     len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
         (*strm).avail_out as ::core::ffi::c_uint
     } else {
