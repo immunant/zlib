@@ -469,30 +469,38 @@ unsafe fn gz_load(
 }
 
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let mut got: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    match gz_avail_action((*state).err, (*state).eof, (*strm).avail_in) {
+    let action = {
+        let state_ref = &mut *state;
+        gz_avail_action(state_ref.err, state_ref.eof, state_ref.strm.avail_in)
+    };
+    match action {
         GzAvailAction::Error => return -1 as ::core::ffi::c_int,
         GzAvailAction::Done => return 0 as ::core::ffi::c_int,
         GzAvailAction::Refill { compact_input } => {
             if compact_input {
-                let mut p: *mut ::core::ffi::c_uchar = (*state).in_0;
-                let mut q: *const ::core::ffi::c_uchar = (*strm).next_in;
+                let state_ref = &mut *state;
+                let p: *mut ::core::ffi::c_uchar = state_ref.in_0;
+                let q: *const ::core::ffi::c_uchar = state_ref.strm.next_in;
                 if q != p as *const ::core::ffi::c_uchar {
-                    core::ptr::copy_nonoverlapping(q, p, (*strm).avail_in as usize);
+                    core::ptr::copy_nonoverlapping(q, p, state_ref.strm.avail_in as usize);
                 }
             }
-            let load = gz_load(
-                state,
-                (*state).in_0.wrapping_add((*strm).avail_in as usize),
-                gz_avail_refill_len((*state).size, (*strm).avail_in),
-            );
+            let (buf, len) = {
+                let state_ref = &*state;
+                (
+                    state_ref
+                        .in_0
+                        .wrapping_add(state_ref.strm.avail_in as usize),
+                    gz_avail_refill_len(state_ref.size, state_ref.strm.avail_in),
+                )
+            };
+            let load = gz_load(state, buf, len);
             if load.failed {
                 return -1 as ::core::ffi::c_int;
             }
-            got = load.have;
-            (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
-            (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+            let state_ref = &mut *state;
+            state_ref.strm.avail_in = state_ref.strm.avail_in.wrapping_add(load.have);
+            state_ref.strm.next_in = state_ref.in_0 as *mut crate::stdlib::Bytef;
         }
     }
     return 0 as ::core::ffi::c_int;
