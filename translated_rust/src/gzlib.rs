@@ -519,15 +519,9 @@ pub unsafe extern "C" fn gzseek64_ffi(
 ) -> crate::stdlib::off64_t {
     gzseek64(file, offset, whence)
 }
-pub unsafe extern "C" fn gzseek(
-    mut file: crate::zlib_h::gzFile,
-    mut offset: crate::stdlib::off_t,
-    mut whence: ::core::ffi::c_int,
-) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzseek64(file, offset, whence);
+fn gzseek_result(ret: crate::stdlib::off64_t) -> crate::stdlib::off_t {
     return if ret == ret {
-        ret
+        ret as crate::stdlib::off_t
     } else {
         -1 as crate::stdlib::off_t
     };
@@ -539,7 +533,7 @@ pub unsafe extern "C" fn gzseek_ffi(
     mut offset: crate::stdlib::off_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
-    gzseek(file, offset, whence)
+    gzseek_result(gzseek64(file, offset as crate::stdlib::off64_t, whence))
 }
 pub fn gztell64(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off64_t {
     let Some(state) = state else {
