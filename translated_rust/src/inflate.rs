@@ -2908,7 +2908,10 @@ pub unsafe extern "C" fn inflateCopy(
         if dest.is_null() {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        (inflate_copy_plan(state), *state)
+        let Some(plan) = inflate_copy_plan(state) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        (plan, *state)
     };
     copy = Some((*source).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
@@ -2943,7 +2946,7 @@ pub unsafe extern "C" fn inflateCopy(
         None
     } else {
         Some((
-            ::core::slice::from_raw_parts(source_state.window, source_state.whave as usize),
+            ::core::slice::from_raw_parts(source_state.window, plan.window_copy_len),
             ::core::slice::from_raw_parts_mut(
                 window,
                 plan.window_len.expect("window allocation has a length"),
@@ -2958,15 +2961,30 @@ pub unsafe extern "C" fn inflateCopy(
 
 struct InflateCopyPlan {
     window_len: Option<usize>,
+    window_copy_len: usize,
 }
 
 // Everything needed to decide whether a copied inflater owns a window is
 // ordinary state inspection.  The surrounding `inflateCopy()` keeps the
 // allocator and raw storage bindings at its existing ABI boundary.
-fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> InflateCopyPlan {
-    InflateCopyPlan {
-        window_len: (!state.window.is_null()).then_some(inflate_window_layout(state.wbits).len),
+fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> Option<InflateCopyPlan> {
+    let window_len = (!state.window.is_null()).then_some(inflate_window_layout(state.wbits).len);
+    let window_copy_len = state.whave as usize;
+    // A copied inflater's history must fit in the allocation derived from
+    // its configured window bits. Validate that scalar relationship before
+    // the ABI boundary forms a raw window slice below.
+    if window_len.is_none() && window_copy_len != 0 {
+        return None;
     }
+    if let Some(window_len) = window_len {
+        if window_copy_len > window_len {
+            return None;
+        }
+    }
+    Some(InflateCopyPlan {
+        window_len,
+        window_copy_len,
+    })
 }
 
 // Decode-table cursors in a live inflater either refer to its fixed tables or
