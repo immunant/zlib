@@ -114,6 +114,32 @@ macro_rules! gz_init_at_boundary {
 }
 pub(crate) use gz_init_at_boundary;
 
+/// Classify a completed deflate call using only its scalar result and output
+/// capacity transition. The codec boundary keeps the stream borrow, error
+/// publication, and cursor state; this core makes impossible output growth
+/// explicit before the next loop iteration.
+pub(crate) enum GzCompDeflateStep {
+    StreamError,
+    OutputCorrupt,
+    NoOutput,
+    Continue,
+}
+
+pub(crate) fn gz_comp_after_deflate(
+    before: crate::stdlib::uInt,
+    after: crate::stdlib::uInt,
+    ret: ::core::ffi::c_int,
+) -> GzCompDeflateStep {
+    if ret == crate::zlib_h::Z_STREAM_ERROR {
+        return GzCompDeflateStep::StreamError;
+    }
+    match crate::src::gzread::gz_codec_output_progress(before, after) {
+        None => GzCompDeflateStep::OutputCorrupt,
+        Some(0) => GzCompDeflateStep::NoOutput,
+        Some(_) => GzCompDeflateStep::Continue,
+    }
+}
+
 macro_rules! gz_comp_at_boundary {
     ($state:expr, $flush:expr) => {{
         let state_ref = &mut *$state;
@@ -225,26 +251,29 @@ macro_rules! gz_comp_at_boundary {
                 }
                 let have = state_ref.strm.avail_out;
                 ret = crate::src::deflate::deflate(&raw mut state_ref.strm, flush);
-                if ret == crate::zlib_h::Z_STREAM_ERROR {
-                    crate::src::gzlib::gz_error_static(
-                        state_ref,
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        b"internal error: deflate stream corrupt\0",
-                    );
-                    break 'gz_comp_result -1;
-                }
-                let Some(produced) =
-                    crate::src::gzread::gz_codec_output_progress(have, state_ref.strm.avail_out)
-                else {
-                    crate::src::gzlib::gz_error_static(
-                        state_ref,
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        b"internal error: deflate output corrupt\0",
-                    );
-                    break 'gz_comp_result -1;
-                };
-                if produced == 0 {
-                    break;
+                match crate::src::gzwrite::gz_comp_after_deflate(
+                    have,
+                    state_ref.strm.avail_out,
+                    ret,
+                ) {
+                    crate::src::gzwrite::GzCompDeflateStep::StreamError => {
+                        crate::src::gzlib::gz_error_static(
+                            state_ref,
+                            crate::zlib_h::Z_STREAM_ERROR,
+                            b"internal error: deflate stream corrupt\0",
+                        );
+                        break 'gz_comp_result -1;
+                    }
+                    crate::src::gzwrite::GzCompDeflateStep::OutputCorrupt => {
+                        crate::src::gzlib::gz_error_static(
+                            state_ref,
+                            crate::zlib_h::Z_STREAM_ERROR,
+                            b"internal error: deflate output corrupt\0",
+                        );
+                        break 'gz_comp_result -1;
+                    }
+                    crate::src::gzwrite::GzCompDeflateStep::NoOutput => break,
+                    crate::src::gzwrite::GzCompDeflateStep::Continue => {}
                 }
             }
             if flush == crate::zlib_h::Z_FINISH {
