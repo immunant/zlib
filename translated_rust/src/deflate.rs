@@ -1736,6 +1736,44 @@ struct PendingRegions {
     symbols: ::core::ops::Range<usize>,
 }
 
+// Copying a deflate stream has a fixed set of allocation extents derived from
+// scalar state.  Keep that geometry pointer-free so the eventual owned-state
+// copy can use the same plan, rather than reconstructing lengths from raw
+// allocation bases.
+struct DeflateCopyLayout {
+    window_bytes: usize,
+    prev_bytes: usize,
+    head_bytes: usize,
+    pending: Option<PendingRegions>,
+}
+
+fn deflate_copy_layout(
+    high_water: crate::zutil_h::ulg,
+    slid: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    insert: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+    hash_size: crate::stdlib::uInt,
+    pending_out: usize,
+    pending_len: usize,
+    sym_buf_start: usize,
+    sym_next: usize,
+) -> DeflateCopyLayout {
+    let prev_entries = if slid != 0 || strstart.wrapping_sub(insert) > w_size {
+        w_size
+    } else {
+        strstart.wrapping_sub(insert)
+    };
+    DeflateCopyLayout {
+        window_bytes: high_water as usize,
+        prev_bytes: (prev_entries as usize)
+            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        head_bytes: (hash_size as usize)
+            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        pending: PendingRegions::new(pending_out, pending_len, sym_buf_start, sym_next),
+    }
+}
+
 impl PendingRegions {
     fn new(
         pending_out: usize,
@@ -1773,13 +1811,9 @@ impl PendingRegions {
 fn copy_pending_regions(
     source: &[crate::stdlib::Bytef],
     destination: &mut [crate::stdlib::Bytef],
-    pending_out: usize,
-    pending_len: usize,
-    sym_buf_start: usize,
-    sym_next: usize,
+    regions: Option<PendingRegions>,
 ) {
-    let Some(regions) = PendingRegions::new(pending_out, pending_len, sym_buf_start, sym_next)
-    else {
+    let Some(regions) = regions else {
         return;
     };
     regions.copy_from(source, destination);
@@ -2553,26 +2587,32 @@ pub unsafe extern "C" fn deflateCopy(
         deflateEnd(dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    let copy_layout = deflate_copy_layout(
+        (*ss).high_water,
+        (*ss).slid,
+        (*ss).strstart,
+        (*ss).insert,
+        (*ds).w_size,
+        (*ds).hash_size,
+        (*ss).pending_out,
+        (*ss).pending as usize,
+        (*ss).sym_buf_start,
+        (*ss).sym_next as usize,
+    );
     crate::stdlib::memcpy(
         (*ds).window as *mut ::core::ffi::c_void,
         (*ss).window as *const ::core::ffi::c_void,
-        (*ss).high_water as crate::__stddef_size_t_h::size_t,
+        copy_layout.window_bytes,
     );
     crate::stdlib::memcpy(
         (*ds).prev as *mut ::core::ffi::c_void,
         (*ss).prev as *const ::core::ffi::c_void,
-        ((if (*ss).slid != 0 || (*ss).strstart.wrapping_sub((*ss).insert) > (*ds).w_size {
-            (*ds).w_size
-        } else {
-            (*ss).strstart.wrapping_sub((*ss).insert)
-        }) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        copy_layout.prev_bytes,
     );
     crate::stdlib::memcpy(
         (*ds).head as *mut ::core::ffi::c_void,
         (*ss).head as *const ::core::ffi::c_void,
-        ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        copy_layout.head_bytes,
     );
     (*ds).pending_out = (*ss).pending_out;
     // Both allocations have the copied `pending_buf_size` capacity.  Form
@@ -2585,10 +2625,7 @@ pub unsafe extern "C" fn deflateCopy(
     copy_pending_regions(
         source_pending,
         destination_pending,
-        (*ss).pending_out as usize,
-        (*ss).pending as usize,
-        (*ss).sym_buf_start as usize,
-        (*ss).sym_next as usize,
+        copy_layout.pending,
     );
     return crate::zlib_h::Z_OK;
 }
