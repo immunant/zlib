@@ -7,6 +7,86 @@ pub struct code {
     pub val: ::core::ffi::c_ushort,
 }
 
+/// The semantic meaning of a packed inflate table entry.
+///
+/// `code` remains the four-byte C-compatible representation used by the
+/// decoder.  Safe table construction can use this view instead of duplicating
+/// the flag precedence encoded in `op` (in particular, end-of-block entries
+/// have both the end and invalid flag bits set).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CodeEntryKind {
+    Literal(u16),
+    Base { value: u16, extra_bits: u8 },
+    EndOfBlock,
+    Invalid,
+    Subtable { index: u16, bits: u8 },
+}
+
+impl code {
+    const END_OF_BLOCK_OP: u8 = 96;
+    const INVALID_OP: u8 = 64;
+
+    const fn literal(bits: u8, value: u16) -> Self {
+        Self {
+            op: 0,
+            bits,
+            val: value,
+        }
+    }
+
+    const fn table_base(bits: u8, op: u8, value: u16) -> Self {
+        Self {
+            op,
+            bits,
+            val: value,
+        }
+    }
+
+    const fn end_of_block(bits: u8) -> Self {
+        Self {
+            op: Self::END_OF_BLOCK_OP,
+            bits,
+            val: 0,
+        }
+    }
+
+    const fn invalid(bits: u8) -> Self {
+        Self {
+            op: Self::INVALID_OP,
+            bits,
+            val: 0,
+        }
+    }
+
+    const fn subtable(root_bits: u8, table_bits: u8, index: u16) -> Self {
+        Self {
+            op: table_bits,
+            bits: root_bits,
+            val: index,
+        }
+    }
+
+    pub(crate) const fn kind(self) -> CodeEntryKind {
+        if self.op & 32 != 0 {
+            CodeEntryKind::EndOfBlock
+        } else if self.op & 64 != 0 {
+            CodeEntryKind::Invalid
+        } else if self.op & 16 != 0 {
+            CodeEntryKind::Base {
+                value: self.val,
+                extra_bits: self.op & 15,
+            }
+        } else if self.op == 0 {
+            CodeEntryKind::Literal(self.val)
+        } else {
+            CodeEntryKind::Subtable {
+                index: self.val,
+                bits: self.op,
+            }
+        }
+    }
+}
+
 pub const ENOUGH_LENS: ::core::ffi::c_int = 852 as ::core::ffi::c_int;
 
 pub const ENOUGH_DISTS: ::core::ffi::c_int = 592 as ::core::ffi::c_int;
@@ -3101,24 +3181,16 @@ fn table_entry_for_symbol(
         CodeType::Dists => (&DBASE, &DEXT, 0),
     };
     if u32::from(symbol) + 1 < u32::from(match_symbol) {
-        Some(crate::src::inftrees::code {
-            op: 0,
-            bits,
-            val: symbol,
-        })
+        Some(crate::src::inftrees::code::literal(bits, symbol))
     } else if symbol >= match_symbol {
         let index = (symbol - match_symbol) as usize;
-        Some(crate::src::inftrees::code {
-            op: *extra.get(index)? as u8,
+        Some(crate::src::inftrees::code::table_base(
             bits,
-            val: *base.get(index)?,
-        })
+            *extra.get(index)? as u8,
+            *base.get(index)?,
+        ))
     } else {
-        Some(crate::src::inftrees::code {
-            op: 96,
-            bits,
-            val: 0,
-        })
+        Some(crate::src::inftrees::code::end_of_block(bits))
     }
 }
 
@@ -3217,11 +3289,7 @@ fn inflate_table_core(
     let length_state = match LengthState::try_new(type_0, lens, *bits) {
         Err(error) => return Err(error),
         Ok(None) => {
-            let here = crate::src::inftrees::code {
-                op: 64,
-                bits: 1,
-                val: 0,
-            };
+            let here = crate::src::inftrees::code::invalid(1);
             if table_cursor.write_entries(table, 0, &[here; 2]).is_none() {
                 return Err(1);
             };
@@ -3305,9 +3373,7 @@ fn inflate_table_core(
             let Some(entry) = table_cursor.entry_mut(table, 0, low as usize) else {
                 return Err(1);
             };
-            entry.op = curr as u8;
-            entry.bits = root as u8;
-            entry.val = next as u16;
+            *entry = crate::src::inftrees::code::subtable(root as u8, curr as u8, next as u16);
         }
     }
 
@@ -3315,11 +3381,7 @@ fn inflate_table_core(
         let Some(entry) = table_cursor.entry_mut(table, next, huff as usize) else {
             return Err(1);
         };
-        *entry = crate::src::inftrees::code {
-            op: 64,
-            bits: (length - drop_bits) as u8,
-            val: 0,
-        };
+        *entry = crate::src::inftrees::code::invalid((length - drop_bits) as u8);
     }
     if table_cursor.end(used as usize).is_none() {
         return Err(1);
@@ -3659,6 +3721,25 @@ mod tests {
         assert_table_entry(table_entry_for_symbol(CodeType::Codes, 18, 7), 0, 7, 18);
         assert_table_entry(table_entry_for_symbol(CodeType::Codes, 19, 7), 96, 7, 0);
         assert!(table_entry_for_symbol(CodeType::Codes, 20, 7).is_none());
+    }
+
+    #[test]
+    fn code_entry_kind_interprets_packed_flag_precedence() {
+        assert_eq!(core::mem::size_of::<code>(), 4);
+        assert_eq!(code::literal(7, 18).kind(), CodeEntryKind::Literal(18));
+        assert_eq!(
+            code::table_base(5, 19, 257).kind(),
+            CodeEntryKind::Base {
+                value: 257,
+                extra_bits: 3,
+            }
+        );
+        assert_eq!(
+            code::subtable(7, 4, 23).kind(),
+            CodeEntryKind::Subtable { index: 23, bits: 4 }
+        );
+        assert_eq!(code::invalid(1).kind(), CodeEntryKind::Invalid);
+        assert_eq!(code::end_of_block(7).kind(), CodeEntryKind::EndOfBlock);
     }
 
     #[test]

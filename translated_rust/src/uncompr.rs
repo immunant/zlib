@@ -169,7 +169,17 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     if has_missing_uncompress_lengths(destLen.is_null(), sourceLen.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let lengths = UncompressBufferLengths::new(*destLen, *sourceLen);
+    // Keep the borrowed views of the caller's length fields short.  In
+    // particular, do not assume that the two C pointers are distinct.
+    let dest_capacity = match unsafe { destLen.as_ref() } {
+        Some(dest_len) => *dest_len,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
+    let source_capacity = match unsafe { sourceLen.as_ref() } {
+        Some(source_len) => *source_len,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
+    let lengths = UncompressBufferLengths::new(dest_capacity, source_capacity);
     let buffer_setup = lengths.buffer_setup(dest.is_null(), source.is_null());
     if buffer_setup == UncompressBufferSetup::Invalid {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -191,13 +201,18 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         adler: 0,
         reserved: 0,
     };
-    let mut dummy = 0 as crate::stdlib::Bytef;
-    if buffer_setup == UncompressBufferSetup::DummyOutput {
-        dest = &raw mut dummy;
-    }
+    // A zero-capacity destination still needs a non-null output pointer for
+    // inflate. Keep that byte in dedicated Rust-owned storage rather than
+    // rewriting the caller's pointer argument.
+    let mut empty_output = [0 as crate::stdlib::Bytef; 1];
+    let output = match buffer_setup {
+        UncompressBufferSetup::Direct => dest,
+        UncompressBufferSetup::DummyOutput => empty_output.as_mut_ptr(),
+        UncompressBufferSetup::Invalid => return crate::zlib_h::Z_STREAM_ERROR,
+    };
 
     stream.next_in = source as *mut crate::stdlib::Bytef;
-    stream.next_out = dest;
+    stream.next_out = output;
     let err = crate::src::inflate::inflateInit2_(
         &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
         crate::zutil_h::DEF_WBITS,
@@ -228,8 +243,14 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         output_progress,
         stream.avail_out,
     );
-    *sourceLen = outcome.source_len;
-    *destLen = outcome.dest_len;
+    match unsafe { sourceLen.as_mut() } {
+        Some(source_len) => *source_len = outcome.source_len,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    }
+    match unsafe { destLen.as_mut() } {
+        Some(dest_len) => *dest_len = outcome.dest_len,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    }
     crate::src::inflate::inflateEnd_ffi(&raw mut stream as *mut crate::zlib_h::z_stream_s);
     outcome.status
 }
@@ -244,13 +265,28 @@ pub unsafe extern "C" fn uncompress2_ffi(
     if has_missing_uncompress_lengths(destLen.is_null(), sourceLen.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let lengths = LegacyUncompressLengths::from_legacy(*destLen, *sourceLen);
+    let dest_capacity = match unsafe { destLen.as_ref() } {
+        Some(dest_len) => *dest_len,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
+    let source_capacity = match unsafe { sourceLen.as_ref() } {
+        Some(source_len) => *source_len,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    };
+    let lengths = LegacyUncompressLengths::from_legacy(dest_capacity, source_capacity);
     let mut got = lengths.dest;
     let mut used = lengths.source;
     let ret = uncompress2_z_ffi(dest, &raw mut got, source, &raw mut used);
-    let (dest_len, source_len) = LegacyUncompressLengths::from_z(got, used).into_legacy();
-    *sourceLen = source_len;
-    *destLen = dest_len;
+    let (updated_dest_len, updated_source_len) =
+        LegacyUncompressLengths::from_z(got, used).into_legacy();
+    match unsafe { sourceLen.as_mut() } {
+        Some(source_len) => *source_len = updated_source_len,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    }
+    match unsafe { destLen.as_mut() } {
+        Some(dest_len) => *dest_len = updated_dest_len,
+        None => return crate::zlib_h::Z_STREAM_ERROR,
+    }
     ret
 }
 
@@ -280,8 +316,8 @@ pub unsafe extern "C" fn uncompress_ffi(
 mod tests {
     use super::{
         has_missing_uncompress_lengths, normalize_uncompress_status, replenish_scalar,
-        uncompress_outcome, ChunkedProgress, LegacyUncompressLengths, UncompressBufferLengths,
-        UncompressBufferSetup,
+        uncompress2_ffi, uncompress2_z_ffi, uncompress_outcome, ChunkedProgress,
+        LegacyUncompressLengths, UncompressBufferLengths, UncompressBufferSetup,
     };
 
     #[test]
@@ -313,6 +349,46 @@ mod tests {
         assert!(has_missing_uncompress_lengths(true, false));
         assert!(has_missing_uncompress_lengths(false, true));
         assert!(!has_missing_uncompress_lengths(false, false));
+    }
+
+    #[test]
+    fn ffi_rejects_missing_length_pointers_before_buffer_access() {
+        let mut z_length = 0;
+        assert_eq!(
+            unsafe {
+                uncompress2_z_ffi(
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                    core::ptr::null(),
+                    &mut z_length,
+                )
+            },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+        assert_eq!(
+            unsafe {
+                uncompress2_z_ffi(
+                    core::ptr::null_mut(),
+                    &mut z_length,
+                    core::ptr::null(),
+                    core::ptr::null_mut(),
+                )
+            },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+
+        let mut legacy_length = 0;
+        assert_eq!(
+            unsafe {
+                uncompress2_ffi(
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                    core::ptr::null(),
+                    &mut legacy_length,
+                )
+            },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
     }
 
     #[test]
