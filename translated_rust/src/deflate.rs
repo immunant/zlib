@@ -2125,11 +2125,17 @@ fn put_short_msb(
     s.put_pending_byte((b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte);
 }
 
-unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
+/// Move pending compressed bytes into the caller's bounded output range.
+///
+/// The pending bytes are owned by `s`; `write_stream_bytes()` is the sole
+/// stream-output boundary and validates the ABI cursor before creating its
+/// short-lived output slice.
+fn flush_pending_impl(
+    s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream_s,
+) {
     let mut len: ::core::ffi::c_uint = 0;
-    let strm = &mut *strm;
-    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
-    crate::src::trees::_tr_flush_bits(s);
+    crate::src::trees::flush_bits_impl(s);
     len = if s.pending > strm.avail_out as crate::zutil_h::ulg {
         strm.avail_out as ::core::ffi::c_uint
     } else {
@@ -2148,11 +2154,10 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let Some(source) = pending.get(start..end) else {
         return;
     };
-    core::ptr::copy_nonoverlapping(source.as_ptr(), strm.next_out, len as usize);
-    strm.next_out = strm.next_out.offset(len as isize);
+    if !write_stream_bytes(strm, source) {
+        return;
+    }
     s.pending_out = s.pending_out.wrapping_add(len as usize);
-    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
-    strm.avail_out = strm.avail_out.wrapping_sub(len);
     s.pending = s.pending.wrapping_sub(len as crate::zutil_h::ulg);
     if s.pending == 0 as crate::zutil_h::ulg {
         s.pending_out = 0;
@@ -2204,7 +2209,7 @@ pub unsafe fn deflate(
     old_flush = (*s).last_flush;
     (*s).last_flush = flush;
     if (*s).pending != 0 as crate::zutil_h::ulg {
-        flush_pending(strm);
+        flush_pending_impl(s, strm);
         if strm.avail_out == 0 as crate::stdlib::uInt {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2291,7 +2296,7 @@ pub unsafe fn deflate(
             0 as crate::stdlib::uInt,
         );
         (*s).status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm);
+        flush_pending_impl(s, strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2317,7 +2322,7 @@ pub unsafe fn deflate(
             });
             (*s).put_pending_byte(3);
             (*s).status = crate::src::deflate::BUSY_STATE;
-            flush_pending(strm);
+            flush_pending_impl(s, strm);
             if (*s).pending != 0 as crate::zutil_h::ulg {
                 (*s).last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -2394,7 +2399,7 @@ pub unsafe fn deflate(
                     }
                 }
                 (*s).gzindex = (*s).gzindex.wrapping_add(copy);
-                flush_pending(strm);
+                flush_pending_impl(s, strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2440,7 +2445,7 @@ pub unsafe fn deflate(
                             strm.adler = crate::src::crc32::crc32_z(strm.adler, bytes);
                         }
                     }
-                    flush_pending(strm);
+                    flush_pending_impl(s, strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
                         (*s).last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2478,7 +2483,7 @@ pub unsafe fn deflate(
                             strm.adler = crate::src::crc32::crc32_z(strm.adler, bytes);
                         }
                     }
-                    flush_pending(strm);
+                    flush_pending_impl(s, strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
                         (*s).last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2509,7 +2514,7 @@ pub unsafe fn deflate(
             != 0
         {
             if (*s).pending.wrapping_add(2 as crate::zutil_h::ulg) > (*s).pending_buf_size {
-                flush_pending(strm);
+                flush_pending_impl(s, strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2520,7 +2525,7 @@ pub unsafe fn deflate(
             strm.adler = crate::src::crc32::crc32(0 as crate::stdlib::uLong, &[]);
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm);
+        flush_pending_impl(s, strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2587,7 +2592,7 @@ pub unsafe fn deflate(
                     }
                 }
             }
-            flush_pending(strm);
+            flush_pending_impl(s, strm);
             if strm.avail_out == 0 as crate::stdlib::uInt {
                 (*s).last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -2619,7 +2624,7 @@ pub unsafe fn deflate(
             (strm.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
         );
     }
-    flush_pending(strm);
+    flush_pending_impl(s, strm);
     if (*s).wrap > 0 as ::core::ffi::c_int {
         (*s).wrap = -(*s).wrap;
     }
@@ -3064,7 +3069,7 @@ unsafe fn deflate_stored(
         // `_tr_stored_block()` just appended the four-byte length trailer.
         // Replace its zero length with this block's actual length.
         let _ = s.set_stored_block_length(len as crate::stdlib::uInt);
-        flush_pending(core::ptr::from_mut(strm));
+        flush_pending_impl(s, strm);
         if left != 0 {
             if left > len {
                 left = len;
@@ -3206,7 +3211,7 @@ unsafe fn deflate_stored(
         };
         crate::src::trees::tr_stored_block(s, &source, len as crate::zutil_h::ulg, last);
         s.block_start += len as ::core::ffi::c_long;
-        flush_pending(core::ptr::from_mut(strm));
+        flush_pending_impl(s, strm);
     }
     if last != 0 {
         s.bi_used = 8 as ::core::ffi::c_int;
@@ -3315,7 +3320,7 @@ unsafe fn deflate_fast(
             };
             crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
             s.block_start = s.strstart as ::core::ffi::c_long;
-            flush_pending(s.strm);
+            flush_pending_impl(s, strm);
             if s.avail_out() == Some(0) {
                 return need_more;
             }
@@ -3337,7 +3342,7 @@ unsafe fn deflate_fast(
         };
         crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
         s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending(s.strm);
+        flush_pending_impl(s, strm);
         if s.avail_out() == Some(0) {
             return finish_started;
         }
@@ -3352,7 +3357,7 @@ unsafe fn deflate_fast(
         };
         crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
         s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending(s.strm);
+        flush_pending_impl(s, strm);
         if s.avail_out() == Some(0) {
             return need_more;
         }
@@ -3470,7 +3475,7 @@ unsafe fn deflate_slow(
                     0,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending(strm);
+                flush_pending_impl(s, strm);
                 if strm.avail_out == 0 as crate::stdlib::uInt {
                     return (if false {
                         finish_started as ::core::ffi::c_int
@@ -3503,7 +3508,7 @@ unsafe fn deflate_slow(
                     0,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending(strm);
+                flush_pending_impl(s, strm);
             }
             (*s).strstart = (*s).strstart.wrapping_add(1);
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
@@ -3548,7 +3553,7 @@ unsafe fn deflate_slow(
             1,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending(strm);
+        flush_pending_impl(s, strm);
         if strm.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
@@ -3574,7 +3579,7 @@ unsafe fn deflate_slow(
             0,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending(strm);
+        flush_pending_impl(s, strm);
         if strm.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
@@ -3664,7 +3669,7 @@ unsafe fn deflate_rle(
             };
             crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
             s.block_start = s.strstart as ::core::ffi::c_long;
-            flush_pending(s.strm);
+            flush_pending_impl(s, strm);
             if s.avail_out() == Some(0) {
                 return need_more;
             }
@@ -3680,7 +3685,7 @@ unsafe fn deflate_rle(
         };
         crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
         s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending(s.strm);
+        flush_pending_impl(s, strm);
         if s.avail_out() == Some(0) {
             return finish_started;
         }
@@ -3695,7 +3700,7 @@ unsafe fn deflate_rle(
         };
         crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
         s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending(s.strm);
+        flush_pending_impl(s, strm);
         if s.avail_out() == Some(0) {
             return need_more;
         }
@@ -3739,7 +3744,7 @@ unsafe fn deflate_huff(
             };
             crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
             s.block_start = s.strstart as ::core::ffi::c_long;
-            flush_pending(s.strm);
+            flush_pending_impl(s, strm);
             if s.avail_out() == Some(0) {
                 return need_more;
             }
@@ -3755,7 +3760,7 @@ unsafe fn deflate_huff(
         };
         crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
         s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending(s.strm);
+        flush_pending_impl(s, strm);
         if s.avail_out() == Some(0) {
             return finish_started;
         }
@@ -3770,7 +3775,7 @@ unsafe fn deflate_huff(
         };
         crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
         s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending(s.strm);
+        flush_pending_impl(s, strm);
         if s.avail_out() == Some(0) {
             return need_more;
         }
