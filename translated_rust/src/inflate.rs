@@ -1568,11 +1568,17 @@ pub unsafe fn inflate(
                                                                                                     if left == 0 as ::core::ffi::c_uint {
                                                                                                         break '_inf_leave;
                                                                                                     }
+                                                                                                    // Literal emission only touches the existing
+                                                                                                    // output cursor and decoder scalar state. Keep
+                                                                                                    // its state read/commit on one transition-local
+                                                                                                    // borrow instead of traversing the compatibility
+                                                                                                    // pointer for each field.
+                                                                                                    let state_ref = &mut *state;
                                                                                                     let c2rust_fresh32 = put;
                                                                                                     put = put.wrapping_add(1);
-                                                                                                    *c2rust_fresh32 = (*state).length as ::core::ffi::c_uchar;
+                                                                                                    *c2rust_fresh32 = state_ref.length as ::core::ffi::c_uchar;
                                                                                                     left = left.wrapping_sub(1);
-                                                                                                    (*state).mode = crate::src::inflate::LEN;
+                                                                                                    state_ref.mode = crate::src::inflate::LEN;
                                                                                                     continue '_inf_leave;
                                                                                                 }
                                                                                                 16206 => {
@@ -2893,8 +2899,13 @@ pub unsafe fn inflate(
                     state_ref.mode = crate::src::inflate::HCRC;
                     break 'c_2327;
                 }
-                if (*state).extra != 0 {
-                    while bits < (*state).extra {
+                // Distance extra bits only consume the decoder cursor and
+                // update scalar match state. Keep the compatibility-state
+                // access in one short-lived transition borrow; raw input
+                // cursor handling remains in this legacy boundary.
+                let state_ref = &mut *state;
+                if state_ref.extra != 0 {
+                    while bits < state_ref.extra {
                         if have == 0 as ::core::ffi::c_uint {
                             break '_inf_leave;
                         }
@@ -2904,18 +2915,18 @@ pub unsafe fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh29 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).offset = (*state).offset.wrapping_add(
+                    state_ref.offset = state_ref.offset.wrapping_add(
                         hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
+                            & ((1 as ::core::ffi::c_uint) << state_ref.extra)
                                 .wrapping_sub(1 as ::core::ffi::c_uint),
                     );
-                    hold >>= (*state).extra;
-                    bits = bits.wrapping_sub((*state).extra);
-                    (*state).back = ((*state).back as ::core::ffi::c_uint)
-                        .wrapping_add((*state).extra)
+                    hold >>= state_ref.extra;
+                    bits = bits.wrapping_sub(state_ref.extra);
+                    state_ref.back = (state_ref.back as ::core::ffi::c_uint)
+                        .wrapping_add(state_ref.extra)
                         as ::core::ffi::c_int;
                 }
-                (*state).mode = crate::src::inflate::MATCH;
+                state_ref.mode = crate::src::inflate::MATCH;
                 break 'c_2425;
             }
             // Header-CRC completion only consumes the existing decoder
