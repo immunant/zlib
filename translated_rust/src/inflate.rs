@@ -104,6 +104,56 @@ pub struct inflate_state {
     pub back: ::core::ffi::c_int,
     pub was: ::core::ffi::c_uint,
 }
+
+/// Construct the exact all-zero state that `inflateInit2_()` historically
+/// obtained from `memset`, with the few fields it initialized immediately
+/// afterwards already set.  Keeping this as an ordinary value makes the
+/// initial state explicit; the allocator-owned pointer is written only by
+/// the export boundary.
+pub(crate) fn inflate_initial_state() -> inflate_state {
+    let empty_code = crate::src::inftrees::code {
+        op: 0,
+        bits: 0,
+        val: 0,
+    };
+    inflate_state {
+        strm: ::core::ptr::null_mut(),
+        mode: crate::src::inflate::HEAD,
+        last: 0,
+        wrap: 0,
+        havedict: 0,
+        flags: 0,
+        dmax: 0,
+        check: 0,
+        total: 0,
+        head: ::core::ptr::null_mut::<crate::zlib_h::gz_header>(),
+        wbits: 0,
+        wsize: 0,
+        whave: 0,
+        wnext: 0,
+        window: ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
+        hold: 0,
+        bits: 0,
+        length: 0,
+        offset: 0,
+        extra: 0,
+        lencode: ::core::ptr::null(),
+        distcode: ::core::ptr::null(),
+        lenbits: 0,
+        distbits: 0,
+        ncode: 0,
+        nlen: 0,
+        ndist: 0,
+        have: 0,
+        next: ::core::ptr::null_mut(),
+        lens: [0; 320],
+        work: [0; 288],
+        codes: [empty_code; 1444],
+        sane: 0,
+        back: 0,
+        was: 0,
+    }
+}
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
@@ -380,15 +430,9 @@ macro_rules! inflate_init2_at_boundary {
             if state.is_null() {
                 crate::zlib_h::Z_MEM_ERROR
             } else {
-                crate::stdlib::memset(
-                    state as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-                );
+                ::core::ptr::write(state, crate::src::inflate::inflate_initial_state());
                 (*strm).state = state as *mut crate::src::deflate::internal_state;
                 (*state).strm = strm;
-                (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                (*state).mode = crate::src::inflate::HEAD;
                 let ret = crate::src::inflate::inflate_reset2_at_boundary!(strm, window_bits);
                 if ret != crate::zlib_h::Z_OK {
                     Some((*strm).zfree.expect("non-null function pointer"))
