@@ -3052,74 +3052,72 @@ fn build_bl_tree(
     return max_blindex;
 }
 
-unsafe extern "C" fn send_all_trees(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut lcodes: ::core::ffi::c_int,
-    mut dcodes: ::core::ffi::c_int,
-    mut blcodes: ::core::ffi::c_int,
+fn send_all_trees(
+    dyn_ltree: &[crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &[crate::src::deflate::ct_data_s; 61],
+    bl_tree: &[crate::src::deflate::ct_data_s; 39],
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    lcodes: ::core::ffi::c_int,
+    dcodes: ::core::ffi::c_int,
+    blcodes: ::core::ffi::c_int,
 ) {
-    {
-        let state = &mut *s;
-        // The pending allocation is exactly `pending_buf_size` bytes.  All
-        // bit fields below retain the original write order and use this one
-        // bounded view for their occasional two-byte spill.
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    send_bits(
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+        lcodes - 257 as ::core::ffi::c_int,
+        5 as ::core::ffi::c_int,
+    );
+    send_bits(
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+        dcodes - 1 as ::core::ffi::c_int,
+        5 as ::core::ffi::c_int,
+    );
+    send_bits(
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+        blcodes - 4 as ::core::ffi::c_int,
+        4 as ::core::ffi::c_int,
+    );
+    let mut rank = 0 as ::core::ffi::c_int;
+    while rank < blcodes {
         send_bits(
             pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-            lcodes - 257 as ::core::ffi::c_int,
-            5 as ::core::ffi::c_int,
+            pending,
+            bi_buf,
+            bi_valid,
+            bl_tree[bl_order[rank as usize] as usize].dl as ::core::ffi::c_int,
+            3 as ::core::ffi::c_int,
         );
-        send_bits(
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-            dcodes - 1 as ::core::ffi::c_int,
-            5 as ::core::ffi::c_int,
-        );
-        send_bits(
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-            blcodes - 4 as ::core::ffi::c_int,
-            4 as ::core::ffi::c_int,
-        );
-        let mut rank = 0 as ::core::ffi::c_int;
-        while rank < blcodes {
-            send_bits(
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                state.bl_tree[bl_order[rank as usize] as usize].dl as ::core::ffi::c_int,
-                3 as ::core::ffi::c_int,
-            );
-            rank += 1;
-        }
-        send_tree(
-            &state.dyn_ltree,
-            lcodes - 1 as ::core::ffi::c_int,
-            &state.bl_tree,
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-        );
-        send_tree(
-            &state.dyn_dtree,
-            dcodes - 1 as ::core::ffi::c_int,
-            &state.bl_tree,
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-        );
+        rank += 1;
     }
+    send_tree(
+        dyn_ltree,
+        lcodes - 1 as ::core::ffi::c_int,
+        bl_tree,
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+    );
+    send_tree(
+        dyn_dtree,
+        dcodes - 1 as ::core::ffi::c_int,
+        bl_tree,
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+    );
 }
 fn stored_block_bytes(
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -3423,12 +3421,28 @@ pub unsafe extern "C" fn _tr_flush_block(
             );
             (state.l_desc.max_code, state.d_desc.max_code)
         };
-        send_all_trees(
-            s,
-            l_max_code + 1 as ::core::ffi::c_int,
-            d_max_code + 1 as ::core::ffi::c_int,
-            max_blindex + 1 as ::core::ffi::c_int,
-        );
+        {
+            let state = &mut *s;
+            // The pending allocation is exactly `pending_buf_size` bytes.
+            // Keep this ABI projection local; the dynamic-header writer only
+            // receives bounded storage and pointer-free tree views.
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            send_all_trees(
+                &state.dyn_ltree,
+                &state.dyn_dtree,
+                &state.bl_tree,
+                pending_buf,
+                &mut state.pending,
+                &mut state.bi_buf,
+                &mut state.bi_valid,
+                l_max_code + 1 as ::core::ffi::c_int,
+                d_max_code + 1 as ::core::ffi::c_int,
+                max_blindex + 1 as ::core::ffi::c_int,
+            );
+        }
         {
             let state = &mut *s;
             let pending_buf = ::core::slice::from_raw_parts_mut(
