@@ -434,8 +434,23 @@ fn inflate_fast_slices(
     finish_inflate_fast(strm, state, fast_state, input, output, result);
 }
 
+// Once a caller has bound the two caller-owned cursor ranges, fast inflation
+// has no raw-pointer work left. Keep that dispatch separate from the cursor
+// adapter so regular and inflateBack callers share the same slice-only
+// decoder path.
+fn inflate_fast_dispatch(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    cursors: InflateFastCursors,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+) {
+    inflate_fast_slices(strm, state, cursors.used, input, output)
+}
+
 // This adapter retains the existing raw cursor boundary for translated
-// callers. The actual fast decoder above receives only bounded slices.
+// callers. Its preflight must happen before either foreign cursor is bound;
+// the dispatch target above receives only bounded slices.
 pub fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -449,15 +464,15 @@ pub fn inflate_fast(
     let input = if strm.avail_in == 0 {
         &[]
     } else {
-        // SAFETY: zlib invokes the fast path only with `avail_in` readable
-        // bytes at this cursor.
+        // SAFETY: preflight rejected a null cursor, and zlib's fast-path
+        // contract supplies exactly `avail_in` readable bytes.
         unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
     };
     let output = if cursors.output_len == 0 {
         &mut []
     } else {
-        // SAFETY: the fast-path precondition makes the bytes already used,
-        // plus `avail_out` remaining bytes, one writable output range.
+        // SAFETY: preflight computed this range from the caller's output
+        // cursor and the fast-path's already-produced byte count.
         unsafe {
             ::core::slice::from_raw_parts_mut(
                 strm.next_out.wrapping_sub(cursors.used),
@@ -465,7 +480,7 @@ pub fn inflate_fast(
             )
         }
     };
-    inflate_fast_slices(strm, state, cursors.used, input, output)
+    inflate_fast_dispatch(strm, state, cursors, input, output)
 }
 
 #[export_name = "inflate_fast"]
