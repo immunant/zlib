@@ -237,6 +237,27 @@ impl InflateOwnedWindow {
             bytes: &mut self.bytes,
         })
     }
+
+    /// Deep-copy exactly the initialized history retained by `inflateCopy`.
+    /// This gives the future allocator-preserving owner a pointer-free copy
+    /// route; live ABI-backed streams still use the existing callback bridge.
+    fn try_copy_for_state(&self, state: &inflate_state) -> Option<Self> {
+        if !self.matches_state(state) {
+            return None;
+        }
+        let layout = InflateWindowLayout::from_state(state)?;
+        let history_len = usize::try_from(state.whave).ok()?;
+        if history_len > layout.len {
+            return None;
+        }
+
+        let mut duplicate = layout.try_owned()?;
+        duplicate
+            .bytes
+            .get_mut(..history_len)?
+            .copy_from_slice(self.bytes.get(..history_len)?);
+        Some(duplicate)
+    }
 }
 
 impl<'a> InflateWindow<'a> {
