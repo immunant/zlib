@@ -441,6 +441,14 @@ struct DeflateRleMatchTally {
     distance_tree_index: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeflateRleLiteralTally {
+    cursors: [crate::stdlib::uInt; 3],
+    next_sym: crate::stdlib::uInt,
+    symbol_bytes: [crate::zutil_h::uchf; 3],
+    literal_tree_index: usize,
+}
+
 fn deflate_rle_match_tally_plan(
     match_length: crate::stdlib::uInt,
     sym_next: crate::stdlib::uInt,
@@ -457,6 +465,20 @@ fn deflate_rle_match_tally_plan(
         symbol_bytes: crate::src::trees::tally_symbol_bytes(distance, length),
         length_tree_index,
         distance_tree_index,
+    }
+}
+
+fn deflate_rle_literal_tally_plan(
+    literal: crate::zutil_h::uch,
+    sym_next: crate::stdlib::uInt,
+) -> DeflateRleLiteralTally {
+    let (cursors, next_sym) = symbol_triplet_cursors(sym_next);
+
+    DeflateRleLiteralTally {
+        cursors,
+        next_sym,
+        symbol_bytes: [0, 0, literal as crate::zutil_h::uchf],
+        literal_tree_index: literal as usize,
     }
 }
 
@@ -4045,15 +4067,18 @@ unsafe fn deflate_rle(
                     );
             }
             DeflateRleTallyPlan::Literal => {
-                let mut cc: crate::zutil_h::uch =
+                let literal: crate::zutil_h::uch =
                     *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-                let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
-                (*s).sym_next = next;
-                *(*s).sym_buf.offset(cursors[0] as isize) = 0 as crate::zutil_h::uchf;
-                *(*s).sym_buf.offset(cursors[1] as isize) = 0 as crate::zutil_h::uchf;
-                *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
-                (*s).dyn_ltree[cc as usize].fc.value =
-                    (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
+                let tally = deflate_rle_literal_tally_plan(literal, (*s).sym_next);
+                (*s).sym_next = tally.next_sym;
+                *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
+                *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
+                *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+                (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
+                    [tally.literal_tree_index]
+                    .fc
+                    .value
+                    .wrapping_add(1);
                 bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
                 ((*s).lookahead, (*s).strstart) =
                     deflate_literal_state_after_emit((*s).lookahead, (*s).strstart);
@@ -4249,7 +4274,8 @@ mod tests {
         deflate_literal_state_after_emit, deflate_match_refill_action, deflate_pending_value,
         deflate_preflight, deflate_prime_bits_valid, deflate_request_is_invalid,
         deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
-        deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
+        deflate_rle_literal_tally_plan, deflate_rle_match_length,
+        deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
         deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_check_impl,
         deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
@@ -4349,6 +4375,25 @@ mod tests {
         assert_eq!(plan.symbol_bytes, [1, 0, 255]);
         assert_eq!(plan.length_tree_index, 285);
         assert_eq!(plan.distance_tree_index, 0);
+    }
+
+    #[test]
+    fn deflate_rle_literal_tally_plan_preserves_literal_bytes_and_cursor_wrapping() {
+        let normal = deflate_rle_literal_tally_plan(0, 7);
+        assert_eq!(normal.cursors, [7, 8, 9]);
+        assert_eq!(normal.next_sym, 10);
+        assert_eq!(normal.symbol_bytes, [0, 0, 0]);
+        assert_eq!(normal.literal_tree_index, 0);
+
+        let wrapped =
+            deflate_rle_literal_tally_plan(crate::zutil_h::uch::MAX, crate::stdlib::uInt::MAX);
+        assert_eq!(wrapped.cursors, [crate::stdlib::uInt::MAX, 0, 1]);
+        assert_eq!(wrapped.next_sym, 2);
+        assert_eq!(wrapped.symbol_bytes, [0, 0, crate::zutil_h::uch::MAX]);
+        assert_eq!(
+            wrapped.literal_tree_index,
+            crate::zutil_h::uch::MAX as usize
+        );
     }
 
     #[test]

@@ -3320,7 +3320,8 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    let buffered = &mut (*state).x;
+    let state_ref = &mut *state;
+    let buffered = &mut state_ref.x;
     if buffered.have != 0 {
         let next = buffered.next;
         let (have, pos, result) = gzgetc_buffered_result(buffered.have, buffered.pos, *next);
@@ -3331,7 +3332,7 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
     }
     return gzgetc_read_result(
         gz_read(
-            state,
+            state_ref,
             &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
             1 as crate::stdlib::z_size_t,
         ),
