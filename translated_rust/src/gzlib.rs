@@ -1195,6 +1195,7 @@ struct GzOpenMode {
 fn gz_open_init(state: &mut crate::gzguts_h::gz_state) {
     state.size = 0;
     state.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
+    state.path_len = 0;
     state.err = crate::zlib_h::Z_OK;
     state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     state.mode = crate::gzguts_h::GZ_NONE;
@@ -1373,6 +1374,7 @@ fn gz_open(
         crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
+    state_ref.path_len = len;
     // SAFETY: the owned path allocation has room for the path and terminator,
     // and both the format string and source path are valid C strings.
     unsafe {
@@ -1989,10 +1991,9 @@ pub fn gz_error(
     if !gz_error_needs_message_allocation(true, err) {
         return;
     }
-    // SAFETY: `path` is an owned, NUL-terminated string in every initialized
-    // gzip state. Bind it once so both allocation and formatting use the same
-    // length without a second raw C-string traversal.
-    let path_len = unsafe { ::core::ffi::CStr::from_ptr(state.path).to_bytes().len() };
+    // `gz_open()` records this when it allocates the owned path. Retaining the
+    // scalar length avoids another raw C-string traversal on an error path.
+    let path_len = state.path_len;
     // `malloc` accepts every `size_t` value. `path` and `msg` are only used
     // below after allocation succeeds, at the C formatting boundary.
     state.msg = crate::stdlib::malloc(path_len.wrapping_add(msg.len().wrapping_add(2)))

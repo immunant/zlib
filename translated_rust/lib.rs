@@ -54,6 +54,10 @@ pub mod gzguts_h {
         pub mode: ::core::ffi::c_int,
         pub fd: ::core::ffi::c_int,
         pub path: *mut ::core::ffi::c_char,
+        // This is private gzip bookkeeping. `gzFile` is opaque to callers,
+        // so retaining the already-known path length avoids re-reading the
+        // owned C string when an error message is assembled.
+        pub path_len: crate::stdlib::z_size_t,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
         pub in_0: *mut ::core::ffi::c_uchar,
