@@ -14,36 +14,42 @@ pub use crate::zlib_h::Z_NULL;
 pub const BASE: ::core::ffi::c_uint = 65521 as ::core::ffi::c_uint;
 
 pub const NMAX: ::core::ffi::c_int = 5552 as ::core::ffi::c_int;
-pub unsafe extern "C" fn adler32_z(
+fn adler32_bytes(
     mut adler: crate::stdlib::uLong,
-    mut buf: *const crate::stdlib::Bytef,
-    mut len: crate::stdlib::z_size_t,
+    buf: &[crate::stdlib::Bytef],
 ) -> crate::stdlib::uLong {
     let mut sum2 = (adler >> 16 as ::core::ffi::c_int & 0xffff as crate::stdlib::uLong)
         as ::core::ffi::c_ulong;
     adler &= 0xffff as crate::stdlib::uLong;
-    if buf.is_null() {
-        return 1 as crate::stdlib::uLong;
-    }
 
-    while len != 0 {
-        let chunk_len = if len > NMAX as crate::stdlib::z_size_t {
-            NMAX as crate::stdlib::z_size_t
+    let mut remaining = buf;
+    while !remaining.is_empty() {
+        let chunk_len = if remaining.len() > NMAX as usize {
+            NMAX as usize
         } else {
-            len
+            remaining.len()
         };
-        let mut chunk = chunk_len;
-        len = len.wrapping_sub(chunk_len);
-        while chunk != 0 {
-            adler = adler.wrapping_add(*buf as crate::stdlib::uLong);
+        let (chunk, rest) = remaining.split_at(chunk_len);
+        remaining = rest;
+        for byte in chunk {
+            adler = adler.wrapping_add(*byte as crate::stdlib::uLong);
             sum2 = sum2.wrapping_add(adler as ::core::ffi::c_ulong);
-            buf = buf.offset(1);
-            chunk = chunk.wrapping_sub(1);
         }
         adler = adler.wrapping_rem(BASE as crate::stdlib::uLong);
         sum2 = sum2.wrapping_rem(BASE as ::core::ffi::c_ulong);
     }
     adler | (sum2 as crate::stdlib::uLong) << 16 as ::core::ffi::c_int
+}
+
+pub unsafe extern "C" fn adler32_z(
+    adler: crate::stdlib::uLong,
+    buf: *const crate::stdlib::Bytef,
+    len: crate::stdlib::z_size_t,
+) -> crate::stdlib::uLong {
+    if buf.is_null() {
+        return 1 as crate::stdlib::uLong;
+    }
+    adler32_bytes(adler, unsafe { ::core::slice::from_raw_parts(buf, len) })
 }
 #[export_name = "adler32_z"]
 pub unsafe extern "C" fn adler32_z_ffi(
