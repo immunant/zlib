@@ -2812,6 +2812,245 @@ pub static mut inflate_copyright: [::core::ffi::c_char; 49] = unsafe {
         *b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
     )
 };
+const LBASE: [u16; 31] = [
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258, 0, 0,
+];
+const LEXT: [u16; 31] = [
+    16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20,
+    21, 21, 21, 21, 16, 68, 193,
+];
+const DBASE: [u16; 32] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577, 0, 0,
+];
+const DEXT: [u16; 32] = [
+    16, 16, 16, 16, 17, 17, 18, 18, 19, 19, 20, 20, 21, 21, 22, 22, 23, 23, 24, 24, 25, 25, 26, 26,
+    27, 27, 28, 28, 29, 29, 64, 64,
+];
+
+/// Builds an inflate decoding table using bounded Rust slices.
+///
+/// `table_cursor` is the index at which the table starts and is advanced by
+/// the number of entries used on success. `work` must have at least
+/// `lens.len()` elements. As in zlib, `0` is success, `-1` reports an invalid
+/// code-length set, and `1` reports insufficient table or workspace capacity.
+pub fn inflate_table_safe(
+    type_0: crate::src::inftrees::codetype,
+    lens: &[u16],
+    table: &mut [crate::src::inftrees::code],
+    table_cursor: &mut usize,
+    bits: &mut u32,
+    work: &mut [u16],
+) -> ::core::ffi::c_int {
+    let codes = lens.len();
+    if codes > u16::MAX as usize || work.len() < codes || *table_cursor > table.len() {
+        return 1;
+    }
+
+    let (base, extra, match_symbol): (&[u16], &[u16], u16) = match type_0 {
+        crate::src::inftrees::CODES => (&[], &[], 20),
+        crate::src::inftrees::LENS => (&LBASE, &LEXT, 257),
+        crate::src::inftrees::DISTS => (&DBASE, &DEXT, 0),
+        _ => return -1,
+    };
+
+    let mut count = [0u16; MAXBITS as usize + 1];
+    for &length in lens {
+        if length as usize > MAXBITS as usize {
+            return -1;
+        }
+        count[length as usize] = count[length as usize].wrapping_add(1);
+    }
+
+    let mut root = *bits;
+    let mut max = MAXBITS as u32;
+    while max >= 1 && count[max as usize] == 0 {
+        max -= 1;
+    }
+    if root > max {
+        root = max;
+    }
+    if max == 0 {
+        let Some(end) = (*table_cursor).checked_add(2) else {
+            return 1;
+        };
+        if end > table.len() {
+            return 1;
+        }
+        let here = crate::src::inftrees::code {
+            op: 64,
+            bits: 1,
+            val: 0,
+        };
+        table[*table_cursor] = here;
+        table[*table_cursor + 1] = here;
+        *table_cursor = end;
+        *bits = 1;
+        return 0;
+    }
+
+    let mut min = 1u32;
+    while min < max && count[min as usize] == 0 {
+        min += 1;
+    }
+    if root < min {
+        root = min;
+    }
+
+    let mut left = 1i32;
+    for length in 1..=MAXBITS as usize {
+        left <<= 1;
+        left -= count[length] as i32;
+        if left < 0 {
+            return -1;
+        }
+    }
+    if left > 0 && (type_0 == CODES || max != 1) {
+        return -1;
+    }
+
+    let mut offs = [0u16; MAXBITS as usize + 1];
+    for length in 1..MAXBITS as usize {
+        offs[length + 1] = offs[length].wrapping_add(count[length]);
+    }
+    for (symbol, &length) in lens.iter().enumerate() {
+        if length != 0 {
+            let offset = offs[length as usize] as usize;
+            work[offset] = symbol as u16;
+            offs[length as usize] = offs[length as usize].wrapping_add(1);
+        }
+    }
+
+    let table_start = *table_cursor;
+    let mut huff = 0u32;
+    let mut symbol = 0usize;
+    let mut length = min;
+    let mut next = 0usize;
+    let mut curr = root;
+    let mut drop_bits = 0u32;
+    let mut low = u32::MAX;
+    let mut used = 1u32 << root;
+    let mask = used - 1;
+    if (type_0 == LENS && used > ENOUGH_LENS as u32)
+        || (type_0 == DISTS && used > ENOUGH_DISTS as u32)
+        || table_start
+            .checked_add(used as usize)
+            .map_or(true, |end| end > table.len())
+    {
+        return 1;
+    }
+
+    loop {
+        let work_symbol = work[symbol] as usize;
+        let here = if (work_symbol as u32) + 1 < match_symbol as u32 {
+            crate::src::inftrees::code {
+                op: 0,
+                bits: (length - drop_bits) as u8,
+                val: work[symbol],
+            }
+        } else if work_symbol >= match_symbol as usize {
+            let index = work_symbol - match_symbol as usize;
+            let (Some(&op), Some(&val)) = (extra.get(index), base.get(index)) else {
+                return -1;
+            };
+            crate::src::inftrees::code {
+                op: op as u8,
+                bits: (length - drop_bits) as u8,
+                val,
+            }
+        } else {
+            crate::src::inftrees::code {
+                op: 96,
+                bits: (length - drop_bits) as u8,
+                val: 0,
+            }
+        };
+
+        let increment = 1u32 << (length - drop_bits);
+        let mut fill = 1u32 << curr;
+        let next_table_size = fill;
+        loop {
+            fill -= increment;
+            let index = table_start + next + ((huff >> drop_bits) + fill) as usize;
+            let Some(entry) = table.get_mut(index) else {
+                return 1;
+            };
+            *entry = here;
+            if fill == 0 {
+                break;
+            }
+        }
+
+        let mut increment = 1u32 << (length - 1);
+        while huff & increment != 0 {
+            increment >>= 1;
+        }
+        if increment != 0 {
+            huff &= increment - 1;
+            huff += increment;
+        } else {
+            huff = 0;
+        }
+
+        symbol += 1;
+        count[length as usize] = count[length as usize].wrapping_sub(1);
+        if count[length as usize] == 0 {
+            if length == max {
+                break;
+            }
+            length = lens[work[symbol] as usize] as u32;
+        }
+
+        if length > root && huff & mask != low {
+            if drop_bits == 0 {
+                drop_bits = root;
+            }
+            next += next_table_size as usize;
+            curr = length - drop_bits;
+            left = 1i32 << curr;
+            while curr + drop_bits < max {
+                left -= count[(curr + drop_bits) as usize] as i32;
+                if left <= 0 {
+                    break;
+                }
+                curr += 1;
+                left <<= 1;
+            }
+            used += 1u32 << curr;
+            if (type_0 == LENS && used > ENOUGH_LENS as u32)
+                || (type_0 == DISTS && used > ENOUGH_DISTS as u32)
+                || table_start
+                    .checked_add(used as usize)
+                    .map_or(true, |end| end > table.len())
+            {
+                return 1;
+            }
+            low = huff & mask;
+            let Some(entry) = table.get_mut(table_start + low as usize) else {
+                return 1;
+            };
+            entry.op = curr as u8;
+            entry.bits = root as u8;
+            entry.val = next as u16;
+        }
+    }
+
+    if huff != 0 {
+        let Some(entry) = table.get_mut(table_start + next + huff as usize) else {
+            return 1;
+        };
+        *entry = crate::src::inftrees::code {
+            op: 64,
+            bits: (length - drop_bits) as u8,
+            val: 0,
+        };
+    }
+    *table_cursor = table_start + used as usize;
+    *bits = root;
+    0
+}
+
 pub unsafe extern "C" fn inflate_table(
     mut type_0: crate::src::inftrees::codetype,
     mut lens: *mut ::core::ffi::c_ushort,
@@ -3192,6 +3431,16 @@ pub unsafe extern "C" fn inflate_table_ffi(
     mut bits: *mut ::core::ffi::c_uint,
     mut work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
+    if table.is_null() || bits.is_null() || (codes != 0 && (lens.is_null() || work.is_null())) {
+        return -1;
+    }
+    if (*table).is_null() {
+        return -1;
+    }
+    if type_0 != CODES && type_0 != LENS && type_0 != DISTS {
+        return -1;
+    }
+
     inflate_table(type_0, lens, codes, table, bits, work)
 }
 pub unsafe extern "C" fn inflate_fixed(mut state: *mut crate::src::inflate::inflate_state) {
@@ -3204,4 +3453,45 @@ pub unsafe extern "C" fn inflate_fixed(mut state: *mut crate::src::inflate::infl
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
     inflate_fixed(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_table_builds_a_codes_table() {
+        let lens = [1u16, 1];
+        let mut table = [code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        }; 2];
+        let mut cursor = 0;
+        let mut bits = 7;
+        let mut work = [0u16; 2];
+
+        assert_eq!(
+            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            0
+        );
+        assert_eq!(cursor, 2);
+        assert_eq!(bits, 1);
+        assert_eq!(table[0].val, 0);
+        assert_eq!(table[1].val, 1);
+    }
+
+    #[test]
+    fn safe_table_rejects_insufficient_table_space() {
+        let lens = [1u16, 1];
+        let mut table = [];
+        let mut cursor = 0;
+        let mut bits = 7;
+        let mut work = [0u16; 2];
+
+        assert_eq!(
+            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            1
+        );
+    }
 }
