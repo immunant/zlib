@@ -152,6 +152,21 @@ fn gz_load_slice(
     gz_load(state, buf, len)
 }
 
+// Compute the still-buffered input range without forming a slice from the
+// cursor itself. The two non-null cursors are part of gzip's initialized
+// input allocation; checking their address-derived range keeps the later
+// `copy_within()` and refill slice within the one allocation bound here.
+fn gz_buffered_input_range(
+    input_addr: usize,
+    cursor_addr: usize,
+    buffered: ::core::ffi::c_uint,
+    capacity: usize,
+) -> Option<::core::ops::Range<usize>> {
+    let start = cursor_addr.checked_sub(input_addr)?;
+    let end = start.checked_add(buffered as usize)?;
+    (end <= capacity).then_some(start..end)
+}
+
 // This helper is internal and all of its callers have already bound the
 // validated gzip state. Descriptor I/O remains confined to `gz_load`.
 fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -162,34 +177,41 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     };
     if let crate::src::gzlib::GzAvailPlan::Load {
         buffered,
-        requested,
+        requested: _,
     } = plan
     {
+        // `gz_look()` creates this fixed-size input allocation before
+        // `gz_avail()` can refill it. Bind it once, then keep compaction and
+        // the descriptor request slice-based.
+        let input = match ::core::ptr::NonNull::new(state.in_0) {
+            Some(input) => input,
+            None => return -1,
+        };
+        // SAFETY: the initialized gzip state owns exactly `size` input
+        // bytes at `in_0`. The planner above has already ensured that the
+        // buffered count fits this allocation.
+        let buffer =
+            unsafe { ::core::slice::from_raw_parts_mut(input.as_ptr(), state.size as usize) };
         if buffered != 0 {
-            let input = state.strm.next_in;
-            if crate::src::gzlib::gz_avail_needs_compaction(buffered, input == state.in_0) {
-                // `next_in` is a cursor in this initialized input allocation.
-                // Bind that allocation once and use the slice operation that
-                // explicitly permits the source and destination to overlap.
-                // SAFETY: `gz_avail` is reached only after `gz_look` has
-                // allocated `size` input bytes, and `next_in` plus `buffered`
-                // denotes the still-available portion of that allocation.
-                let input_start = (input as usize).wrapping_sub(state.in_0 as usize);
-                let input_end = input_start.wrapping_add(buffered as usize);
-                let buffer =
-                    unsafe { ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize) };
-                buffer.copy_within(input_start..input_end, 0);
+            let cursor_at_start = state.strm.next_in == state.in_0;
+            if crate::src::gzlib::gz_avail_needs_compaction(buffered, cursor_at_start) {
+                let cursor = match ::core::ptr::NonNull::new(state.strm.next_in) {
+                    Some(cursor) => cursor,
+                    None => return -1,
+                };
+                let Some(range) = gz_buffered_input_range(
+                    input.as_ptr().addr(),
+                    cursor.as_ptr().addr(),
+                    buffered,
+                    buffer.len(),
+                )
+                else {
+                    return -1;
+                };
+                buffer.copy_within(range, 0);
             }
         }
-        // `gz_look()` created this input allocation before `gz_avail()` can
-        // request more bytes. Keep that non-null allocation contract in the
-        // typed descriptor-read boundary.
-        let input = ::core::ptr::NonNull::new(state.in_0)
-            .expect("gzip input buffer initialized")
-            .as_ptr()
-            .wrapping_add(buffered as usize);
-        let input = ::core::ptr::NonNull::new(input).expect("offset from non-null buffer");
-        let result = gz_load(state, input, requested);
+        let result = gz_load_slice(state, &mut buffer[buffered as usize..]);
         got = result.received;
         if result.status == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;

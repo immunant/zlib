@@ -312,6 +312,12 @@ pub(crate) fn gz_avail_plan(state: &crate::gzguts_h::gz_state) -> Result<GzAvail
         return Ok(GzAvailPlan::Done);
     }
     let buffered = state.strm.avail_in as ::core::ffi::c_uint;
+    // `avail_in` is a cursor count within gzip's fixed input allocation.
+    // Reject a corrupt count before its subtraction could wrap or before the
+    // read adapter turns it into a buffer offset.
+    if buffered > state.size {
+        return Err(());
+    }
     Ok(GzAvailPlan::Load {
         buffered,
         requested: state.size.wrapping_sub(buffered),
