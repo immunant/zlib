@@ -512,6 +512,25 @@ fn gz_read_buffer_copy_plan(
     requested.min(have)
 }
 
+/// Copy one buffered output prefix into the caller's current destination.
+/// The adapter supplies both cursor positions as indices, so this core can
+/// validate its ranges and use an ordinary slice copy instead of libc
+/// `memcpy`.
+fn gz_read_buffered_copy(
+    destination: &mut [u8],
+    buffered: &[u8],
+    next_index: usize,
+    requested: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    let copied = gz_read_buffer_copy_plan(requested, have) as usize;
+    let end = next_index.checked_add(copied)?;
+    destination
+        .get_mut(..copied)?
+        .copy_from_slice(buffered.get(next_index..end)?);
+    Some(copied as ::core::ffi::c_uint)
+}
+
 /// Commit a preflighted direct buffered read after its raw cursor has moved.
 /// The shared read loop records the logical position for every source path.
 fn gz_read_buffer_copy_commit_state(
@@ -652,10 +671,11 @@ unsafe extern "C" fn gz_read(
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut err: ::core::ffi::c_int = 0;
+    let state_ref = &mut *state;
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if state_ref.skip != 0 && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     got = 0 as crate::stdlib::z_size_t;
@@ -666,53 +686,72 @@ unsafe extern "C" fn gz_read(
             n = len as ::core::ffi::c_uint;
         }
         's_28: {
-            if (*state).x.have != 0 {
-                n = gz_read_buffer_copy_plan(n, (*state).x.have);
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    (*state).x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
-                (*state).x.next = (*state).x.next.offset(n as isize);
-                if !gz_read_buffer_copy_commit_state(&mut *state, n) {
+            if state_ref.x.have != 0 {
+                let Some(buffered) = state_ref
+                    .buffers
+                    .as_ref()
+                    .and_then(|buffers| buffers.output.as_ref())
+                else {
+                    return got;
+                };
+                let Some(next_index) = (state_ref.x.next as usize)
+                    .checked_sub(buffered.as_ptr() as usize)
+                    .filter(|index| *index <= buffered.len())
+                else {
+                    return got;
+                };
+                let destination = ::core::slice::from_raw_parts_mut(buf as *mut u8, n as usize);
+                let Some(copied) = gz_read_buffered_copy(
+                    destination,
+                    buffered,
+                    next_index,
+                    n,
+                    state_ref.x.have,
+                ) else {
+                    return got;
+                };
+                n = copied;
+                state_ref.x.next = buffered.as_ptr().wrapping_add(next_index + n as usize)
+                    as *mut ::core::ffi::c_uchar;
+                if !gz_read_buffer_copy_commit_state(state_ref, n) {
                     return got;
                 }
-                if (*state).err != crate::zlib_h::Z_OK {
+                if state_ref.err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
                 }
             } else {
-                if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
+                if state_ref.eof != 0 && state_ref.strm.avail_in == 0 as crate::stdlib::uInt {
                     break 's_140;
                 }
-                if (*state).how == crate::gzguts_h::LOOK
-                    || n < (*state).size << 1 as ::core::ffi::c_int
+                if state_ref.how == crate::gzguts_h::LOOK
+                    || n < state_ref.size << 1 as ::core::ffi::c_int
                 {
-                    if gz_fetch(state) == -1 as ::core::ffi::c_int
-                        && (*state).x.have == 0 as ::core::ffi::c_uint
+                    if gz_fetch(state_ref) == -1 as ::core::ffi::c_int
+                        && state_ref.x.have == 0 as ::core::ffi::c_uint
                     {
                         err = -1 as ::core::ffi::c_int;
                     }
                     break 's_28;
-                } else if (*state).how == crate::gzguts_h::COPY {
-                    err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
+                } else if state_ref.how == crate::gzguts_h::COPY {
+                    err = gz_load(state_ref, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
                 } else {
-                    (*state).strm.avail_out = n as crate::stdlib::uInt;
-                    (*state).strm.next_out =
+                    state_ref.strm.avail_out = n as crate::stdlib::uInt;
+                    state_ref.strm.next_out =
                         buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
-                    err = gz_decomp(state);
-                    n = (*state).x.have;
-                    (*state).x.have = 0 as ::core::ffi::c_uint;
+                    err = gz_decomp(state_ref);
+                    n = state_ref.x.have;
+                    state_ref.x.have = 0 as ::core::ffi::c_uint;
                 }
             }
             buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
-            (len, got, (*state).x.pos) = gz_read_progress_state(len, got, (*state).x.pos, n);
+            (len, got, state_ref.x.pos) = gz_read_progress_state(len, got, state_ref.x.pos, n);
         }
         if !(len != 0 && err == 0) {
             break;
         }
     }
-    if len != 0 && (*state).eof != 0 {
-        (*state).past = 1 as ::core::ffi::c_int;
+    if len != 0 && state_ref.eof != 0 {
+        state_ref.past = 1 as ::core::ffi::c_int;
     }
     return got;
 }
