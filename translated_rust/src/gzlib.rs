@@ -137,11 +137,39 @@ pub(crate) fn gz_load_result(
     Ok(())
 }
 
+pub(crate) enum GzAvailPlan {
+    Done,
+    Load {
+        buffered: ::core::ffi::c_uint,
+        requested: ::core::ffi::c_uint,
+    },
+}
+
+// Decide whether the raw gzip input adapter needs another read.  Pointer
+// compaction and the descriptor call remain in that adapter; this helper owns
+// the state checks and count arithmetic.
+pub(crate) fn gz_avail_plan(
+    state: &crate::gzguts_h::gz_state,
+) -> Result<GzAvailPlan, ()> {
+    if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
+        return Err(());
+    }
+    if state.eof != 0 {
+        return Ok(GzAvailPlan::Done);
+    }
+    let buffered = state.strm.avail_in as ::core::ffi::c_uint;
+    Ok(GzAvailPlan::Load {
+        buffered,
+        requested: state.size.wrapping_sub(buffered),
+    })
+}
+
 pub(crate) fn gz_avail_after_load(
     state: &mut crate::gzguts_h::gz_state,
     received: ::core::ffi::c_uint,
 ) {
     state.strm.avail_in = state.strm.avail_in.wrapping_add(received);
+    state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
 }
 
 pub(crate) fn gz_set_copy_input(

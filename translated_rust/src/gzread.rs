@@ -97,15 +97,20 @@ unsafe extern "C" fn gz_load(
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut got: ::core::ffi::c_uint = 0;
     let state = &mut *state;
-    if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.eof == 0 as ::core::ffi::c_int {
-        if state.strm.avail_in != 0 {
+    let plan = match crate::src::gzlib::gz_avail_plan(state) {
+        Ok(plan) => plan,
+        Err(()) => return -1,
+    };
+    if let crate::src::gzlib::GzAvailPlan::Load {
+        buffered,
+        requested,
+    } = plan
+    {
+        if buffered != 0 {
             let mut p: *mut ::core::ffi::c_uchar = state.in_0;
             let mut q: *const ::core::ffi::c_uchar = state.strm.next_in;
             if q != p as *const ::core::ffi::c_uchar {
-                let mut n: ::core::ffi::c_uint = state.strm.avail_in as ::core::ffi::c_uint;
+                let mut n = buffered;
                 loop {
                     let c2rust_fresh0 = q;
                     q = q.offset(1);
@@ -121,19 +126,16 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
         }
         if gz_load(
             state,
-            state.in_0.offset(state.strm.avail_in as isize),
-            state
-                .size
-                .wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint),
+            state.in_0.offset(buffered as isize),
+            requested,
             &raw mut got,
         ) == -1 as ::core::ffi::c_int
         {
             return -1 as ::core::ffi::c_int;
         }
         crate::src::gzlib::gz_avail_after_load(state, got);
-        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
     }
-    return 0 as ::core::ffi::c_int;
+    0
 }
 
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
