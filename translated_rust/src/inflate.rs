@@ -519,16 +519,12 @@ unsafe fn inflate_allocate_state(
 ///
 /// Callers invoke this only for a state installed by `inflate_allocate_state`,
 /// after ensuring that the stream still carries a matching free callback.
-unsafe fn inflate_release_state(
-    strm: &mut crate::zlib_h::z_stream_s,
-    state: *mut crate::src::inflate::inflate_state,
-) {
-    let zfree = strm
-        .zfree
-        .expect("initialized inflate stream has a free callback");
-    ::core::ptr::drop_in_place(state);
-    zfree(strm.opaque, state.cast());
-    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+fn inflate_release_owned_state(state: &mut crate::src::inflate::inflate_state) {
+    // The history window is the state allocation's only owned field.  Clear it
+    // before returning the surrounding ABI allocation to its callback, rather
+    // than dropping that callback-owned allocation in place through a raw
+    // pointer.
+    state.window = None;
 }
 
 pub unsafe fn inflateInit2_(
@@ -569,7 +565,15 @@ pub unsafe fn inflateInit2_(
     let mut state = InflateState(state);
     let ret = inflate_reset2_impl(strm, &mut state, windowBits);
     if ret != crate::zlib_h::Z_OK {
-        inflate_release_state(strm, state.0);
+        inflate_release_owned_state(state.0);
+        let allocation = state.0 as *mut crate::src::inflate::inflate_state;
+        drop(state);
+        strm.zfree
+            .expect("initialized inflate stream has a free callback")(
+            strm.opaque,
+            allocation.cast(),
+        );
+        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     ret
 }
