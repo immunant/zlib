@@ -2655,6 +2655,15 @@ fn stored_block_should_wait(
             || len != (left as crate::stdlib::uInt).wrapping_add(avail_in))
 }
 
+fn stored_block_is_last(
+    flush: ::core::ffi::c_int,
+    len: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+) -> bool {
+    flush == crate::zlib_h::Z_FINISH && len == (left as crate::stdlib::uInt).wrapping_add(avail_in)
+}
+
 fn stored_block_can_emit(
     left: ::core::ffi::c_uint,
     min_block: ::core::ffi::c_uint,
@@ -2714,13 +2723,7 @@ unsafe extern "C" fn deflate_stored(
         if stored_block_should_wait(len, min_block, left, (*(*s).strm).avail_in, flush) {
             break;
         }
-        last = if flush == crate::zlib_h::Z_FINISH
-            && len == (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in)
-        {
-            1 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        };
+        last = stored_block_is_last(flush, len, left, (*(*s).strm).avail_in) as ::core::ffi::c_int;
         crate::src::trees::_tr_stored_block(
             s as *mut crate::src::deflate::internal_state,
             ::core::ptr::null_mut::<crate::stdlib::charf>(),
@@ -3789,8 +3792,8 @@ mod tests {
         longest_match_limit, normalize_deflate_params, pending_buffer_needs_flush,
         pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
-        stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
-        symbol_triplet_cursors, zlib_header, DeflatePreflight,
+        stored_block_is_last, stored_block_min_size, stored_block_should_wait,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
 
     #[test]
@@ -4190,6 +4193,19 @@ mod tests {
             0,
             0,
             crate::zlib_h::Z_FINISH,
+        ));
+    }
+
+    #[test]
+    fn stored_block_is_last_requires_finish_and_preserves_wrapping_input_total() {
+        assert!(stored_block_is_last(crate::zlib_h::Z_FINISH, 7, 3, 4));
+        assert!(!stored_block_is_last(crate::zlib_h::Z_FULL_FLUSH, 7, 3, 4,));
+        assert!(!stored_block_is_last(crate::zlib_h::Z_FINISH, 6, 3, 4));
+        assert!(stored_block_is_last(
+            crate::zlib_h::Z_FINISH,
+            0,
+            ::core::ffi::c_uint::MAX,
+            1,
         ));
     }
 

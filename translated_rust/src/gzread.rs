@@ -352,6 +352,17 @@ fn gz_read_fetch_failed_without_buffer(
     fetch_result == -1 as ::core::ffi::c_int && have == 0
 }
 
+fn gz_read_fetch_error(
+    fetch_result: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_int> {
+    if gz_read_fetch_failed_without_buffer(fetch_result, have) {
+        Some(-1)
+    } else {
+        None
+    }
+}
+
 fn gz_read_load_status(load_failed: bool) -> ::core::ffi::c_int {
     if load_failed {
         -1
@@ -1820,6 +1831,13 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_fetch_error_reports_only_unbuffered_fetch_failures() {
+        assert_eq!(gz_read_fetch_error(-1, 0), Some(-1));
+        assert_eq!(gz_read_fetch_error(-1, 1), None);
+        assert_eq!(gz_read_fetch_error(0, 0), None);
+    }
+
+    #[test]
     fn gz_read_should_continue_requires_remaining_output_without_errors() {
         assert!(gz_read_should_continue(1, 0));
         assert!(!gz_read_should_continue(0, 0));
@@ -2312,8 +2330,8 @@ unsafe fn gz_read(
             }
             GzReadAction::StopAtEof => break,
             GzReadAction::Fetch => {
-                if gz_read_fetch_failed_without_buffer(gz_fetch(state), (*state).x.have) {
-                    err = -1 as ::core::ffi::c_int;
+                if let Some(fetch_error) = gz_read_fetch_error(gz_fetch(state), (*state).x.have) {
+                    err = fetch_error;
                 }
                 false
             }

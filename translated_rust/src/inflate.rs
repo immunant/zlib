@@ -1769,7 +1769,7 @@ pub unsafe extern "C" fn inflate(
                 }
             }
             14452068164804587099 => {
-                if (*state).flags & 0x400 as ::core::ffi::c_int != 0 {
+                if inflate_gzip_header_has_extra((*state).flags) {
                     while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint {
                         if have == 0 as ::core::ffi::c_uint {
                             break 's_88;
@@ -1913,7 +1913,7 @@ pub unsafe extern "C" fn inflate(
                 c2rust_current_block = 10473654687254177392;
             }
             7763740415849674987 => {
-                if (*state).flags & 0x400 as ::core::ffi::c_int != 0 {
+                if inflate_gzip_header_has_extra((*state).flags) {
                     copy = (*state).length;
                     if copy > have {
                         copy = have;
@@ -2460,6 +2460,10 @@ fn inflate_header_crc_enabled(flags: ::core::ffi::c_int, wrap: ::core::ffi::c_in
     flags & 0x200 != 0 && wrap & 4 != 0
 }
 
+fn inflate_gzip_header_has_extra(flags: ::core::ffi::c_int) -> bool {
+    flags & 0x400 != 0
+}
+
 fn gzip_extra_copy_bounds(
     extra_len: ::core::ffi::c_uint,
     remaining: ::core::ffi::c_uint,
@@ -2897,22 +2901,21 @@ mod tests {
         dynamic_header_counts, gzip_extra_copy_bounds, inflateSyncPoint_ffi, inflate_block_header,
         inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_progress,
         inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_get_dictionary_result, inflate_header_crc_enabled,
+        inflate_get_dictionary_result, inflate_gzip_header_has_extra, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
-        inflate_mark_value,
-        inflate_match_copy_plan, inflate_mode_data_type_flags, inflate_mode_is_valid,
-        inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
-        inflate_reset2_params, inflate_should_update_window, inflate_state_is_usable,
-        inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
-        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
-        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
-        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
-        InflateBlockKind, InflateCopyProgress, InflateMatchPlan, InflateMatchSource,
-        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
-        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
+        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
+        inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
+        inflate_state_is_usable, inflate_state_metadata_is_valid,
+        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
+        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
+        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
+        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
+        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
+        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
+        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
+        InflateSyncSearch, InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -3032,6 +3035,14 @@ mod tests {
         assert!(!inflate_header_crc_enabled(0, 4));
         assert!(!inflate_header_crc_enabled(0x200, 0));
         assert!(!inflate_header_crc_enabled(0x400, 2));
+    }
+
+    #[test]
+    fn inflate_gzip_header_extra_flag_requires_the_extra_bit() {
+        assert!(inflate_gzip_header_has_extra(0x400));
+        assert!(inflate_gzip_header_has_extra(0x600));
+        assert!(!inflate_gzip_header_has_extra(0));
+        assert!(!inflate_gzip_header_has_extra(0x200));
     }
 
     #[test]
