@@ -2243,6 +2243,36 @@ struct GzipFixedHeader {
     extra_len: crate::stdlib::uInt,
 }
 
+/// Decide the state transition immediately after emitting gzip's fixed header.
+///
+/// A caller-supplied header defers draining until the optional fields have
+/// been emitted, while an absent header advances straight to normal block
+/// output and must drain the fixed header now.  This is scalar policy only;
+/// the ABI header observation and pending-buffer lend remain at the codec
+/// boundary.
+#[derive(Copy, Clone)]
+struct GzipFixedHeaderPlan {
+    next_status: ::core::ffi::c_int,
+    reset_index: bool,
+    flush_now: bool,
+}
+
+fn gzip_fixed_header_plan(has_header: bool) -> GzipFixedHeaderPlan {
+    if has_header {
+        GzipFixedHeaderPlan {
+            next_status: crate::src::deflate::EXTRA_STATE,
+            reset_index: true,
+            flush_now: false,
+        }
+    } else {
+        GzipFixedHeaderPlan {
+            next_status: crate::src::deflate::BUSY_STATE,
+            reset_index: false,
+            flush_now: true,
+        }
+    }
+}
+
 fn gzip_xflags(level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) -> crate::stdlib::Byte {
     if level == 9 {
         2
@@ -2820,7 +2850,7 @@ pub fn deflate(
             // borrow.  The pending buffer is still lent only here, and the
             // borrow ends before `flush_pending()` can revisit compatibility
             // state or callback-owned output.
-            let has_header = {
+            let fixed_header_plan = {
                 let stream = &mut *strm;
                 let state = &mut *s;
                 stream.adler = crate::src::crc32::crc32_slice(0, &[]);
@@ -2860,15 +2890,14 @@ pub fn deflate(
                 ) {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                if header.is_some() {
+                let plan = gzip_fixed_header_plan(header.is_some());
+                if plan.reset_index {
                     state.gzindex = 0 as crate::zutil_h::ulg;
-                    state.status = crate::src::deflate::EXTRA_STATE;
-                } else {
-                    state.status = crate::src::deflate::BUSY_STATE;
                 }
-                header.is_some()
+                state.status = plan.next_status;
+                plan
             };
-            if !has_header {
+            if fixed_header_plan.flush_now {
                 flush_pending(strm);
                 let state = &mut *s;
                 if state.pending != 0 as crate::zutil_h::ulg {
