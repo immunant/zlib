@@ -3274,14 +3274,35 @@ unsafe extern "C" fn deflate_slow(
     return block_done;
 }
 
+fn rle_match_length(
+    window: &[crate::stdlib::Bytef],
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    let start = strstart as usize;
+    let previous = window[start - 1];
+    let limit = ::core::cmp::min(lookahead, crate::zutil_h::MAX_MATCH as crate::stdlib::uInt)
+        as usize;
+
+    if window[start] != previous
+        || window[start + 1] != previous
+        || window[start + 2] != previous
+    {
+        return 0;
+    }
+
+    let mut length = crate::zutil_h::MIN_MATCH as usize;
+    while length < limit && window[start + length] == previous {
+        length += 1;
+    }
+    length as crate::stdlib::uInt
+}
+
 unsafe extern "C" fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let mut prev: crate::stdlib::uInt = 0;
-    let mut scan: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    let mut strend: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
@@ -3298,68 +3319,8 @@ unsafe extern "C" fn deflate_rle(
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             && (*s).strstart > 0 as crate::stdlib::uInt
         {
-            scan = (*s)
-                .window
-                .offset((*s).strstart as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize));
-            prev = *scan as crate::stdlib::uInt;
-            scan = scan.offset(1);
-            if prev == *scan as crate::stdlib::uInt
-                && {
-                    scan = scan.offset(1);
-                    prev == *scan as crate::stdlib::uInt
-                }
-                && {
-                    scan = scan.offset(1);
-                    prev == *scan as crate::stdlib::uInt
-                }
-            {
-                strend = (*s)
-                    .window
-                    .offset((*s).strstart as isize)
-                    .offset(crate::zutil_h::MAX_MATCH as isize);
-                loop {
-                    scan = scan.offset(1);
-                    if !(prev == *scan as crate::stdlib::uInt
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && scan < strend)
-                    {
-                        break;
-                    }
-                }
-                (*s).match_length = (crate::zutil_h::MAX_MATCH as crate::stdlib::uInt)
-                    .wrapping_sub(strend.offset_from(scan) as crate::stdlib::uInt);
-                if (*s).match_length > (*s).lookahead {
-                    (*s).match_length = (*s).lookahead;
-                }
-            }
+            let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
+            (*s).match_length = rle_match_length(window, (*s).strstart, (*s).lookahead);
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let mut len: crate::zutil_h::uch =
