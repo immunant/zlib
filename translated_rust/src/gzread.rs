@@ -1664,13 +1664,10 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 gz_decomp(state) == -1 as ::core::ffi::c_int
             }
             GzFetchAction::StateCorrupt => {
-                unsafe {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                }
+                // Error-string allocation is an FFI concern.  Keep this
+                // state-machine core safe and let the exported caller report
+                // the same error before returning to C.
+                gz_fetch_note_state_corrupt(state);
                 return -1 as ::core::ffi::c_int;
             }
         };
@@ -1689,6 +1686,26 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return 0 as ::core::ffi::c_int;
         }
     }
+}
+
+fn gz_fetch_apply_state_corrupt(
+    have: &mut ::core::ffi::c_uint,
+    err: &mut ::core::ffi::c_int,
+    state_corrupt: &mut ::core::ffi::c_int,
+) {
+    *have = 0;
+    *err = crate::zlib_h::Z_STREAM_ERROR;
+    *state_corrupt = 1;
+}
+
+fn gz_fetch_note_state_corrupt(state: &mut crate::gzguts_h::gz_state) {
+    gz_fetch_apply_state_corrupt(&mut state.x.have, &mut state.err, &mut state.state_corrupt);
+}
+
+fn gz_take_state_corrupt(state: &mut crate::gzguts_h::gz_state) -> bool {
+    let was_state_corrupt = state.state_corrupt != 0;
+    state.state_corrupt = 0;
+    was_state_corrupt
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -2081,6 +2098,19 @@ macro_rules! gz_skip {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_corrupt_transition_clears_buffer_and_defers_error_reporting() {
+        let mut have = 7;
+        let mut err = crate::zlib_h::Z_OK;
+        let mut state_corrupt = 0;
+
+        gz_fetch_apply_state_corrupt(&mut have, &mut err, &mut state_corrupt);
+
+        assert_eq!(have, 0);
+        assert_eq!(err, crate::zlib_h::Z_STREAM_ERROR);
+        assert_eq!(state_corrupt, 1);
+    }
 
     #[test]
     fn gz_load_read_result_preserves_signed_read_results() {
@@ -4513,6 +4543,13 @@ pub unsafe extern "C" fn gzread_ffi(
         return -1 as ::core::ffi::c_int;
     };
     len = gz_read(&mut *state, buf, request_len) as ::core::ffi::c_uint;
+    if gz_take_state_corrupt(&mut *state) {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+        );
+    }
     match gzread_outcome(len, (*state).err, (*state).again) {
         GzreadOutcome::Read(read) => read,
         GzreadOutcome::Error => -1 as ::core::ffi::c_int,
@@ -4559,10 +4596,18 @@ pub unsafe extern "C" fn gzfread_ffi(
         return 0 as crate::stdlib::z_size_t;
     };
     len = request_len;
-    return match gz_fread_action(len) {
+    let read = match gz_fread_action(len) {
         GzFreadAction::ReturnZero => 0 as crate::stdlib::z_size_t,
         GzFreadAction::Read => gz_fread_items_read(size, gz_read(&mut *state, buf, len)),
     };
+    if gz_take_state_corrupt(&mut *state) {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+        );
+    }
+    read
 }
 #[export_name = "gzgetc"]
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -4596,14 +4641,19 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
         }
         GzgetcAction::Read => {}
     }
-    return gzgetc_read_result(
-        gz_read(
-            state_ref,
-            &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
-            1 as crate::stdlib::z_size_t,
-        ),
-        buf[0 as ::core::ffi::c_int as usize],
+    let read = gz_read(
+        state_ref,
+        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
+        1 as crate::stdlib::z_size_t,
     );
+    if gz_take_state_corrupt(state_ref) {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+        );
+    }
+    gzgetc_read_result(read, buf[0 as ::core::ffi::c_int as usize])
 }
 #[export_name = "gzgetc_"]
 
@@ -4712,6 +4762,13 @@ pub unsafe extern "C" fn gzgets_ffi(
     );
     let state_ref = &mut *state;
     if gz_read_has_pending_skip(state_ref.skip) && gz_skip!(state_ref) {
+        if gz_take_state_corrupt(state_ref) {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+        }
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
@@ -4759,6 +4816,13 @@ pub unsafe extern "C" fn gzgets_ffi(
                 break;
             }
         }
+    }
+    if gz_take_state_corrupt(state_ref) {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
+        );
     }
     if !gzgets_copied_any(initial_left, left) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();

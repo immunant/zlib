@@ -227,6 +227,7 @@ fn gz_error_state_core(
         state.x.have = 0;
     }
     state.err = plan.err;
+    state.state_corrupt = 0;
 
     plan
 }
@@ -292,6 +293,7 @@ fn gz_open_defaults(state: &mut crate::gzguts_h::gz_state) {
     state.size = 0;
     state.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
     state.err = crate::zlib_h::Z_OK;
+    state.state_corrupt = 0;
     state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     state.mode = crate::gzguts_h::GZ_NONE;
     state.level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
@@ -1541,6 +1543,7 @@ mod tests {
             reset: 0,
             skip: 29,
             err: crate::zlib_h::Z_BUF_ERROR,
+            state_corrupt: 0,
             msg: ::core::ptr::null_mut(),
             strm: crate::zlib_h::z_stream_s {
                 next_in: ::core::ptr::null_mut(),
@@ -2107,6 +2110,7 @@ mod tests {
             reset: 0,
             skip: 0,
             err: crate::zlib_h::Z_OK,
+            state_corrupt: 0,
             msg: ::core::ptr::null_mut(),
             strm: crate::zlib_h::z_stream_s {
                 next_in: ::core::ptr::null_mut(),
@@ -2167,6 +2171,7 @@ mod tests {
             reset: 0,
             skip: 0,
             err: crate::zlib_h::Z_OK,
+            state_corrupt: 0,
             msg: ::core::ptr::null_mut(),
             strm: crate::zlib_h::z_stream_s {
                 next_in: ::core::ptr::null_mut(),

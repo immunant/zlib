@@ -3795,6 +3795,7 @@ mod tests {
             reset: 0,
             skip: 6,
             err: 0,
+            state_corrupt: 0,
             msg: ::core::ptr::null_mut(),
             strm: crate::zlib_h::z_stream {
                 next_in: ::core::ptr::null_mut(),
