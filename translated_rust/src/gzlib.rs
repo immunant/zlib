@@ -1047,6 +1047,58 @@ fn gz_open_flags(
         }
 }
 
+// Descriptor selection is purely a consequence of the supplied descriptor
+// and parsed mode flags.  Keep that choice separate from the raw descriptor
+// calls in `gz_open()`.
+enum GzOpenFdPlan {
+    Open,
+    Use {
+        nonblocking: bool,
+        close_on_exec: bool,
+    },
+}
+
+fn gz_open_fd_plan(fd: ::core::ffi::c_int, oflag: ::core::ffi::c_int) -> GzOpenFdPlan {
+    if fd == -1 as ::core::ffi::c_int {
+        GzOpenFdPlan::Open
+    } else {
+        GzOpenFdPlan::Use {
+            nonblocking: oflag & crate::stdlib::O_NONBLOCK != 0,
+            close_on_exec: oflag & crate::stdlib::O_CLOEXEC != 0,
+        }
+    }
+}
+
+// Positioning after a descriptor is opened only depends on the finalized
+// gzip mode.  The actual seek remains at the descriptor-I/O boundary.
+enum GzOpenPositionPlan {
+    None,
+    Append,
+    Read,
+}
+
+fn gz_open_position_plan(state: &crate::gzguts_h::gz_state) -> GzOpenPositionPlan {
+    if state.mode == crate::gzguts_h::GZ_APPEND {
+        GzOpenPositionPlan::Append
+    } else if state.mode == crate::gzguts_h::GZ_READ {
+        GzOpenPositionPlan::Read
+    } else {
+        GzOpenPositionPlan::None
+    }
+}
+
+fn gz_open_finish_append(state: &mut crate::gzguts_h::gz_state) {
+    state.mode = crate::gzguts_h::GZ_WRITE;
+}
+
+fn gz_open_set_read_start(state: &mut crate::gzguts_h::gz_state, start: crate::stdlib::off64_t) {
+    state.start = if start == -1 as crate::stdlib::off64_t {
+        0 as crate::stdlib::off64_t
+    } else {
+        start
+    };
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -1097,50 +1149,59 @@ unsafe extern "C" fn gz_open(
         path as *const ::core::ffi::c_char,
     );
     let oflag = gz_open_flags(state_ref, &options);
-    if fd == -1 as ::core::ffi::c_int {
-        state_ref.fd = crate::stdlib::open(
-            path as *const ::core::ffi::c_char,
-            oflag,
-            0o666 as ::core::ffi::c_int,
-        );
-    } else {
-        if oflag & crate::stdlib::O_NONBLOCK != 0 {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFL,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
+    match gz_open_fd_plan(fd, oflag) {
+        GzOpenFdPlan::Open => {
+            state_ref.fd = crate::stdlib::open(
+                path as *const ::core::ffi::c_char,
+                oflag,
+                0o666 as ::core::ffi::c_int,
             );
         }
-        if oflag & crate::stdlib::O_CLOEXEC != 0 {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFD,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
-            );
+        GzOpenFdPlan::Use {
+            nonblocking,
+            close_on_exec,
+        } => {
+            if nonblocking {
+                crate::stdlib::fcntl(
+                    fd,
+                    crate::stdlib::F_SETFL,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL)
+                        | crate::stdlib::O_NONBLOCK,
+                );
+            }
+            if close_on_exec {
+                crate::stdlib::fcntl(
+                    fd,
+                    crate::stdlib::F_SETFD,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD)
+                        | crate::stdlib::O_CLOEXEC,
+                );
+            }
+            state_ref.fd = fd;
         }
-        state_ref.fd = fd;
     }
     if state_ref.fd == -1 as ::core::ffi::c_int {
         crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    if state_ref.mode == crate::gzguts_h::GZ_APPEND {
-        crate::stdlib::lseek64(
-            state_ref.fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_END,
-        );
-        state_ref.mode = crate::gzguts_h::GZ_WRITE;
-    }
-    if state_ref.mode == crate::gzguts_h::GZ_READ {
-        state_ref.start = crate::stdlib::lseek64(
-            state_ref.fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if state_ref.start == -1 as crate::stdlib::off64_t {
-            state_ref.start = 0 as crate::stdlib::off64_t;
+    match gz_open_position_plan(state_ref) {
+        GzOpenPositionPlan::None => {}
+        GzOpenPositionPlan::Append => {
+            crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_END,
+            );
+            gz_open_finish_append(state_ref);
+        }
+        GzOpenPositionPlan::Read => {
+            let start = crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_CUR,
+            ) as crate::stdlib::off64_t;
+            gz_open_set_read_start(state_ref, start);
         }
     }
     gz_reset(state_ref);
