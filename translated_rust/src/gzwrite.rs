@@ -250,7 +250,7 @@ macro_rules! gz_comp_at_boundary {
                     }
                 }
                 let have = state_ref.strm.avail_out;
-                ret = crate::src::deflate::deflate(&raw mut state_ref.strm, flush);
+                ret = crate::src::deflate::deflate(&mut state_ref.strm, flush);
                 match crate::src::gzwrite::gz_comp_after_deflate(
                     have,
                     state_ref.strm.avail_out,

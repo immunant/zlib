@@ -1921,7 +1921,7 @@ macro_rules! deflate_params_at_boundary {
                     break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                 };
             if plan.needs_block_flush {
-                let err = crate::src::deflate::deflate(strm, crate::zlib_h::Z_BLOCK);
+                let err = crate::src::deflate::deflate(&mut *strm, crate::zlib_h::Z_BLOCK);
                 if err == crate::zlib_h::Z_STREAM_ERROR {
                     break 'deflate_params_result err;
                 }
@@ -2778,7 +2778,7 @@ fn deflate_compressor_plan(
 }
 
 pub fn deflate(
-    mut strm: crate::zlib_h::z_streamp,
+    strm_ref: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     // This legacy dispatcher still has to adopt the ABI stream/state records,
@@ -2786,6 +2786,7 @@ pub fn deflate(
     // that work at one explicit transitional codec boundary so Rust callers do
     // not inherit an unsafe-function contract.
     unsafe {
+        let strm = strm_ref as *mut crate::zlib_h::z_stream;
         let mut old_flush: ::core::ffi::c_int = 0;
         if flush > crate::zlib_h::Z_BLOCK || flush < 0 as ::core::ffi::c_int || strm.is_null() {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -3442,7 +3443,11 @@ pub unsafe extern "C" fn deflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflate(strm, flush)
+    if flush > crate::zlib_h::Z_BLOCK || flush < 0 || strm.is_null() {
+        crate::zlib_h::Z_STREAM_ERROR
+    } else {
+        deflate(&mut *strm, flush)
+    }
 }
 fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if status == crate::src::deflate::BUSY_STATE {
