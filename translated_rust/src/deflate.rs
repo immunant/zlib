@@ -2806,6 +2806,14 @@ fn deflate_stored_advance_insert(
     })
 }
 
+fn deflate_stored_window_start(state: &crate::src::deflate::deflate_state) -> usize {
+    // Stored mode keeps block_start nonnegative: stored-mode slides subtract
+    // only after block_start >= w_size, and deflateParams drains any non-stored
+    // block before switching strategies into stored mode.
+    debug_assert!(state.block_start >= 0 as ::core::ffi::c_long);
+    state.block_start as usize
+}
+
 fn deflate_insert_limit(strstart: crate::stdlib::uInt) -> crate::stdlib::uInt {
     let limit = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
     if strstart < limit {
@@ -2919,14 +2927,8 @@ fn deflate_stored(
                 left = len;
             }
             let copy_len = left as usize;
-            if s.block_start >= 0 as ::core::ffi::c_long {
-                let stored_start = s.block_start as usize;
-                output.copy_from_slice(strm, &window[stored_start..stored_start + copy_len]);
-            } else {
-                let stored_base = s.window.wrapping_offset(s.block_start as isize);
-                let stored = unsafe { ::core::slice::from_raw_parts(stored_base, copy_len) };
-                output.copy_from_slice(strm, stored);
-            }
+            let stored_start = deflate_stored_window_start(s);
+            output.copy_from_slice(strm, &window[stored_start..stored_start + copy_len]);
             s.block_start += left as ::core::ffi::c_long;
             len = len.wrapping_sub(left);
         }
@@ -3030,7 +3032,7 @@ fn deflate_stored(
         len = plan.len;
         left = plan.left;
         last = plan.last;
-        let stored_start = s.block_start as usize;
+        let stored_start = deflate_stored_window_start(s);
         let stored = &window[stored_start..stored_start + len as usize];
         crate::src::trees::tr_stored_block_impl(
             s,
