@@ -2420,20 +2420,19 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if !inflate_state_valid(strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if !state.window.is_null() {
-        unsafe {
-            Some(strm.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                state.window as crate::stdlib::voidpf,
-            );
+    // The C allocator releases the window before the state. Keep that order
+    // in one explicit callback boundary while these allocations remain raw.
+    let allocations = [
+        state.window as crate::stdlib::voidpf,
+        strm.state as crate::stdlib::voidpf,
+    ];
+    for allocation in allocations {
+        if !allocation.is_null() {
+            unsafe {
+                Some(strm.zfree.expect("non-null function pointer"))
+                    .expect("non-null function pointer")(strm.opaque, allocation);
+            }
         }
-    }
-    unsafe {
-        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            strm.opaque,
-            strm.state as crate::stdlib::voidpf,
-        );
     }
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
