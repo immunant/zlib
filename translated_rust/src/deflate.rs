@@ -402,6 +402,16 @@ pub(crate) fn symbol_triplet_cursors(
     ([start, second, third], third.wrapping_add(1))
 }
 
+fn can_search_hash_match(
+    hash_head: crate::src::deflate::IPos,
+    strstart: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+) -> bool {
+    hash_head != NIL as crate::src::deflate::IPos
+        && (strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
+            <= w_size.wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
+}
+
 unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut m: ::core::ffi::c_uint = 0;
@@ -2966,12 +2976,7 @@ unsafe extern "C" fn deflate_fast(
             *(*s).head.wrapping_add((*s).ins_h as usize) =
                 (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
         }
-        if hash_head != NIL as crate::src::deflate::IPos
-            && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= (*s)
-                    .w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-        {
+        if can_search_hash_match(hash_head, (*s).strstart, (*s).w_size) {
             (*s).match_length = longest_match(s, hash_head);
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
@@ -3818,9 +3823,9 @@ unsafe fn deflate_huff(
 #[cfg(test)]
 mod tests {
     use super::{
-        clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
-        deflate_flush_rank, deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_request_is_invalid, deflate_reset_status_and_adler,
+        can_search_hash_match, clamped_copy_len, deflate_bound_lengths, deflate_copyright,
+        deflate_dictionary_len, deflate_flush_rank, deflate_pending_value, deflate_preflight,
+        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
         deflate_should_return_buf_error, deflate_state_status_valid, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
         fill_window_insert_after_slide, fill_window_should_refill, fill_window_zero_range,
@@ -3843,6 +3848,33 @@ mod tests {
                 1
             )
         );
+    }
+
+    #[test]
+    fn hash_match_search_gate_preserves_nil_and_distance_boundaries() {
+        let w_size = 32_768;
+        let maximum_distance = w_size - crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
+
+        assert!(!can_search_hash_match(
+            crate::src::deflate::NIL as crate::src::deflate::IPos,
+            1,
+            w_size
+        ));
+        assert!(can_search_hash_match(
+            1,
+            maximum_distance.wrapping_add(1),
+            w_size
+        ));
+        assert!(!can_search_hash_match(
+            1,
+            maximum_distance.wrapping_add(2),
+            w_size
+        ));
+        assert!(can_search_hash_match(
+            crate::stdlib::uInt::MAX as crate::src::deflate::IPos,
+            0,
+            w_size
+        ));
     }
 
     #[test]

@@ -126,8 +126,8 @@ fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
     (len as ::core::ffi::c_int) >= 0 && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
 }
 
-fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
-    (len as ::core::ffi::c_int) >= 0
+fn gzwrite_request(len: ::core::ffi::c_uint) -> Option<crate::stdlib::z_size_t> {
+    ((len as ::core::ffi::c_int) >= 0).then_some(len as crate::stdlib::z_size_t)
 }
 
 fn gz_write_state_is_usable(
@@ -911,15 +911,15 @@ pub unsafe extern "C" fn gzwrite(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if !gzwrite_len_fits_int(len) {
+    let Some(len) = gzwrite_request(len) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_DATA_ERROR,
             b"requested length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
         );
         return 0 as ::core::ffi::c_int;
-    }
-    return gz_write(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_int;
+    };
+    return gz_write(state, buf, len) as ::core::ffi::c_int;
 }
 #[export_name = "gzwrite"]
 
@@ -1201,7 +1201,7 @@ mod tests {
         gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_result,
         gzputc_result, gzputc_write_action, gzputs_len_fits_int, gzputs_result,
         gzsetparams_buffer_action, gzsetparams_settings_match, gzsetparams_state_is_usable,
-        gzwrite_len_fits_int, GzCloseBufferAction, GzCompResetAction, GzCompWriteFailure,
+        gzwrite_request, GzCloseBufferAction, GzCompResetAction, GzCompWriteFailure,
         GzCompWriteResult, GzPutcWriteAction, GzSetParamsBufferAction, GzWriteDirectAction,
         GzZeroAction,
     };
@@ -1726,20 +1726,13 @@ mod tests {
     }
 
     #[test]
-    fn gzwrite_len_fits_int_accepts_c_int_range() {
-        assert!(gzwrite_len_fits_int(0));
-        assert!(gzwrite_len_fits_int(1));
-        assert!(gzwrite_len_fits_int(
-            ::core::ffi::c_int::MAX as ::core::ffi::c_uint
-        ));
-    }
+    fn gzwrite_request_converts_only_signed_int_representable_lengths() {
+        let largest_valid = ::core::ffi::c_int::MAX as ::core::ffi::c_uint;
 
-    #[test]
-    fn gzwrite_len_fits_int_rejects_values_outside_c_int_range() {
-        assert!(!gzwrite_len_fits_int(
-            (::core::ffi::c_int::MAX as ::core::ffi::c_uint) + 1
-        ));
-        assert!(!gzwrite_len_fits_int(::core::ffi::c_uint::MAX));
+        assert_eq!(gzwrite_request(0), Some(0));
+        assert_eq!(gzwrite_request(largest_valid), Some(largest_valid as _));
+        assert_eq!(gzwrite_request(largest_valid.wrapping_add(1)), None);
+        assert_eq!(gzwrite_request(::core::ffi::c_uint::MAX), None);
     }
 
     #[test]

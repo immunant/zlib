@@ -154,8 +154,8 @@ fn gz_avail_should_compact(compact_input: bool, input_is_buffer_start: bool) -> 
     compact_input && !input_is_buffer_start
 }
 
-fn gzread_request_fits_int(len: ::core::ffi::c_uint) -> bool {
-    (len as ::core::ffi::c_int) >= 0
+fn gzread_request(len: ::core::ffi::c_uint) -> Option<crate::stdlib::z_size_t> {
+    ((len as ::core::ffi::c_int) >= 0).then_some(len as crate::stdlib::z_size_t)
 }
 
 fn gz_is_read_mode(mode: ::core::ffi::c_int) -> bool {
@@ -1595,11 +1595,13 @@ mod tests {
     }
 
     #[test]
-    fn gzread_request_fits_int_checks_signed_int_boundary() {
+    fn gzread_request_converts_only_signed_int_representable_lengths() {
         let largest_valid = ::core::ffi::c_int::MAX as ::core::ffi::c_uint;
 
-        assert!(gzread_request_fits_int(largest_valid));
-        assert!(!gzread_request_fits_int(largest_valid.wrapping_add(1)));
+        assert_eq!(gzread_request(0), Some(0));
+        assert_eq!(gzread_request(largest_valid), Some(largest_valid as _));
+        assert_eq!(gzread_request(largest_valid.wrapping_add(1)), None);
+        assert_eq!(gzread_request(::core::ffi::c_uint::MAX), None);
     }
 
     #[test]
@@ -2455,15 +2457,15 @@ pub unsafe extern "C" fn gzread(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if !gzread_request_fits_int(len) {
+    let Some(request_len) = gzread_request(len) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in an int\0".as_ptr() as *const ::core::ffi::c_char,
         );
         return -1 as ::core::ffi::c_int;
-    }
-    len = gz_read(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_uint;
+    };
+    len = gz_read(state, buf, request_len) as ::core::ffi::c_uint;
     match gzread_outcome(len, (*state).err, (*state).again) {
         GzreadOutcome::Read(read) => read,
         GzreadOutcome::Error => -1 as ::core::ffi::c_int,

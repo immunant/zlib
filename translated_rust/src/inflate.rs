@@ -618,6 +618,14 @@ fn inflate_reset2_params(
     Some((wrap, window_bits as ::core::ffi::c_uint))
 }
 
+fn inflate_reset2_discards_window(
+    has_window: bool,
+    current_wbits: ::core::ffi::c_uint,
+    requested_wbits: ::core::ffi::c_uint,
+) -> bool {
+    has_window && current_wbits != requested_wbits
+}
+
 unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return inflate_state_check_result(false, false, false);
@@ -709,7 +717,7 @@ pub unsafe extern "C" fn inflateReset2(
     let Some((wrap, window_bits)) = inflate_reset2_params(windowBits) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !(*state).window.is_null() && (*state).wbits != window_bits {
+    if inflate_reset2_discards_window(!(*state).window.is_null(), (*state).wbits, window_bits) {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
             (*state).window as crate::stdlib::voidpf,
@@ -2926,18 +2934,18 @@ mod tests {
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
         inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
-        inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
-        inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
-        inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
-        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
-        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
-        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
-        InflateBlockKind, InflateCopyProgress, InflateMatchPlan, InflateMatchSource,
-        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
-        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
+        inflate_should_update_window, inflate_state_check_result, inflate_state_is_usable,
+        inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
+        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
+        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
+        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
+        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
+        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
+        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
+        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
+        InflateSyncSearch, InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2958,6 +2966,13 @@ mod tests {
             ::core::ffi::c_uint::MAX,
             ::core::ffi::c_uint::MAX
         ));
+    }
+
+    #[test]
+    fn inflate_reset2_discards_only_existing_mismatched_windows() {
+        assert!(!inflate_reset2_discards_window(false, 15, 14));
+        assert!(!inflate_reset2_discards_window(true, 15, 15));
+        assert!(inflate_reset2_discards_window(true, 15, 14));
     }
 
     #[test]
