@@ -1681,6 +1681,30 @@ fn flush_pending_progress(
     *pending = pending.wrapping_sub(len as crate::zutil_h::ulg);
 }
 
+// Once the pending allocation has been bound by the raw adapter, bit draining
+// and its transfer size are ordinary reference-and-slice work.
+fn flush_pending_bytes(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    pending_buf: &mut [crate::zutil_h::uch],
+) -> ::core::ffi::c_uint {
+    crate::src::trees::tr_flush_bits(state, pending_buf);
+    pending_copy_len(state.pending, stream.avail_out)
+}
+
+fn flush_pending_account(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    len: ::core::ffi::c_uint,
+) {
+    flush_pending_progress(
+        &mut stream.avail_out,
+        &mut stream.total_out,
+        &mut state.pending,
+        len,
+    );
+}
+
 // Private raw adapters are Rust-ABI functions.  The public `_ffi` wrappers
 // remain the only C ABI boundary for callers outside this crate.
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
@@ -1692,8 +1716,7 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         state.pending_buf,
         state.pending_buf_size as usize,
     );
-    crate::src::trees::tr_flush_bits(state, pending_buf);
-    let len = pending_copy_len(state.pending, stream.avail_out);
+    let len = flush_pending_bytes(state, stream, pending_buf);
     if len == 0 as ::core::ffi::c_uint {
         return;
     }
@@ -1702,16 +1725,11 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         state.pending_out as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
+    flush_pending_account(state, stream, len);
     // Both ranges were validated by the deflater before this flush. Advance
     // their addresses without requiring an in-bounds raw-pointer operation.
     stream.next_out = stream.next_out.wrapping_add(len as usize);
     state.pending_out = state.pending_out.wrapping_add(len as usize);
-    flush_pending_progress(
-        &mut stream.avail_out,
-        &mut stream.total_out,
-        &mut state.pending,
-        len,
-    );
     if state.pending == 0 as crate::zutil_h::ulg {
         state.pending_out = state.pending_buf;
     }
