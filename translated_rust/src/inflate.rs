@@ -229,7 +229,7 @@ fn dynamic_code_length_repeat_fits(
     nlen: ::core::ffi::c_uint,
     ndist: ::core::ffi::c_uint,
 ) -> bool {
-    have.wrapping_add(repeat) <= nlen.wrapping_add(ndist)
+    (have as u64) + (repeat as u64) <= (nlen as u64) + (ndist as u64)
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -3018,6 +3018,16 @@ mod tests {
             1,
             ::core::ffi::c_uint::MAX,
             1,
+        ));
+    }
+
+    #[test]
+    fn dynamic_code_length_repeat_fits_rejects_wrapping_progress() {
+        assert!(!dynamic_code_length_repeat_fits(
+            ::core::ffi::c_uint::MAX,
+            1,
+            0,
+            0,
         ));
     }
 

@@ -847,8 +847,7 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
     (*state).x.have = gz_decomp_output_len(had, (*strm).avail_out);
     (*state).x.next = (*strm)
         .next_out
-        .wrapping_sub(gz_decomp_output_rewind_len((*state).x.have))
-        as *mut ::core::ffi::c_uchar;
+        .wrapping_sub(gz_decomp_output_rewind_len((*state).x.have));
     match gz_decomp_result(ret) {
         GzDecompResult::RestartLook => {
             (*state).junk = 0 as ::core::ffi::c_int;

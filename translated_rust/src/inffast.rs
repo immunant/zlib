@@ -216,11 +216,11 @@ pub unsafe extern "C" fn inflate_fast(
     's_94: loop {
         if bits < 15 as ::core::ffi::c_uint {
             let c2rust_fresh0 = in_0;
-            in_0 = in_0.offset(1);
+            in_0 = in_0.wrapping_add(1);
             input_remaining = input_remaining.wrapping_sub(1);
             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh0);
             let c2rust_fresh1 = in_0;
-            in_0 = in_0.offset(1);
+            in_0 = in_0.wrapping_add(1);
             input_remaining = input_remaining.wrapping_sub(1);
             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh1);
         }
@@ -232,7 +232,7 @@ pub unsafe extern "C" fn inflate_fast(
             match fast_litlen_action(op) {
                 FastLitLenAction::Literal => {
                     let c2rust_fresh2 = out;
-                    out = out.offset(1);
+                    out = out.wrapping_add(1);
                     (output_produced, output_remaining) =
                         output_cursor_after_write(output_produced, output_remaining);
                     *c2rust_fresh2 = (*here).val as ::core::ffi::c_uchar;
@@ -532,7 +532,7 @@ pub unsafe extern "C" fn inflate_fast(
         }
     }
     (hold, bits, len) = unread_bit_state(hold, bits);
-    in_0 = in_0.offset(-(len as isize));
+    in_0 = in_0.wrapping_sub(len as usize);
     (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
     (*strm).avail_in = input_remaining_after_unread(input_remaining, len);

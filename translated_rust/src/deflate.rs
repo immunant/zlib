@@ -532,7 +532,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         {
             crate::stdlib::memcpy(
                 (*s).window as *mut ::core::ffi::c_void,
-                (*s).window.offset(wsize as isize) as *const ::core::ffi::c_void,
+                (*s).window.wrapping_add(wsize as usize) as *const ::core::ffi::c_void,
                 wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
             );
             (*s).match_start = (*s).match_start.wrapping_sub(wsize);
