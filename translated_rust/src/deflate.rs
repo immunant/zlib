@@ -1576,6 +1576,11 @@ enum DeflateStorageProjection<'request> {
     // it at the reset adapter after the opaque state has been borrowed.
     Hash,
     Dictionary,
+    // Deflate dispatch needs the three dictionary/history tables and the
+    // pending bytes together.  Keep that complete callback-storage view at
+    // the shared stream/state boundary rather than rebuilding its pending
+    // slice in the dispatch adapter.
+    Dispatch,
     // Dictionary installation is a complete pointer-free operation once the
     // shared boundary has lent it the callback-owned views.  Keep its status
     // slot in the request so the FFI export can dispatch directly without
@@ -1658,6 +1663,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         }
     });
     let storage_layout = state.callback_storage.storage();
+    let dispatches_with_pending = matches!(&projection, DeflateStorageProjection::Dispatch);
     let storage = match projection {
         DeflateStorageProjection::None => DeflateCallbackStorage {
             window: None,
@@ -1693,6 +1699,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             pending: None,
         },
         DeflateStorageProjection::Dictionary
+        | DeflateStorageProjection::Dispatch
         | DeflateStorageProjection::DictionaryInstall { .. }
         | DeflateStorageProjection::DictionaryQuery { .. } => DeflateCallbackStorage {
             window: Some(::core::slice::from_raw_parts_mut(
@@ -1716,7 +1723,20 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                     .element_len::<crate::src::deflate::Posf>()
                     .expect("validated head allocation geometry"),
             )),
-            pending: None,
+            pending: if dispatches_with_pending {
+                Some(::core::slice::from_raw_parts_mut(
+                    state
+                        .pending_buf
+                        .expect("initialized pending buffer")
+                        .as_ptr(),
+                    storage_layout
+                        .pending
+                        .byte_len()
+                        .expect("validated pending allocation geometry"),
+                ))
+            } else {
+                None
+            },
         },
     };
     if let DeflateStorageProjection::DictionaryInstall { dictionary, result } = projection {
@@ -4845,10 +4865,10 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // Dispatch needs the same three bounded history views as dictionary
-    // handling. Reuse that single callback-storage projection instead of
-    // rebuilding window, prev, and head slices at this boundary.
+    // handling, plus pending bytes. Reuse the single complete callback-
+    // storage projection instead of rebuilding any storage slice here.
     let Some((strm, state, storage, _)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary, None)
+        deflate_stream_and_state(strm, DeflateStorageProjection::Dispatch, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -4866,13 +4886,7 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
         ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
     };
     let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
+    let pending_buf = storage.pending.expect("dispatch pending-buffer projection");
     let window = storage.window.expect("dispatch window projection");
     let prev = storage.prev.expect("dispatch prev-table projection");
     let head = storage.head.expect("dispatch hash-table projection");
