@@ -395,6 +395,14 @@ fn clamped_copy_len(
     available.min(requested) as ::core::ffi::c_uint
 }
 
+fn symbol_triplet_cursors(
+    start: crate::stdlib::uInt,
+) -> ([crate::stdlib::uInt; 3], crate::stdlib::uInt) {
+    let second = start.wrapping_add(1);
+    let third = second.wrapping_add(1);
+    ([start, second, third], third.wrapping_add(1))
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut m: ::core::ffi::c_uint = 0;
@@ -2901,15 +2909,11 @@ unsafe extern "C" fn deflate_fast(
         } else {
             let mut cc: crate::zutil_h::uch =
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-            let c2rust_fresh51 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh51 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh52 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh52 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh53 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh53 as isize) = cc as crate::zutil_h::uchf;
+            let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
+            (*s).sym_next = next;
+            *(*s).sym_buf.offset(cursors[0] as isize) = 0 as crate::zutil_h::uchf;
+            *(*s).sym_buf.offset(cursors[1] as isize) = 0 as crate::zutil_h::uchf;
+            *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc.value =
                 (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
@@ -3388,18 +3392,14 @@ unsafe extern "C" fn deflate_rle(
             let mut len: crate::zutil_h::uch =
                 (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
             let mut dist: crate::zutil_h::ush = 1 as ::core::ffi::c_int as crate::zutil_h::ush;
-            let c2rust_fresh54 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh54 as isize) =
+            let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
+            (*s).sym_next = next;
+            *(*s).sym_buf.offset(cursors[0] as isize) =
                 dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-            let c2rust_fresh55 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh55 as isize) =
+            *(*s).sym_buf.offset(cursors[1] as isize) =
                 (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
                     as crate::zutil_h::uchf;
-            let c2rust_fresh56 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh56 as isize) = len as crate::zutil_h::uchf;
+            *(*s).sym_buf.offset(cursors[2] as isize) = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
             (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
@@ -3449,15 +3449,11 @@ unsafe extern "C" fn deflate_rle(
         } else {
             let mut cc: crate::zutil_h::uch =
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-            let c2rust_fresh57 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh57 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh58 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh58 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh59 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh59 as isize) = cc as crate::zutil_h::uchf;
+            let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
+            (*s).sym_next = next;
+            *(*s).sym_buf.offset(cursors[0] as isize) = 0 as crate::zutil_h::uchf;
+            *(*s).sym_buf.offset(cursors[1] as isize) = 0 as crate::zutil_h::uchf;
+            *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc.value =
                 (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
@@ -3558,15 +3554,11 @@ unsafe extern "C" fn deflate_huff(
         (*s).match_length = 0 as crate::stdlib::uInt;
         let mut cc: crate::zutil_h::uch =
             *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        let c2rust_fresh60 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh60 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh61 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh61 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh62 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh62 as isize) = cc as crate::zutil_h::uchf;
+        let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
+        (*s).sym_next = next;
+        *(*s).sym_buf.offset(cursors[0] as isize) = 0 as crate::zutil_h::uchf;
+        *(*s).sym_buf.offset(cursors[1] as isize) = 0 as crate::zutil_h::uchf;
+        *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
         (*s).dyn_ltree[cc as usize].fc.value = (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
         bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);
@@ -3656,8 +3648,20 @@ mod tests {
         fill_window_cursor, fill_window_insert_after_slide, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
         pending_output_len, read_buf_len, short_msb_bytes, slide_hash_entry, stored_block_min_size,
-        stored_insert_after_input, zlib_header,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header,
     };
+
+    #[test]
+    fn symbol_triplet_cursors_preserve_record_order_and_wrapping() {
+        assert_eq!(symbol_triplet_cursors(7), ([7, 8, 9], 10));
+        assert_eq!(
+            symbol_triplet_cursors(crate::stdlib::uInt::MAX - 1),
+            (
+                [crate::stdlib::uInt::MAX - 1, crate::stdlib::uInt::MAX, 0],
+                1
+            )
+        );
+    }
 
     #[test]
     fn normalize_deflate_params_maps_default_level_to_six() {

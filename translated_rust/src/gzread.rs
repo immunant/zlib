@@ -389,6 +389,13 @@ enum GzUngetcBufferState {
     Pushable,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum GzUngetcAction {
+    Empty { write_index: usize },
+    Full,
+    Pushable { compact: bool },
+}
+
 fn gz_ungetc_buffer_state(
     have: ::core::ffi::c_uint,
     size: ::core::ffi::c_uint,
@@ -399,6 +406,22 @@ fn gz_ungetc_buffer_state(
         GzUngetcBufferState::Full
     } else {
         GzUngetcBufferState::Pushable
+    }
+}
+
+fn gz_ungetc_action(
+    have: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+    next_is_out: bool,
+) -> GzUngetcAction {
+    match gz_ungetc_buffer_state(have, size) {
+        GzUngetcBufferState::Empty => GzUngetcAction::Empty {
+            write_index: gz_output_buffer_len(size).wrapping_sub(1) as usize,
+        },
+        GzUngetcBufferState::Full => GzUngetcAction::Full,
+        GzUngetcBufferState::Pushable => GzUngetcAction::Pushable {
+            compact: next_is_out,
+        },
     }
 }
 
@@ -1648,6 +1671,23 @@ mod tests {
     }
 
     #[test]
+    fn gz_ungetc_action_preserves_empty_full_and_compaction_decisions() {
+        assert_eq!(
+            gz_ungetc_action(0, 8, true),
+            GzUngetcAction::Empty { write_index: 15 }
+        );
+        assert_eq!(gz_ungetc_action(16, 8, false), GzUngetcAction::Full);
+        assert_eq!(
+            gz_ungetc_action(15, 8, true),
+            GzUngetcAction::Pushable { compact: true }
+        );
+        assert_eq!(
+            gz_ungetc_action(15, 8, false),
+            GzUngetcAction::Pushable { compact: false }
+        );
+    }
+
+    #[test]
     fn gz_ungetc_next_have_wraps_buffered_count() {
         assert_eq!(gz_ungetc_next_have(0), 1);
         assert_eq!(gz_ungetc_next_have(::core::ffi::c_uint::MAX), 0);
@@ -2180,20 +2220,21 @@ pub unsafe extern "C" fn gzungetc(
     if !gz_ungetc_accepts_byte(c) {
         return -1 as ::core::ffi::c_int;
     }
-    match gz_ungetc_buffer_state((*state).x.have, (*state).size) {
-        GzUngetcBufferState::Empty => {
+    match gz_ungetc_action(
+        (*state).x.have,
+        (*state).size,
+        (*state).x.next == (*state).out,
+    ) {
+        GzUngetcAction::Empty { write_index } => {
             let (have, pos, past) = gz_ungetc_progress((*state).x.have, (*state).x.pos);
             (*state).x.have = have;
-            (*state).x.next = (*state)
-                .out
-                .offset(gz_output_buffer_len((*state).size) as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize));
+            (*state).x.next = (*state).out.offset(write_index as isize);
             *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
             (*state).x.pos = pos;
             (*state).past = past;
             return c;
         }
-        GzUngetcBufferState::Full => {
+        GzUngetcAction::Full => {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_DATA_ERROR,
@@ -2201,19 +2242,21 @@ pub unsafe extern "C" fn gzungetc(
             );
             return -1 as ::core::ffi::c_int;
         }
-        GzUngetcBufferState::Pushable => {}
-    }
-    if (*state).x.next == (*state).out {
-        let mut src: *mut ::core::ffi::c_uchar = (*state).out.offset((*state).x.have as isize);
-        let mut dest: *mut ::core::ffi::c_uchar = (*state)
-            .out
-            .offset(gz_output_buffer_len((*state).size) as isize);
-        while src > (*state).out {
-            src = src.wrapping_sub(1);
-            dest = dest.wrapping_sub(1);
-            *dest = *src;
+        GzUngetcAction::Pushable { compact } => {
+            if compact {
+                let mut src: *mut ::core::ffi::c_uchar =
+                    (*state).out.offset((*state).x.have as isize);
+                let mut dest: *mut ::core::ffi::c_uchar = (*state)
+                    .out
+                    .offset(gz_output_buffer_len((*state).size) as isize);
+                while src > (*state).out {
+                    src = src.wrapping_sub(1);
+                    dest = dest.wrapping_sub(1);
+                    *dest = *src;
+                }
+                (*state).x.next = dest;
+            }
         }
-        (*state).x.next = dest;
     }
     let (have, pos, past) = gz_ungetc_progress((*state).x.have, (*state).x.pos);
     (*state).x.have = have;
