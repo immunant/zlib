@@ -118,6 +118,12 @@ pub unsafe extern "C" fn inflateBackInit_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     (*strm).state = state as *mut crate::src::deflate::internal_state;
+    // Back-mode state uses the same allocation/release contract as normal
+    // inflate.  Establish the scalar validity invariants now so its exported
+    // end entry point can reuse inflateEnd()'s checked cleanup rather than
+    // keeping a duplicate raw release implementation.
+    (*state).stream_identity = strm.addr();
+    (*state).mode = crate::src::inflate::TYPE;
     (*state).dmax = 32768 as ::core::ffi::c_uint;
     (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
     (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
@@ -1133,21 +1139,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
 ) -> ::core::ffi::c_int {
     inflateBack(strm, in_0, in_desc, out, out_desc)
 }
-pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
-}
 #[export_name = "inflateBackEnd"]
 
 pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateBackEnd(strm)
+    crate::src::inflate::inflateEnd(strm)
 }
