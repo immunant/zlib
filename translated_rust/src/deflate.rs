@@ -568,33 +568,43 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
     (*s).slid = 1 as ::core::ffi::c_int;
 }
 
+fn read_buf_impl(
+    strm: &mut crate::zlib_h::z_stream_s,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    wrap: ::core::ffi::c_int,
+) {
+    let len = input.len() as crate::stdlib::uInt;
+    strm.avail_in = strm.avail_in.wrapping_sub(len);
+    output.copy_from_slice(input);
+    if wrap == 1 as ::core::ffi::c_int {
+        strm.adler = crate::src::adler32::adler32_z(strm.adler, output);
+    } else if wrap == 2 as ::core::ffi::c_int {
+        strm.adler = crate::src::crc32::crc32(strm.adler, output);
+    }
+    strm.total_in = strm.total_in.wrapping_add(len as crate::stdlib::uLong);
+}
+
 unsafe extern "C" fn read_buf(
-    mut strm: crate::zlib_h::z_streamp,
-    mut buf: *mut crate::stdlib::Bytef,
-    mut size: ::core::ffi::c_uint,
+    strm: crate::zlib_h::z_streamp,
+    buf: *mut crate::stdlib::Bytef,
+    size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let mut len: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-    if len > size {
-        len = size;
+    let strm = &mut *strm;
+    let len = strm.avail_in.min(size);
+    if len == 0 {
+        return 0;
     }
-    if len == 0 as ::core::ffi::c_uint {
-        return 0 as ::core::ffi::c_uint;
-    }
-    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
+
     // `len` is bounded by both the caller-provided destination capacity and
     // the stream's available input above, so each view covers exactly the
     // bytes transferred by this call.
-    let input = ::core::slice::from_raw_parts((*strm).next_in, len as usize);
+    let input = ::core::slice::from_raw_parts(strm.next_in, len as usize);
     let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
-    output.copy_from_slice(input);
-    if (*(*strm).state).wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32_z((*strm).adler, output);
-    } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::crc32::crc32((*strm).adler, output);
-    }
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
-    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
-    return len;
+    let wrap = (&*strm.state).wrap;
+    read_buf_impl(strm, input, output, wrap);
+    strm.next_in = strm.next_in.add(len as usize);
+    len
 }
 
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
