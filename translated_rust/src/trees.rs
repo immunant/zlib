@@ -5373,35 +5373,38 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
 ) {
     _tr_flush_block(s, buf, stored_len, last)
 }
-pub unsafe extern "C" fn _tr_tally(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut dist: ::core::ffi::c_uint,
-    mut lc: ::core::ffi::c_uint,
+fn tr_tally_core(
+    symbols: &mut [crate::zutil_h::uchf],
+    sym_next: &mut crate::stdlib::uInt,
+    sym_end: crate::stdlib::uInt,
+    matches: &mut crate::stdlib::uInt,
+    dyn_ltree: &mut [crate::src::deflate::ct_data],
+    dyn_dtree: &mut [crate::src::deflate::ct_data],
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let symbol_bytes = tally_symbol_bytes(dist, lc);
-    let sym_next = (*s).sym_next;
-    let (cursors, next_sym_next) = symbol_triplet_cursors(sym_next);
+    let (cursors, next_sym_next) = symbol_triplet_cursors(*sym_next);
     for (cursor, byte) in cursors.into_iter().zip(symbol_bytes) {
-        *(*s).sym_buf.wrapping_add(cursor as usize) = byte;
+        symbols[cursor as usize] = byte;
     }
-    (*s).sym_next = next_sym_next;
+    *sym_next = next_sym_next;
     match tally_tree_update(dist, lc) {
         TallyTreeUpdate::Literal { literal_index } => {
-            (*s).dyn_ltree[literal_index].fc.value =
-                (*s).dyn_ltree[literal_index].fc.value.wrapping_add(1);
+            dyn_ltree[literal_index].fc.value = dyn_ltree[literal_index].fc.value.wrapping_add(1);
         }
         TallyTreeUpdate::Match {
             length_index,
             distance_index,
         } => {
-            (*s).matches = (*s).matches.wrapping_add(1);
-            (*s).dyn_ltree[length_index].fc.value =
-                (*s).dyn_ltree[length_index].fc.value.wrapping_add(1);
-            (*s).dyn_dtree[distance_index].fc.value =
-                (*s).dyn_dtree[distance_index].fc.value.wrapping_add(1);
+            *matches = matches.wrapping_add(1);
+            dyn_ltree[length_index].fc.value =
+                dyn_ltree[length_index].fc.value.wrapping_add(1);
+            dyn_dtree[distance_index].fc.value =
+                dyn_dtree[distance_index].fc.value.wrapping_add(1);
         }
     }
-    return symbol_buffer_is_full(next_sym_next, (*s).sym_end) as ::core::ffi::c_int;
+    symbol_buffer_is_full(next_sym_next, sym_end) as ::core::ffi::c_int
 }
 #[export_name = "_tr_tally"]
 
@@ -5410,7 +5413,21 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    _tr_tally(s, dist, lc)
+    let state = &mut *s;
+    let symbols = core::slice::from_raw_parts_mut(
+        state.sym_buf,
+        state.pending_buf_size.wrapping_sub(state.lit_bufsize as crate::zutil_h::ulg) as usize,
+    );
+    tr_tally_core(
+        symbols,
+        &mut state.sym_next,
+        state.sym_end,
+        &mut state.matches,
+        &mut state.dyn_ltree,
+        &mut state.dyn_dtree,
+        dist,
+        lc,
+    )
 }
 
 #[cfg(test)]
