@@ -1471,6 +1471,21 @@ fn deflate_flush_bits(
         state.bi_valid -= 8;
     }
 }
+// Prime only changes validated deflater state and its owned pending buffer.
+// Reuse the common bounded buffer adapter so the exported ABI shim only has
+// to bind its stream argument.
+pub fn deflatePrime(
+    strm: &mut crate::zlib_h::z_stream,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let Some((stream, state)) = deflateStateCheck(strm as *mut _) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    flush_pending(state, stream, false, |state, _stream, pending, _output| {
+        deflate_prime_checked(state, pending, bits, value)
+    })
+}
 #[export_name = "deflatePrime"]
 
 pub unsafe extern "C" fn deflatePrime_ffi(
@@ -1478,14 +1493,10 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    // SAFETY: `deflateStateCheck()` established this live deflater. Its
-    // pending allocation has exactly `pending_buf_size` bytes.
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    deflate_prime_checked(state, pending, bits, value)
+    deflatePrime(strm, bits, value)
 }
 // All raw stream/state binding is contained in `deflateStateCheck()` and the
 // bounded helpers it calls, so this implementation itself has no unsafe
