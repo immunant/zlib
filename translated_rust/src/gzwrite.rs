@@ -140,34 +140,73 @@ pub(crate) unsafe fn gz_comp(
             || flush != crate::zlib_h::Z_NO_FLUSH
                 && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
         {
-            while (*strm).next_out > state_ref.x.next {
-                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                state_ref.again = 0 as ::core::ffi::c_int;
-                let max = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-                    >> 2 as ::core::ffi::c_int)
-                    .wrapping_add(1 as ::core::ffi::c_uint);
-                let put = if (*strm).next_out.offset_from(state_ref.x.next)
-                    > max as ::core::ffi::c_int as isize
-                {
-                    max
-                } else {
-                    (*strm).next_out.offset_from(state_ref.x.next) as ::core::ffi::c_uint
+            while state_ref.strm.next_out > state_ref.x.next {
+                let (start_index, end_index, result) = {
+                    let (Some(file), Some(output)) = (
+                        state_ref.file.as_mut(),
+                        state_ref
+                            .buffers
+                            .as_ref()
+                            .and_then(|buffers| buffers.output.as_ref()),
+                    ) else {
+                        return -1;
+                    };
+                    let output_start = output.as_ptr() as usize;
+                    let Some(start_index) = (state_ref.x.next as usize)
+                        .checked_sub(output_start)
+                        .filter(|index| *index <= output.len())
+                    else {
+                        return -1;
+                    };
+                    let Some(end_index) = (state_ref.strm.next_out as usize)
+                        .checked_sub(output_start)
+                        .filter(|index| *index <= output.len())
+                    else {
+                        return -1;
+                    };
+                    let Some(pending) = gz_comp_pending_output(output, start_index, end_index)
+                    else {
+                        return -1;
+                    };
+                    (start_index, end_index, gz_direct_write_file(file, pending))
                 };
-                let writ = crate::stdlib::write(
-                    state_ref.fd,
-                    state_ref.x.next as *const ::core::ffi::c_void,
-                    put as crate::__stddef_size_t_h::size_t,
-                ) as ::core::ffi::c_int;
-                if writ < 0 as ::core::ffi::c_int {
-                    if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                        || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                    {
-                        state_ref.again = 1 as ::core::ffi::c_int;
+                match result {
+                    Ok(written) => {
+                        if written != end_index.wrapping_sub(start_index) {
+                            return -1;
+                        }
+                        let Some(output) = state_ref
+                            .buffers
+                            .as_mut()
+                            .and_then(|buffers| buffers.output.as_mut())
+                        else {
+                            return -1;
+                        };
+                        state_ref.again = 0;
+                        state_ref.x.next = output.as_mut_ptr().wrapping_add(end_index);
                     }
-                    crate::src::gzlib::gz_error_io(state_ref, *crate::stdlib::__errno_location());
-                    return -1 as ::core::ffi::c_int;
+                    Err((written, code)) => {
+                        let Some(next_index) = start_index.checked_add(written) else {
+                            return -1;
+                        };
+                        let Some(output) = state_ref
+                            .buffers
+                            .as_mut()
+                            .and_then(|buffers| buffers.output.as_mut())
+                        else {
+                            return -1;
+                        };
+                        if next_index > output.len() {
+                            return -1;
+                        }
+                        state_ref.x.next = output.as_mut_ptr().wrapping_add(next_index);
+                        state_ref.again = (code == crate::stdlib::EAGAIN
+                            || code == crate::stdlib::EWOULDBLOCK)
+                            as ::core::ffi::c_int;
+                        crate::src::gzlib::gz_error_io(state_ref, code);
+                        return -1;
+                    }
                 }
-                state_ref.x.next = state_ref.x.next.offset(writ as isize);
             }
             if (*strm).avail_out == 0 as crate::stdlib::uInt {
                 let Some(output) = state_ref
@@ -337,6 +376,12 @@ fn gz_direct_write_file(
         }
     }
     Ok(written)
+}
+
+/// Borrow the pending compressor output after ABI cursors have been
+/// reconciled to owned-buffer indices.
+fn gz_comp_pending_output(output: &[u8], start_index: usize, end_index: usize) -> Option<&[u8]> {
+    output.get(start_index..end_index)
 }
 
 /// Commit a direct-write result and map descriptor failure to gzip's stable
