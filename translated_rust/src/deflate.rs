@@ -3310,6 +3310,20 @@ fn seed_hash(
     true
 }
 
+fn tally_literal(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+) -> Option<::core::ffi::c_int> {
+    let literal = *window.get(state.strstart as usize)? as ::core::ffi::c_uint;
+    Some(crate::src::trees::tr_tally(
+        state,
+        pending_buf,
+        0 as ::core::ffi::c_uint,
+        literal,
+    ))
+}
+
 unsafe extern "C" fn deflate_fast(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3397,21 +3411,18 @@ unsafe extern "C" fn deflate_fast(
                 }
             }
         } else {
-            let mut cc: crate::zutil_h::uch =
-                *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
             let state = &mut *s;
+            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
             );
-            bflush = crate::src::trees::tr_tally(
-                state,
-                pending_buf,
-                0 as ::core::ffi::c_uint,
-                cc as ::core::ffi::c_uint,
-            );
-            (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            (*s).strstart = (*s).strstart.wrapping_add(1);
+            let Some(flush) = tally_literal(state, window, pending_buf) else {
+                return need_more;
+            };
+            bflush = flush;
+            state.lookahead = state.lookahead.wrapping_sub(1);
+            state.strstart = state.strstart.wrapping_add(1);
         }
         if bflush != 0 {
             flush_block_from_raw!(
@@ -3850,21 +3861,18 @@ unsafe extern "C" fn deflate_rle(
             (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
             (*s).match_length = 0 as crate::stdlib::uInt;
         } else {
-            let mut cc: crate::zutil_h::uch =
-                *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
             let state = &mut *s;
+            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
             let pending_buf = ::core::slice::from_raw_parts_mut(
                 state.pending_buf,
                 state.pending_buf_size as usize,
             );
-            bflush = crate::src::trees::tr_tally(
-                state,
-                pending_buf,
-                0 as ::core::ffi::c_uint,
-                cc as ::core::ffi::c_uint,
-            );
-            (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            (*s).strstart = (*s).strstart.wrapping_add(1);
+            let Some(flush) = tally_literal(state, window, pending_buf) else {
+                return need_more;
+            };
+            bflush = flush;
+            state.lookahead = state.lookahead.wrapping_sub(1);
+            state.strstart = state.strstart.wrapping_add(1);
         }
         if bflush != 0 {
             flush_block_from_raw!(
