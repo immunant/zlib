@@ -232,7 +232,6 @@ pub mod zlib_h {
 
     pub type gzFile = *mut crate::zlib_h::gzFile_s;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct gzFile_s {
