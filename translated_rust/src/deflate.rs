@@ -686,7 +686,10 @@ unsafe extern "C" fn read_buf(
     );
     strm.avail_in = avail_in;
     strm.adler = adler;
-    strm.next_in = strm.next_in.offset(len as isize);
+    // `len` is bounded by the validated input slice above.  Preserve the
+    // translated cursor arithmetic without performing an unsafe raw-pointer
+    // offset in this private adapter.
+    strm.next_in = strm.next_in.wrapping_add(len as usize);
     strm.total_in = total_in;
     len
 }
