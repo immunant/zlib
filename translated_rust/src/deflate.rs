@@ -1768,17 +1768,26 @@ pub unsafe extern "C" fn deflatePending_ffi(
 ) -> ::core::ffi::c_int {
     deflatePending(strm, pending, bits)
 }
-pub unsafe extern "C" fn deflateUsed(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
+fn deflate_used_impl(state: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
+    state.bi_used
+}
+
+/// Read the bit count after validating the ABI stream and its installed
+/// deflate state.  The state link is still an ABI raw pointer, so keep the
+/// one link crossing here rather than in the exported output wrapper.
+unsafe fn deflateUsed(
+    strm: &crate::zlib_h::z_stream_s,
+) -> Result<::core::ffi::c_int, ::core::ffi::c_int> {
+    if !deflate_params_stream_is_valid(strm) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    if !bits.is_null() {
-        *bits = (*(*strm).state).bi_used;
+    let Some(state) = strm.state.as_ref() else {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    };
+    if !deflate_params_state_is_valid(strm, state) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    return crate::zlib_h::Z_OK;
+    Ok(deflate_used_impl(state))
 }
 #[export_name = "deflateUsed"]
 
@@ -1786,7 +1795,19 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateUsed(strm, bits)
+    let used = {
+        let Some(strm) = strm.as_ref() else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        match deflateUsed(strm) {
+            Ok(used) => used,
+            Err(error) => return error,
+        }
+    };
+    if !bits.is_null() {
+        *bits = used;
+    }
+    crate::zlib_h::Z_OK
 }
 pub unsafe extern "C" fn deflatePrime(
     mut strm: crate::zlib_h::z_streamp,
