@@ -2748,12 +2748,15 @@ unsafe extern "C" fn deflate_fast(
                 .offset(len as isize) as ::core::ffi::c_int
                 + crate::src::deflate::LITERALS
                 + 1 as ::core::ffi::c_int) as usize]
-                .fc.value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
+                .fc
+                .value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
+                .offset(len as isize)
+                as ::core::ffi::c_int
                 + crate::src::deflate::LITERALS
                 + 1 as ::core::ffi::c_int) as usize]
-                .fc.value
+                .fc
+                .value
                 .wrapping_add(1);
             (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
@@ -2765,19 +2768,22 @@ unsafe extern "C" fn deflate_fast(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc.value = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc.value
-                .wrapping_add(1);
+                .fc
+                .value =
+                (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
+                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
+                        .offset(dist as isize) as ::core::ffi::c_int
+                } else {
+                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
+                        .offset(
+                            (256 as ::core::ffi::c_int
+                                + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
+                                as isize,
+                        ) as ::core::ffi::c_int
+                }) as usize]
+                    .fc
+                    .value
+                    .wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
             if (*s).match_length <= (*s).max_lazy_match
@@ -2999,12 +3005,15 @@ unsafe extern "C" fn deflate_slow(
                 .offset(len as isize) as ::core::ffi::c_int
                 + crate::src::deflate::LITERALS
                 + 1 as ::core::ffi::c_int) as usize]
-                .fc.value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
+                .fc
+                .value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
+                .offset(len as isize)
+                as ::core::ffi::c_int
                 + crate::src::deflate::LITERALS
                 + 1 as ::core::ffi::c_int) as usize]
-                .fc.value
+                .fc
+                .value
                 .wrapping_add(1);
             (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
@@ -3016,19 +3025,22 @@ unsafe extern "C" fn deflate_slow(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc.value = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc.value
-                .wrapping_add(1);
+                .fc
+                .value =
+                (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
+                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
+                        .offset(dist as isize) as ::core::ffi::c_int
+                } else {
+                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
+                        .offset(
+                            (256 as ::core::ffi::c_int
+                                + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
+                                as isize,
+                        ) as ::core::ffi::c_int
+                }) as usize]
+                    .fc
+                    .value
+                    .wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s)
                 .lookahead
@@ -3317,12 +3329,15 @@ unsafe extern "C" fn deflate_rle(
                 .offset(len as isize) as ::core::ffi::c_int
                 + crate::src::deflate::LITERALS
                 + 1 as ::core::ffi::c_int) as usize]
-                .fc.value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
+                .fc
+                .value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
+                .offset(len as isize)
+                as ::core::ffi::c_int
                 + crate::src::deflate::LITERALS
                 + 1 as ::core::ffi::c_int) as usize]
-                .fc.value
+                .fc
+                .value
                 .wrapping_add(1);
             (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
@@ -3334,19 +3349,22 @@ unsafe extern "C" fn deflate_rle(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc.value = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc.value
-                .wrapping_add(1);
+                .fc
+                .value =
+                (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
+                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
+                        .offset(dist as isize) as ::core::ffi::c_int
+                } else {
+                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
+                        .offset(
+                            (256 as ::core::ffi::c_int
+                                + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
+                                as isize,
+                        ) as ::core::ffi::c_int
+                }) as usize]
+                    .fc
+                    .value
+                    .wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
             (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);

@@ -3775,11 +3775,14 @@ unsafe extern "C" fn pqdownheap(
     while j <= (*s).heap_len {
         if j < (*s).heap_len
             && (((*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                .fc.value as ::core::ffi::c_int)
+                .fc
+                .value as ::core::ffi::c_int)
                 < (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
                 || (*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                    .fc.value as ::core::ffi::c_int
-                    == (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
+                    .fc
+                    .value as ::core::ffi::c_int
+                    == (*tree.offset((*s).heap[j as usize] as isize)).fc.value
+                        as ::core::ffi::c_int
                     && (*s).depth[(*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
                         as ::core::ffi::c_int
                         <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int)
@@ -4727,7 +4730,8 @@ unsafe extern "C" fn compress_block(
                             .wrapping_add(1 as ::core::ffi::c_uint)
                             as isize,
                     ))
-                    .fc.value
+                    .fc
+                    .value
                         as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4753,7 +4757,8 @@ unsafe extern "C" fn compress_block(
                                 .wrapping_add(1 as ::core::ffi::c_uint)
                                 as isize,
                         ))
-                        .fc.value as ::core::ffi::c_int)
+                        .fc
+                        .value as ::core::ffi::c_int)
                             << (*s).bi_valid)
                         as crate::zutil_h::ush;
                     (*s).bi_valid += len_0;
@@ -4885,38 +4890,41 @@ unsafe extern "C" fn compress_block(
     };
 }
 
-unsafe extern "C" fn detect_data_type(
-    mut s: *mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
+fn detect_data_type_from_ltree(dyn_ltree: &[crate::src::deflate::ct_data]) -> ::core::ffi::c_int {
     let mut block_mask: ::core::ffi::c_ulong = 0xf3ffc07f as ::core::ffi::c_ulong;
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
     while n <= 31 as ::core::ffi::c_int {
         if block_mask & 1 as ::core::ffi::c_ulong != 0
-            && (*s).dyn_ltree[n as usize].fc.value as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+            && dyn_ltree[n as usize].fc.value as ::core::ffi::c_int != 0 as ::core::ffi::c_int
         {
             return crate::zlib_h::Z_BINARY;
         }
         n += 1;
         block_mask >>= 1 as ::core::ffi::c_int;
     }
-    if (*s).dyn_ltree[9 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
+    if dyn_ltree[9 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
         != 0 as ::core::ffi::c_int
-        || (*s).dyn_ltree[10 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
+        || dyn_ltree[10 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
-        || (*s).dyn_ltree[13 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
+        || dyn_ltree[13 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int
             != 0 as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_TEXT;
     }
     n = 32 as ::core::ffi::c_int;
     while n < crate::src::deflate::LITERALS {
-        if (*s).dyn_ltree[n as usize].fc.value as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+        if dyn_ltree[n as usize].fc.value as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             return crate::zlib_h::Z_TEXT;
         }
         n += 1;
     }
     return crate::zlib_h::Z_BINARY;
+}
+unsafe extern "C" fn detect_data_type(
+    mut s: *mut crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
+    detect_data_type_from_ltree(&(*s).dyn_ltree)
 }
 pub unsafe extern "C" fn _tr_flush_block(
     mut s: *mut crate::src::deflate::deflate_state,
@@ -5076,15 +5084,19 @@ pub unsafe extern "C" fn _tr_tally(
         (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
             + crate::src::deflate::LITERALS
             + 1 as ::core::ffi::c_int) as usize]
-            .fc.value = (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize]
+            .fc
+            .value = (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize]
             as ::core::ffi::c_int
             + crate::src::deflate::LITERALS
             + 1 as ::core::ffi::c_int) as usize]
-            .fc.value
+            .fc
+            .value
             .wrapping_add(1);
         (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
-            .fc.value = (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
-            .fc.value
+            .fc
+            .value = (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
+            .fc
+            .value
             .wrapping_add(1);
     }
     return ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
@@ -5101,7 +5113,42 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{bi_flush_core, bi_reverse, bi_windup_core, bl_order, dist_code_index, MAX_BITS};
+    use super::{
+        bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
+        dist_code_index, MAX_BITS,
+    };
+
+    fn ltree_with_frequency(
+        index: usize,
+    ) -> [crate::src::deflate::ct_data; crate::src::deflate::HEAP_SIZE as usize] {
+        let empty = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { dad: 0 },
+        };
+        let mut ltree = [empty; crate::src::deflate::HEAP_SIZE as usize];
+        ltree[index].fc.value = 1;
+        ltree
+    }
+
+    #[test]
+    fn data_type_detection_preserves_binary_control_bytes() {
+        let empty = ltree_with_frequency(crate::src::deflate::HEAP_SIZE as usize - 1);
+        assert_eq!(detect_data_type_from_ltree(&empty), crate::zlib_h::Z_BINARY);
+
+        let control = ltree_with_frequency(0);
+        assert_eq!(
+            detect_data_type_from_ltree(&control),
+            crate::zlib_h::Z_BINARY
+        );
+    }
+
+    #[test]
+    fn data_type_detection_recognizes_text_bytes() {
+        for index in [9, 10, 13, 32] {
+            let ltree = ltree_with_frequency(index);
+            assert_eq!(detect_data_type_from_ltree(&ltree), crate::zlib_h::Z_TEXT);
+        }
+    }
 
     #[test]
     fn bit_length_code_order_matches_deflate_spec() {

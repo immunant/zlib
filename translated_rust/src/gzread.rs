@@ -659,8 +659,8 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
 unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     loop {
-        match (*state).how {
-            crate::gzguts_h::LOOK => {
+        match gz_fetch_action((*state).how) {
+            GzFetchAction::Look => {
                 if gz_look(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
@@ -668,7 +668,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                     return 0 as ::core::ffi::c_int;
                 }
             }
-            crate::gzguts_h::COPY => {
+            GzFetchAction::Copy => {
                 if gz_load(
                     state,
                     (*state).out,
@@ -681,7 +681,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 (*state).x.next = (*state).out;
                 return 0 as ::core::ffi::c_int;
             }
-            crate::gzguts_h::GZIP => {
+            GzFetchAction::Gzip => {
                 (*strm).avail_out =
                     ((*state).size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
                 (*strm).next_out = (*state).out as *mut crate::stdlib::Bytef;
@@ -689,7 +689,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                     return -1 as ::core::ffi::c_int;
                 }
             }
-            _ => {
+            GzFetchAction::StateCorrupt => {
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_STREAM_ERROR,
@@ -703,6 +703,23 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
         }
     }
     return 0 as ::core::ffi::c_int;
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum GzFetchAction {
+    Look,
+    Copy,
+    Gzip,
+    StateCorrupt,
+}
+
+fn gz_fetch_action(how: ::core::ffi::c_int) -> GzFetchAction {
+    match how {
+        crate::gzguts_h::LOOK => GzFetchAction::Look,
+        crate::gzguts_h::COPY => GzFetchAction::Copy,
+        crate::gzguts_h::GZIP => GzFetchAction::Gzip,
+        _ => GzFetchAction::StateCorrupt,
+    }
 }
 
 fn gz_fetch_should_continue(
@@ -1285,6 +1302,19 @@ mod tests {
             GzLookAction::TransparentCopy
         );
         assert_eq!(gz_look_action(3, 0, None), GzLookAction::TransparentCopy);
+    }
+
+    #[test]
+    fn gz_fetch_action_dispatches_exactly_known_read_modes() {
+        assert_eq!(gz_fetch_action(crate::gzguts_h::LOOK), GzFetchAction::Look);
+        assert_eq!(gz_fetch_action(crate::gzguts_h::COPY), GzFetchAction::Copy);
+        assert_eq!(gz_fetch_action(crate::gzguts_h::GZIP), GzFetchAction::Gzip);
+    }
+
+    #[test]
+    fn gz_fetch_action_rejects_unknown_read_modes() {
+        assert_eq!(gz_fetch_action(-1), GzFetchAction::StateCorrupt);
+        assert_eq!(gz_fetch_action(99), GzFetchAction::StateCorrupt);
     }
 
     #[test]
