@@ -296,8 +296,10 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
     };
 }
 
-unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let state = &mut *state;
+// All callers have already checked and bound the gzip state.  Keep the fetch
+// state machine reference-bound; its raw I/O and buffer adapters remain in
+// `gz_look`, `gz_load`, and `gz_decomp`.
+unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         match crate::src::gzlib::gz_fetch_plan(state) {
             crate::src::gzlib::GzFetchPlan::Look => {
