@@ -417,12 +417,30 @@ pub unsafe extern "C" fn inflateBack(
                     (*state).next = 0;
                     (*state).lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
                     (*state).lenbits = 7 as ::core::ffi::c_uint;
-                    ret = crate::src::inflate::inflate_table_from_state(
-                        state,
-                        crate::src::inftrees::CODES,
-                        0,
-                        19 as ::core::ffi::c_uint,
-                    );
+                    ret = 'table: {
+                        let state = &mut *state;
+                        let table_start = state.next;
+                        let Some(lens) = state.lens.get(..19) else {
+                            break 'table 1;
+                        };
+                        let Some(table) = state.codes.get_mut(table_start..) else {
+                            break 'table 1;
+                        };
+                        let Some(work) = state.work.get_mut(..19) else {
+                            break 'table 1;
+                        };
+                        let (status, used) = crate::src::inftrees::inflate_table(
+                            crate::src::inftrees::CODES,
+                            lens,
+                            table,
+                            &mut state.lenbits,
+                            work,
+                        );
+                        if status == 0 {
+                            state.next += used;
+                        }
+                        status
+                    };
                     if ret != 0 {
                         (*strm).msg = b"invalid code lengths set\0".as_ptr()
                             as *const ::core::ffi::c_char
@@ -638,12 +656,31 @@ pub unsafe extern "C" fn inflateBack(
                             (*state).next = 0;
                             (*state).lencode = crate::src::inflate::CodeTableRef::Dynamic(0);
                             (*state).lenbits = 9 as ::core::ffi::c_uint;
-                            ret = crate::src::inflate::inflate_table_from_state(
-                                state,
-                                crate::src::inftrees::LENS,
-                                0,
-                                (*state).nlen,
-                            );
+                            ret = 'table: {
+                                let state = &mut *state;
+                                let codes = state.nlen as usize;
+                                let table_start = state.next;
+                                let Some(lens) = state.lens.get(..codes) else {
+                                    break 'table 1;
+                                };
+                                let Some(table) = state.codes.get_mut(table_start..) else {
+                                    break 'table 1;
+                                };
+                                let Some(work) = state.work.get_mut(..codes) else {
+                                    break 'table 1;
+                                };
+                                let (status, used) = crate::src::inftrees::inflate_table(
+                                    crate::src::inftrees::LENS,
+                                    lens,
+                                    table,
+                                    &mut state.lenbits,
+                                    work,
+                                );
+                                if status == 0 {
+                                    state.next += used;
+                                }
+                                status
+                            };
                             if ret != 0 {
                                 (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
                                     as *const ::core::ffi::c_char
@@ -653,12 +690,35 @@ pub unsafe extern "C" fn inflateBack(
                             } else {
                                 (*state).distcode = crate::src::inflate::CodeTableRef::Dynamic((*state).next);
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
-                                ret = crate::src::inflate::inflate_table_from_state(
-                                    state,
-                                    crate::src::inftrees::DISTS,
-                                    (*state).nlen as usize,
-                                    (*state).ndist,
-                                );
+                                ret = 'table: {
+                                    let state = &mut *state;
+                                    let lens_start = state.nlen as usize;
+                                    let codes = state.ndist as usize;
+                                    let Some(lens_end) = lens_start.checked_add(codes) else {
+                                        break 'table 1;
+                                    };
+                                    let table_start = state.next;
+                                    let Some(lens) = state.lens.get(lens_start..lens_end) else {
+                                        break 'table 1;
+                                    };
+                                    let Some(table) = state.codes.get_mut(table_start..) else {
+                                        break 'table 1;
+                                    };
+                                    let Some(work) = state.work.get_mut(..codes) else {
+                                        break 'table 1;
+                                    };
+                                    let (status, used) = crate::src::inftrees::inflate_table(
+                                        crate::src::inftrees::DISTS,
+                                        lens,
+                                        table,
+                                        &mut state.distbits,
+                                        work,
+                                    );
+                                    if status == 0 {
+                                        state.next += used;
+                                    }
+                                    status
+                                };
                                 if ret != 0 {
                                     (*strm).msg = b"invalid distances set\0".as_ptr()
                                         as *const ::core::ffi::c_char
