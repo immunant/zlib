@@ -1045,7 +1045,10 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
     }
 }
 
-fn gz_read_core(
+// The byte-copy/skip state machine works entirely over the pointer-free read
+// owner.  The ABI state is projected only by its callers when they must drive
+// the embedded codec.
+fn gz_read(
     state: &mut GzReadState,
     output: &mut [u8],
     mut dispatch: impl FnMut(GzReadAction, &mut GzReadState, &mut [u8]) -> GzReadStep,
@@ -1197,14 +1200,26 @@ fn gz_read_core(
     return got;
 }
 
-// The facade is deliberately moved out of `gz_state` for every dispatched
-// operation.  That keeps checked buffer/cursor ownership with the safe read
-// loop, while LOOK/fetch and the temporary embedded-inflate ABI projection
-// remain together at this established state boundary.
-unsafe fn gz_read(
-    state: &mut crate::gzguts_h::gz_state,
-    output: &mut [u8],
-) -> crate::stdlib::z_size_t {
+unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::core::ffi::c_int {
+    let request = GzReadRequest::new(state.mode, state.err, state.again);
+    let mut error = crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    };
+    if !request.begin(&mut error) {
+        return -1 as ::core::ffi::c_int;
+    }
+    if (output.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
+        error.set(
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"request does not fit in an int"),
+        );
+        return -1 as ::core::ffi::c_int;
+    }
+    drop(error);
     let mut read = GzReadState {
         buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
         have: state.x.have,
@@ -1216,7 +1231,7 @@ unsafe fn gz_read(
         err: state.err,
         avail_in: state.strm.avail_in,
     };
-    let result = gz_read_core(&mut read, output, |action, read, destination| {
+    let len = gz_read(&mut read, output, |action, read, destination| {
         state.buffers =
             ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
         state.x.have = read.have;
@@ -1227,19 +1242,17 @@ unsafe fn gz_read(
         state.past = read.past;
         state.err = read.err;
         state.strm.avail_in = read.avail_in;
-        let cursor = state
+        let cursor_is_valid = match state
             .buffers
             .output_cursor()
-            .map(|cursor| (cursor.start(), cursor.have()));
-        let cursor_is_valid = match cursor {
+            .map(|cursor| (cursor.start(), cursor.have()))
+        {
             Some((start, have)) if have == state.x.have => state
                 .buffers
                 .output
                 .as_deref_mut()
                 .and_then(|buffer| buffer.get_mut(start..))
-                .map(|buffer| {
-                    state.x.next = buffer.as_mut_ptr();
-                })
+                .map(|buffer| state.x.next = buffer.as_mut_ptr())
                 .is_some(),
             None if state.x.have == 0 => {
                 state.x.next = ::core::ptr::null_mut();
@@ -1282,10 +1295,9 @@ unsafe fn gz_read(
                 GzReadAction::Decompress => {
                     state.strm.avail_out = destination.len() as crate::stdlib::uInt;
                     state.strm.next_out = destination.as_mut_ptr();
-                    let failed = gz_decomp(state) == -1;
                     GzReadStep {
                         count: state.x.have,
-                        failed,
+                        failed: gz_decomp(state) == -1,
                     }
                 }
             }
@@ -1301,7 +1313,7 @@ unsafe fn gz_read(
         read.err = state.err;
         read.avail_in = state.strm.avail_in;
         step
-    });
+    }) as ::core::ffi::c_uint;
     state.buffers = ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
     state.x.have = read.have;
     state.x.pos = read.pos;
@@ -1311,46 +1323,23 @@ unsafe fn gz_read(
     state.past = read.past;
     state.err = read.err;
     state.strm.avail_in = read.avail_in;
-    let cursor = state
+    match state
         .buffers
         .output_cursor()
-        .map(|cursor| (cursor.start(), cursor.have()));
-    match cursor {
+        .map(|cursor| (cursor.start(), cursor.have()))
+    {
         Some((start, have)) if have == state.x.have => {
-            let Some(output) = state.buffers.output.as_deref_mut() else {
+            let Some(buffer) = state.buffers.output.as_deref_mut() else {
                 return 0;
             };
-            let Some(output) = output.get_mut(start..) else {
+            let Some(buffer) = buffer.get_mut(start..) else {
                 return 0;
             };
-            state.x.next = output.as_mut_ptr();
+            state.x.next = buffer.as_mut_ptr();
         }
         None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
         _ => return 0,
     }
-    result
-}
-unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::core::ffi::c_int {
-    let request = GzReadRequest::new(state.mode, state.err, state.again);
-    let mut error = crate::src::gzlib::GzErrorState {
-        message: &mut state.msg,
-        error: &mut state.err,
-        buffered: &mut state.x.have,
-        again: state.again,
-        path: state.path.as_deref(),
-    };
-    if !request.begin(&mut error) {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (output.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
-        error.set(
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(b"request does not fit in an int"),
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    drop(error);
-    let len = gz_read(state, output) as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
         if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
             return -1 as ::core::ffi::c_int;
@@ -1417,7 +1406,7 @@ unsafe fn gzfread(
     }
     drop(error);
     return if len != 0 {
-        gz_read(state, output).wrapping_div(size)
+        gzread(state, output).max(0) as crate::stdlib::z_size_t / size
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -1471,7 +1460,7 @@ unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.buffers.set_output_cursor(next_cursor);
         return byte as ::core::ffi::c_int;
     }
-    return if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
+    return if gzread(state, &mut buf) < 1 as ::core::ffi::c_int {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as usize] as ::core::ffi::c_int
