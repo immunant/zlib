@@ -97,7 +97,10 @@ impl CodeTableRef {
 #[repr(C)]
 
 pub struct inflate_state {
-    pub strm: crate::zlib_h::z_streamp,
+    // Keep the stream association check without retaining a raw backlink in
+    // the codec state.  This is an identity token only; stream access is
+    // always supplied by the caller.
+    pub stream_identity: usize,
     pub mode: crate::src::inflate::inflate_mode,
     pub last: ::core::ffi::c_int,
     pub wrap: ::core::ffi::c_int,
@@ -225,7 +228,7 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if state.is_null()
-        || (*state).strm != strm
+        || (*state).stream_identity != strm.addr()
         || ((*state).mode as ::core::ffi::c_uint)
             < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
         || (*state).mode as ::core::ffi::c_uint
@@ -392,7 +395,7 @@ pub unsafe extern "C" fn inflateInit2_(
         ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
     );
     (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).strm = strm;
+    (*state).stream_identity = strm.addr();
     (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     (*state).mode = crate::src::inflate::HEAD;
     ret = inflateReset2(strm, windowBits);
@@ -2585,7 +2588,7 @@ pub unsafe extern "C" fn inflateCopy(
         state as *const ::core::ffi::c_void,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
     );
-    (*copy).strm = dest;
+    (*copy).stream_identity = dest.addr();
     (*copy).lencode = (*state).lencode;
     (*copy).distcode = (*state).distcode;
     (*copy).next = (*state).next;
