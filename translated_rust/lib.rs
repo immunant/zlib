@@ -52,6 +52,9 @@ pub mod gzguts_h {
         // allocation routines.
         pub in_buf: Vec<u8>,
         pub out_buf: Vec<u8>,
+        // End of the pending input in `in_buf`.  This keeps buffered-write
+        // progress in a Rust index rather than deriving it from raw cursors.
+        pub in_end: usize,
         pub in_0: *mut ::core::ffi::c_uchar,
         pub out: *mut ::core::ffi::c_uchar,
         pub direct: ::core::ffi::c_int,

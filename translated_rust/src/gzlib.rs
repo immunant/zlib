@@ -72,6 +72,7 @@ pub fn gz_init_buffers(
 ) -> bool {
     state.in_buf.clear();
     state.out_buf.clear();
+    state.in_end = 0;
 
     if state.in_buf.try_reserve_exact(input_len).is_err() {
         state.in_0 = ::core::ptr::null_mut();
@@ -146,6 +147,7 @@ unsafe extern "C" fn gz_open(
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
         in_buf: Vec::new(),
         out_buf: Vec::new(),
+        in_end: 0,
         in_0: ::core::ptr::null_mut(),
         out: ::core::ptr::null_mut(),
         direct: 0,

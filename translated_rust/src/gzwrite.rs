@@ -80,6 +80,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         if ret != crate::zlib_h::Z_OK {
             state.in_buf.clear();
             state.out_buf.clear();
+            state.in_end = 0;
             state.in_0 = ::core::ptr::null_mut();
             state.out = ::core::ptr::null_mut();
             crate::src::gzlib::gz_error(
@@ -250,6 +251,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         (*strm).avail_in = n as crate::stdlib::uInt;
         (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+        (*state).in_end = n as usize;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         n = n.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
         (*state).x.pos += n as crate::stdlib::off64_t;
@@ -286,18 +288,16 @@ unsafe fn gz_write(
             let mut copy: ::core::ffi::c_uint = 0;
             if state.strm.avail_in == 0 as crate::stdlib::uInt {
                 state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+                state.in_end = 0;
             }
-            have = state
-                .strm
-                .next_in
-                .offset(state.strm.avail_in as isize)
-                .offset_from(state.in_0) as ::core::ffi::c_uint;
+            have = state.in_end as ::core::ffi::c_uint;
             copy = state.size.wrapping_sub(have);
             if copy as crate::stdlib::z_size_t > len {
                 copy = len as ::core::ffi::c_uint;
             }
             let end = have.wrapping_add(copy) as usize;
             state.in_buf[have as usize..end].copy_from_slice(&input[..copy as usize]);
+            state.in_end = end;
             state.strm.avail_in = state.strm.avail_in.wrapping_add(copy);
             state.x.pos += copy as crate::stdlib::off64_t;
             input = &input[copy as usize..];
@@ -468,14 +468,12 @@ unsafe fn gzputc(
     if state.size != 0 {
         if state.strm.avail_in == 0 as crate::stdlib::uInt {
             state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+            state.in_end = 0;
         }
-        let have = state
-            .strm
-            .next_in
-            .offset(state.strm.avail_in as isize)
-            .offset_from(state.in_0) as ::core::ffi::c_uint;
+        let have = state.in_end as ::core::ffi::c_uint;
         if have < state.size {
             state.in_buf[have as usize] = c as ::core::ffi::c_uchar;
+            state.in_end = have as usize + 1;
             state.strm.avail_in = state.strm.avail_in.wrapping_add(1);
             state.x.pos += 1;
             return c & 0xff as ::core::ffi::c_int;
