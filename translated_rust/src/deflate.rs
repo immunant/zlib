@@ -3554,44 +3554,57 @@ fn flush_pending_core(
     })
 }
 
-unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let stream = &mut *strm;
-    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
-    let Some(layout) = pending_storage_layout_for_state(state) else {
-        return;
-    };
-    let Some(pending_buf) = state.pending_buf else {
-        return;
-    };
-    let pending_storage = core::slice::from_raw_parts_mut(pending_buf.as_ptr(), layout.total_len);
-    let Some(mut storage) = PendingStorageView::new(pending_storage, layout) else {
-        return;
-    };
-    assert!(crate::src::trees::tr_flush_bits_core(
-        &mut storage,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-    ));
-    let drain = PendingDrainState {
-        pending: state.pending,
-        pending_out_offset: state.pending_out_offset,
-    };
-    let Some(preview) = flush_pending_core(drain, stream.avail_out, stream.total_out) else {
-        return;
-    };
-    // These raw allocations are established by the exported deflate
-    // initializer.  Once their bounded views exist, the storage owner drains
-    // through checked ranges and a safe slice copy.
-    let output = core::slice::from_raw_parts_mut(stream.next_out, preview.copied as usize);
-    let Some(result) = storage.drain_into(drain, output, stream.avail_out, stream.total_out) else {
-        return;
-    };
-    stream.next_out = stream.next_out.wrapping_add(result.copied as usize);
-    stream.total_out = result.total_out;
-    stream.avail_out = result.avail_out;
-    state.pending = result.next.pending;
-    state.pending_out_offset = result.next.pending_out_offset;
+// `flush_pending_at_ffi_boundary!` expands only from the exported `deflate`
+// wrapper (including its strategy expansions).  The bounded storage and drain
+// work stays in safe helpers; this is the one-call raw view setup and cursor
+// commit at the ABI boundary.
+#[macro_export]
+macro_rules! flush_pending_at_ffi_boundary {
+    ($strm:expr $(,)?) => {{
+        let stream = &mut *$strm;
+        let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+        if let Some(layout) = pending_storage_layout_for_state(state) {
+            if let Some(pending_buf) = state.pending_buf {
+                let pending_storage =
+                    core::slice::from_raw_parts_mut(pending_buf.as_ptr(), layout.total_len);
+                if let Some(mut storage) = PendingStorageView::new(pending_storage, layout) {
+                    assert!(crate::src::trees::tr_flush_bits_core(
+                        &mut storage,
+                        &mut state.pending,
+                        &mut state.bi_buf,
+                        &mut state.bi_valid,
+                    ));
+                    let drain = PendingDrainState {
+                        pending: state.pending,
+                        pending_out_offset: state.pending_out_offset,
+                    };
+                    if let Some(preview) =
+                        flush_pending_core(drain, stream.avail_out, stream.total_out)
+                    {
+                        // The exported deflate preflight has established a
+                        // non-null output buffer.  A preview exists only for
+                        // a non-zero bounded copy.
+                        let output = core::slice::from_raw_parts_mut(
+                            stream.next_out,
+                            preview.copied as usize,
+                        );
+                        if let Some(result) = storage.drain_into(
+                            drain,
+                            output,
+                            stream.avail_out,
+                            stream.total_out,
+                        ) {
+                            stream.next_out = stream.next_out.wrapping_add(result.copied as usize);
+                            stream.total_out = result.total_out;
+                            stream.avail_out = result.avail_out;
+                            state.pending = result.next.pending;
+                            state.pending_out_offset = result.next.pending_out_offset;
+                        }
+                    }
+                }
+            }
+        }
+    }};
 }
 
 fn gzip_header_crc(
@@ -3942,7 +3955,7 @@ pub unsafe extern "C" fn deflate_ffi(
     old_flush = (*s).last_flush;
     (*s).last_flush = flush;
     if (*s).pending != 0 as crate::zutil_h::ulg {
-        flush_pending(strm);
+        crate::flush_pending_at_ffi_boundary!(strm);
         if (*strm).avail_out == 0 as crate::stdlib::uInt {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -4004,7 +4017,7 @@ pub unsafe extern "C" fn deflate_ffi(
         state.status = crate::src::deflate::BUSY_STATE;
     }
     if initialized {
-        flush_pending(strm);
+        crate::flush_pending_at_ffi_boundary!(strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -4041,7 +4054,7 @@ pub unsafe extern "C" fn deflate_ffi(
             })
             .expect("pending storage layout matches its allocation"));
             (*s).status = crate::src::deflate::BUSY_STATE;
-            flush_pending(strm);
+            crate::flush_pending_at_ffi_boundary!(strm);
             if (*s).pending != 0 as crate::zutil_h::ulg {
                 (*s).last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -4126,7 +4139,7 @@ pub unsafe extern "C" fn deflate_ffi(
                     (*s).pending,
                 );
                 (*s).gzindex = (*s).gzindex.wrapping_add(copy);
-                flush_pending(strm);
+                crate::flush_pending_at_ffi_boundary!(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -4170,7 +4183,7 @@ pub unsafe extern "C" fn deflate_ffi(
                         beg_0,
                         (*s).pending,
                     );
-                    flush_pending(strm);
+                    crate::flush_pending_at_ffi_boundary!(strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
                         (*s).last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -4215,7 +4228,7 @@ pub unsafe extern "C" fn deflate_ffi(
                         beg_1,
                         (*s).pending,
                     );
-                    flush_pending(strm);
+                    crate::flush_pending_at_ffi_boundary!(strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
                         (*s).last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -4254,7 +4267,7 @@ pub unsafe extern "C" fn deflate_ffi(
                 2 as crate::zutil_h::ulg,
                 (*s).pending_buf_size,
             ) {
-                flush_pending(strm);
+                crate::flush_pending_at_ffi_boundary!(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -4277,7 +4290,7 @@ pub unsafe extern "C" fn deflate_ffi(
             (*strm).adler = 0 as crate::stdlib::uLong;
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm);
+        crate::flush_pending_at_ffi_boundary!(strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -4689,7 +4702,7 @@ pub unsafe extern "C" fn deflate_ffi(
                     }
                 }
             }
-            flush_pending(strm);
+            crate::flush_pending_at_ffi_boundary!(strm);
             if (*strm).avail_out == 0 as crate::stdlib::uInt {
                 (*s).last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -4745,7 +4758,7 @@ pub unsafe extern "C" fn deflate_ffi(
             .expect("pending storage layout matches its allocation")
         );
     }
-    flush_pending(strm);
+    crate::flush_pending_at_ffi_boundary!(strm);
     if (*s).wrap > 0 as ::core::ffi::c_int {
         (*s).wrap = -(*s).wrap;
     }
@@ -5513,7 +5526,7 @@ macro_rules! deflate_stored_at_ffi_boundary {
                 let mut storage = PendingStorageView::new(pending, layout)
                     .expect("pending storage layout matches its allocation");
                 stored_block_emit_direct_header(&mut storage, state, len, last);
-                flush_pending((*s).strm);
+                crate::flush_pending_at_ffi_boundary!((*s).strm);
                 let (window_len, input_len) = stored_block_copy_lengths(left, len);
                 if window_len != 0 {
                     let window =
@@ -5661,7 +5674,7 @@ macro_rules! deflate_stored_at_ffi_boundary {
                     last,
                 );
                 (*s).block_start += len as ::core::ffi::c_long;
-                flush_pending((*s).strm);
+                crate::flush_pending_at_ffi_boundary!((*s).strm);
             }
             if last != 0 {
                 (*s).bi_used = 8 as ::core::ffi::c_int;
@@ -6061,7 +6074,7 @@ macro_rules! deflate_rle_at_ffi_boundary {
                     );
                     drop(storage);
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(state.strm);
+                    crate::flush_pending_at_ffi_boundary!(state.strm);
                     if let Some(state) =
                         deflate_flush_block_state_after_output((*stream).avail_out, false)
                     {
@@ -6086,7 +6099,7 @@ macro_rules! deflate_rle_at_ffi_boundary {
                     1 as ::core::ffi::c_int,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending((*s).strm);
+                crate::flush_pending_at_ffi_boundary!((*s).strm);
                 if let Some(state) =
                     deflate_flush_block_state_after_output((*(*s).strm).avail_out, true)
                 {
@@ -6109,7 +6122,7 @@ macro_rules! deflate_rle_at_ffi_boundary {
                     0 as ::core::ffi::c_int,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending((*s).strm);
+                crate::flush_pending_at_ffi_boundary!((*s).strm);
                 if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
                     break 'rle (if false {
                         finish_started as ::core::ffi::c_int
@@ -6226,7 +6239,7 @@ macro_rules! deflate_huff_at_ffi_boundary {
                         0 as ::core::ffi::c_int,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(state.strm);
+                    crate::flush_pending_at_ffi_boundary!(state.strm);
                     if let Some(state) =
                         deflate_flush_block_state_after_output((*stream).avail_out, false)
                     {
@@ -6253,7 +6266,7 @@ macro_rules! deflate_huff_at_ffi_boundary {
                     1 as ::core::ffi::c_int,
                 );
                 state.block_start = state.strstart as ::core::ffi::c_long;
-                flush_pending(state.strm);
+                crate::flush_pending_at_ffi_boundary!(state.strm);
                 let stream = &mut *state.strm;
                 if let Some(state) =
                     deflate_flush_block_state_after_output((*stream).avail_out, true)
@@ -6278,7 +6291,7 @@ macro_rules! deflate_huff_at_ffi_boundary {
                     0 as ::core::ffi::c_int,
                 );
                 state.block_start = state.strstart as ::core::ffi::c_long;
-                flush_pending(state.strm);
+                crate::flush_pending_at_ffi_boundary!(state.strm);
                 let stream = &mut *state.strm;
                 if (*stream).avail_out == 0 as crate::stdlib::uInt {
                     break 'huff (if false {
