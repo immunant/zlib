@@ -4759,7 +4759,7 @@ fn crc_table_ref() -> &'static [crate::stdlib::z_crc_t; 256] {
 }
 #[export_name = "get_crc_table"]
 
-pub unsafe extern "C" fn get_crc_table_ffi() -> *const crate::stdlib::z_crc_t {
+pub extern "C" fn get_crc_table_ffi() -> *const crate::stdlib::z_crc_t {
     crc_table_ref().as_ptr()
 }
 const CRC32_MASK: crate::stdlib::uLong = 0xffff_ffff;
@@ -5128,5 +5128,6 @@ mod tests {
         assert_eq!(first[1], 0x7707_3096);
         assert_eq!(first[255], 0x2d02_ef8d);
         assert_eq!(first.as_ptr(), second.as_ptr());
+        assert_eq!(super::get_crc_table_ffi(), first.as_ptr());
     }
 }
