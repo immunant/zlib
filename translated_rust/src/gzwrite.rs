@@ -238,7 +238,17 @@ macro_rules! gz_comp_at_boundary {
                     );
                     break 'gz_comp_result -1;
                 }
-                if have.wrapping_sub(state_ref.strm.avail_out) == 0 {
+                let Some(produced) =
+                    crate::src::gzread::gz_codec_output_progress(have, state_ref.strm.avail_out)
+                else {
+                    crate::src::gzlib::gz_error_static(
+                        state_ref,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal error: deflate output corrupt\0",
+                    );
+                    break 'gz_comp_result -1;
+                };
+                if produced == 0 {
                     break;
                 }
             }

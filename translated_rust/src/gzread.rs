@@ -398,6 +398,16 @@ enum GzDecompInflateStep {
     DataError,
 }
 
+/// Convert a codec output-capacity transition into produced bytes.  Both gzip
+/// adapters take the pre-call capacity from the same owned output span, so a
+/// larger post-call value is corrupt state rather than wrapping progress.
+pub(crate) fn gz_codec_output_progress(
+    before: crate::stdlib::uInt,
+    after: crate::stdlib::uInt,
+) -> Option<crate::stdlib::uInt> {
+    before.checked_sub(after)
+}
+
 fn gz_decomp_after_inflate(
     state: &mut crate::gzguts_h::gz_state,
     had: ::core::ffi::c_uint,
@@ -444,7 +454,10 @@ fn gz_decomp_finish(
     had: ::core::ffi::c_uint,
     ret: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    state.x.have = had.wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
+    let Some(produced) = gz_codec_output_progress(had, state.strm.avail_out) else {
+        return -1;
+    };
+    state.x.have = produced as ::core::ffi::c_uint;
     // Callers establish `x.next` as the start of this output span before
     // entering the codec.  Keeping that origin avoids reconstructing it by
     // subtracting from the raw post-inflate cursor.
