@@ -134,6 +134,13 @@ struct InflateBackDynamicTableSpec {
     lens_offset: usize,
 }
 
+#[derive(Copy, Clone)]
+enum InflateBackDynamicTableTarget {
+    CodeLengths,
+    LiteralLengths,
+    Distances,
+}
+
 fn inflate_back_code_length_table_spec() -> InflateBackDynamicTableSpec {
     InflateBackDynamicTableSpec {
         table_type: crate::src::inftrees::CODES,
@@ -163,6 +170,28 @@ fn inflate_back_distance_table_spec(
         code_count: ndist,
         root_bits: 6,
         lens_offset: nlen as usize,
+    }
+}
+
+// The table builder itself is an FFI boundary, but selecting the destination
+// table and publishing its root width are ordinary decoder state changes.
+// Keep those changes reference-based before the caller makes that raw call.
+fn inflate_back_prepare_dynamic_table(
+    state: &mut crate::src::inflate::inflate_state,
+    target: InflateBackDynamicTableTarget,
+    spec: &InflateBackDynamicTableSpec,
+) {
+    match target {
+        InflateBackDynamicTableTarget::CodeLengths
+        | InflateBackDynamicTableTarget::LiteralLengths => {
+            state.next = state.codes.as_mut_ptr();
+            state.lencode = state.next as *const crate::src::inftrees::code;
+            state.lenbits = spec.root_bits;
+        }
+        InflateBackDynamicTableTarget::Distances => {
+            state.distcode = state.next as *const crate::src::inftrees::code;
+            state.distbits = spec.root_bits;
+        }
     }
 }
 
@@ -794,9 +823,11 @@ pub unsafe extern "C" fn inflateBack(
                         &mut (*state).have,
                     );
                     let code_length_table = inflate_back_code_length_table_spec();
-                    (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                    (*state).lencode = (*state).next as *const crate::src::inftrees::code;
-                    (*state).lenbits = code_length_table.root_bits;
+                    inflate_back_prepare_dynamic_table(
+                        &mut *state,
+                        InflateBackDynamicTableTarget::CodeLengths,
+                        &code_length_table,
+                    );
                     ret = crate::src::inftrees::inflate_table(
                         code_length_table.table_type,
                         &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
@@ -934,10 +965,11 @@ pub unsafe extern "C" fn inflateBack(
                         } else {
                             let literal_length_table =
                                 inflate_back_literal_length_table_spec((*state).nlen);
-                            (*state).next =
-                                &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                            (*state).lencode = (*state).next as *const crate::src::inftrees::code;
-                            (*state).lenbits = literal_length_table.root_bits;
+                            inflate_back_prepare_dynamic_table(
+                                &mut *state,
+                                InflateBackDynamicTableTarget::LiteralLengths,
+                                &literal_length_table,
+                            );
                             ret = crate::src::inftrees::inflate_table(
                                 literal_length_table.table_type,
                                 &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
@@ -958,9 +990,11 @@ pub unsafe extern "C" fn inflateBack(
                                     (*state).nlen,
                                     (*state).ndist,
                                 );
-                                (*state).distcode =
-                                    (*state).next as *const crate::src::inftrees::code;
-                                (*state).distbits = distance_table.root_bits;
+                                inflate_back_prepare_dynamic_table(
+                                    &mut *state,
+                                    InflateBackDynamicTableTarget::Distances,
+                                    &distance_table,
+                                );
                                 ret = crate::src::inftrees::inflate_table(
                                     distance_table.table_type,
                                     (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
