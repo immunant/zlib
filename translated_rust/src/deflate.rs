@@ -331,42 +331,46 @@ static configuration_table: [config; 10] = [
     },
 ];
 
+fn slide_hash_state(
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    wsize: crate::stdlib::uInt,
+) {
+    let wsize = wsize as ::core::ffi::c_uint;
+    for entry in head.iter_mut().rev().chain(prev.iter_mut().rev()) {
+        let value = *entry as ::core::ffi::c_uint;
+        *entry = if value >= wsize {
+            value.wrapping_sub(wsize) as crate::src::deflate::Posf
+        } else {
+            NIL as crate::src::deflate::Posf
+        };
+    }
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut m: ::core::ffi::c_uint = 0;
-    let mut p: *mut crate::src::deflate::Posf =
-        ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
-    n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
+    if s.is_null() {
+        return;
     }
-    n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
+    let Ok(head_len) = usize::try_from((*s).hash_size) else {
+        return;
+    };
+    let Ok(prev_len) = usize::try_from((*s).w_size) else {
+        return;
+    };
+    if (head_len != 0 && (*s).head.is_null()) || (prev_len != 0 && (*s).prev.is_null()) {
+        return;
     }
+    let head = if head_len == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut((*s).head, head_len)
+    };
+    let prev = if prev_len == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut((*s).prev, prev_len)
+    };
+    slide_hash_state(head, prev, (*s).w_size);
     (*s).slid = 1 as ::core::ffi::c_int;
 }
 
