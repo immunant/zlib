@@ -1308,6 +1308,69 @@ fn gz_zero_prepare_and_initialize_chunk(
     chunk
 }
 
+struct GzZeroCore {
+    first: ::core::ffi::c_int,
+    size: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+}
+
+enum GzZeroInitialAction {
+    FlushPending,
+    Generate,
+}
+
+impl GzZeroCore {
+    fn new(
+        size: ::core::ffi::c_uint,
+        pos: crate::stdlib::off64_t,
+        skip: crate::stdlib::off64_t,
+    ) -> Self {
+        Self {
+            first: 0,
+            size,
+            pos,
+            skip,
+        }
+    }
+
+    fn initial_action(&mut self, pending_input: crate::stdlib::uInt) -> GzZeroInitialAction {
+        let limits = gz_zero_chunk_limits();
+        let step = gz_zero_initial_step(
+            pending_input,
+            self.first,
+            self.size,
+            self.skip,
+            limits.int_and_off64_are_same_size,
+            limits.int_max,
+        );
+        self.first = 1;
+        match step {
+            GzZeroStep::FlushPending => GzZeroInitialAction::FlushPending,
+            GzZeroStep::WriteChunk { .. } => GzZeroInitialAction::Generate,
+        }
+    }
+
+    fn prepare_chunk(&mut self, input: &mut GzWriteInputStorage<'_>) -> GzZeroPreparedChunk {
+        gz_zero_prepare_and_initialize_chunk(self.size, self.skip, input, &mut self.first)
+    }
+
+    fn apply_compression(
+        &mut self,
+        chunk_len: ::core::ffi::c_uint,
+        remaining_avail_in: crate::stdlib::uInt,
+        result: ::core::ffi::c_int,
+    ) -> GzZeroAction {
+        gz_zero_apply_comp_progress(
+            &mut self.pos,
+            &mut self.skip,
+            chunk_len,
+            remaining_avail_in,
+            result,
+        )
+    }
+}
+
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let buffer = if state.size == 0 {
         &mut []
@@ -1315,42 +1378,31 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
     };
     let mut input = GzWriteInputStorage::new(buffer);
-    let mut first: ::core::ffi::c_int = 0;
-    let limits = gz_zero_chunk_limits();
-    match gz_zero_initial_step(
-        state.strm.avail_in,
-        first,
-        state.size,
-        state.skip,
-        limits.int_and_off64_are_same_size,
-        limits.int_max,
-    ) {
-        GzZeroStep::FlushPending => {
+    let mut zero = GzZeroCore::new(state.size, state.x.pos, state.skip);
+    match zero.initial_action(state.strm.avail_in) {
+        GzZeroInitialAction::FlushPending => {
             if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
                 return -1 as ::core::ffi::c_int;
             }
         }
-        GzZeroStep::WriteChunk { .. } => {}
+        GzZeroInitialAction::Generate => {}
     }
-    first = 1 as ::core::ffi::c_int;
     loop {
-        let chunk =
-            gz_zero_prepare_and_initialize_chunk(state.size, state.skip, &mut input, &mut first);
+        let chunk = zero.prepare_chunk(&mut input);
         state.strm.avail_in = chunk.len as crate::stdlib::uInt;
         state.strm.next_in = state.in_0;
         let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        match gz_zero_apply_comp_progress(
-            &mut state.x.pos,
-            &mut state.skip,
-            chunk.len,
-            state.strm.avail_in,
-            ret,
-        ) {
+        let action = zero.apply_compression(chunk.len, state.strm.avail_in, ret);
+        state.x.pos = zero.pos;
+        state.skip = zero.skip;
+        match action {
             GzZeroAction::Error => return -1 as ::core::ffi::c_int,
             GzZeroAction::Done => break,
             GzZeroAction::Continue => {}
         }
     }
+    state.x.pos = zero.pos;
+    state.skip = zero.skip;
     return 0 as ::core::ffi::c_int;
 }
 
@@ -1847,7 +1899,8 @@ mod tests {
         GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
         GzSetParamsAction, GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
         GzWriteBufferedInputAction, GzWriteDirectAction, GzWriteInputStorage, GzWritePreparation,
-        GzZeroAction, GzZeroChunkLimits, GzZeroPreparedChunk, GzZeroStep,
+        GzZeroAction, GzZeroChunkLimits, GzZeroCore, GzZeroInitialAction, GzZeroPreparedChunk,
+        GzZeroStep,
     };
 
     #[test]
@@ -3536,6 +3589,51 @@ mod tests {
         assert_eq!(final_chunk.len, 2);
         assert!(!final_chunk.initialize_buffer);
         assert_eq!(buffer, [0; 4]);
+    }
+
+    #[test]
+    fn gz_zero_core_flushes_pending_input_before_generating_zeroes() {
+        let mut zero = GzZeroCore::new(4, 10, 6);
+        assert!(matches!(
+            zero.initial_action(1),
+            GzZeroInitialAction::FlushPending
+        ));
+
+        let mut buffer = [0xff; 4];
+        let mut input = GzWriteInputStorage::new(&mut buffer);
+        let chunk = zero.prepare_chunk(&mut input);
+        assert_eq!(chunk.len, 4);
+        assert!(chunk.initialize_buffer);
+        assert_eq!(buffer, [0; 4]);
+    }
+
+    #[test]
+    fn gz_zero_core_commits_progress_only_after_compression() {
+        let mut zero = GzZeroCore::new(4, 10, 6);
+        assert!(matches!(
+            zero.initial_action(0),
+            GzZeroInitialAction::Generate
+        ));
+
+        let mut buffer = [0xff; 4];
+        let mut input = GzWriteInputStorage::new(&mut buffer);
+        let chunk = zero.prepare_chunk(&mut input);
+        assert!(matches!(
+            zero.apply_compression(chunk.len, 2, 0),
+            GzZeroAction::Continue
+        ));
+        assert_eq!(zero.pos, 12);
+        assert_eq!(zero.skip, 4);
+
+        let final_chunk = zero.prepare_chunk(&mut input);
+        assert_eq!(final_chunk.len, 4);
+        assert!(!final_chunk.initialize_buffer);
+        assert!(matches!(
+            zero.apply_compression(final_chunk.len, 0, 0),
+            GzZeroAction::Done
+        ));
+        assert_eq!(zero.pos, 16);
+        assert_eq!(zero.skip, 0);
     }
 
     #[test]
