@@ -357,17 +357,19 @@ fn inflate_fast_slices(
             // of the state-owned workspace.  Resolve both through the
             // inflater's cursor validator so this slice-only core does not
             // repeat raw table-address arithmetic.
-            let lcode = crate::src::inflate::inflate_code_table(
+            let Some(lcode) = crate::src::inflate::inflate_code_table(
                 state,
                 crate::src::inflate::InflateCodeTable::Length,
-            )
-            .expect("live inflater length cursor has a complete decode table");
-            let dcode = crate::src::inflate::inflate_code_table(
+            ) else {
+                return None;
+            };
+            let Some(dcode) = crate::src::inflate::inflate_code_table(
                 state,
                 crate::src::inflate::InflateCodeTable::Distance,
-            )
-            .expect("live inflater distance cursor has a complete decode table");
-            inflate_fast_bound(
+            ) else {
+                return None;
+            };
+            Some(inflate_fast_bound(
                 &mut fast_state,
                 input,
                 output,
@@ -375,10 +377,16 @@ fn inflate_fast_slices(
                 lcode,
                 dcode,
                 used,
-            )
+            ))
         },
     )
     .expect("existing-window access cannot allocate or fail");
+    // `inflate_code_table()` also validates the state-owned dynamic cursor.
+    // A direct call with a malformed state must leave the stream untouched,
+    // rather than turning that invariant failure into a Rust panic.
+    let Some(result) = result else {
+        return;
+    };
     finish_inflate_fast(strm, state, fast_state, input, output, result);
 }
 
