@@ -1140,6 +1140,17 @@ fn gz_decomp_trailing_junk_plan() -> GzDecompTrailingJunkPlan {
     }
 }
 
+fn gz_decomp_apply_trailing_junk_plan(
+    avail_in: &mut crate::stdlib::uInt,
+    eof: &mut ::core::ffi::c_int,
+    how: &mut ::core::ffi::c_int,
+    plan: &GzDecompTrailingJunkPlan,
+) {
+    *avail_in = plan.avail_in;
+    *eof = plan.eof;
+    *how = plan.how;
+}
+
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
@@ -1202,9 +1213,12 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
             GzDecompAction::TrailingJunk => {
                 let plan = gz_decomp_trailing_junk_plan();
-                (*strm).avail_in = plan.avail_in;
-                state.eof = plan.eof;
-                state.how = plan.how;
+                gz_decomp_apply_trailing_junk_plan(
+                    &mut state.strm.avail_in,
+                    &mut state.eof,
+                    &mut state.how,
+                    &plan,
+                );
                 ret = crate::zlib_h::Z_OK;
                 break;
             }
@@ -1992,6 +2006,20 @@ mod tests {
                 how: crate::gzguts_h::LOOK,
             }
         );
+    }
+
+    #[test]
+    fn gz_decomp_apply_trailing_junk_plan_updates_only_planned_state() {
+        let plan = gz_decomp_trailing_junk_plan();
+        let mut avail_in = 12;
+        let mut eof = 0;
+        let mut how = crate::gzguts_h::GZIP;
+
+        gz_decomp_apply_trailing_junk_plan(&mut avail_in, &mut eof, &mut how, &plan);
+
+        assert_eq!(avail_in, 0);
+        assert_eq!(eof, 1);
+        assert_eq!(how, crate::gzguts_h::LOOK);
     }
 
     #[test]

@@ -257,6 +257,22 @@ fn inflate_back_match_copy_plan(
     }
 }
 
+fn inflate_back_copy_match(
+    window: &mut [::core::ffi::c_uchar],
+    destination: usize,
+    source: InflateBackMatchSource,
+    count: ::core::ffi::c_uint,
+) {
+    let source = match source {
+        InflateBackMatchSource::Ahead(distance) => destination + distance,
+        InflateBackMatchSource::Behind(distance) => destination - distance,
+    };
+
+    for offset in 0..count as usize {
+        window[destination + offset] = window[source + offset];
+    }
+}
+
 fn inflate_back_block_header(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -355,7 +371,6 @@ pub unsafe extern "C" fn inflateBack(
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -1050,35 +1065,23 @@ pub unsafe extern "C" fn inflateBack(
                                         break 's_69;
                                     }
                                 }
+                                let state = &mut *state;
                                 let (source, planned_copy) = inflate_back_match_copy_plan(
-                                    (*state).wsize,
-                                    (*state).offset,
+                                    state.wsize,
+                                    state.offset,
                                     left,
-                                    (*state).length,
+                                    state.length,
                                 );
-                                from = match source {
-                                    InflateBackMatchSource::Ahead(distance) => {
-                                        put.wrapping_add(distance)
-                                    }
-                                    InflateBackMatchSource::Behind(distance) => {
-                                        put.wrapping_sub(distance)
-                                    }
-                                };
-                                copy = planned_copy;
-                                (*state).length = (*state).length.wrapping_sub(copy);
-                                left = left.wrapping_sub(copy);
-                                loop {
-                                    let c2rust_fresh20 = from;
-                                    from = from.wrapping_add(1);
-                                    let c2rust_fresh21 = put;
-                                    put = put.wrapping_add(1);
-                                    *c2rust_fresh21 = *c2rust_fresh20;
-                                    copy = copy.wrapping_sub(1);
-                                    if !(copy != 0) {
-                                        break;
-                                    }
-                                }
-                                if !((*state).length != 0 as ::core::ffi::c_uint) {
+                                let destination = state.wsize as usize - left as usize;
+                                let window = &mut *core::ptr::slice_from_raw_parts_mut(
+                                    state.window,
+                                    state.wsize as usize,
+                                );
+                                inflate_back_copy_match(window, destination, source, planned_copy);
+                                put = put.wrapping_add(planned_copy as usize);
+                                state.length = state.length.wrapping_sub(planned_copy);
+                                left = left.wrapping_sub(planned_copy);
+                                if state.length == 0 as ::core::ffi::c_uint {
                                     break;
                                 }
                             }
@@ -1132,11 +1135,12 @@ mod tests {
     use super::{
         inflate_back_align_to_byte_boundary, inflate_back_block_header,
         inflate_back_code_length_repeat, inflate_back_consume_input_byte, inflate_back_copy_count,
-        inflate_back_distance_exceeds_window, inflate_back_finish_flush_status,
-        inflate_back_init_metadata_is_valid, inflate_back_litlen_action,
-        inflate_back_match_copy_plan, inflate_back_stored_block_length, inflate_back_take_bits,
-        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
-        InflateBackCodeLengthRepeat, InflateBackLitLenAction, InflateBackMatchSource,
+        inflate_back_copy_match, inflate_back_distance_exceeds_window,
+        inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
+        inflate_back_litlen_action, inflate_back_match_copy_plan, inflate_back_stored_block_length,
+        inflate_back_take_bits, inflate_back_window_bits_are_valid, inflate_back_window_size,
+        InflateBackBlockKind, InflateBackCodeLengthRepeat, InflateBackLitLenAction,
+        InflateBackMatchSource,
     };
 
     #[test]
@@ -1295,6 +1299,24 @@ mod tests {
             inflate_back_match_copy_plan(32, 20, 0, 7),
             (InflateBackMatchSource::Behind(20), 0)
         );
+    }
+
+    #[test]
+    fn inflate_back_copy_match_reuses_new_output_for_overlapping_back_references() {
+        let mut window = [b'a', b'b', 0, 0, 0, 0, 0, 0];
+
+        inflate_back_copy_match(&mut window, 2, InflateBackMatchSource::Behind(2), 6);
+
+        assert_eq!(window, [b'a', b'b', b'a', b'b', b'a', b'b', b'a', b'b']);
+    }
+
+    #[test]
+    fn inflate_back_copy_match_reads_wrapped_history_ahead_of_output() {
+        let mut window = [0, 0, 0, 0, b'w', b'x', b'y', b'z'];
+
+        inflate_back_copy_match(&mut window, 0, InflateBackMatchSource::Ahead(4), 4);
+
+        assert_eq!(window, [b'w', b'x', b'y', b'z', b'w', b'x', b'y', b'z']);
     }
 
     #[test]

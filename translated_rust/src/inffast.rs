@@ -91,9 +91,23 @@ fn append_input_byte(
     )
 }
 
-fn subtable_index(entry: code, hold: ::core::ffi::c_ulong) -> usize {
-    entry.val as usize
-        + (hold & bit_mask(entry.op as ::core::ffi::c_uint) as ::core::ffi::c_ulong) as usize
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FastCodeEntry {
+    op: ::core::ffi::c_uint,
+    bits: ::core::ffi::c_uint,
+    value: ::core::ffi::c_uint,
+}
+
+fn fast_code_entry(entry: code) -> FastCodeEntry {
+    FastCodeEntry {
+        op: entry.op as ::core::ffi::c_uint,
+        bits: entry.bits as ::core::ffi::c_uint,
+        value: entry.val as ::core::ffi::c_uint,
+    }
+}
+
+fn subtable_index(entry: FastCodeEntry, hold: ::core::ffi::c_ulong) -> usize {
+    entry.value as usize + (hold & bit_mask(entry.op) as ::core::ffi::c_ulong) as usize
 }
 
 fn table_index(hold: ::core::ffi::c_ulong, mask: ::core::ffi::c_uint) -> usize {
@@ -429,21 +443,22 @@ pub unsafe extern "C" fn inflate_fast(
         }
         here = lcode.wrapping_add(table_index(hold, lmask));
         loop {
-            op = (*here).bits as ::core::ffi::c_uint;
+            let entry = fast_code_entry(*here);
+            op = entry.bits;
             (hold, bits) = consume_bits(hold, bits, op);
-            op = (*here).op as ::core::ffi::c_uint;
+            op = entry.op;
             match fast_litlen_action(op) {
                 FastLitLenAction::Literal => {
                     let c2rust_fresh2 = out;
                     out = out.wrapping_add(1);
                     (output_produced, output_remaining) =
                         output_cursor_after_write(output_produced, output_remaining);
-                    *c2rust_fresh2 = (*here).val as ::core::ffi::c_uchar;
+                    *c2rust_fresh2 = entry.value as ::core::ffi::c_uchar;
                     c2rust_current_block_141 = 5689001924483802034;
                     break;
                 }
                 FastLitLenAction::Length { extra_bits } => {
-                    len = (*here).val as ::core::ffi::c_uint;
+                    len = entry.value;
                     if extra_bits != 0 {
                         if fast_length_extra_bits_need_input(bits, extra_bits) {
                             let c2rust_fresh3 = in_0;
@@ -464,7 +479,7 @@ pub unsafe extern "C" fn inflate_fast(
                     break;
                 }
                 FastLitLenAction::Subtable => {
-                    here = lcode.wrapping_add(subtable_index(*here, hold));
+                    here = lcode.wrapping_add(subtable_index(entry, hold));
                 }
                 FastLitLenAction::End => {
                     c2rust_current_block_141 = 13505557363059842426;
@@ -479,12 +494,13 @@ pub unsafe extern "C" fn inflate_fast(
         match c2rust_current_block_141 {
             3217834059723038609 => {
                 loop {
-                    op = (*here).bits as ::core::ffi::c_uint;
+                    let entry = fast_code_entry(*here);
+                    op = entry.bits;
                     (hold, bits) = consume_bits(hold, bits, op);
-                    op = (*here).op as ::core::ffi::c_uint;
+                    op = entry.op;
                     match fast_dist_action(op) {
                         FastDistAction::Distance { extra_bits } => {
-                            dist = (*here).val as ::core::ffi::c_uint;
+                            dist = entry.value;
                             for _ in 0..input_bytes_needed(bits, extra_bits) {
                                 let c2rust_fresh6 = in_0;
                                 in_0 = in_0.wrapping_add(1);
@@ -505,7 +521,7 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                         }
                         FastDistAction::Subtable => {
-                            here = dcode.wrapping_add(subtable_index(*here, hold));
+                            here = dcode.wrapping_add(subtable_index(entry, hold));
                         }
                         FastDistAction::Invalid => {
                             (*strm).msg = b"invalid distance code\0".as_ptr()
@@ -704,13 +720,14 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_decode_needs_prefetch, fast_decode_prefetch_byte_count, fast_dist_action,
-        fast_length_extra_bits_need_input, fast_litlen_action, fast_match_uses_window,
-        fast_window_copy_plan, fast_window_distance_is_invalid, finish_fast_distance,
-        input_bytes_needed, input_remaining_after_read, low_bits, match_copy_layout,
-        output_cursor_after_write, subtable_index, table_index, unread_input_state,
-        validate_fast_window_distance, FastDistAction, FastDistance, FastDistanceSource,
-        FastLitLenAction, FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
+        fast_code_entry, fast_decode_needs_prefetch, fast_decode_prefetch_byte_count,
+        fast_dist_action, fast_length_extra_bits_need_input, fast_litlen_action,
+        fast_match_uses_window, fast_window_copy_plan, fast_window_distance_is_invalid,
+        finish_fast_distance, input_bytes_needed, input_remaining_after_read, low_bits,
+        match_copy_layout, output_cursor_after_write, subtable_index, table_index,
+        unread_input_state, validate_fast_window_distance, FastCodeEntry, FastDistAction,
+        FastDistance, FastDistanceSource, FastLitLenAction, FastWindowContinuationSource,
+        FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -719,6 +736,24 @@ mod tests {
         assert_eq!(bit_mask(1), 1);
         assert_eq!(bit_mask(5), 0b1_1111);
         assert_eq!(bit_mask(15), 0x7fff);
+    }
+
+    #[test]
+    fn fast_code_entry_snapshots_code_fields() {
+        let entry = code {
+            op: 0b1_0101,
+            bits: 7,
+            val: 123,
+        };
+
+        assert_eq!(
+            fast_code_entry(entry),
+            FastCodeEntry {
+                op: 0b1_0101,
+                bits: 7,
+                value: 123,
+            }
+        );
     }
 
     #[test]
@@ -849,18 +884,18 @@ mod tests {
 
     #[test]
     fn subtable_index_combines_base_and_low_bit_index() {
-        let entry = code {
+        let entry = fast_code_entry(code {
             op: 5,
             bits: 0,
             val: 96,
-        };
+        });
         assert_eq!(subtable_index(entry, 0b1_1011), 123);
 
-        let entry = code {
+        let entry = fast_code_entry(code {
             op: 15,
             bits: 0,
             val: ::core::ffi::c_ushort::MAX,
-        };
+        });
         assert_eq!(subtable_index(entry, ::core::ffi::c_ulong::MAX), 98_302);
     }
 
