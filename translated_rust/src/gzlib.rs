@@ -1551,20 +1551,18 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     }
     gz_buffer(&mut *(file as crate::gzguts_h::gz_statep), size)
 }
-// Rewind receives an already-bound state from its FFI entry point. Its
-// descriptor and error-record calls retain their established raw boundaries.
+// Rewind receives an already-bound state from its FFI entry point. Seeking a
+// descriptor has no memory precondition, so only error-record ownership below
+// remains a raw boundary.
 fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if !gz_rewind_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
-    // SAFETY: `fd` belongs to the bound gzip state and is not retained.
-    let position = unsafe {
-        crate::stdlib::lseek64(
-            state.fd,
-            state.start as crate::stdlib::off64_t,
-            crate::stdlib::SEEK_SET,
-        )
-    };
+    let position = crate::stdlib::lseek64(
+        state.fd,
+        state.start as crate::stdlib::off64_t,
+        crate::stdlib::SEEK_SET,
+    );
     gz_rewind_result(state, position)
 }
 #[export_name = "gzrewind"]
@@ -1674,11 +1672,9 @@ fn gzseek64(
             offset,
             descriptor_offset,
         } => {
-            // SAFETY: `fd` belongs to the bound gzip state and is not retained.
-            if unsafe {
-                crate::stdlib::lseek64(state.fd, descriptor_offset, crate::stdlib::SEEK_CUR)
-                    == -1 as crate::stdlib::__off64_t
-            } {
+            if crate::stdlib::lseek64(state.fd, descriptor_offset, crate::stdlib::SEEK_CUR)
+                == -1 as crate::stdlib::__off64_t
+            {
                 return -1 as crate::stdlib::off64_t;
             }
             // This path immediately clears the same read-side flags below,
@@ -1770,25 +1766,19 @@ pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::s
     }
     gztell(&*(file as crate::gzguts_h::gz_statep))
 }
-// Offset querying only needs bound state.  Keep the descriptor query in its
-// narrow raw block, so the FFI entry point only validates and binds `file`.
 // Offset queries observe gzip state while asking the descriptor for its
-// current position. Keep that state binding immutable; only `lseek64` crosses
-// the descriptor boundary below.
+// current position. The descriptor query itself has no memory precondition.
 fn gzoffset64(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
     if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
         && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
     {
         return -1 as crate::stdlib::off64_t;
     }
-    // SAFETY: `fd` belongs to the bound gzip state and is not retained.
-    let mut offset = unsafe {
-        crate::stdlib::lseek64(
-            state.fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t
-    };
+    let mut offset = crate::stdlib::lseek64(
+        state.fd,
+        0 as crate::stdlib::__off64_t,
+        crate::stdlib::SEEK_CUR,
+    ) as crate::stdlib::off64_t;
     if offset == -1 as crate::stdlib::off64_t {
         return -1 as crate::stdlib::off64_t;
     }

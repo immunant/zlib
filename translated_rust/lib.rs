@@ -288,13 +288,16 @@ pub mod stdlib {
         pub fn strlen(__s: *const ::core::ffi::c_char) -> crate::__stddef_size_t_h::size_t;
 
         pub fn strerror(__errnum: ::core::ffi::c_int) -> *mut ::core::ffi::c_char;
-        pub fn lseek64(
+        // Seeking an arbitrary descriptor and closing an arbitrary descriptor
+        // are defined by libc to report errors, not invoke undefined behavior.
+        // Neither operation accepts a Rust reference or memory range.
+        pub safe fn lseek64(
             __fd: ::core::ffi::c_int,
             __offset: crate::stdlib::__off64_t,
             __whence: ::core::ffi::c_int,
         ) -> crate::stdlib::__off64_t;
 
-        pub fn close(__fd: ::core::ffi::c_int) -> ::core::ffi::c_int;
+        pub safe fn close(__fd: ::core::ffi::c_int) -> ::core::ffi::c_int;
 
         pub fn read(
             __fd: ::core::ffi::c_int,
