@@ -1024,29 +1024,26 @@ fn gzclose_r_cleanup(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_in
     drop(::core::mem::ManuallyDrop::into_inner(path));
     err
 }
-pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
+pub fn gzclose_r(mut allocation: Box<[crate::gzguts_h::gz_state]>) -> ::core::ffi::c_int {
+    // `gz_open` allocates exactly one state.  Keep the C error path's
+    // non-consuming behavior for a mismatched close entry point.
+    if allocation.len() != 1 || allocation[0].mode != crate::gzguts_h::GZ_READ {
+        ::core::mem::forget(allocation);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = file as crate::gzguts_h::gz_statep;
     let (fd, err) = {
-        let state = &mut *state;
-        if state.mode != crate::gzguts_h::GZ_READ {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
+        let state = &mut allocation[0];
         if state.size != 0 {
-            crate::src::inflate::inflateEnd(
-                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
+            // The initialized gzip state owns this stream until close.
+            unsafe { crate::src::inflate::inflateEnd(&raw mut state.strm) };
         }
         let err = gzclose_r_cleanup(state);
         (state.fd.take(), err)
     };
     let ret = match fd {
-        Some(fd) => crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)),
+        Some(fd) => unsafe { crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)) },
         None => -1,
     };
-    drop(Box::from_raw(::core::ptr::slice_from_raw_parts_mut(state, 1)));
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
@@ -1056,5 +1053,12 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
 #[export_name = "gzclose_r"]
 
 pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_r(file)
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let allocation = Box::from_raw(::core::ptr::slice_from_raw_parts_mut(
+        file as crate::gzguts_h::gz_statep,
+        1,
+    ));
+    gzclose_r(allocation)
 }

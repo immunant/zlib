@@ -19,28 +19,26 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub fn gzclose(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state.mode == crate::gzguts_h::GZ_READ {
-        // The state reference is valid for this synchronous close operation.
-        unsafe {
-            crate::src::gzread::gzclose_r(
-                state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile,
-            )
-        }
+pub fn gzclose(allocation: Box<[crate::gzguts_h::gz_state]>) -> ::core::ffi::c_int {
+    if allocation.len() != 1 {
+        ::core::mem::forget(allocation);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if allocation[0].mode == crate::gzguts_h::GZ_READ {
+        crate::src::gzread::gzclose_r(allocation)
     } else {
-        // The state reference is valid for this synchronous close operation.
-        unsafe {
-            crate::src::gzwrite::gzclose_w(
-                state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile,
-            )
-        }
+        crate::src::gzwrite::gzclose_w(allocation)
     }
 }
 #[export_name = "gzclose"]
 
 pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+    if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    gzclose(state)
+    }
+    let allocation = Box::from_raw(::core::ptr::slice_from_raw_parts_mut(
+        file as crate::gzguts_h::gz_statep,
+        1,
+    ));
+    gzclose(allocation)
 }

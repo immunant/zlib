@@ -780,17 +780,16 @@ fn gzclose_w_cleanup(state: &mut crate::gzguts_h::gz_state) {
     );
     drop(::core::mem::ManuallyDrop::into_inner(path));
 }
-pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+pub fn gzclose_w(mut allocation: Box<[crate::gzguts_h::gz_state]>) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    if file.is_null() {
+    // `gz_open` allocates exactly one state.  Keep the C error path's
+    // non-consuming behavior for a mismatched close entry point.
+    if allocation.len() != 1 || allocation[0].mode != crate::gzguts_h::GZ_WRITE {
+        ::core::mem::forget(allocation);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = file as crate::gzguts_h::gz_statep;
     let fd = {
-        let state = &mut *state;
-        if state.mode != crate::gzguts_h::GZ_WRITE {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
+        let state = &mut allocation[0];
         if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
             ret = state.err;
         }
@@ -798,25 +797,30 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
             ret = state.err;
         }
         if state.size != 0 && state.direct == 0 {
-            crate::src::deflate::deflateEnd(
-                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-            );
+            // The initialized gzip state owns this stream until close.
+            unsafe { crate::src::deflate::deflateEnd(&raw mut state.strm) };
         }
         gzclose_w_cleanup(state);
         state.fd.take()
     };
     let close_result = match fd {
-        Some(fd) => crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)),
+        Some(fd) => unsafe { crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)) },
         None => -1,
     };
     if close_result == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
-    drop(Box::from_raw(::core::ptr::slice_from_raw_parts_mut(state, 1)));
     return ret;
 }
 #[export_name = "gzclose_w"]
 
 pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_w(file)
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let allocation = Box::from_raw(::core::ptr::slice_from_raw_parts_mut(
+        file as crate::gzguts_h::gz_statep,
+        1,
+    ));
+    gzclose_w(allocation)
 }
