@@ -347,6 +347,16 @@ pub(crate) fn gz_fetch_copy_loaded(
     state.x.next = state.out;
 }
 
+// Set up the already-owned inflater output window before `gz_decomp()`
+// crosses its raw inflate boundary.
+pub(crate) fn gz_fetch_prepare_decompression(
+    state: &mut crate::gzguts_h::gz_state,
+    output: ::core::ffi::c_uint,
+) {
+    state.strm.avail_out = output as crate::stdlib::uInt;
+    state.strm.next_out = state.out;
+}
+
 pub(crate) fn gz_fetch_needs_more(state: &crate::gzguts_h::gz_state) -> bool {
     state.x.have == 0 && (state.eof == 0 || state.strm.avail_in != 0)
 }
@@ -416,6 +426,18 @@ pub(crate) fn gz_decomp_after_inflate(
     } else {
         GzDecompStep::Stop(ret)
     }
+}
+
+// Publish the output range produced by the inflater after its raw call has
+// completed. This only updates the already-bound gzip state; the inflater
+// invocation and its buffer validity remain in the read adapter.
+pub(crate) fn gz_decomp_publish_output(
+    state: &mut crate::gzguts_h::gz_state,
+    available_before: ::core::ffi::c_uint,
+) {
+    state.x.have = (available_before as crate::stdlib::uInt)
+        .wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
+    state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize);
 }
 
 pub(crate) fn gz_decomp_finish(state: &mut crate::gzguts_h::gz_state, ret: ::core::ffi::c_int) -> bool {

@@ -331,9 +331,7 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
         }
     }
-    state.x.have =
-        (had as crate::stdlib::uInt).wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
-    state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize);
+    crate::src::gzlib::gz_decomp_publish_output(state, had);
     return if crate::src::gzlib::gz_decomp_finish(state, ret) {
         0 as ::core::ffi::c_int
     } else {
@@ -364,8 +362,7 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 return 0 as ::core::ffi::c_int;
             }
             crate::src::gzlib::GzFetchPlan::Gzip { output } => {
-                state.strm.avail_out = output as crate::stdlib::uInt;
-                state.strm.next_out = state.out;
+                crate::src::gzlib::gz_fetch_prepare_decompression(state, output);
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
