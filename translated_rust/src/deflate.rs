@@ -3197,69 +3197,33 @@ unsafe extern "C" fn deflate_slow(
         if (*s).prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             && (*s).match_length <= (*s).prev_length
         {
-            let mut max_insert: crate::stdlib::uInt = (*s)
+            let max_insert: crate::stdlib::uInt = (*s)
                 .strstart
                 .wrapping_add((*s).lookahead)
                 .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-            let mut len: crate::zutil_h::uch =
+            let len: crate::zutil_h::uch =
                 (*s).prev_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-            let mut dist: crate::zutil_h::ush = ((*s).strstart as crate::src::deflate::IPos)
+            let dist: crate::zutil_h::ush = ((*s).strstart as crate::src::deflate::IPos)
                 .wrapping_sub(1 as crate::src::deflate::IPos)
                 .wrapping_sub((*s).prev_match)
                 as crate::zutil_h::ush;
-            let c2rust_fresh35 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh35 as isize) =
-                dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-            let c2rust_fresh36 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh36 as isize) =
-                (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
-                    as crate::zutil_h::uchf;
-            let c2rust_fresh37 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh37 as isize) = len as crate::zutil_h::uchf;
-            dist = dist.wrapping_sub(1);
-            (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq
-                .wrapping_add(1);
-            (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
+            let state = &mut *s;
+            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                return need_more;
+            };
+            if symbol_len != 0 && state.sym_buf.is_null() {
+                return need_more;
+            }
+            let symbols = if symbol_len == 0 {
+                &mut []
             } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc
-                .freq = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc
-                .freq
-                .wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+            };
+            let Some(flush_now) = tally_symbol_state(state, symbols, dist.into(), len.into())
+            else {
+                return need_more;
+            };
+            bflush = flush_now as ::core::ffi::c_int;
             (*s).lookahead = (*s)
                 .lookahead
                 .wrapping_sub((*s).prev_length.wrapping_sub(1 as crate::stdlib::uInt));
@@ -3314,22 +3278,26 @@ unsafe extern "C" fn deflate_slow(
                 }
             }
         } else if (*s).match_available != 0 {
-            let mut cc: crate::zutil_h::uch = *(*s)
+            let cc: crate::zutil_h::uch = *(*s)
                 .window
                 .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
                 as crate::zutil_h::uch;
-            let c2rust_fresh38 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh38 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh39 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh39 as isize) = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh40 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh40 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc.freq =
-                (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            let state = &mut *s;
+            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                return need_more;
+            };
+            if symbol_len != 0 && state.sym_buf.is_null() {
+                return need_more;
+            }
+            let symbols = if symbol_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+            };
+            let Some(flush_now) = tally_symbol_state(state, symbols, 0, cc.into()) else {
+                return need_more;
+            };
+            bflush = flush_now as ::core::ffi::c_int;
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
                     s as *mut crate::src::deflate::internal_state,
@@ -3359,22 +3327,26 @@ unsafe extern "C" fn deflate_slow(
         }
     }
     if (*s).match_available != 0 {
-        let mut cc_0: crate::zutil_h::uch = *(*s)
+        let cc_0: crate::zutil_h::uch = *(*s)
             .window
             .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
             as crate::zutil_h::uch;
-        let c2rust_fresh41 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh41 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh42 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh42 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh43 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh43 as isize) = cc_0 as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc_0 as usize].fc.freq =
-            (*s).dyn_ltree[cc_0 as usize].fc.freq.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+        let state = &mut *s;
+        let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+            return need_more;
+        };
+        if symbol_len != 0 && state.sym_buf.is_null() {
+            return need_more;
+        }
+        let symbols = if symbol_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+        };
+        let Some(flush_now) = tally_symbol_state(state, symbols, 0, cc_0.into()) else {
+            return need_more;
+        };
+        bflush = flush_now as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
     (*s).insert = if (*s).strstart
