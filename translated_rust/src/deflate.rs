@@ -4005,6 +4005,23 @@ fn stored_input_consumed(
     initial_avail_in.wrapping_sub(remaining_avail_in)
 }
 
+/// Apply one stored-mode output write to the stream counters.  The codec
+/// boundary remains responsible for advancing its ABI cursor, while this
+/// value-only transition makes the capacity check and counter accounting
+/// shared by buffered-window copies and direct input copies.
+fn record_stored_output_state(
+    avail_out: &mut crate::stdlib::uInt,
+    total_out: &mut crate::stdlib::uLong,
+    written: crate::stdlib::uInt,
+) -> bool {
+    let Some(remaining) = avail_out.checked_sub(written) else {
+        return false;
+    };
+    *avail_out = remaining;
+    *total_out = total_out.wrapping_add(written as crate::stdlib::uLong);
+    true
+}
+
 /// Record the history-window cursors after stored mode has copied `have`
 /// caller bytes into the window.  The legacy adapter retains the raw input and
 /// window lends; this transition is only scalar state and deliberately keeps
@@ -4167,10 +4184,13 @@ fn deflate_stored(
                     // `copy.copied` is bounded by the output view above. Preserve
                     // the ABI cursor advance without unsafe pointer arithmetic.
                     strm.next_out = strm.next_out.wrapping_add(copied);
-                    strm.avail_out = strm.avail_out.wrapping_sub(copy.copied);
-                    strm.total_out = strm
-                        .total_out
-                        .wrapping_add(copy.copied as crate::stdlib::uLong);
+                    if !record_stored_output_state(
+                        &mut strm.avail_out,
+                        &mut strm.total_out,
+                        copy.copied,
+                    ) {
+                        return need_more;
+                    }
                     state.block_start = copy.block_start;
                     len = copy.remaining;
                 }
@@ -4180,11 +4200,18 @@ fn deflate_stored(
                     };
                     let progress = read_buf(stream, destination, len, state.wrap);
                     remaining_avail_in = progress.avail_in;
-                    // `read_buf()` consumed at most the requested `len` bytes, so
-                    // this is a cursor update only; no pointer dereference is needed.
-                    strm.next_out = strm.next_out.wrapping_add(len as usize);
-                    strm.avail_out = strm.avail_out.wrapping_sub(len);
-                    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+                    // Advance by the bytes actually copied. On valid zlib state
+                    // this equals `len`; retaining the returned value keeps a
+                    // malformed cursor/input pairing from publishing progress it
+                    // did not make.
+                    strm.next_out = strm.next_out.wrapping_add(progress.copied as usize);
+                    if !record_stored_output_state(
+                        &mut strm.avail_out,
+                        &mut strm.total_out,
+                        progress.copied,
+                    ) {
+                        return need_more;
+                    }
                 }
             }
             if last != 0 as ::core::ffi::c_int {
@@ -4255,8 +4282,8 @@ fn deflate_stored(
                 let Some(output) = window.get_mut(write_span) else {
                     return need_more;
                 };
-                read_buf(stream, output, have, state.wrap);
-                record_stored_input_state(state, have);
+                let progress = read_buf(stream, output, have, state.wrap);
+                record_stored_input_state(state, progress.copied);
             }
             let tail_plan = stored_tail_block_plan(
                 state.pending_buf_size,
