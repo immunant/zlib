@@ -3853,26 +3853,139 @@ unsafe extern "C" fn deflate_stored(
     result
 }
 
-unsafe extern "C" fn deflate_fast(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream_s,
+// The fast parser only needs bounded storage and stream cursors.  Keep the
+// callback-owned allocation and ABI cursor projections in `deflate_fast()`;
+// this view is deliberately pointer-free so the hot loop can stay safe.
+struct DeflateFastState<'a> {
+    window: &'a mut [crate::stdlib::Bytef],
+    prev: &'a mut [crate::src::deflate::Posf],
+    head: &'a mut [crate::src::deflate::Posf],
+    pending_buf: &'a mut [crate::stdlib::Bytef],
+    pending_out: usize,
+    pending: crate::zutil_h::ulg,
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+    bi_used: ::core::ffi::c_int,
+    dyn_ltree: &'a mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &'a mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &'a mut [crate::src::deflate::ct_data_s; 39],
+    l_desc: &'a mut crate::src::deflate::tree_desc_s,
+    d_desc: &'a mut crate::src::deflate::tree_desc_s,
+    bl_desc: &'a mut crate::src::deflate::tree_desc_s,
+    heap: &'a mut [::core::ffi::c_int; 573],
+    heap_len: ::core::ffi::c_int,
+    heap_max: ::core::ffi::c_int,
+    depth: &'a mut [crate::zutil_h::uch; 573],
+    bl_count: &'a mut [crate::zutil_h::ush; 16],
+    opt_len: crate::zutil_h::ulg,
+    static_len: crate::zutil_h::ulg,
+    sym_buf_start: usize,
+    sym_next: crate::stdlib::uInt,
+    sym_end: crate::stdlib::uInt,
+    matches: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+    insert: crate::stdlib::uInt,
+    ins_h: crate::stdlib::uInt,
+    match_length: crate::stdlib::uInt,
+    match_start: crate::stdlib::uInt,
+    prev_length: crate::stdlib::uInt,
+    max_chain_length: crate::stdlib::uInt,
+    max_lazy_match: crate::stdlib::uInt,
+    good_match: crate::stdlib::uInt,
+    nice_match: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    w_size: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    wrap: ::core::ffi::c_int,
+    slid: ::core::ffi::c_int,
+    high_water: crate::zutil_h::ulg,
+}
+
+struct DeflateFastStream<'a> {
+    input: &'a [crate::stdlib::Bytef],
+    input_pos: usize,
+    output: &'a mut [crate::stdlib::Bytef],
+    output_pos: usize,
+    avail_out: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    data_type: &'a mut ::core::ffi::c_int,
+}
+
+fn fill_fast_window(state: &mut DeflateFastState<'_>, stream: &mut DeflateFastStream<'_>) {
+    let mut input = DeflateInputCursor {
+        input: &stream.input[stream.input_pos..],
+        consumed: 0,
+        checksum: stream.adler,
+        total_in: stream.total_in,
+    };
+    fill_window_from_views(
+        &mut FillWindowState {
+            window: state.window,
+            prev: state.prev,
+            head: state.head,
+            w_size: state.w_size,
+            hash_shift: state.hash_shift,
+            hash_mask: state.hash_mask,
+            w_mask: state.w_mask,
+            wrap: state.wrap,
+            lookahead: &mut state.lookahead,
+            strstart: &mut state.strstart,
+            match_start: &mut state.match_start,
+            block_start: &mut state.block_start,
+            insert: &mut state.insert,
+            slid: &mut state.slid,
+            ins_h: &mut state.ins_h,
+            high_water: &mut state.high_water,
+        },
+        &mut input,
+    );
+    stream.input_pos += input.consumed;
+    stream.adler = input.checksum;
+    stream.total_in = input.total_in;
+}
+
+fn flush_fast_pending(state: &mut DeflateFastState<'_>, stream: &mut DeflateFastStream<'_>) {
+    crate::src::trees::flush_pending_bits(
+        state.pending_buf,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+    );
+    let len = (state.pending as crate::stdlib::uInt).min(stream.avail_out) as usize;
+    if len == 0 {
+        return;
+    }
+    let copied = flush_pending_bytes(
+        &mut stream.output[stream.output_pos..stream.output_pos + len],
+        state.pending_buf,
+        &mut state.pending_out,
+        &mut state.pending,
+    );
+    stream.output_pos += copied as usize;
+    stream.total_out = stream.total_out.wrapping_add(copied as crate::stdlib::uLong);
+    stream.avail_out = stream.avail_out.wrapping_sub(copied);
+}
+
+fn deflate_fast_from_views(
+    state: &mut DeflateFastState<'_>,
+    stream: &mut DeflateFastStream<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
-    // the literal area. Keeping one full-capacity view avoids a raw cursor.
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
+    // the literal area. The adapter supplied this one full-capacity view.
     loop {
         if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(state as *mut crate::src::deflate::deflate_state);
+            fill_fast_window(state, stream);
             if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3885,20 +3998,11 @@ unsafe extern "C" fn deflate_fast(
         // `fill_window()` is the only operation in this iteration that can
         // change the window.  Keep one bounded read view for the remainder
         // of the match/flush work, then drop it before the next refill.
-        let window = ::core::slice::from_raw_parts(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        );
+        let window = &*state.window;
         hash_head = NIL as crate::src::deflate::IPos;
         if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let head = ::core::slice::from_raw_parts_mut(
-                state.head.expect("initialized head table").as_ptr(),
-                state.hash_size as usize,
-            );
-            let prev = ::core::slice::from_raw_parts_mut(
-                state.prev.expect("initialized prev table").as_ptr(),
-                state.w_size as usize,
-            );
+            let head = &mut *state.head;
+            let prev = &mut *state.prev;
             (state.ins_h, hash_head) = insert_hash(
                 window,
                 head,
@@ -3919,10 +4023,7 @@ unsafe extern "C" fn deflate_fast(
             // The hash insertion view above has ended.  Reborrow the exact
             // previous-chain allocation as an immutable bounded slice for
             // the matcher, leaving the match algorithm itself pointer-free.
-            let prev = ::core::slice::from_raw_parts(
-                state.prev.expect("initialized prev table").as_ptr(),
-                state.w_size as usize,
-            );
+            let prev = &*state.prev;
             let result = longest_match_core(
                 window,
                 prev,
@@ -3948,7 +4049,7 @@ unsafe extern "C" fn deflate_fast(
             let dist: crate::zutil_h::ush =
                 state.strstart.wrapping_sub(state.match_start) as crate::zutil_h::ush;
             bflush = crate::src::trees::tally_symbol(
-                &mut pending_buf[sym_buf_start..],
+                &mut state.pending_buf[sym_buf_start..],
                 &mut state.sym_next,
                 state.sym_end,
                 &mut state.dyn_ltree,
@@ -3964,14 +4065,8 @@ unsafe extern "C" fn deflate_fast(
                 state.match_length = state.match_length.wrapping_sub(1);
                 loop {
                     state.strstart = state.strstart.wrapping_add(1);
-                    let head = ::core::slice::from_raw_parts_mut(
-                        state.head.expect("initialized head table").as_ptr(),
-                        state.hash_size as usize,
-                    );
-                    let prev = ::core::slice::from_raw_parts_mut(
-                        state.prev.expect("initialized prev table").as_ptr(),
-                        state.w_size as usize,
-                    );
+                    let head = &mut *state.head;
+                    let prev = &mut *state.prev;
                     (state.ins_h, hash_head) = insert_hash(
                         window,
                         head,
@@ -3997,7 +4092,7 @@ unsafe extern "C" fn deflate_fast(
         } else {
             let cc: crate::zutil_h::uch = window[state.strstart as usize] as crate::zutil_h::uch;
             bflush = crate::src::trees::tally_symbol(
-                &mut pending_buf[sym_buf_start..],
+                &mut state.pending_buf[sym_buf_start..],
                 &mut state.sym_next,
                 state.sym_end,
                 &mut state.dyn_ltree,
@@ -4027,7 +4122,7 @@ unsafe extern "C" fn deflate_fast(
                 crate::src::trees::BlockFlushState {
                     level: state.level,
                     strategy: state.strategy,
-                    pending_buf,
+                    pending_buf: state.pending_buf,
                     pending: &mut state.pending,
                     bi_buf: &mut state.bi_buf,
                     bi_valid: &mut state.bi_valid,
@@ -4054,7 +4149,7 @@ unsafe extern "C" fn deflate_fast(
                 0,
             );
             state.block_start = state.strstart as ::core::ffi::c_long;
-            flush_pending(stream, state);
+            flush_fast_pending(state, stream);
             if stream.avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
@@ -4074,10 +4169,7 @@ unsafe extern "C" fn deflate_fast(
     if flush == crate::zlib_h::Z_FINISH {
         let stored_len =
             (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-        let window = ::core::slice::from_raw_parts(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        );
+        let window = &*state.window;
         let input = if state.block_start >= 0 {
             let start = state.block_start as usize;
             Some(&window[start..start + stored_len as usize])
@@ -4093,7 +4185,7 @@ unsafe extern "C" fn deflate_fast(
             crate::src::trees::BlockFlushState {
                 level: state.level,
                 strategy: state.strategy,
-                pending_buf,
+                pending_buf: state.pending_buf,
                 pending: &mut state.pending,
                 bi_buf: &mut state.bi_buf,
                 bi_valid: &mut state.bi_valid,
@@ -4120,7 +4212,7 @@ unsafe extern "C" fn deflate_fast(
             1,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(stream, state);
+        flush_fast_pending(state, stream);
         if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
@@ -4133,10 +4225,7 @@ unsafe extern "C" fn deflate_fast(
     if state.sym_next != 0 {
         let stored_len =
             (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-        let window = ::core::slice::from_raw_parts(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        );
+        let window = &*state.window;
         let input = if state.block_start >= 0 {
             let start = state.block_start as usize;
             Some(&window[start..start + stored_len as usize])
@@ -4152,7 +4241,7 @@ unsafe extern "C" fn deflate_fast(
             crate::src::trees::BlockFlushState {
                 level: state.level,
                 strategy: state.strategy,
-                pending_buf,
+                pending_buf: state.pending_buf,
                 pending: &mut state.pending,
                 bi_buf: &mut state.bi_buf,
                 bi_valid: &mut state.bi_valid,
@@ -4179,7 +4268,7 @@ unsafe extern "C" fn deflate_fast(
             0,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(stream, state);
+        flush_fast_pending(state, stream);
         if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
@@ -4189,6 +4278,130 @@ unsafe extern "C" fn deflate_fast(
         }
     }
     return block_done;
+}
+
+unsafe extern "C" fn deflate_fast(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
+    flush: ::core::ffi::c_int,
+) -> block_state {
+    let input = if stream.avail_in == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+    };
+    let output = if stream.avail_out == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
+    };
+    let window = ::core::slice::from_raw_parts_mut(
+        state.window.expect("initialized window").as_ptr(),
+        state.window_size as usize,
+    );
+    let prev = ::core::slice::from_raw_parts_mut(
+        state.prev.expect("initialized prev table").as_ptr(),
+        state.w_size as usize,
+    );
+    let head = ::core::slice::from_raw_parts_mut(
+        state.head.expect("initialized head table").as_ptr(),
+        state.hash_size as usize,
+    );
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state.pending_buf.expect("initialized pending buffer").as_ptr(),
+        state.pending_buf_size as usize,
+    );
+    let mut fast = DeflateFastState {
+        window,
+        prev,
+        head,
+        pending_buf,
+        pending_out: state.pending_out,
+        pending: state.pending,
+        bi_buf: state.bi_buf,
+        bi_valid: state.bi_valid,
+        bi_used: state.bi_used,
+        dyn_ltree: &mut state.dyn_ltree,
+        dyn_dtree: &mut state.dyn_dtree,
+        bl_tree: &mut state.bl_tree,
+        l_desc: &mut state.l_desc,
+        d_desc: &mut state.d_desc,
+        bl_desc: &mut state.bl_desc,
+        heap: &mut state.heap,
+        heap_len: state.heap_len,
+        heap_max: state.heap_max,
+        depth: &mut state.depth,
+        bl_count: &mut state.bl_count,
+        opt_len: state.opt_len,
+        static_len: state.static_len,
+        sym_buf_start: state.sym_buf_start,
+        sym_next: state.sym_next,
+        sym_end: state.sym_end,
+        matches: state.matches,
+        lookahead: state.lookahead,
+        strstart: state.strstart,
+        block_start: state.block_start,
+        insert: state.insert,
+        ins_h: state.ins_h,
+        match_length: state.match_length,
+        match_start: state.match_start,
+        prev_length: state.prev_length,
+        max_chain_length: state.max_chain_length,
+        max_lazy_match: state.max_lazy_match,
+        good_match: state.good_match,
+        nice_match: state.nice_match,
+        level: state.level,
+        strategy: state.strategy,
+        w_size: state.w_size,
+        w_mask: state.w_mask,
+        hash_shift: state.hash_shift,
+        hash_mask: state.hash_mask,
+        wrap: state.wrap,
+        slid: state.slid,
+        high_water: state.high_water,
+    };
+    let mut fast_stream = DeflateFastStream {
+        input,
+        input_pos: 0,
+        output,
+        output_pos: 0,
+        avail_out: stream.avail_out,
+        total_in: stream.total_in,
+        total_out: stream.total_out,
+        adler: stream.adler,
+        data_type: &mut stream.data_type,
+    };
+    let result = deflate_fast_from_views(&mut fast, &mut fast_stream, flush);
+    stream.next_in = stream.next_in.wrapping_add(fast_stream.input_pos);
+    stream.avail_in = stream
+        .avail_in
+        .wrapping_sub(fast_stream.input_pos as crate::stdlib::uInt);
+    stream.next_out = stream.next_out.wrapping_add(fast_stream.output_pos);
+    stream.avail_out = fast_stream.avail_out;
+    stream.total_in = fast_stream.total_in;
+    stream.total_out = fast_stream.total_out;
+    stream.adler = fast_stream.adler;
+    state.pending_out = fast.pending_out;
+    state.pending = fast.pending;
+    state.bi_buf = fast.bi_buf;
+    state.bi_valid = fast.bi_valid;
+    state.bi_used = fast.bi_used;
+    state.heap_len = fast.heap_len;
+    state.heap_max = fast.heap_max;
+    state.opt_len = fast.opt_len;
+    state.static_len = fast.static_len;
+    state.sym_next = fast.sym_next;
+    state.matches = fast.matches;
+    state.lookahead = fast.lookahead;
+    state.strstart = fast.strstart;
+    state.block_start = fast.block_start;
+    state.insert = fast.insert;
+    state.ins_h = fast.ins_h;
+    state.match_length = fast.match_length;
+    state.match_start = fast.match_start;
+    state.slid = fast.slid;
+    state.high_water = fast.high_water;
+    result
 }
 
 unsafe extern "C" fn deflate_slow(
