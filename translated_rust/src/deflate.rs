@@ -616,19 +616,27 @@ fn deflate_slow_can_search_match(
 
 unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let wsize = (*s).w_size;
-    let mut index = (*s).hash_size;
-    while index != 0 {
-        index = index.wrapping_sub(1);
-        let entry = (*s).head.wrapping_add(index as usize);
-        *entry = slide_hash_entry(*entry as ::core::ffi::c_uint, wsize);
+    let mut n = (*s).hash_size;
+    let mut p = (*s).head.wrapping_add(n as usize);
+    loop {
+        p = p.wrapping_sub(1);
+        *p = slide_hash_entry(*p as ::core::ffi::c_uint, wsize);
+        n = n.wrapping_sub(1);
+        if n == 0 {
+            break;
+        }
     }
-    index = wsize;
-    while index != 0 {
-        index = index.wrapping_sub(1);
-        let entry = (*s).prev.wrapping_add(index as usize);
-        *entry = slide_hash_entry(*entry as ::core::ffi::c_uint, wsize);
+    n = wsize;
+    p = (*s).prev.wrapping_add(n as usize);
+    loop {
+        p = p.wrapping_sub(1);
+        *p = slide_hash_entry(*p as ::core::ffi::c_uint, wsize);
+        n = n.wrapping_sub(1);
+        if n == 0 {
+            break;
+        }
     }
-    (*s).slid = 1 as ::core::ffi::c_int;
+    (*s).slid = 1;
 }
 
 fn read_buf_len(

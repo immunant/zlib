@@ -121,6 +121,10 @@ fn gz_zero_needs_initialization(first: ::core::ffi::c_int) -> bool {
     first != 0
 }
 
+fn gz_zero_initialize_buffer(buffer: &mut [crate::stdlib::Byte]) {
+    buffer.fill(0);
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct GzZeroChunkLimits {
     int_and_off64_are_same_size: bool,
@@ -1039,11 +1043,8 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         };
         n = len;
         if initialize_buffer {
-            crate::stdlib::memset(
-                state.in_0 as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                n as crate::__stddef_size_t_h::size_t,
-            );
+            let buffer = ::core::slice::from_raw_parts_mut(state.in_0, n as usize);
+            gz_zero_initialize_buffer(buffer);
             first = 0 as ::core::ffi::c_int;
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
@@ -1553,7 +1554,7 @@ mod tests {
         gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
         gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
         gz_zero_apply_comp_progress, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_chunk_limits, gz_zero_chunk_step, gz_zero_initial_step,
+        gz_zero_chunk_limits, gz_zero_chunk_step, gz_zero_initial_step, gz_zero_initialize_buffer,
         gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
         gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error, gzclose_w_result,
         gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
@@ -1694,6 +1695,15 @@ mod tests {
         assert!(gz_zero_needs_initialization(1));
         assert!(gz_zero_needs_initialization(-1));
         assert!(!gz_zero_needs_initialization(0));
+    }
+
+    #[test]
+    fn gz_zero_initialize_buffer_clears_every_byte() {
+        let mut buffer = [0xff; 4];
+
+        gz_zero_initialize_buffer(&mut buffer);
+
+        assert_eq!(buffer, [0; 4]);
     }
 
     #[test]
