@@ -211,9 +211,7 @@ fn gz_comp(
             return 0 as ::core::ffi::c_int;
         }
         crate::src::gzlib::GzCompMode::Reset => {
-            // SAFETY: initialization created the deflater stored in this
-            // validated write state before it can reach the reset path.
-            unsafe { crate::src::deflate::deflateReset(&mut state.strm) };
+            crate::src::deflate::deflateReset(&mut state.strm);
             crate::src::gzlib::gz_comp_reset_complete(state);
         }
         crate::src::gzlib::GzCompMode::Deflate => {}

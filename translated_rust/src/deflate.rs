@@ -748,7 +748,7 @@ pub unsafe extern "C" fn deflateInit2_(
     state.level = level;
     state.strategy = strategy;
     state.method = method as crate::stdlib::Byte;
-    return deflateReset(strm);
+    return deflateReset(stream);
 }
 #[export_name = "deflateInit2_"]
 
@@ -1037,11 +1037,14 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     deflateGetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn deflateResetKeep(
-    mut strm: crate::zlib_h::z_streamp,
+// Resetting a previously validated deflater only needs its bound stream.
+// Keep raw stream dereferencing at the ABI wrappers so gzip's private reset
+// path can reuse this without an unsafe call.
+pub fn deflateResetKeep(
+    strm: &mut crate::zlib_h::z_stream,
     initialize_matcher: bool,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = deflateStateCheck(strm) else {
+    let Some((strm, state)) = deflateStateCheck(strm as *mut _) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let result = deflate_reset_keep(strm, state);
@@ -1088,7 +1091,10 @@ fn deflate_reset_keep(
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateResetKeep(strm, false)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflateResetKeep(&mut *strm, false)
 }
 fn lm_init_state(
     state: &mut crate::src::deflate::deflate_state,
@@ -1113,7 +1119,7 @@ fn lm_init_state(
     state.match_available = 0;
     state.ins_h = 0;
 }
-pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+pub fn deflateReset(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     deflateResetKeep(strm, true)
 }
 #[export_name = "deflateReset"]
@@ -1121,7 +1127,10 @@ pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
 pub unsafe extern "C" fn deflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateReset(strm)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflateReset(&mut *strm)
 }
 pub unsafe extern "C" fn deflateSetHeader(
     mut strm: crate::zlib_h::z_streamp,
