@@ -4458,29 +4458,45 @@ fn gen_next_codes(
     next_code
 }
 
-unsafe extern "C" fn gen_codes(
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
-    mut bl_count: *mut crate::zutil_h::ushf,
-) {
-    let mut counts: [crate::zutil_h::ush; 16] = [0; 16];
-    let mut bits = 0usize;
-    while bits <= crate::src::deflate::MAX_BITS as usize {
-        counts[bits] = *bl_count.offset(bits as isize);
-        bits += 1;
+fn gen_codes_state(
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    bl_count: &[crate::zutil_h::ush; crate::src::deflate::MAX_BITS as usize + 1],
+) -> bool {
+    let Ok(max_code) = usize::try_from(max_code) else {
+        return false;
+    };
+    if max_code >= tree.len() {
+        return false;
     }
-    let mut next_code = gen_next_codes(&counts);
-    let mut n = 0 as ::core::ffi::c_int;
-    while n <= max_code {
-        let len = (*tree.offset(n as isize)).dl.len as ::core::ffi::c_int;
-        if len != 0 as ::core::ffi::c_int {
-            let code = next_code[len as usize];
-            next_code[len as usize] = next_code[len as usize].wrapping_add(1);
-            (*tree.offset(n as isize)).fc.code =
-                bi_reverse(code as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
+    let mut next_code = gen_next_codes(bl_count);
+    for entry in &mut tree[..=max_code] {
+        let len = entry.dl.len as usize;
+        if len != 0 {
+            let Some(code) = next_code.get_mut(len) else {
+                return false;
+            };
+            entry.fc.code = bi_reverse(*code as ::core::ffi::c_uint, len as ::core::ffi::c_int)
+                as crate::zutil_h::ush;
+            *code = code.wrapping_add(1);
         }
-        n += 1;
     }
+    true
+}
+
+unsafe extern "C" fn gen_codes(
+    tree: *mut crate::src::deflate::ct_data,
+    tree_len: usize,
+    max_code: ::core::ffi::c_int,
+    bl_count: *const crate::zutil_h::ushf,
+) {
+    if tree.is_null() || bl_count.is_null() {
+        return;
+    }
+    let tree = ::core::slice::from_raw_parts_mut(tree, tree_len);
+    let bl_count =
+        &*(bl_count as *const [crate::zutil_h::ush; crate::src::deflate::MAX_BITS as usize + 1]);
+    let _ = gen_codes_state(tree, max_code, bl_count);
 }
 
 fn tr_static_init() {}
@@ -4895,8 +4911,9 @@ unsafe extern "C" fn build_tree(
     gen_bitlen(s, desc);
     gen_codes(
         tree,
+        (elems as usize) * 2 + 1,
         max_code,
-        &raw mut (*s).bl_count as *mut crate::zutil_h::ushf,
+        &raw const (*s).bl_count as *const crate::zutil_h::ushf,
     );
 }
 
