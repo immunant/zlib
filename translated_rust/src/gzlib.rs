@@ -664,6 +664,26 @@ impl GzOpenConfig {
             }
     }
 
+    // Opening a path is entirely within the pointer-free owner boundary.  In
+    // particular, keep this separate from descriptor adoption: converting a
+    // caller-owned raw descriptor remains an ABI-boundary operation, whereas
+    // this path can already construct the eventual gzip owner directly.
+    fn open(self, path: &[u8]) -> Option<GzOpenState> {
+        let oflag = self.open_flags();
+        let fd = match rustix::fs::open(
+            path,
+            rustix::fs::OFlags::from_bits_retain(oflag as u32),
+            rustix::fs::Mode::from_raw_mode(0o666),
+        ) {
+            Ok(opened) => opened,
+            Err(error) => {
+                errno::set_errno(errno::Errno(error.raw_os_error()));
+                return None;
+            }
+        };
+        Some(self.into_open_state(fd))
+    }
+
     fn into_open_state(mut self, fd: rustix::fd::OwnedFd) -> GzOpenState {
         if self.mode.mode == crate::gzguts_h::GZ_APPEND {
             let _ = rustix::fs::seek(&fd, rustix::fs::SeekFrom::End(0));
@@ -780,20 +800,13 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
     let Some(config) = GzOpenConfig::new(path, mode) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    let oflag = config.open_flags();
-    let fd = if fd == -1 as ::core::ffi::c_int {
-        match rustix::fs::open(
-            path,
-            rustix::fs::OFlags::from_bits_retain(oflag as u32),
-            rustix::fs::Mode::from_raw_mode(0o666),
-        ) {
-            Ok(opened) => opened,
-            Err(error) => {
-                errno::set_errno(errno::Errno(error.raw_os_error()));
-                return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-            }
-        }
+    let initial = if fd == -1 as ::core::ffi::c_int {
+        let Some(initial) = config.open(path) else {
+            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+        };
+        initial
     } else {
+        let oflag = config.open_flags();
         let fd = <rustix::fd::OwnedFd as rustix::fd::FromRawFd>::from_raw_fd(fd);
         if oflag & crate::stdlib::O_NONBLOCK != 0 {
             if let Ok(flags) = rustix::fs::fcntl_getfl(&fd) {
@@ -805,9 +818,8 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
                 let _ = rustix::io::fcntl_setfd(&fd, flags | rustix::io::FdFlags::CLOEXEC);
             }
         }
-        fd
+        config.into_open_state(fd)
     };
-    let initial = config.into_open_state(fd);
     state_owner.push(crate::gzguts_h::gz_state {
         x: crate::zlib_h::gzFile_s {
             have: initial.reset.have,
