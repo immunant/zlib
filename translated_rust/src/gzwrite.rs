@@ -143,6 +143,18 @@ fn gz_write_chunk_consumed_len(
     chunk_len.wrapping_sub(remaining_avail_in as ::core::ffi::c_uint)
 }
 
+fn gz_write_apply_direct_progress(
+    pos: &mut crate::stdlib::off64_t,
+    remaining: &mut crate::stdlib::z_size_t,
+    chunk_len: ::core::ffi::c_uint,
+    remaining_avail_in: crate::stdlib::uInt,
+) -> bool {
+    let consumed = gz_write_chunk_consumed_len(chunk_len, remaining_avail_in);
+    *pos += consumed as crate::stdlib::off64_t;
+    *remaining = remaining.wrapping_sub(consumed as crate::stdlib::z_size_t);
+    *remaining != 0
+}
+
 fn gz_zero_apply_progress(
     pos: &mut crate::stdlib::off64_t,
     skip: &mut crate::stdlib::off64_t,
@@ -450,16 +462,19 @@ unsafe extern "C" fn gz_write(
         }
         (*state).strm.next_in = buf as *mut crate::stdlib::Bytef;
         loop {
-            let mut n = gz_write_chunk_len(len);
+            let n = gz_write_chunk_len(len);
             (*state).strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            n = gz_write_chunk_consumed_len(n, (*state).strm.avail_in);
-            (*state).x.pos += n as crate::stdlib::off64_t;
-            len = len.wrapping_sub(n as crate::stdlib::z_size_t);
+            let has_remaining = gz_write_apply_direct_progress(
+                &mut (*state).x.pos,
+                &mut len,
+                n,
+                (*state).strm.avail_in,
+            );
             if ret == -1 as ::core::ffi::c_int {
                 return gz_write_error_result((*state).again, put, len);
             }
-            if !(len != 0) {
+            if !has_remaining {
                 break;
             }
         }
@@ -792,10 +807,11 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 mod tests {
     use super::{
         gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_write_chunk_len,
-        gz_write_buffered_copy_len, gz_write_chunk_consumed_len, gz_write_chunk_len,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_uses_buffered_path,
-        gz_zero_apply_progress, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
-        gzputs_len_fits_int, gzputs_result, gzwrite_len_fits_int,
+        gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_chunk_consumed_len,
+        gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
+        gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
+        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
+        gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1045,6 +1061,51 @@ mod tests {
     #[test]
     fn gz_write_chunk_consumed_len_preserves_wrapping_accounting() {
         assert_eq!(gz_write_chunk_consumed_len(0, 1), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn gz_write_apply_direct_progress_accounts_for_partial_consumption() {
+        let mut pos = 10;
+        let mut remaining = 100;
+
+        assert!(gz_write_apply_direct_progress(
+            &mut pos,
+            &mut remaining,
+            80,
+            20
+        ));
+        assert_eq!(pos, 70);
+        assert_eq!(remaining, 40);
+    }
+
+    #[test]
+    fn gz_write_apply_direct_progress_reports_input_exhaustion() {
+        let mut pos = 10;
+        let mut remaining = 80;
+
+        assert!(!gz_write_apply_direct_progress(
+            &mut pos,
+            &mut remaining,
+            80,
+            0
+        ));
+        assert_eq!(pos, 90);
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn gz_write_apply_direct_progress_preserves_wrapping_accounting() {
+        let mut pos = 0;
+        let mut remaining = ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t;
+
+        assert!(!gz_write_apply_direct_progress(
+            &mut pos,
+            &mut remaining,
+            0,
+            1
+        ));
+        assert_eq!(pos, ::core::ffi::c_uint::MAX as crate::stdlib::off64_t);
+        assert_eq!(remaining, 0);
     }
 
     #[test]

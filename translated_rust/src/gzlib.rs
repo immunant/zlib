@@ -417,6 +417,28 @@ fn gz_apply_post_open_metadata(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GzOpenOffsetPlan {
+    whence: ::core::ffi::c_int,
+    record_offset: bool,
+}
+
+fn gz_open_offset_plan(mode: ::core::ffi::c_int) -> Option<GzOpenOffsetPlan> {
+    if mode == crate::gzguts_h::GZ_APPEND {
+        Some(GzOpenOffsetPlan {
+            whence: crate::stdlib::SEEK_END,
+            record_offset: false,
+        })
+    } else if mode == crate::gzguts_h::GZ_READ {
+        Some(GzOpenOffsetPlan {
+            whence: crate::stdlib::SEEK_CUR,
+            record_offset: true,
+        })
+    } else {
+        None
+    }
+}
+
 fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::stdlib::off64_t) {
     gz_apply_post_open_metadata(state, current_offset);
     gz_reset_state(state);
@@ -494,21 +516,18 @@ unsafe extern "C" fn gz_open(
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    let current_offset = if (*state).mode == crate::gzguts_h::GZ_APPEND {
-        crate::stdlib::lseek64(
-            (*state).fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_END,
-        );
-        0
-    } else if (*state).mode == crate::gzguts_h::GZ_READ {
-        crate::stdlib::lseek64(
-            (*state).fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t
-    } else {
-        0
+    let current_offset = match gz_open_offset_plan((*state).mode) {
+        Some(plan) => {
+            let offset =
+                crate::stdlib::lseek64((*state).fd, 0 as crate::stdlib::__off64_t, plan.whence)
+                    as crate::stdlib::off64_t;
+            if plan.record_offset {
+                offset
+            } else {
+                0
+            }
+        }
+        None => 0,
     };
     gz_finish_open(&mut *state, current_offset);
     gz_error(
@@ -1004,13 +1023,14 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
-        gz_prepare_open, gz_reset_core, gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
-        gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_error_allows_positioning, gzseek_fast_forward_reset,
+        gz_clear_read_flags, gz_is_read_or_write_mode, gz_open_offset_plan, gz_parse_open_mode,
+        gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
+        gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
+        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
+        gzseek_error_allows_positioning, gzseek_fast_forward_reset,
         gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
         gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
-        GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
+        GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1498,5 +1518,31 @@ mod tests {
             gz_post_open_metadata(crate::gzguts_h::GZ_READ, 19),
             (crate::gzguts_h::GZ_READ, Some(19))
         );
+    }
+    #[test]
+    fn gz_open_offset_plan_seeks_to_end_without_recording_append_offsets() {
+        assert_eq!(
+            gz_open_offset_plan(crate::gzguts_h::GZ_APPEND),
+            Some(GzOpenOffsetPlan {
+                whence: crate::stdlib::SEEK_END,
+                record_offset: false,
+            })
+        );
+    }
+
+    #[test]
+    fn gz_open_offset_plan_records_current_read_offset() {
+        assert_eq!(
+            gz_open_offset_plan(crate::gzguts_h::GZ_READ),
+            Some(GzOpenOffsetPlan {
+                whence: crate::stdlib::SEEK_CUR,
+                record_offset: true,
+            })
+        );
+    }
+
+    #[test]
+    fn gz_open_offset_plan_skips_seeking_for_write_mode() {
+        assert_eq!(gz_open_offset_plan(crate::gzguts_h::GZ_WRITE), None);
     }
 }

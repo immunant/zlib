@@ -205,6 +205,10 @@ fn gz_read_progress(
     )
 }
 
+fn gz_read_should_continue(len: crate::stdlib::z_size_t, err: ::core::ffi::c_int) -> bool {
+    len != 0 && err == 0
+}
+
 enum GzUngetcBufferState {
     Empty,
     Full,
@@ -993,6 +997,13 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_should_continue_requires_remaining_output_without_errors() {
+        assert!(gz_read_should_continue(1, 0));
+        assert!(!gz_read_should_continue(0, 0));
+        assert!(!gz_read_should_continue(1, -1));
+    }
+
+    #[test]
     fn gz_ungetc_buffer_state_prioritizes_empty_buffer() {
         assert!(matches!(
             gz_ungetc_buffer_state(0, 8),
@@ -1226,7 +1237,7 @@ unsafe extern "C" fn gz_read(
             (len, got, (*state).x.pos) = gz_read_progress(len, got, (*state).x.pos, n);
             buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
         }
-        if !(len != 0 && err == 0) {
+        if !gz_read_should_continue(len, err) {
             break;
         }
     }
