@@ -1534,6 +1534,11 @@ mod callback_owner {
         let state = state_handle.as_mut();
         drop(state.gzhead.take());
         let release_plan = state.callback_storage.take_release_plan(state.status);
+        // Snapshot the recorded, typed handles before the first callback.
+        // `Iterator::map()` would retain this state borrow until each later
+        // iteration, including across a re-entrant `zfree` call.  Array::map
+        // is eager, so the complete liveness validation and handle lookup end
+        // before a callback can inspect or alter the stream again.
         let allocations = release_plan.ordered_slots().map(|slot| {
             slot.and_then(|slot| match slot {
                 DeflateCallbackSlot::Storage(DeflateStorageSlot::Pending) => {
