@@ -156,9 +156,7 @@ pub(crate) struct PendingStorageLayout {
     pub symbol_flush_threshold: crate::stdlib::uInt,
 }
 
-pub(crate) fn pending_storage_layout(
-    lit_bufsize: crate::stdlib::uInt,
-) -> PendingStorageLayout {
+pub(crate) fn pending_storage_layout(lit_bufsize: crate::stdlib::uInt) -> PendingStorageLayout {
     let symbol_offset = lit_bufsize as usize;
     let total_len = symbol_offset.wrapping_mul(4);
 
@@ -167,6 +165,50 @@ pub(crate) fn pending_storage_layout(
         symbol_offset,
         symbol_len: total_len.wrapping_sub(symbol_offset),
         symbol_flush_threshold: lit_bufsize.wrapping_sub(1).wrapping_mul(3),
+    }
+}
+
+pub(crate) struct PendingStorageView<'a> {
+    bytes: &'a mut [crate::stdlib::Bytef],
+    layout: PendingStorageLayout,
+}
+
+impl<'a> PendingStorageView<'a> {
+    pub(crate) fn new(
+        bytes: &'a mut [crate::stdlib::Bytef],
+        layout: PendingStorageLayout,
+    ) -> Option<Self> {
+        if bytes.len() < layout.total_len {
+            return None;
+        }
+        Some(Self { bytes, layout })
+    }
+
+    pub(crate) fn pending_bytes(&mut self) -> &mut [crate::stdlib::Bytef] {
+        &mut self.bytes[..self.layout.total_len]
+    }
+
+    pub(crate) fn symbol_bytes(&mut self) -> &mut [crate::stdlib::Bytef] {
+        &mut self.bytes[self.layout.symbol_offset..self.layout.total_len]
+    }
+
+    pub(crate) fn append_pending(
+        &mut self,
+        pending: &mut crate::zutil_h::ulg,
+        bytes: &[crate::stdlib::Bytef],
+    ) -> bool {
+        let Ok(start) = usize::try_from(*pending) else {
+            return false;
+        };
+        let Some(end) = start.checked_add(bytes.len()) else {
+            return false;
+        };
+        let Some(output) = self.pending_bytes().get_mut(start..end) else {
+            return false;
+        };
+        output.copy_from_slice(bytes);
+        *pending = pending.wrapping_add(bytes.len() as crate::zutil_h::ulg);
+        true
     }
 }
 
@@ -1269,9 +1311,8 @@ pub unsafe extern "C" fn deflateInit2_(
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf = (*s)
-        .pending_buf
-        .wrapping_add(pending_layout.symbol_offset) as *mut crate::zutil_h::uchf;
+    (*s).sym_buf =
+        (*s).pending_buf.wrapping_add(pending_layout.symbol_offset) as *mut crate::zutil_h::uchf;
     (*s).sym_end = pending_layout.symbol_flush_threshold;
     (*s).level = level;
     (*s).strategy = strategy;
@@ -4487,16 +4528,16 @@ mod tests {
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors,
-        pending_storage_layout, put_short_msb_core,
-        read_buf_checksum, read_buf_core, read_buf_input_progress_after_copy, read_buf_len,
-        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_core, slide_hash_entry,
-        stored_block_available_output, stored_block_buffered_len, stored_block_can_emit,
-        stored_block_copy_lengths, stored_block_header_bytes, stored_block_is_last,
-        stored_block_length_bytes, stored_block_min_size, stored_block_payload_len,
-        stored_block_should_wait, stored_insert_after_input, symbol_buffer_is_full,
-        symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress, DeflateFinalFlushAction,
-        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
-        ReadBufChecksum, ReadBufResult,
+        pending_storage_layout, put_short_msb_core, read_buf_checksum, read_buf_core,
+        read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
+        stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
+        stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
+        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
+        stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
+        DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
+        ReadBufResult,
     };
 
     #[test]
@@ -5441,6 +5482,21 @@ mod tests {
                 symbol_flush_threshold: 0,
             }
         );
+    }
+
+    #[test]
+    fn pending_storage_view_preserves_temporal_pending_and_symbol_access() {
+        let layout = pending_storage_layout(4);
+        let mut bytes = [0; 16];
+        let mut storage = super::PendingStorageView::new(&mut bytes, layout).unwrap();
+        let mut pending = 0;
+
+        assert!(storage.append_pending(&mut pending, &[1, 2, 3]));
+        assert_eq!(pending, 3);
+        assert_eq!(storage.pending_bytes()[..3], [1, 2, 3]);
+        assert_eq!(storage.symbol_bytes().len(), 12);
+        assert!(!storage.append_pending(&mut pending, &[0; 14]));
+        assert_eq!(pending, 3);
     }
 
     #[test]
