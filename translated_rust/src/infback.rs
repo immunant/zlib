@@ -433,7 +433,7 @@ pub unsafe extern "C" fn inflateBack(
                         Ok(used) => {
                             (*state).next = (&raw mut (*state).codes
                                 as *mut crate::src::inftrees::code)
-                                .add(used);
+                                .wrapping_add(used);
                             0
                         }
                         Err(error) => error,
@@ -666,7 +666,7 @@ pub unsafe extern "C" fn inflateBack(
                                 Ok(used) => {
                                     (*state).next = (&raw mut (*state).codes
                                         as *mut crate::src::inftrees::code)
-                                        .add(used);
+                                        .wrapping_add(used);
                                     0
                                 }
                                 Err(error) => error,
@@ -683,7 +683,14 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
                                 let table_start =
                                     &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                                let table_used = (*state).next.offset_from(table_start) as usize;
+                                // `next` was set from this fixed code arena after the
+                                // literal/length table build, so its address delta is a
+                                // whole number of `code` entries within that arena.
+                                let table_used = (*state)
+                                    .next
+                                    .addr()
+                                    .wrapping_sub(table_start.addr())
+                                    / ::core::mem::size_of::<crate::src::inftrees::code>();
                                 ret = match crate::src::inftrees::inflate_table(
                                     crate::src::inftrees::DISTS,
                                     &(&(*state).lens)[(*state).nlen as usize
@@ -693,7 +700,7 @@ pub unsafe extern "C" fn inflateBack(
                                     &mut (&mut (*state).work)[..(*state).ndist as usize],
                                 ) {
                                     Ok(used) => {
-                                        (*state).next = table_start.add(table_used + used);
+                                        (*state).next = table_start.wrapping_add(table_used + used);
                                         0
                                     }
                                     Err(error) => error,
