@@ -2731,6 +2731,28 @@ struct DeflateCopyPayload {
     slid: ::core::ffi::c_int,
 }
 
+impl DeflateCopyPayload {
+    // The callback boundary receives this fully pointer-free snapshot before
+    // it requests replacement storage.  Keep the allocation geometry with
+    // that snapshot so a future custom-allocation owner does not need to
+    // re-read callback-owned state merely to rebuild the copy plan.
+    fn copy_plan(&self) -> DeflateCopyPlan {
+        deflate_copy_plan(
+            self.w_size,
+            self.hash_size,
+            self.lit_bufsize,
+            self.high_water,
+            self.slid,
+            self.strstart,
+            self.insert,
+            self.pending_out,
+            self.pending as usize,
+            self.sym_buf_start,
+            self.sym_next as usize,
+        )
+    }
+}
+
 fn copy_tree_desc(desc: &crate::src::deflate::tree_desc_s) -> crate::src::deflate::tree_desc_s {
     crate::src::deflate::tree_desc_s {
         kind: match &desc.kind {
@@ -3706,6 +3728,10 @@ pub unsafe extern "C" fn deflateCopy(
         high_water: ss.high_water,
         slid: ss.slid,
     };
+    let DeflateCopyPlan {
+        storage,
+        layout: copy_layout,
+    } = payload.copy_plan();
 
     // Do not byte-copy the ABI stream: that made this boundary depend on the
     // layout of a caller-visible owner and obscured which fields are retained
@@ -3810,22 +3836,6 @@ pub unsafe extern "C" fn deflateCopy(
         },
     );
     let ds = &mut *ds;
-    let DeflateCopyPlan {
-        storage,
-        layout: copy_layout,
-    } = deflate_copy_plan(
-        ds.w_size,
-        ds.hash_size,
-        ds.lit_bufsize,
-        ss.high_water,
-        ss.slid,
-        ss.strstart,
-        ss.insert,
-        ss.pending_out,
-        ss.pending as usize,
-        ss.sym_buf_start,
-        ss.sym_next as usize,
-    );
     // Preserve the source implementation's callback-visible order.  Reload
     // the callback and opaque value for every request: a re-entrant custom
     // allocator is allowed to inspect or update the stream between calls.
