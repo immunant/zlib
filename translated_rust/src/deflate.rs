@@ -1494,6 +1494,25 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     deflateGetDictionary(strm, dictionary, dictLength)
 }
+
+fn deflate_reset_keep_state(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+) {
+    strm.total_out = 0;
+    strm.total_in = strm.total_out;
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    strm.data_type = crate::zlib_h::Z_UNKNOWN;
+    state.pending = 0;
+    state.pending_out = state.pending_buf;
+    if state.wrap < 0 {
+        state.wrap = -state.wrap;
+    }
+    (state.status, strm.adler) = deflate_reset_status_and_adler(state.wrap);
+    state.last_flush = -2;
+    crate::src::trees::tr_init(state);
+}
+
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -1502,19 +1521,10 @@ pub unsafe extern "C" fn deflateResetKeep(
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).total_out = 0 as crate::stdlib::uLong;
-    (*strm).total_in = (*strm).total_out;
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*strm).data_type = crate::zlib_h::Z_UNKNOWN;
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    (*s).pending = 0 as crate::zutil_h::ulg;
-    (*s).pending_out = (*s).pending_buf;
-    if (*s).wrap < 0 as ::core::ffi::c_int {
-        (*s).wrap = -(*s).wrap;
-    }
-    ((*s).status, (*strm).adler) = deflate_reset_status_and_adler((*s).wrap);
-    (*s).last_flush = -2 as ::core::ffi::c_int;
-    crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
+    let stream = &mut *strm;
+    s = stream.state as *mut crate::src::deflate::deflate_state;
+    let state = &mut *s;
+    deflate_reset_keep_state(stream, state);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateResetKeep"]

@@ -4187,9 +4187,8 @@ fn init_block(s: &mut crate::src::deflate::deflate_state) {
     s.matches = 0;
     s.sym_next = s.matches;
 }
-pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
+pub(crate) fn tr_init(state: &mut crate::src::deflate::deflate_state) {
     tr_static_init();
-    let state = &mut *s;
     state.l_desc.dynamic_tree = crate::src::deflate::DynamicTree::Literal;
     state.d_desc.dynamic_tree = crate::src::deflate::DynamicTree::Distance;
     state.bl_desc.dynamic_tree = crate::src::deflate::DynamicTree::BitLength;
@@ -4197,6 +4196,10 @@ pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state
     state.bi_valid = 0;
     state.bi_used = 0;
     init_block(state);
+}
+
+pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
+    tr_init(&mut *s);
 }
 #[export_name = "_tr_init"]
 
