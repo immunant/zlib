@@ -632,6 +632,75 @@ pub(crate) struct GzDecompStep {
     pub(crate) action: GzDecompAction,
 }
 
+// The decompression loop mutates only these scalar gzip fields in response to
+// an inflate result.  Keep that transition with the bounded output accounting
+// so an eventual owned gzip codec can run the loop without borrowing the ABI
+// `gz_state`; the current boundary only snapshots and republishes the values.
+pub(crate) struct GzDecompState {
+    output: GzCodecOutput,
+    junk: ::core::ffi::c_int,
+    eof: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+}
+
+impl GzDecompState {
+    pub(crate) fn new(
+        output_capacity: usize,
+        junk: ::core::ffi::c_int,
+        eof: ::core::ffi::c_int,
+        how: ::core::ffi::c_int,
+    ) -> Option<Self> {
+        Some(Self {
+            output: GzCodecOutput::new(output_capacity)?,
+            junk,
+            eof,
+            how,
+        })
+    }
+
+    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
+        self.output.available()
+    }
+
+    pub(crate) fn record_inflate(
+        &mut self,
+        result: ::core::ffi::c_int,
+        available: crate::stdlib::uInt,
+    ) -> GzDecompAction {
+        self.output.record_available(available);
+        let produced_output = self.output.has_output();
+        if produced_output {
+            self.junk = 0;
+        }
+        let step = gz_decomp_step(result, available, produced_output, self.junk);
+        if matches!(step.action, GzDecompAction::Junk) {
+            self.eof = 1;
+            self.how = crate::gzguts_h::LOOK;
+        }
+        step.action
+    }
+
+    pub(crate) fn finish(&mut self, result: ::core::ffi::c_int) -> ::core::ffi::c_int {
+        if result == crate::zlib_h::Z_STREAM_END {
+            self.junk = 0;
+            self.how = crate::gzguts_h::LOOK;
+            0
+        } else if result != crate::zlib_h::Z_OK {
+            -1
+        } else {
+            0
+        }
+    }
+
+    pub(crate) fn written(&self) -> crate::stdlib::uInt {
+        self.output.written()
+    }
+
+    pub(crate) fn fields(&self) -> (::core::ffi::c_int, ::core::ffi::c_int, ::core::ffi::c_int) {
+        (self.junk, self.eof, self.how)
+    }
+}
+
 pub(crate) fn gz_decomp_step(
     result: ::core::ffi::c_int,
     output_available: crate::stdlib::uInt,

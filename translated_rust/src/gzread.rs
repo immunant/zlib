@@ -546,10 +546,12 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     }) else {
         return -1 as ::core::ffi::c_int;
     };
-    let Some(mut output_progress) = crate::src::gzlib::GzCodecOutput::new(output_len) else {
+    let Some(mut decomp) =
+        crate::src::gzlib::GzDecompState::new(output_len, state.junk, state.eof, state.how)
+    else {
         return -1 as ::core::ffi::c_int;
     };
-    state.strm.avail_out = output_progress.available();
+    state.strm.avail_out = decomp.output_available();
     state.strm.next_out = next_out;
     // The stream itself is embedded in the state we already exclusively own.
     // Keep field access through that borrow; only `inflate()` needs the ABI
@@ -599,25 +601,11 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );
-            output_progress.record_available(strm.avail_out);
-            let produced_output = output_progress.has_output();
-            let junk = if produced_output {
-                0 as ::core::ffi::c_int
-            } else {
-                state.junk
-            };
-            let step =
-                crate::src::gzlib::gz_decomp_step(ret, strm.avail_out, produced_output, junk);
-            if step.produced_output {
-                state.junk = 0 as ::core::ffi::c_int;
-            }
-            match step.action {
+            match decomp.record_inflate(ret, strm.avail_out) {
                 crate::src::gzlib::GzDecompAction::Continue => {}
                 crate::src::gzlib::GzDecompAction::Stop => break,
                 crate::src::gzlib::GzDecompAction::Junk => {
                     strm.avail_in = 0 as crate::stdlib::uInt;
-                    state.eof = 1 as ::core::ffi::c_int;
-                    state.how = crate::gzguts_h::LOOK;
                     ret = crate::zlib_h::Z_OK;
                     break;
                 }
@@ -670,18 +658,14 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
         }
     }
-    state.x.have = output_progress.written() as ::core::ffi::c_uint;
+    state.x.have = decomp.written() as ::core::ffi::c_uint;
     state.x.next = output_start;
-    if ret == crate::zlib_h::Z_STREAM_END {
-        state.junk = 0 as ::core::ffi::c_int;
-        state.how = crate::gzguts_h::LOOK;
-        return 0 as ::core::ffi::c_int;
-    }
-    return if ret != crate::zlib_h::Z_OK {
-        -1 as ::core::ffi::c_int
-    } else {
-        0 as ::core::ffi::c_int
-    };
+    let result = decomp.finish(ret);
+    let (junk, eof, how) = decomp.fields();
+    state.junk = junk;
+    state.eof = eof;
+    state.how = how;
+    result
 }
 
 unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
