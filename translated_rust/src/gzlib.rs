@@ -484,10 +484,7 @@ pub unsafe extern "C" fn gzseek64(
         }
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
-        n = gz_skip_chunk((*state).x.have, offset);
-        (*state).x.have = (*state).x.have.wrapping_sub(n);
-        (*state).x.next = (*state).x.next.offset(n as isize);
-        (*state).x.pos += n as crate::stdlib::off64_t;
+        n = crate::src::gzread::gz_consume(&mut *state, offset);
         offset -= n as crate::stdlib::off64_t;
     }
     (*state).skip = offset;

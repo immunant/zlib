@@ -356,14 +356,12 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
 }
 
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let mut n: ::core::ffi::c_uint = 0;
     loop {
         if (*state).x.have != 0 {
-            n = crate::src::gzlib::gz_skip_chunk((*state).x.have, (*state).skip);
-            (*state).x.have = (*state).x.have.wrapping_sub(n);
-            (*state).x.next = (*state).x.next.offset(n as isize);
-            (*state).x.pos += n as crate::stdlib::off64_t;
-            (*state).skip -= n as crate::stdlib::off64_t;
+            let state = &mut *state;
+            let skip = state.skip;
+            let n = gz_consume(state, skip);
+            state.skip -= n as crate::stdlib::off64_t;
         } else {
             if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
@@ -377,6 +375,17 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         }
     }
     return 0 as ::core::ffi::c_int;
+}
+
+pub(crate) fn gz_consume(
+    state: &mut crate::gzguts_h::gz_state,
+    limit: crate::stdlib::off64_t,
+) -> ::core::ffi::c_uint {
+    let n = crate::src::gzlib::gz_skip_chunk(state.x.have, limit);
+    state.x.have = state.x.have.wrapping_sub(n);
+    state.x.next = state.x.next.wrapping_add(n as usize);
+    state.x.pos += n as crate::stdlib::off64_t;
+    n
 }
 
 unsafe extern "C" fn gz_read(
