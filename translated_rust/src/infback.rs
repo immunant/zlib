@@ -298,12 +298,26 @@ fn inflate_back_reset_output_window(state: &mut crate::src::inflate::inflate_sta
     state.whave = state.wsize;
 }
 
+// An output callback consumes a whole window, after which the decoder starts
+// filling that same window again.  The caller retains the raw window binding
+// and performs the callback; this helper owns only the decoder bookkeeping.
+fn inflate_back_reopen_output_window(
+    state: &mut crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_uint {
+    inflate_back_reset_output_window(state);
+    state.wsize
+}
+
 fn inflate_back_finish_stored_block(state: &mut crate::src::inflate::inflate_state) {
     state.mode = crate::src::inflate::TYPE;
 }
 
 fn inflate_back_finish_literal(state: &mut crate::src::inflate::inflate_state) {
     state.mode = crate::src::inflate::LEN;
+}
+
+fn inflate_back_literal_byte(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_uchar {
+    state.length as ::core::ffi::c_uchar
 }
 
 fn inflate_back_finish_end_code(state: &mut crate::src::inflate::inflate_state) {
@@ -562,6 +576,18 @@ fn inflate_back_stored_copy_count(
     left: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
     length.min(have).min(left)
+}
+
+// Both stored and match copies consume decoded bytes from the same output
+// window.  The actual pointer advances remain in the caller; this transition
+// keeps their length/window accounting reference-based.
+fn inflate_back_consume_output_copy(
+    state: &mut crate::src::inflate::inflate_state,
+    left: &mut ::core::ffi::c_uint,
+    count: ::core::ffi::c_uint,
+) {
+    state.length = state.length.wrapping_sub(count);
+    *left = left.wrapping_sub(count);
 }
 
 fn inflate_back_can_use_fast_path(
@@ -834,8 +860,7 @@ pub unsafe extern "C" fn inflateBack(
                         }
                         if left == 0 as ::core::ffi::c_uint {
                             put = state_ref.window;
-                            left = state_ref.wsize;
-                            inflate_back_reset_output_window(state_ref);
+                            left = inflate_back_reopen_output_window(state_ref);
                             if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
@@ -849,9 +874,8 @@ pub unsafe extern "C" fn inflateBack(
                         );
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
-                        left = left.wrapping_sub(copy);
                         put = put.wrapping_add(copy as usize);
-                        state_ref.length = state_ref.length.wrapping_sub(copy);
+                        inflate_back_consume_output_copy(state_ref, &mut left, copy);
                     }
                     inflate_back_finish_stored_block(state_ref);
                     continue;
@@ -1214,8 +1238,7 @@ pub unsafe extern "C" fn inflateBack(
                 InflateBackLengthCode::Literal => {
                 if left == 0 as ::core::ffi::c_uint {
                     put = state_ref.window;
-                    left = state_ref.wsize;
-                    inflate_back_reset_output_window(state_ref);
+                    left = inflate_back_reopen_output_window(state_ref);
                     if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break;
@@ -1223,7 +1246,7 @@ pub unsafe extern "C" fn inflateBack(
                 }
                 let c2rust_fresh15 = put;
                 put = put.wrapping_add(1);
-                *c2rust_fresh15 = state_ref.length as ::core::ffi::c_uchar;
+                *c2rust_fresh15 = inflate_back_literal_byte(state_ref);
                 left = left.wrapping_sub(1);
                 inflate_back_finish_literal(state_ref);
                 }
@@ -1363,8 +1386,7 @@ pub unsafe extern "C" fn inflateBack(
                         loop {
                             if left == 0 as ::core::ffi::c_uint {
                                 put = state_ref.window;
-                                left = state_ref.wsize;
-                                inflate_back_reset_output_window(state_ref);
+                                left = inflate_back_reopen_output_window(state_ref);
                                 if out.expect("non-null function pointer")(out_desc, put, left) != 0
                                 {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1379,8 +1401,11 @@ pub unsafe extern "C" fn inflateBack(
                             );
                             from = put.offset(match_copy.from_offset);
                             copy = match_copy.count;
-                            state_ref.length = state_ref.length.wrapping_sub(match_copy.count);
-                            left = left.wrapping_sub(match_copy.count);
+                            inflate_back_consume_output_copy(
+                                state_ref,
+                                &mut left,
+                                match_copy.count,
+                            );
                             loop {
                                 let c2rust_fresh20 = from;
                                 from = from.wrapping_add(1);
