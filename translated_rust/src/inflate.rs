@@ -596,10 +596,11 @@ fn updatewindow(
     let window = unsafe { ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize) };
     update_window(state, window, input).is_err() as ::core::ffi::c_int
 }
-pub unsafe fn inflate(
+pub fn inflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    unsafe {
     // The exported wrapper and internal callers provide a live stream
     // reference. Keep the translated raw-state implementation below local
     // until stream ownership is converted.
@@ -2354,6 +2355,7 @@ pub unsafe fn inflate(
         ret = crate::zlib_h::Z_BUF_ERROR;
     }
     return ret;
+    }
 }
 #[export_name = "inflate"]
 

@@ -357,9 +357,7 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             break;
         } else {
             // `strm` is the initialized stream held by this gzip state.
-            ret = unsafe {
-                crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH)
-            };
+            ret = crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH);
             if state.strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
             }

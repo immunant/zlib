@@ -91,12 +91,7 @@ pub fn uncompress2_z(
             };
             len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
         }
-        err = unsafe {
-            crate::src::inflate::inflate(
-                &mut stream,
-                crate::zlib_h::Z_NO_FLUSH,
-            )
-        };
+        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH);
         if err != crate::zlib_h::Z_OK {
             break;
         }
