@@ -301,42 +301,42 @@ unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_i
             return -1;
         }
     }
-    if state_ref.direct == -1 as ::core::ffi::c_int || state_ref.junk == 0 as ::core::ffi::c_int {
-        crate::src::inflate::inflateReset(&raw mut state_ref.strm);
-        state_ref.how = crate::gzguts_h::GZIP;
-        state_ref.junk = gz_look_reset_junk(state_ref.junk);
-        state_ref.direct = 0;
-        return 0;
-    }
-    if gz_avail(state_ref) == -1 as ::core::ffi::c_int {
-        return -1;
-    }
-    if state_ref.strm.avail_in == 0 as crate::stdlib::uInt
-        || state_ref.again != 0 && state_ref.strm.avail_in < 4 as crate::stdlib::uInt
+    let reset_junk = if state_ref.direct == -1 as ::core::ffi::c_int
+        || state_ref.junk == 0 as ::core::ffi::c_int
     {
-        return 0;
-    }
-    let input_is_gzip = {
-        let Some(buffers) = state_ref.buffers.as_ref() else {
+        Some(gz_look_reset_junk(state_ref.junk))
+    } else {
+        if gz_avail(state_ref) == -1 as ::core::ffi::c_int {
             return -1;
+        }
+        if state_ref.strm.avail_in == 0 as crate::stdlib::uInt
+            || state_ref.again != 0 && state_ref.strm.avail_in < 4 as crate::stdlib::uInt
+        {
+            return 0;
+        }
+        let input_is_gzip = {
+            let Some(buffers) = state_ref.buffers.as_ref() else {
+                return -1;
+            };
+            let Some(next_index) = (state_ref.strm.next_in as usize)
+                .checked_sub(buffers.input.as_ptr() as usize)
+                .filter(|index| *index <= buffers.input.len())
+            else {
+                return -1;
+            };
+            let Some(is_gzip) =
+                gz_look_input_is_gzip(&buffers.input, next_index, state_ref.strm.avail_in)
+            else {
+                return -1;
+            };
+            is_gzip
         };
-        let Some(next_index) = (state_ref.strm.next_in as usize)
-            .checked_sub(buffers.input.as_ptr() as usize)
-            .filter(|index| *index <= buffers.input.len())
-        else {
-            return -1;
-        };
-        let Some(is_gzip) =
-            gz_look_input_is_gzip(&buffers.input, next_index, state_ref.strm.avail_in)
-        else {
-            return -1;
-        };
-        is_gzip
+        input_is_gzip.then_some(1)
     };
-    if input_is_gzip {
+    if let Some(junk) = reset_junk {
         crate::src::inflate::inflateReset(&raw mut state_ref.strm);
         state_ref.how = crate::gzguts_h::GZIP;
-        state_ref.junk = 1;
+        state_ref.junk = junk;
         state_ref.direct = 0;
         return 0;
     }
