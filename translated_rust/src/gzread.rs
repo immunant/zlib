@@ -930,15 +930,21 @@ fn gz_decomp_reports_unexpected_eof(again: ::core::ffi::c_int) -> bool {
     again == 0
 }
 
-fn gz_decomp_output_len(
-    had: ::core::ffi::c_uint,
-    avail_out: crate::stdlib::uInt,
-) -> ::core::ffi::c_uint {
-    (had as crate::stdlib::uInt).wrapping_sub(avail_out) as ::core::ffi::c_uint
+#[derive(Debug, Eq, PartialEq)]
+struct GzDecompOutputProgress {
+    have: ::core::ffi::c_uint,
+    rewind_len: usize,
 }
 
-fn gz_decomp_output_rewind_len(have: ::core::ffi::c_uint) -> usize {
-    have as usize
+fn gz_decomp_output_progress(
+    had: ::core::ffi::c_uint,
+    avail_out: crate::stdlib::uInt,
+) -> GzDecompOutputProgress {
+    let have = (had as crate::stdlib::uInt).wrapping_sub(avail_out) as ::core::ffi::c_uint;
+    GzDecompOutputProgress {
+        have,
+        rewind_len: have as usize,
+    }
 }
 
 fn gz_decomp_should_continue(ret: ::core::ffi::c_int, avail_out: crate::stdlib::uInt) -> bool {
@@ -1089,8 +1095,9 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
     let (avail_out, next_out) = ((*strm).avail_out, (*strm).next_out);
     {
         let state_ref = &mut *state;
-        state_ref.x.have = gz_decomp_output_len(had, avail_out);
-        state_ref.x.next = next_out.wrapping_sub(gz_decomp_output_rewind_len(state_ref.x.have));
+        let progress = gz_decomp_output_progress(had, avail_out);
+        state_ref.x.have = progress.have;
+        state_ref.x.next = next_out.wrapping_sub(progress.rewind_len);
     }
     match gz_decomp_result(ret) {
         GzDecompResult::RestartLook => {
@@ -1618,23 +1625,24 @@ mod tests {
     }
 
     #[test]
-    fn gz_decomp_output_len_tracks_produced_bytes_with_wrapping() {
-        assert_eq!(gz_decomp_output_len(10, 4), 6);
-        assert_eq!(gz_decomp_output_len(0, 1), ::core::ffi::c_uint::MAX);
-    }
-
-    #[test]
-    fn gz_decomp_output_rewind_len_preserves_the_cursor_without_output() {
-        assert_eq!(gz_decomp_output_rewind_len(0), 0);
-    }
-
-    #[test]
-    fn gz_decomp_output_rewind_len_matches_produced_output() {
-        assert_eq!(gz_decomp_output_rewind_len(1), 1);
-        assert_eq!(gz_decomp_output_rewind_len(42), 42);
+    fn gz_decomp_output_progress_tracks_produced_bytes_and_rewind() {
         assert_eq!(
-            gz_decomp_output_rewind_len(::core::ffi::c_uint::MAX),
-            ::core::ffi::c_uint::MAX as usize,
+            gz_decomp_output_progress(10, 4),
+            GzDecompOutputProgress {
+                have: 6,
+                rewind_len: 6,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_decomp_output_progress_preserves_unsigned_wrapping() {
+        assert_eq!(
+            gz_decomp_output_progress(0, 1),
+            GzDecompOutputProgress {
+                have: ::core::ffi::c_uint::MAX,
+                rewind_len: ::core::ffi::c_uint::MAX as usize,
+            }
         );
     }
 

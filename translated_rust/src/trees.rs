@@ -3722,6 +3722,10 @@ fn supplemental_tree_node(max_code: &mut ::core::ffi::c_int) -> ::core::ffi::c_i
     }
 }
 
+fn supplemental_tree_opt_len(opt_len: crate::zutil_h::ulg) -> crate::zutil_h::ulg {
+    opt_len.wrapping_sub(1)
+}
+
 fn rebalance_overflowed_bit_lengths(
     bl_count: &mut [crate::zutil_h::ush; 16],
     max_length: ::core::ffi::c_int,
@@ -4285,7 +4289,7 @@ unsafe fn build_tree(
         node = (*s).heap[(*s).heap_len as usize];
         (*tree.wrapping_add(node as usize)).fc.value = 1 as crate::zutil_h::ush;
         (*s).depth[node as usize] = 0 as crate::zutil_h::uch;
-        (*s).opt_len = (*s).opt_len.wrapping_sub(1);
+        (*s).opt_len = supplemental_tree_opt_len((*s).opt_len);
         if !stree.is_null() {
             (*s).static_len = (*s)
                 .static_len
@@ -5498,12 +5502,12 @@ mod tests {
         last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes,
         pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
         reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
-        supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
-        tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
-        tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
-        tree_run_extra_bits, tree_run_limits, BlockEncoding, GenBitlenOverflowNode,
-        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
-        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        supplemental_tree_node, supplemental_tree_opt_len, symbol_buffer_is_full,
+        symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tally_tree_update,
+        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_next_cursor,
+        tree_parent_depth, tree_run_continues, tree_run_extra_bits, tree_run_limits, BlockEncoding,
+        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
+        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -6021,6 +6025,12 @@ mod tests {
         let mut max_code = 2;
         assert_eq!(supplemental_tree_node(&mut max_code), 0);
         assert_eq!(max_code, 2);
+    }
+
+    #[test]
+    fn supplemental_tree_opt_len_preserves_wrapping_cost_adjustment() {
+        assert_eq!(supplemental_tree_opt_len(8), 7);
+        assert_eq!(supplemental_tree_opt_len(0), crate::zutil_h::ulg::MAX);
     }
 
     #[test]

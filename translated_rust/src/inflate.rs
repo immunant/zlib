@@ -1031,8 +1031,12 @@ fn update_window_core(
     *whave = plan.whave;
 }
 
-fn update_window_has_produced_bytes(copy: ::core::ffi::c_uint) -> bool {
-    copy != 0
+fn update_window_produced_len(copy: ::core::ffi::c_uint) -> Option<usize> {
+    if copy == 0 {
+        None
+    } else {
+        Some(copy as usize)
+    }
 }
 
 unsafe fn updatewindow(
@@ -1059,10 +1063,9 @@ unsafe fn updatewindow(
         &mut state.whave,
     );
     let window = core::slice::from_raw_parts_mut(state.window, state.wsize as usize);
-    let produced = if update_window_has_produced_bytes(copy) {
-        core::slice::from_raw_parts(produced_start, copy as usize)
-    } else {
-        &[]
+    let produced = match update_window_produced_len(copy) {
+        Some(produced_len) => core::slice::from_raw_parts(produced_start, produced_len),
+        None => &[],
     };
     update_window_core(
         state.wbits,
@@ -3104,7 +3107,7 @@ mod tests {
         inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
         inflate_zlib_header_transition, inflate_zlib_window_params, initial_window_metadata,
         reset_window_history, stored_block_length, syncsearch_safe, update_window_core,
-        update_window_has_produced_bytes, window_allocation_failed, window_allocation_plan,
+        update_window_produced_len, window_allocation_failed, window_allocation_plan,
         window_allocation_request, window_needs_allocation, window_update_plan,
         DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress, InflateGzipExtraProgress,
         InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource,
@@ -4273,10 +4276,13 @@ mod tests {
     }
 
     #[test]
-    fn update_window_only_constructs_produced_slice_for_nonzero_copy() {
-        assert!(!update_window_has_produced_bytes(0));
-        assert!(update_window_has_produced_bytes(1));
-        assert!(update_window_has_produced_bytes(::core::ffi::c_uint::MAX));
+    fn update_window_produced_len_only_constructs_nonempty_slices() {
+        assert_eq!(update_window_produced_len(0), None);
+        assert_eq!(update_window_produced_len(1), Some(1));
+        assert_eq!(
+            update_window_produced_len(::core::ffi::c_uint::MAX),
+            Some(::core::ffi::c_uint::MAX as usize)
+        );
     }
 
     #[test]
