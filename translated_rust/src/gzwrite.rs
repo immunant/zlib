@@ -50,6 +50,7 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 
 fn gz_init_core(state: &mut crate::gzguts_h::gz_state) {
     state.size = state.want;
+    state.out_pending = 0;
     if state.direct == 0 {
         state.strm.avail_out = state.size as crate::stdlib::uInt;
         state.strm.next_out = state.out;
@@ -333,15 +334,11 @@ fn gz_comp_write_chunk_len(available: usize, max: ::core::ffi::c_uint) -> ::core
 }
 
 fn gz_comp_output_write_chunk_len(
-    next_out_address: usize,
-    next_address: usize,
+    pending: crate::stdlib::uInt,
     max: ::core::ffi::c_uint,
 ) -> Option<::core::ffi::c_uint> {
-    if next_out_address > next_address {
-        Some(gz_comp_write_chunk_len(
-            next_out_address.wrapping_sub(next_address),
-            max,
-        ))
+    if pending != 0 {
+        Some(gz_comp_write_chunk_len(pending as usize, max))
     } else {
         None
     }
@@ -367,6 +364,20 @@ fn gz_comp_output_produced(
     avail_out_after: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
     avail_out_before.wrapping_sub(avail_out_after)
+}
+
+fn gz_comp_pending_after_output(
+    pending: crate::stdlib::uInt,
+    produced: ::core::ffi::c_uint,
+) -> crate::stdlib::uInt {
+    pending.wrapping_add(produced as crate::stdlib::uInt)
+}
+
+fn gz_comp_pending_after_write(
+    pending: crate::stdlib::uInt,
+    written: ::core::ffi::c_int,
+) -> crate::stdlib::uInt {
+    pending.wrapping_sub(written as crate::stdlib::uInt)
 }
 
 fn gz_comp_write_failed(written: ::core::ffi::c_int) -> bool {
@@ -476,6 +487,7 @@ unsafe fn gz_comp(
     if !gz_buffer_is_initialized((*state).size) && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
+    let out_pending = &mut (*state).out_pending;
     if (*state).direct != 0 {
         while (*strm).avail_in != 0 {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
@@ -517,11 +529,7 @@ unsafe fn gz_comp(
     ret = crate::zlib_h::Z_OK;
     loop {
         if gz_comp_needs_output_write((*strm).avail_out, flush, ret) {
-            while let Some(chunk_len) = gz_comp_output_write_chunk_len(
-                (*strm).next_out as usize,
-                (*state).x.next as usize,
-                max,
-            ) {
+            while let Some(chunk_len) = gz_comp_output_write_chunk_len(*out_pending, max) {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 (*state).again = 0 as ::core::ffi::c_int;
                 put = chunk_len;
@@ -543,11 +551,13 @@ unsafe fn gz_comp(
                     return -1 as ::core::ffi::c_int;
                 }
                 (*state).x.next = (*state).x.next.wrapping_add(writ as usize);
+                *out_pending = gz_comp_pending_after_write(*out_pending, writ);
             }
             if gz_comp_needs_output_buffer_reset((*strm).avail_out) {
                 (*strm).avail_out = (*state).size as crate::stdlib::uInt;
                 (*strm).next_out = (*state).out;
                 (*state).x.next = (*state).out;
+                *out_pending = 0;
             }
         }
         have = (*strm).avail_out as ::core::ffi::c_uint;
@@ -561,6 +571,7 @@ unsafe fn gz_comp(
             return -1 as ::core::ffi::c_int;
         }
         have = gz_comp_output_produced(have, (*strm).avail_out as ::core::ffi::c_uint);
+        *out_pending = gz_comp_pending_after_output(*out_pending, have);
         if !gz_comp_has_output(have) {
             break;
         }
@@ -994,10 +1005,11 @@ mod tests {
         gz_buffer_is_initialized, gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress,
         gz_comp_has_output, gz_comp_max_write_chunk, gz_comp_needs_output_buffer_reset,
         gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
-        gz_comp_output_write_chunk_len, gz_comp_reset_action, gz_comp_reset_after_flush,
-        gz_comp_skips_empty_flush, gz_comp_write_chunk_len, gz_comp_write_failed,
-        gz_comp_write_failure, gz_has_pending_input, gz_has_pending_skip, gz_write_advanced_pos,
-        gz_write_apply_chunk_progress, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
+        gz_comp_output_write_chunk_len, gz_comp_pending_after_output, gz_comp_pending_after_write,
+        gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_skips_empty_flush,
+        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_has_pending_input,
+        gz_has_pending_skip, gz_write_advanced_pos, gz_write_apply_chunk_progress,
+        gz_write_apply_direct_progress, gz_write_buffered_copy_len,
         gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
         gz_write_needs_input_reset, gz_write_state_is_usable, gz_write_uses_buffered_path,
@@ -1282,14 +1294,13 @@ mod tests {
 
     #[test]
     fn gz_comp_output_write_chunk_len_requires_pending_output() {
-        assert_eq!(gz_comp_output_write_chunk_len(100, 100, 64), None);
-        assert_eq!(gz_comp_output_write_chunk_len(99, 100, 64), None);
+        assert_eq!(gz_comp_output_write_chunk_len(0, 64), None);
     }
 
     #[test]
     fn gz_comp_output_write_chunk_len_uses_pending_output_length() {
-        assert_eq!(gz_comp_output_write_chunk_len(124, 100, 64), Some(24));
-        assert_eq!(gz_comp_output_write_chunk_len(200, 100, 64), Some(64));
+        assert_eq!(gz_comp_output_write_chunk_len(24, 64), Some(24));
+        assert_eq!(gz_comp_output_write_chunk_len(100, 64), Some(64));
     }
 
     #[test]
@@ -1337,6 +1348,19 @@ mod tests {
     #[test]
     fn gz_comp_output_produced_preserves_wrapping_accounting() {
         assert_eq!(gz_comp_output_produced(0, 1), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn gz_comp_pending_output_tracks_produced_and_written_bytes() {
+        let pending = gz_comp_pending_after_output(0, 100);
+        assert_eq!(pending, 100);
+        assert_eq!(gz_comp_pending_after_write(pending, 20), 80);
+    }
+
+    #[test]
+    fn gz_comp_pending_output_preserves_wrapping_accounting() {
+        assert_eq!(gz_comp_pending_after_output(crate::stdlib::uInt::MAX, 1), 0);
+        assert_eq!(gz_comp_pending_after_write(0, 1), crate::stdlib::uInt::MAX);
     }
 
     #[test]

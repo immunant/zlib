@@ -1142,6 +1142,7 @@ mod tests {
                 adler: 0,
                 reserved: 0,
             },
+            out_pending: 0,
         };
 
         gzseek_fast_forward_reset(&mut state);
@@ -1483,6 +1484,7 @@ mod tests {
                 adler: 0,
                 reserved: 0,
             },
+            out_pending: 0,
         };
 
         super::gzseek_apply_read_buffer_plan(

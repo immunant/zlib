@@ -61,6 +61,7 @@ pub mod gzguts_h {
         pub err: ::core::ffi::c_int,
         pub msg: *mut ::core::ffi::c_char,
         pub strm: crate::zlib_h::z_stream,
+        pub out_pending: crate::stdlib::uInt,
     }
 
     pub type gz_statep = *mut crate::gzguts_h::gz_state;

@@ -2274,11 +2274,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
             return crate::zlib_h::Z_DATA_ERROR;
         }
     }
-    ret = updatewindow(
-        strm,
-        dictionary,
-        dictLength as ::core::ffi::c_uint,
-    );
+    ret = updatewindow(strm, dictionary, dictLength as ::core::ffi::c_uint);
     if ret != 0 {
         (*state).mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
