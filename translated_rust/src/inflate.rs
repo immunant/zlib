@@ -2033,10 +2033,9 @@ pub unsafe extern "C" fn inflate_ffi(
                         }
                     }
                     if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
-                        (*state).check = crate::src::crc32::crc32_ffi(
+                        (*state).check = crate::src::crc32::crc32_update(
                             (*state).check as crate::stdlib::uLong,
-                            next,
-                            copy as crate::stdlib::uInt,
+                            &input[..scan.consumed],
                         ) as ::core::ffi::c_ulong;
                     }
                     have = have.wrapping_sub(copy);
@@ -2147,10 +2146,9 @@ pub unsafe extern "C" fn inflate_ffi(
                         }
                     }
                     if inflate_gzip_header_crc_update_enabled((*state).flags, (*state).wrap) {
-                        (*state).check = crate::src::crc32::crc32_ffi(
+                        (*state).check = crate::src::crc32::crc32_update(
                             (*state).check as crate::stdlib::uLong,
-                            next,
-                            copy as crate::stdlib::uInt,
+                            &input[..scan.consumed],
                         ) as ::core::ffi::c_ulong;
                     }
                     have = have.wrapping_sub(copy);

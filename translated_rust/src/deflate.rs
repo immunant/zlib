@@ -367,27 +367,29 @@ fn read_buf_updated_adler(
 }
 
 unsafe fn read_buf(
-    mut strm: crate::zlib_h::z_streamp,
-    mut buf: *mut crate::stdlib::Bytef,
-    mut size: ::core::ffi::c_uint,
+    strm: crate::zlib_h::z_streamp,
+    buf: *mut crate::stdlib::Bytef,
+    size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let mut len: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
+    let strm = &mut *strm;
+    let state = &*strm.state;
+    let mut len: ::core::ffi::c_uint = strm.avail_in as ::core::ffi::c_uint;
     if len > size {
         len = size;
     }
     if len == 0 as ::core::ffi::c_uint {
         return 0 as ::core::ffi::c_uint;
     }
-    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
+    strm.avail_in = strm.avail_in.wrapping_sub(len);
     crate::stdlib::memcpy(
         buf as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
+        strm.next_in as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
     let copied = ::core::slice::from_raw_parts(buf, len as usize);
-    (*strm).adler = read_buf_updated_adler((*(*strm).state).wrap, (*strm).adler, copied);
-    (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
-    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
+    strm.adler = read_buf_updated_adler(state.wrap, strm.adler, copied);
+    strm.next_in = strm.next_in.wrapping_add(len as usize);
+    strm.total_in = strm.total_in.wrapping_add(len as crate::stdlib::uLong);
     return len;
 }
 
