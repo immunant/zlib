@@ -545,6 +545,32 @@ fn inflate_gzip_flags_plan(
     })
 }
 
+/// Scalar commit for gzip's four-byte modification-time field.  The
+/// transitional decoder still owns the input cursor and the retained ABI
+/// header destination; this plan keeps the little-endian CRC byte order and
+/// wrapper/flag admission out of that raw boundary.
+struct InflateGzipTimePlan {
+    time: crate::stdlib::uLong,
+    crc_bytes: Option<[u8; 4]>,
+}
+
+fn inflate_gzip_time_plan(
+    flags: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+    hold: ::core::ffi::c_ulong,
+) -> InflateGzipTimePlan {
+    let crc_bytes = (flags & 0x200 != 0 && wrap & 4 != 0).then_some([
+        hold as u8,
+        (hold >> 8) as u8,
+        (hold >> 16) as u8,
+        (hold >> 24) as u8,
+    ]);
+    InflateGzipTimePlan {
+        time: hold as crate::stdlib::uLong,
+        crc_bytes,
+    }
+}
+
 /// Preserve zlib's final no-progress/finish result mapping independently of
 /// the ABI cursor commit that precedes it.
 fn inflate_exit_status(
@@ -2271,31 +2297,29 @@ pub fn inflate(
                                                                                     // one short-lived state borrow.
                                                                                     let state_ref =
                                                                                         &mut *state;
+                                                                                    let time_plan = inflate_gzip_time_plan(
+                                                                                        state_ref.flags,
+                                                                                        state_ref.wrap,
+                                                                                        hold,
+                                                                                    );
                                                                                     if !state_ref
                                                                                         .head
                                                                                         .is_null()
                                                                                     {
                                                                                         (*state_ref
                                                                                         .head)
-                                                                                        .time = hold
-                                                                                        as crate::stdlib::uLong;
+                                                                                        .time = time_plan.time;
                                                                                     }
-                                                                                    if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
-                                                                                    && state_ref.wrap & 4 as ::core::ffi::c_int != 0
-                                                                                {
-                                                                                    hbuf[0 as ::core::ffi::c_int as usize] = hold
-                                                                                        as ::core::ffi::c_uchar;
-                                                                                    hbuf[1 as ::core::ffi::c_int as usize] = (hold
-                                                                                        >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                    hbuf[2 as ::core::ffi::c_int as usize] = (hold
-                                                                                        >> 16 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                    hbuf[3 as ::core::ffi::c_int as usize] = (hold
-                                                                                        >> 24 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                                                                                    state_ref.check = inflate_header_crc_update(
+                                                                                    if let Some(
+                                                                                        crc_bytes,
+                                                                                    ) = time_plan
+                                                                                        .crc_bytes
+                                                                                    {
+                                                                                        state_ref.check = inflate_header_crc_update(
                                                                                         state_ref.check,
-                                                                                        &hbuf[..4],
+                                                                                        &crc_bytes,
                                                                                     );
-                                                                                }
+                                                                                    }
                                                                                     hold = 0 as ::core::ffi::c_ulong;
                                                                                     bits = 0 as ::core::ffi::c_uint;
                                                                                     state_ref.mode = crate::src::inflate::OS;
