@@ -1038,30 +1038,30 @@ fn inflate_exit_progress(
     }
 }
 
-unsafe fn updatewindow(
+unsafe fn updatewindow<'a>(
     strm: &mut crate::zlib_h::z_stream,
-    state: &mut crate::src::inflate::inflate_state,
-    end: *const crate::stdlib::Bytef,
+    state: &'a mut crate::src::inflate::inflate_state,
     copy: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
+) -> Option<&'a mut [crate::stdlib::Bytef]> {
     // The legacy decoder already validated and adopted these records at its
-    // boundary.  This helper is still unsafe because it invokes the caller
-    // allocator and lends the ABI-owned window/output spans below.
+    // boundary. This helper retains only the caller allocator and the
+    // ABI-owned window lend. The completed-output view is made only after
+    // this function has invoked any allocator callback.
     let Some(plan) =
         inflate_window_boundary_plan(state.window.is_null(), state.wbits, state.wsize, copy)
     else {
-        return 1 as ::core::ffi::c_int;
+        return None;
     };
     if plan.allocate {
         let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len) else {
-            return 1 as ::core::ffi::c_int;
+            return None;
         };
         // `inflate()` normally reaches this boundary only after init has
         // installed zalloc.  Treat a malformed compatibility stream as the
         // same allocation failure that a null allocator result represents,
         // rather than panicking across the C ABI.
         let Some(zalloc) = strm.zalloc else {
-            return 1 as ::core::ffi::c_int;
+            return None;
         };
         state.window = zalloc(
             strm.opaque,
@@ -1069,35 +1069,13 @@ unsafe fn updatewindow(
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
         if state.window.is_null() {
-            return 1 as ::core::ffi::c_int;
+            return None;
         }
     }
-    let window = ::core::slice::from_raw_parts_mut(state.window, plan.window_len);
-    let produced = if plan.copy_len == 0 {
-        &[]
-    } else {
-        if end.is_null() {
-            return 1 as ::core::ffi::c_int;
-        }
-        // Preserve the translated cursor movement without making pointer
-        // arithmetic itself an unsafe operation. The boundary still lends a
-        // `copy_len` span only after validating the source pointer above.
-        ::core::slice::from_raw_parts(end.wrapping_sub(plan.copy_len), plan.copy_len)
-    };
-    let Some(update) = inflate_window_update(
-        window,
-        produced,
-        state.wbits,
-        state.wsize,
-        state.wnext,
-        state.whave,
-    ) else {
-        return 1 as ::core::ffi::c_int;
-    };
-    state.wsize = update.wsize;
-    state.wnext = update.wnext;
-    state.whave = update.whave;
-    return 0 as ::core::ffi::c_int;
+    Some(::core::slice::from_raw_parts_mut(
+        state.window,
+        plan.window_len,
+    ))
 }
 
 pub unsafe fn inflate(
@@ -3026,7 +3004,7 @@ pub unsafe fn inflate(
     // decoded input/output progress, mode, or bit state this call publishes.
     // Reusing this plan keeps the history decision and final ABI accounting
     // tied to the same scalar snapshot.
-    let (exit, window_error) = {
+    let (exit, window_error, produced) = {
         let strm_ref = &mut *strm;
         let state_ref = &mut *state;
         strm_ref.next_out = put as *mut crate::stdlib::Bytef;
@@ -3046,17 +3024,48 @@ pub unsafe fn inflate(
             state_ref.bits,
             state_ref.last,
         );
-        let window_error = if exit.update_window {
-            updatewindow(
-                strm_ref,
-                state_ref,
-                strm_ref.next_out as *const crate::stdlib::Bytef,
-                exit.output_used,
-            ) != 0
-        } else {
-            false
+        let (window_error, produced): (bool, &[crate::stdlib::Bytef]) = 'window: {
+            // Invoke a possible allocator callback before lending the caller's
+            // completed-output span. History retention and final checksum then
+            // consume that one exact bounded view.
+            let (wbits, wsize, wnext, whave, wrap) = (
+                state_ref.wbits,
+                state_ref.wsize,
+                state_ref.wnext,
+                state_ref.whave,
+                state_ref.wrap,
+            );
+            let window = if exit.update_window {
+                updatewindow(strm_ref, state_ref, exit.output_used)
+            } else {
+                None
+            };
+            if exit.update_window && window.is_none() {
+                break 'window (true, &[]);
+            }
+            let needs_output_view = exit.update_window
+                || inflate_exit_needs_checksum(wrap, exit.output_used as usize);
+            let produced = if needs_output_view && exit.output_used != 0 {
+                ::core::slice::from_raw_parts(
+                    strm_ref.next_out.wrapping_sub(exit.output_used as usize),
+                    exit.output_used as usize,
+                )
+            } else {
+                &[]
+            };
+            if let Some(window) = window {
+                let Some(update) =
+                    inflate_window_update(window, produced, wbits, wsize, wnext, whave)
+                else {
+                    break 'window (true, &[]);
+                };
+                state_ref.wsize = update.wsize;
+                state_ref.wnext = update.wnext;
+                state_ref.whave = update.whave;
+            }
+            (false, produced)
         };
-        (exit, window_error)
+        (exit, window_error, produced)
     };
     if window_error {
         let state_ref = &mut *state;
@@ -3078,15 +3087,11 @@ pub unsafe fn inflate(
             .total
             .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
         if inflate_exit_needs_checksum(state_ref.wrap, exit.output_used as usize) {
-            let output = core::slice::from_raw_parts(
-                strm_ref.next_out.wrapping_sub(exit.output_used as usize),
-                exit.output_used as usize,
-            );
             if let Some(check) = inflate_exit_checksum(
                 state_ref.wrap,
                 state_ref.check as crate::stdlib::uLong,
                 state_ref.flags,
-                output,
+                produced,
             ) {
                 state_ref.check = check;
                 strm_ref.adler = state_ref.check as crate::stdlib::uLong;
