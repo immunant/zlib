@@ -324,6 +324,12 @@ fn gzfwrite_completed_items(
     written.wrapping_div(size)
 }
 
+/// Accept precisely the flush values supported by the public gzip writer.
+/// The opaque handle and compressor remain at the FFI boundary.
+fn gzflush_is_valid(flush: ::core::ffi::c_int) -> bool {
+    (crate::zlib_h::Z_NO_FLUSH..=crate::zlib_h::Z_FINISH).contains(&flush)
+}
+
 unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
@@ -631,30 +637,28 @@ pub unsafe extern "C" fn gzflush(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_WRITE
+        || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
+        state as *mut _,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
+    if !gzflush_is_valid(flush) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        return (*state).err;
+    if state.skip != 0 && gz_zero(state as *mut _) == -1 as ::core::ffi::c_int {
+        return state.err;
     }
-    gz_comp(state, flush);
-    return (*state).err;
+    gz_comp(state as *mut _, flush);
+    state.err
 }
 #[export_name = "gzflush"]
 
