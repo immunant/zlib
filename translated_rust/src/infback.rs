@@ -67,6 +67,21 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
+
+struct InflateBackStateConfig {
+    dmax: ::core::ffi::c_uint,
+    wbits: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+}
+
+fn inflate_back_state_config(window_bits: ::core::ffi::c_int) -> InflateBackStateConfig {
+    InflateBackStateConfig {
+        dmax: 32768 as ::core::ffi::c_uint,
+        wbits: window_bits as crate::stdlib::uInt as ::core::ffi::c_uint,
+        wsize: (1 as ::core::ffi::c_uint) << window_bits,
+    }
+}
+
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -118,9 +133,10 @@ pub unsafe extern "C" fn inflateBackInit_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
+    let config = inflate_back_state_config(windowBits);
+    (*state).dmax = config.dmax;
+    (*state).wbits = config.wbits;
+    (*state).wsize = config.wsize;
     (*state).window = window;
     (*state).wnext = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
