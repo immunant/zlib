@@ -101,6 +101,10 @@ fn gz_write_error_result(
     }
 }
 
+fn gz_write_uses_buffered_path(len: crate::stdlib::z_size_t, size: ::core::ffi::c_uint) -> bool {
+    len < size as crate::stdlib::z_size_t
+}
+
 fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
     if ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t > remaining {
         remaining as ::core::ffi::c_uint
@@ -340,7 +344,7 @@ unsafe extern "C" fn gz_write(
     if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if len < (*state).size as crate::stdlib::z_size_t {
+    if gz_write_uses_buffered_path(len, (*state).size) {
         loop {
             let mut have: ::core::ffi::c_uint = 0;
             let mut copy: ::core::ffi::c_uint = 0;
@@ -727,8 +731,8 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_write_chunk_len, gz_write_error_result, gz_zero_chunk_len, gzflush_mode_is_valid,
-        gzfwrite_len, gzputs_len_fits_int, gzwrite_len_fits_int,
+        gz_write_chunk_len, gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
+        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -817,6 +821,14 @@ mod tests {
     #[test]
     fn gz_write_error_result_discards_partial_count_when_not_retryable() {
         assert_eq!(gz_write_error_result(0, 10, 4), 0);
+    }
+
+    #[test]
+    fn gz_write_uses_buffered_path_only_for_short_writes() {
+        assert!(gz_write_uses_buffered_path(0, 1));
+        assert!(gz_write_uses_buffered_path(1023, 1024));
+        assert!(!gz_write_uses_buffered_path(1024, 1024));
+        assert!(!gz_write_uses_buffered_path(1025, 1024));
     }
 
     #[test]

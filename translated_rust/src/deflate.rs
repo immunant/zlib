@@ -1419,16 +1419,23 @@ unsafe extern "C" fn putShortMSB(
         (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
 }
 
+fn pending_output_len(
+    pending: crate::zutil_h::ulg,
+    avail_out: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    if pending > avail_out as crate::zutil_h::ulg {
+        avail_out as ::core::ffi::c_uint
+    } else {
+        pending as ::core::ffi::c_uint
+    }
+}
+
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
     crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
-    len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
-        (*strm).avail_out as ::core::ffi::c_uint
-    } else {
-        (*s).pending as ::core::ffi::c_uint
-    };
+    len = pending_output_len((*s).pending, (*strm).avail_out);
     if len == 0 as ::core::ffi::c_uint {
         return;
     }
@@ -3540,7 +3547,7 @@ unsafe extern "C" fn deflate_huff(
 
 #[cfg(test)]
 mod tests {
-    use super::{deflate_copyright, gzip_header_crc, gzip_header_crc_pending};
+    use super::{deflate_copyright, gzip_header_crc, gzip_header_crc_pending, pending_output_len};
 
     #[test]
     fn copyright_export_has_stable_bytes() {
@@ -3576,5 +3583,13 @@ mod tests {
         assert_eq!(crc, crate::src::crc32::crc32_z(0, &pending));
         assert_eq!(gzip_header_crc_pending(crc, 0, &pending, 0, 5), crc);
         assert_eq!(gzip_header_crc_pending(crc, 1, &pending, 5, 5), crc);
+    }
+
+    #[test]
+    fn pending_output_len_uses_available_output_capacity() {
+        assert_eq!(pending_output_len(0, 0), 0);
+        assert_eq!(pending_output_len(3, 5), 3);
+        assert_eq!(pending_output_len(5, 5), 5);
+        assert_eq!(pending_output_len(8, 5), 5);
     }
 }

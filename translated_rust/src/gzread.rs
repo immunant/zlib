@@ -138,6 +138,14 @@ fn gz_read_chunk_len(
     chunk
 }
 
+fn gz_read_needs_fetch(
+    how: ::core::ffi::c_int,
+    chunk_len: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> bool {
+    how == crate::gzguts_h::LOOK || chunk_len < size << 1 as ::core::ffi::c_int
+}
+
 unsafe extern "C" fn gz_load(
     state: crate::gzguts_h::gz_statep,
     buf: *mut ::core::ffi::c_uchar,
@@ -603,6 +611,17 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_needs_fetch_for_look_state() {
+        assert!(gz_read_needs_fetch(crate::gzguts_h::LOOK, 16, 8));
+    }
+
+    #[test]
+    fn gz_read_needs_fetch_for_small_chunks_only() {
+        assert!(gz_read_needs_fetch(crate::gzguts_h::COPY, 15, 8));
+        assert!(!gz_read_needs_fetch(crate::gzguts_h::COPY, 16, 8));
+    }
+
+    #[test]
     fn gz_is_gzip_header_accepts_valid_header() {
         assert!(gz_is_gzip_header(31, 139, 8, 31));
     }
@@ -687,8 +706,7 @@ unsafe extern "C" fn gz_read(
             if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
-            if (*state).how == crate::gzguts_h::LOOK || n < (*state).size << 1 as ::core::ffi::c_int
-            {
+            if gz_read_needs_fetch((*state).how, n, (*state).size) {
                 if gz_fetch(state) == -1 as ::core::ffi::c_int
                     && (*state).x.have == 0 as ::core::ffi::c_uint
                 {
