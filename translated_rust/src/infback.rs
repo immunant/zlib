@@ -247,6 +247,19 @@ fn inflate_back_reset(state: &mut crate::src::inflate::inflate_state) {
     state.whave = 0;
 }
 
+// Starting an inflateBack decode clears the public diagnostic and resets the
+// decoder-owned operation state together.  The caller still owns the raw
+// stream/state binding and the callback/window cursors; this helper only
+// returns the configured window capacity for that boundary to use.
+fn inflate_back_begin_decode(
+    stream: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_uint {
+    stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    inflate_back_reset(state);
+    state.wsize
+}
+
 fn inflate_back_block_header(
     hold: ::core::ffi::c_ulong,
 ) -> (::core::ffi::c_int, InflateBackBlockType) {
@@ -829,9 +842,8 @@ pub unsafe extern "C" fn inflateBack(
     // The stream owns this initialized allocation for the whole decode. Bind
     // it once after the null check so decoder bookkeeping stays reference-based.
     let state = strm.state as *mut crate::src::inflate::inflate_state;
-    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     let state_ref = &mut *state;
-    inflate_back_reset(state_ref);
+    left = inflate_back_begin_decode(strm, state_ref);
     next = strm.next_in as *mut ::core::ffi::c_uchar;
     have = (if !next.is_null() {
         strm.avail_in
@@ -841,7 +853,6 @@ pub unsafe extern "C" fn inflateBack(
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
     put = state_ref.window;
-    left = state_ref.wsize;
     '_inf_leave: loop {
         match state_ref.mode as ::core::ffi::c_uint {
             16191 => {
