@@ -5027,6 +5027,149 @@ unsafe extern "C" fn scan_tree(
     let _ = scan_tree_state(&mut (*s).bl_tree, tree, max_code);
 }
 
+fn send_tree_code_state(
+    pending_buf: &mut [crate::stdlib::Byte],
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    bl_tree: &[crate::src::deflate::ct_data],
+    code: ::core::ffi::c_int,
+    extra: ::core::ffi::c_int,
+    extra_len: ::core::ffi::c_int,
+) -> bool {
+    let Ok(code) = usize::try_from(code) else {
+        return false;
+    };
+    let Some(node) = bl_tree.get(code) else {
+        return false;
+    };
+    send_bits_state(
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+        node.fc.code as ::core::ffi::c_int,
+        node.dl.len as ::core::ffi::c_int,
+    ) && send_bits_state(pending_buf, pending, bi_buf, bi_valid, extra, extra_len)
+}
+
+fn send_tree_state(
+    pending_buf: &mut [crate::stdlib::Byte],
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    bl_tree: &[crate::src::deflate::ct_data],
+    tree: &[crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+) -> bool {
+    let Ok(max_code) = usize::try_from(max_code) else {
+        return false;
+    };
+    let Some(sentinel) = max_code.checked_add(1) else {
+        return false;
+    };
+    if sentinel >= tree.len() {
+        return false;
+    }
+
+    let mut n = 0usize;
+    let mut prevlen = -1;
+    let mut nextlen = tree[0].dl.len as ::core::ffi::c_int;
+    let mut count = 0;
+    let mut max_count = if nextlen == 0 { 138 } else { 7 };
+    let mut min_count = if nextlen == 0 { 3 } else { 4 };
+    while n <= max_code {
+        let curlen = nextlen;
+        nextlen = tree[n + 1].dl.len as ::core::ffi::c_int;
+        count += 1;
+        if count >= max_count || curlen != nextlen {
+            if count < min_count {
+                while count != 0 {
+                    if !send_tree_code_state(
+                        pending_buf,
+                        pending,
+                        bi_buf,
+                        bi_valid,
+                        bl_tree,
+                        curlen,
+                        0,
+                        0,
+                    ) {
+                        return false;
+                    }
+                    count -= 1;
+                }
+            } else if curlen != 0 {
+                if curlen != prevlen {
+                    if !send_tree_code_state(
+                        pending_buf,
+                        pending,
+                        bi_buf,
+                        bi_valid,
+                        bl_tree,
+                        curlen,
+                        0,
+                        0,
+                    ) {
+                        return false;
+                    }
+                    count -= 1;
+                }
+                if !send_tree_code_state(
+                    pending_buf,
+                    pending,
+                    bi_buf,
+                    bi_valid,
+                    bl_tree,
+                    REP_3_6,
+                    count - 3,
+                    2,
+                ) {
+                    return false;
+                }
+            } else if count <= 10 {
+                if !send_tree_code_state(
+                    pending_buf,
+                    pending,
+                    bi_buf,
+                    bi_valid,
+                    bl_tree,
+                    REPZ_3_10,
+                    count - 3,
+                    3,
+                ) {
+                    return false;
+                }
+            } else if !send_tree_code_state(
+                pending_buf,
+                pending,
+                bi_buf,
+                bi_valid,
+                bl_tree,
+                REPZ_11_138,
+                count - 11,
+                7,
+            ) {
+                return false;
+            }
+            count = 0;
+            prevlen = curlen;
+            if nextlen == 0 {
+                max_count = 138;
+                min_count = 3;
+            } else if curlen == nextlen {
+                max_count = 6;
+                min_count = 3;
+            } else {
+                max_count = 7;
+                min_count = 4;
+            }
+        }
+        n += 1;
+    }
+    true
+}
+
 unsafe extern "C" fn send_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
@@ -5435,39 +5578,48 @@ unsafe extern "C" fn send_all_trees(
     if s.is_null() {
         return;
     }
-    let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+    let state = &mut *s;
+    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
         return;
     };
-    if pending_len != 0 && (*s).pending_buf.is_null() {
+    if pending_len != 0 && state.pending_buf.is_null() {
         return;
     }
     let pending_buf = if pending_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
     };
     if !send_all_trees_header_state(
         pending_buf,
-        &mut (*s).pending,
-        &mut (*s).bi_buf,
-        &mut (*s).bi_valid,
-        &(*s).bl_tree,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &state.bl_tree,
         lcodes,
         dcodes,
         blcodes,
     ) {
         return;
     }
-    send_tree(
-        s,
-        &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
+    if !send_tree_state(
+        pending_buf,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &state.bl_tree,
+        &state.dyn_ltree,
         lcodes - 1 as ::core::ffi::c_int,
-    );
-    send_tree(
-        s,
-        &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
+    ) {
+        return;
+    }
+    let _ = send_tree_state(
+        pending_buf,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &state.bl_tree,
+        &state.dyn_dtree,
         dcodes - 1 as ::core::ffi::c_int,
     );
 }
