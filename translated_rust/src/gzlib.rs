@@ -97,7 +97,7 @@ fn gz_open_state(
         },
         mode: crate::gzguts_h::GZ_NONE,
         fd: -1,
-        path: ::core::ptr::null_mut(),
+        path: std::ffi::CString::default(),
         size: 0,
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
         in_0: ::core::ptr::null_mut(),
@@ -219,11 +219,13 @@ unsafe extern "C" fn gz_open(
         None => return ::core::ptr::null_mut(),
     };
     let path_bytes = path.to_bytes_with_nul();
-    state.path = crate::stdlib::malloc(path_bytes.len()) as *mut ::core::ffi::c_char;
-    if state.path.is_null() {
+    let mut owned_path = Vec::new();
+    if owned_path.try_reserve_exact(path_bytes.len()).is_err() {
         return ::core::ptr::null_mut();
     }
-    ::core::ptr::copy_nonoverlapping(path_bytes.as_ptr().cast(), state.path, path_bytes.len());
+    owned_path.extend_from_slice(path_bytes);
+    state.path = std::ffi::CString::from_vec_with_nul(owned_path)
+        .expect("a C string is always a valid C string");
     oflag |= crate::stdlib::O_LARGEFILE
         | (if state.mode == crate::gzguts_h::GZ_READ {
             crate::stdlib::O_RDONLY
@@ -264,7 +266,6 @@ unsafe extern "C" fn gz_open(
         state.fd = fd;
     }
     if state.fd == -1 as ::core::ffi::c_int {
-        crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     if state.mode == crate::gzguts_h::GZ_APPEND {
@@ -285,7 +286,23 @@ unsafe extern "C" fn gz_open(
             state.start = 0 as crate::stdlib::off64_t;
         }
     }
-    gz_reset(&mut state);
+    // `state` is freshly constructed, so clearing it here only needs to establish
+    // the mode-specific cursor state.  In particular, there is no prior error
+    // message for `gz_reset()` to release.
+    state.x.have = 0;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0;
+        state.past = 0;
+        state.how = crate::gzguts_h::LOOK;
+        state.junk = -1;
+    } else {
+        state.reset = 0;
+    }
+    state.again = 0;
+    state.skip = 0;
+    state.err = crate::zlib_h::Z_OK;
+    state.x.pos = 0;
+    state.strm.avail_in = 0;
     Box::into_raw(Box::new(state)) as crate::zlib_h::gzFile
 }
 #[export_name = "gzopen"]
@@ -695,7 +712,7 @@ pub unsafe extern "C" fn gz_error(
     if err == crate::zlib_h::Z_MEM_ERROR {
         return;
     }
-    let path = ::core::ffi::CStr::from_ptr(state.path).to_bytes();
+    let path = state.path.to_bytes();
     let message = ::core::ffi::CStr::from_ptr(msg).to_bytes();
     let size = match path
         .len()
