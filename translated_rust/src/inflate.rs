@@ -333,6 +333,20 @@ fn apply_window_update(
     plan
 }
 
+fn copy_dictionary_from_window(
+    window: &[crate::stdlib::Bytef],
+    wnext: usize,
+    dictionary: &mut [crate::stdlib::Bytef],
+) {
+    if dictionary.is_empty() {
+        return;
+    }
+
+    let first = dictionary.len() - wnext;
+    dictionary[..first].copy_from_slice(&window[wnext..wnext + first]);
+    dictionary[first..].copy_from_slice(&window[..wnext]);
+}
+
 fn inflate_mark_value(
     back: ::core::ffi::c_int,
     mode: inflate_mode,
@@ -2173,18 +2187,9 @@ pub unsafe extern "C" fn inflateGetDictionary(
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).whave != 0 && !dictionary.is_null() {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*state).window.offset((*state).wnext as isize) as *const ::core::ffi::c_void,
-            (*state).whave.wrapping_sub((*state).wnext) as crate::__stddef_size_t_h::size_t,
-        );
-        crate::stdlib::memcpy(
-            dictionary
-                .offset((*state).whave as isize)
-                .offset(-((*state).wnext as isize)) as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).wnext as crate::__stddef_size_t_h::size_t,
-        );
+        let window = core::slice::from_raw_parts((*state).window, (*state).wsize as usize);
+        let dictionary = core::slice::from_raw_parts_mut(dictionary, (*state).whave as usize);
+        copy_dictionary_from_window(window, (*state).wnext as usize, dictionary);
     }
     if !dictLength.is_null() {
         *dictLength = (*state).whave as crate::stdlib::uInt;
@@ -2659,7 +2664,8 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_window_update, dynamic_code_length_repeat_fits, dynamic_header_counts,
+        apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
+        dynamic_header_counts,
         inflate_data_type_value, inflate_header_wrap_allows_capture, inflate_mark_value,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update,
         inflate_reset2_params, inflate_state_metadata_is_valid, inflate_sync_point_value,
@@ -2676,6 +2682,35 @@ mod tests {
         assert_eq!(inflate_data_type_value(5, 0, TYPE), 5 + 128);
         assert_eq!(inflate_data_type_value(5, 0, LEN_), 5 + 256);
         assert_eq!(inflate_data_type_value(5, 0, COPY_), 5 + 256);
+    }
+
+    #[test]
+    fn dictionary_copy_preserves_contiguous_window_order() {
+        let window = *b"abcdefgh";
+        let mut dictionary = [0; 5];
+
+        copy_dictionary_from_window(&window, 0, &mut dictionary);
+
+        assert_eq!(dictionary, *b"abcde");
+    }
+
+    #[test]
+    fn dictionary_copy_wraps_from_window_end_to_start() {
+        let window = *b"YZcdefWX";
+        let mut dictionary = [0; 8];
+
+        copy_dictionary_from_window(&window, 2, &mut dictionary);
+
+        assert_eq!(dictionary, *b"cdefWXYZ");
+    }
+
+    #[test]
+    fn dictionary_copy_ignores_an_empty_dictionary() {
+        let mut dictionary = [];
+
+        copy_dictionary_from_window(b"abc", 3, &mut dictionary);
+
+        assert!(dictionary.is_empty());
     }
 
     #[test]

@@ -911,6 +911,14 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     deflateSetDictionary(strm, dictionary, dictLength)
 }
+fn deflate_dictionary_len(
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    w_size: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    strstart.wrapping_add(lookahead).min(w_size)
+}
+
 pub unsafe extern "C" fn deflateGetDictionary(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *mut crate::stdlib::Bytef,
@@ -923,10 +931,7 @@ pub unsafe extern "C" fn deflateGetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    len = (*s).strstart.wrapping_add((*s).lookahead);
-    if len > (*s).w_size {
-        len = (*s).w_size;
-    }
+    len = deflate_dictionary_len((*s).strstart, (*s).lookahead, (*s).w_size);
     if !dictionary.is_null() && len != 0 {
         crate::stdlib::memcpy(
             dictionary as *mut ::core::ffi::c_void,
@@ -3600,7 +3605,7 @@ unsafe extern "C" fn deflate_huff(
 #[cfg(test)]
 mod tests {
     use super::{
-        deflate_bound_lengths, deflate_copyright, deflate_prime_bits_valid,
+        deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_prime_bits_valid,
         deflate_version_matches, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
         slide_hash_entry, zlib_header,
@@ -3614,6 +3619,18 @@ mod tests {
                 crate::zlib_h::Z_DEFAULT_STRATEGY,
             ),
             Some((6, crate::zlib_h::Z_DEFAULT_STRATEGY)),
+        );
+    }
+
+    #[test]
+    fn deflate_dictionary_len_preserves_wrapping_clamp_behavior() {
+        assert_eq!(deflate_dictionary_len(0, 0, 32), 0);
+        assert_eq!(deflate_dictionary_len(10, 5, 32), 15);
+        assert_eq!(deflate_dictionary_len(27, 5, 32), 32);
+        assert_eq!(deflate_dictionary_len(30, 5, 32), 32);
+        assert_eq!(
+            deflate_dictionary_len(crate::stdlib::uInt::MAX, 1, 32),
+            0
         );
     }
 
