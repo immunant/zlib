@@ -1609,9 +1609,9 @@ pub(crate) enum InflateStreamRequest<'request> {
     SetDictionary(&'request [crate::stdlib::Bytef]),
     Header,
     // Copy shares the validated source stream/state association with every
-    // other normal-inflate action.  The destination identity is scalar-only;
-    // the copied callback allocation handle is returned through the existing
-    // unsafe projection rather than retained in this request.
+    // other normal-inflate action.  Its destination stays at the unsafe
+    // adapter boundary so the pointer-free request remains usable by the
+    // safe normal-request routing.
     Copy {
         destination_identity: usize,
     },
@@ -3412,7 +3412,7 @@ pub(crate) unsafe fn inflate_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     request: InflateStreamRequest<'_>,
     mut header_registration: Option<&mut crate::zlib_h::gz_header_s>,
-    mut copied_state: Option<&mut Option<::core::ptr::NonNull<inflate_state>>>,
+    copy_destination: Option<::core::ptr::NonNull<crate::zlib_h::z_stream_s>>,
 ) -> InflateStreamResult {
     // This is the sole normal-inflate stream/state projection.  Keep the
     // opaque handle conversion beside the request-specific cursor, header,
@@ -3456,22 +3456,48 @@ pub(crate) unsafe fn inflate_from_stream(
         destination_identity,
     } = request
     {
-        // Copy allocation must stay at the same validated source projection
-        // as the normal decoder.  The caller receives only the allocation
-        // handle after this boundary has completed, then assembles the ABI
-        // stream without retaining a source-state borrow.
-        let Some(copied_state) = copied_state.as_deref_mut() else {
+        // Copy allocation and final publication both belong to the validated
+        // source projection.  Build the replacement before touching the
+        // non-borrowing destination handle, which preserves zlib's permitted
+        // source/destination aliasing.
+        let Some(destination) = copy_destination else {
             return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
         };
-        return InflateStreamResult::Status(inflate_publish_callback_owner(
-            Some(::core::ptr::NonNull::from(strm)),
+        let mut copied_state = None;
+        let status = inflate_publish_callback_owner(
+            Some(::core::ptr::NonNull::from(&mut *strm)),
             None,
             InflateAbiVersion::Unchecked,
             0,
             Some(state),
             destination_identity,
-            copied_state,
-        ));
+            &mut copied_state,
+        );
+        if status != crate::zlib_h::Z_OK {
+            return InflateStreamResult::Status(status);
+        }
+        let copy = copied_state.expect("successful copy publication returns state");
+        let copied_stream = crate::zlib_h::z_stream_s {
+            next_in: strm.next_in,
+            avail_in: strm.avail_in,
+            total_in: strm.total_in,
+            next_out: strm.next_out,
+            avail_out: strm.avail_out,
+            total_out: strm.total_out,
+            msg: strm.msg,
+            state: Some(copy.cast()),
+            zalloc: strm.zalloc,
+            zfree: strm.zfree,
+            opaque: strm.opaque,
+            data_type: strm.data_type,
+            adler: strm.adler,
+            reserved: strm.reserved,
+        };
+        // `strm` is no longer borrowed after the completed snapshot above.
+        // Only now publish through the destination handle, which can be the
+        // original source address without overlapping the source projection.
+        *destination.as_ptr() = copied_stream;
+        return InflateStreamResult::Status(crate::zlib_h::Z_OK);
     }
     if let InflateStreamRequest::Back(dispatch) = request {
         strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -4081,73 +4107,27 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     .status()
 }
 
-// The export validates the source handle and creates this scoped borrow.  The
-// destination remains a non-borrowing handle until the source projection has
-// ended, since zlib permits source and destination to alias.  The named
-// implementation maps its internal result to an ABI status and a completed
-// stream; the wrapper only performs the final ABI publication on success.
-pub unsafe fn inflateCopy(
-    source: &mut crate::zlib_h::z_stream_s,
-    destination_identity: usize,
-    destination_stream: &mut Option<crate::zlib_h::z_stream_s>,
-) -> ::core::ffi::c_int {
-    // Build the replacement before borrowing the destination.  This retains
-    // C's behavior even for a source/destination alias while all state
-    // access remains scoped to the checked source stream.
-    let mut copied_state = None;
-    let status = inflate_from_stream(
-        source,
-        InflateStreamRequest::Copy {
-            destination_identity,
-        },
-        None,
-        Some(&mut copied_state),
-    )
-    .status();
-    if status != crate::zlib_h::Z_OK {
-        return status;
-    }
-    let copy = copied_state.expect("successful copy publication returns state");
-    let copied_stream = crate::zlib_h::z_stream_s {
-        next_in: source.next_in,
-        avail_in: source.avail_in,
-        total_in: source.total_in,
-        next_out: source.next_out,
-        avail_out: source.avail_out,
-        total_out: source.total_out,
-        msg: source.msg,
-        state: Some(::core::ptr::NonNull::from(copy).cast()),
-        zalloc: source.zalloc,
-        zfree: source.zfree,
-        opaque: source.opaque,
-        data_type: source.data_type,
-        adler: source.adler,
-        reserved: source.reserved,
-    };
-    // Return the completed stream only after the source projection has
-    // ended. The wrapper publishes this ABI-shaped value to its validated
-    // destination handle without borrowing that handle during the copy.
-    *destination_stream = Some(copied_stream);
-    crate::zlib_h::Z_OK
-}
 #[export_name = "inflateCopy"]
 
 pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if dest.is_null() {
+    let Some(dest) = ::core::ptr::NonNull::new(dest) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
     let Some(source) = source.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let mut destination_stream = None;
-    let status = inflateCopy(source, dest.addr(), &mut destination_stream);
-    if status == crate::zlib_h::Z_OK {
-        *dest = destination_stream.expect("successful copy produces a destination stream");
-    }
-    status
+    inflate_from_stream(
+        source,
+        InflateStreamRequest::Copy {
+            destination_identity: dest.addr().into(),
+        },
+        None,
+        Some(dest),
+    )
+    .status()
 }
 
 fn inflate_undermine_sane(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
