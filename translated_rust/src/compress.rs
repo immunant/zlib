@@ -45,6 +45,16 @@ fn compress_bound_z_impl(source_len: crate::stdlib::z_size_t) -> crate::stdlib::
     }
 }
 
+fn compress_bound(source_len: crate::stdlib::uLong) -> crate::stdlib::uLong {
+    let bound = compress_bound_z_impl(source_len as crate::stdlib::z_size_t);
+
+    if (bound as crate::stdlib::uLong) as crate::stdlib::z_size_t != bound {
+        crate::stdlib::uLong::MAX
+    } else {
+        bound as crate::stdlib::uLong
+    }
+}
+
 #[export_name = "compress2_z"]
 pub unsafe extern "C" fn compress2_z_ffi(
     dest: *mut crate::stdlib::Bytef,
@@ -213,10 +223,31 @@ pub unsafe extern "C" fn compressBound_z_ffi(
 pub unsafe extern "C" fn compressBound_ffi(
     sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    let bound = compress_bound_z_impl(sourceLen as crate::stdlib::z_size_t);
-    if bound != bound {
-        -1 as ::core::ffi::c_int as crate::stdlib::uLong
-    } else {
-        bound as crate::stdlib::uLong
+    compress_bound(sourceLen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compress_bound, compress_bound_z_impl};
+
+    #[test]
+    fn compress_bound_matches_the_z_size_formula() {
+        assert_eq!(compress_bound(0), 13);
+        assert_eq!(
+            compress_bound(12_345),
+            compress_bound_z_impl(12_345) as crate::stdlib::uLong
+        );
+    }
+
+    #[test]
+    fn compress_bound_preserves_the_overflow_sentinel() {
+        assert_eq!(
+            compress_bound_z_impl(crate::stdlib::z_size_t::MAX),
+            crate::stdlib::z_size_t::MAX
+        );
+        assert_eq!(
+            compress_bound(crate::stdlib::uLong::MAX),
+            crate::stdlib::uLong::MAX
+        );
     }
 }

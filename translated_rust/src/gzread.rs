@@ -435,8 +435,12 @@ mod tests {
         let mut pos = 42;
         let mut skip = 3;
 
-        let consumed =
-            gz_skip_core(&mut have, &mut pos, &mut skip, crate::src::gzlib::gz_intmax());
+        let consumed = gz_skip_core(
+            &mut have,
+            &mut pos,
+            &mut skip,
+            crate::src::gzlib::gz_intmax(),
+        );
 
         assert_eq!(consumed, 3);
         assert_eq!(have, 7);
@@ -450,8 +454,12 @@ mod tests {
         let mut pos = 42;
         let mut skip = 15;
 
-        let consumed =
-            gz_skip_core(&mut have, &mut pos, &mut skip, crate::src::gzlib::gz_intmax());
+        let consumed = gz_skip_core(
+            &mut have,
+            &mut pos,
+            &mut skip,
+            crate::src::gzlib::gz_intmax(),
+        );
 
         assert_eq!(consumed, 10);
         assert_eq!(have, 0);

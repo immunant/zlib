@@ -3662,8 +3662,8 @@ fn bi_windup_core(
     } else {
         0
     };
-    let used = (valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int)
-        + 1 as ::core::ffi::c_int;
+    let used =
+        (valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int) + 1 as ::core::ffi::c_int;
     *bi_buf = 0 as crate::zutil_h::ush;
     *bi_valid = 0 as ::core::ffi::c_int;
     (used, count, bytes)
@@ -5143,7 +5143,10 @@ mod tests {
 
         let mut buffer = 0x1234;
         let mut valid = 9;
-        assert_eq!(bi_windup_core(&mut buffer, &mut valid), (1, 2, [0x34, 0x12]));
+        assert_eq!(
+            bi_windup_core(&mut buffer, &mut valid),
+            (1, 2, [0x34, 0x12])
+        );
         assert_eq!((buffer, valid), (0, 0));
     }
 }

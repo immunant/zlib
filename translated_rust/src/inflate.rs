@@ -2254,7 +2254,6 @@ fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar])
     *have = got;
     next
 }
-
 unsafe extern "C" fn syncsearch(
     have: *mut ::core::ffi::c_uint,
     buf: *const ::core::ffi::c_uchar,
