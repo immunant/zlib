@@ -384,9 +384,6 @@ pub(crate) fn inflate_reset_gzip(strm: &mut crate::zlib_h::z_stream_s) -> ::core
     inflate_reset_impl(strm, state)
 }
 
-pub unsafe fn inflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    inflate_reset_gzip(strm)
-}
 #[export_name = "inflateReset"]
 
 pub unsafe extern "C" fn inflateReset_ffi(
@@ -395,7 +392,7 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateReset(strm)
+    inflate_reset_gzip(strm)
 }
 fn inflate_reset2_window_bits(
     mut window_bits: ::core::ffi::c_int,
@@ -2789,7 +2786,7 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     flags = (*state).flags;
     in_0 = (*strm).total_in as ::core::ffi::c_ulong;
     out = (*strm).total_out as ::core::ffi::c_ulong;
-    inflateReset(&mut *strm);
+    inflate_reset_gzip(&mut *strm);
     (*strm).total_in = in_0 as crate::stdlib::uLong;
     (*strm).total_out = out as crate::stdlib::uLong;
     (*state).flags = flags;
