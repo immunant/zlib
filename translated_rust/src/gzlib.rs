@@ -491,6 +491,10 @@ fn gz_open_needs_open(fd: ::core::ffi::c_int) -> bool {
     fd == -1 as ::core::ffi::c_int
 }
 
+fn gz_open_path_buffer_len(len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
+    (len as crate::stdlib::z_size_t).wrapping_add(1 as crate::stdlib::z_size_t)
+}
+
 fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::stdlib::off64_t) {
     gz_apply_post_open_metadata(state, current_offset);
     gz_reset_state(state);
@@ -525,18 +529,14 @@ unsafe extern "C" fn gz_open(
     };
     gz_apply_open_plan(&mut *state, plan);
     len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
-    (*state).path = crate::stdlib::malloc(
-        (len as crate::__stddef_size_t_h::size_t)
-            .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_char;
+    (*state).path = crate::stdlib::malloc(gz_open_path_buffer_len(len)) as *mut ::core::ffi::c_char;
     if (*state).path.is_null() {
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     crate::stdlib::snprintf(
         (*state).path,
-        (len as crate::__stddef_size_t_h::size_t)
-            .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
+        gz_open_path_buffer_len(len),
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
         path as *const ::core::ffi::c_char,
     );
@@ -1068,7 +1068,8 @@ mod tests {
     use super::{
         gz_clear_read_flags, gz_error_clears_buffer, gz_error_needs_message_allocation,
         gz_is_read_or_write_mode, gz_legacy_offset_result, gz_open_needs_open, gz_open_offset_plan,
-        gz_open_recorded_offset, gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking,
+        gz_open_path_buffer_len, gz_open_recorded_offset, gz_open_should_set_close_on_exec,
+        gz_open_should_set_nonblocking,
         gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
         gzbuffer_normalized_want, gzclearerr_core, gzdopen_has_valid_descriptor, gzeof_core,
         gzeof_result, gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
@@ -1732,6 +1733,21 @@ mod tests {
         assert!(!gz_open_needs_open(-2));
         assert!(!gz_open_needs_open(0));
         assert!(!gz_open_needs_open(17));
+    }
+
+    #[test]
+    fn gz_open_path_buffer_len_includes_terminator_for_empty_path() {
+        assert_eq!(gz_open_path_buffer_len(0), 1);
+    }
+
+    #[test]
+    fn gz_open_path_buffer_len_includes_terminator_for_normal_path() {
+        assert_eq!(gz_open_path_buffer_len(42), 43);
+    }
+
+    #[test]
+    fn gz_open_path_buffer_len_wraps_at_z_size_t_max() {
+        assert_eq!(gz_open_path_buffer_len(crate::stdlib::z_size_t::MAX), 0);
     }
 
     #[test]

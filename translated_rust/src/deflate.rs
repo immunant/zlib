@@ -1461,18 +1461,25 @@ pub unsafe extern "C" fn deflateBound_ffi(
 ) -> crate::stdlib::uLong {
     deflateBound(strm, sourceLen)
 }
+
+fn short_msb_bytes(b: crate::stdlib::uInt) -> [crate::stdlib::Byte; 2] {
+    [
+        (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte,
+        (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte,
+    ]
+}
+
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,
     mut b: crate::stdlib::uInt,
 ) {
+    let bytes = short_msb_bytes(b);
     let c2rust_fresh33 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh33 as isize) =
-        (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
+    *(*s).pending_buf.offset(c2rust_fresh33 as isize) = bytes[0];
     let c2rust_fresh34 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh34 as isize) =
-        (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+    *(*s).pending_buf.offset(c2rust_fresh34 as isize) = bytes[1];
 }
 
 fn pending_output_len(
@@ -3628,8 +3635,8 @@ mod tests {
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_prime_bits_valid, deflate_state_status_valid, deflate_version_matches,
         gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        normalize_deflate_params, pending_output_len, read_buf_len, slide_hash_entry,
-        stored_block_min_size, zlib_header,
+        normalize_deflate_params, pending_output_len, read_buf_len, short_msb_bytes,
+        slide_hash_entry, stored_block_min_size, zlib_header,
     };
 
     #[test]
@@ -3650,6 +3657,13 @@ mod tests {
         assert_eq!(deflate_dictionary_len(27, 5, 32), 32);
         assert_eq!(deflate_dictionary_len(30, 5, 32), 32);
         assert_eq!(deflate_dictionary_len(crate::stdlib::uInt::MAX, 1, 32), 0);
+    }
+
+    #[test]
+    fn short_msb_bytes_keeps_the_low_sixteen_bits_in_network_order() {
+        assert_eq!(short_msb_bytes(0), [0, 0]);
+        assert_eq!(short_msb_bytes(0x1234), [0x12, 0x34]);
+        assert_eq!(short_msb_bytes(0xabcd_1234), [0x12, 0x34]);
     }
 
     #[test]

@@ -3707,6 +3707,15 @@ fn next_codes(bl_count: &[crate::zutil_h::ush; 16]) -> [crate::zutil_h::ush; 16]
     next_code
 }
 
+fn next_code_for_len(
+    next_code: &mut [crate::zutil_h::ush; 16],
+    len: ::core::ffi::c_int,
+) -> crate::zutil_h::ush {
+    let code = next_code[len as usize];
+    next_code[len as usize] = code.wrapping_add(1);
+    code
+}
+
 unsafe extern "C" fn gen_codes(
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
@@ -3719,8 +3728,7 @@ unsafe extern "C" fn gen_codes(
         let node = tree.wrapping_add(n as usize);
         let mut len: ::core::ffi::c_int = (*node).dl.len as ::core::ffi::c_int;
         if !(len == 0 as ::core::ffi::c_int) {
-            let c2rust_fresh58 = next_code[len as usize];
-            next_code[len as usize] = next_code[len as usize].wrapping_add(1);
+            let c2rust_fresh58 = next_code_for_len(&mut next_code, len);
             (*node).fc.value =
                 bi_reverse(c2rust_fresh58 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
@@ -5118,7 +5126,7 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
-        dist_code_index, next_codes, pending_cursor_after_bytes, MAX_BITS,
+        dist_code_index, next_code_for_len, next_codes, pending_cursor_after_bytes, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5184,6 +5192,21 @@ mod tests {
         assert_eq!(codes[2], 2);
         assert_eq!(codes[3], 8);
         assert_eq!(codes[4], 20);
+    }
+
+    #[test]
+    fn canonical_code_selection_increments_the_requested_length() {
+        let mut codes = [0; 16];
+        codes[0] = 4;
+        codes[3] = 9;
+        codes[MAX_BITS as usize] = 0xfffe;
+
+        assert_eq!(next_code_for_len(&mut codes, 0), 4);
+        assert_eq!(codes[0], 5);
+        assert_eq!(next_code_for_len(&mut codes, 3), 9);
+        assert_eq!(codes[3], 10);
+        assert_eq!(next_code_for_len(&mut codes, MAX_BITS), 0xfffe);
+        assert_eq!(codes[MAX_BITS as usize], 0xffff);
     }
 
     #[test]
