@@ -193,6 +193,19 @@ fn inflate_state_is_usable(
         && inflate_state_metadata_is_valid(stream_matches, mode)
 }
 
+fn inflate_state_metadata_check_result(
+    has_zalloc: bool,
+    has_zfree: bool,
+    stream_matches: bool,
+    mode: inflate_mode,
+) -> ::core::ffi::c_int {
+    inflate_state_check_result(
+        true,
+        true,
+        inflate_state_is_usable(has_zalloc, has_zfree, stream_matches, mode),
+    )
+}
+
 fn inflate_state_check_result(
     has_stream: bool,
     has_state: bool,
@@ -781,13 +794,12 @@ fn inflate_state_check_impl(
     let Some(state) = state else {
         return inflate_state_check_result(true, false, false);
     };
-    let state_is_usable = inflate_state_is_usable(
+    inflate_state_metadata_check_result(
         stream.zalloc.is_some(),
         stream.zfree.is_some(),
         state_matches_stream,
         state.mode,
-    );
-    inflate_state_check_result(true, true, state_is_usable)
+    )
 }
 
 fn inflate_align_to_byte_boundary(
@@ -3346,7 +3358,8 @@ mod tests {
         inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
         inflate_reset2_discards_window, inflate_reset2_params, inflate_reset_keep_adler,
         inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
-        inflate_state_is_usable, inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
+        inflate_state_is_usable, inflate_state_metadata_check_result,
+        inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point, inflate_sync_point_value,
         inflate_sync_remaining_input, inflate_sync_search_core, inflate_trailer_checksum_from_hold,
@@ -4514,6 +4527,30 @@ mod tests {
         assert!(!inflate_state_is_usable(true, false, true, HEAD));
         assert!(!inflate_state_is_usable(true, true, false, HEAD));
         assert!(!inflate_state_is_usable(true, true, true, SYNC + 1));
+    }
+
+    #[test]
+    fn inflate_state_metadata_check_requires_usable_metadata() {
+        assert_eq!(
+            inflate_state_metadata_check_result(true, true, true, HEAD),
+            0
+        );
+        assert_eq!(
+            inflate_state_metadata_check_result(false, true, true, HEAD),
+            1
+        );
+        assert_eq!(
+            inflate_state_metadata_check_result(true, false, true, HEAD),
+            1
+        );
+        assert_eq!(
+            inflate_state_metadata_check_result(true, true, false, HEAD),
+            1
+        );
+        assert_eq!(
+            inflate_state_metadata_check_result(true, true, true, SYNC + 1),
+            1
+        );
     }
 
     #[test]

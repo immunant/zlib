@@ -287,6 +287,27 @@ fn gz_avail_prepare_refill(
     Some(plan)
 }
 
+struct GzAvailInputRefill<'a> {
+    buffer: &'a mut [crate::stdlib::Byte],
+    prior_avail_in: crate::stdlib::uInt,
+}
+
+fn gz_avail_input_refill(
+    input: &mut [crate::stdlib::Byte],
+    size: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    compact_input: bool,
+    input_offset: usize,
+) -> Option<GzAvailInputRefill<'_>> {
+    let plan = gz_avail_prepare_refill(input, size, avail_in, compact_input, input_offset)?;
+    let refill_end = plan.input_offset.checked_add(plan.read_len as usize)?;
+    let buffer = input.get_mut(plan.input_offset..refill_end)?;
+    Some(GzAvailInputRefill {
+        buffer,
+        prior_avail_in: plan.prior_avail_in,
+    })
+}
+
 fn gzread_request(len: ::core::ffi::c_uint) -> Option<crate::stdlib::z_size_t> {
     ((len as ::core::ffi::c_int) >= 0).then_some(len as crate::stdlib::z_size_t)
 }
@@ -851,7 +872,7 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 }
                 let input = core::slice::from_raw_parts_mut(p, state.size as usize);
                 let input_offset = (q as usize).wrapping_sub(p as usize);
-                let plan = match gz_avail_prepare_refill(
+                let refill = match gz_avail_input_refill(
                     input,
                     state.size,
                     state.strm.avail_in,
@@ -862,9 +883,9 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                     None => return -1 as ::core::ffi::c_int,
                 };
                 (
-                    state.in_0.wrapping_add(plan.input_offset),
-                    plan.read_len,
-                    plan.prior_avail_in,
+                    refill.buffer.as_mut_ptr(),
+                    refill.buffer.len() as ::core::ffi::c_uint,
+                    refill.prior_avail_in,
                 )
             };
             let load = gz_load(state, buf, len);
@@ -1980,6 +2001,19 @@ mod tests {
         );
         assert_eq!(input, *b"abcdefgh");
         assert_eq!(gz_avail_prepare_refill(&mut input, 8, 6, true, 3), None);
+    }
+
+    #[test]
+    fn gz_avail_input_refill_returns_only_the_validated_read_region() {
+        let mut input = *b"abcdefgh";
+        let refill = gz_avail_input_refill(&mut input, 8, 6, true, 2).unwrap();
+
+        assert_eq!(refill.prior_avail_in, 6);
+        assert_eq!(refill.buffer, b"gh");
+        refill.buffer.copy_from_slice(b"12");
+        assert_eq!(input, *b"cdefgh12");
+
+        assert!(gz_avail_input_refill(&mut input, 8, 6, true, 3).is_none());
     }
 
     #[test]
