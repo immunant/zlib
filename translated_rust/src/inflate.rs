@@ -2671,6 +2671,14 @@ fn inflate_validate_wrap(
     }
 }
 
+fn inflate_validate_core(
+    wrap: &mut ::core::ffi::c_int,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    *wrap = inflate_validate_wrap(*wrap, check);
+    crate::zlib_h::Z_OK
+}
+
 #[export_name = "inflateValidate"]
 
 pub unsafe extern "C" fn inflateValidate_ffi(
@@ -2680,9 +2688,8 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).wrap = inflate_validate_wrap((*state).wrap, check);
-    crate::zlib_h::Z_OK
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    inflate_validate_core(&mut state.wrap, check)
 }
 #[export_name = "inflateMark"]
 
@@ -2728,10 +2735,10 @@ mod tests {
         inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
         inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
         inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_wrap, initial_window_metadata, stored_block_length, syncsearch_safe,
-        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT,
-        HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_validate_core, inflate_validate_wrap, initial_window_metadata, stored_block_length,
+        syncsearch_safe, window_needs_allocation, window_update_plan, InflateBlockKind,
+        InflateCopyProgress, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER,
+        COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2874,6 +2881,14 @@ mod tests {
         assert_eq!(inflate_validate_wrap(4, -1), 4);
         assert_eq!(inflate_validate_wrap(9, 0), 9);
         assert_eq!(inflate_validate_wrap(0, 1), 0);
+    }
+
+    #[test]
+    fn inflate_validate_core_updates_wrap_in_place() {
+        for (mut wrap, check, expected) in [(1, 1, 5), (4, -1, 4), (9, 0, 9), (0, 1, 0)] {
+            assert_eq!(inflate_validate_core(&mut wrap, check), crate::zlib_h::Z_OK);
+            assert_eq!(wrap, expected);
+        }
     }
 
     #[test]

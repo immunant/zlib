@@ -311,6 +311,19 @@ fn gz_write_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
     errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
 }
 
+enum GzCompWriteFailure {
+    Retryable,
+    Fatal,
+}
+
+fn gz_comp_write_failure(errno: ::core::ffi::c_int) -> GzCompWriteFailure {
+    if gz_write_errno_is_retryable(errno) {
+        GzCompWriteFailure::Retryable
+    } else {
+        GzCompWriteFailure::Fatal
+    }
+}
+
 fn gz_comp_write_chunk_len(available: usize, max: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if available > max as usize {
         max
@@ -474,13 +487,14 @@ unsafe fn gz_comp(
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             if gz_comp_write_failed(writ) {
-                if gz_write_errno_is_retryable(*crate::stdlib::__errno_location()) {
+                let errno = *crate::stdlib::__errno_location();
+                if matches!(gz_comp_write_failure(errno), GzCompWriteFailure::Retryable) {
                     (*state).again = 1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                    crate::stdlib::strerror(errno),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -517,13 +531,14 @@ unsafe fn gz_comp(
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 if gz_comp_write_failed(writ) {
-                    if gz_write_errno_is_retryable(*crate::stdlib::__errno_location()) {
+                    let errno = *crate::stdlib::__errno_location();
+                    if matches!(gz_comp_write_failure(errno), GzCompWriteFailure::Retryable) {
                         (*state).again = 1 as ::core::ffi::c_int;
                     }
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                        crate::stdlib::strerror(errno),
                     );
                     return -1 as ::core::ffi::c_int;
                 }
@@ -981,7 +996,7 @@ mod tests {
         gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
         gz_comp_output_write_chunk_len, gz_comp_reset_action, gz_comp_reset_after_flush,
         gz_comp_skips_empty_flush, gz_comp_write_chunk_len, gz_comp_write_failed,
-        gz_has_pending_input, gz_has_pending_skip, gz_write_advanced_pos,
+        gz_comp_write_failure, gz_has_pending_input, gz_has_pending_skip, gz_write_advanced_pos,
         gz_write_apply_chunk_progress, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
         gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
@@ -990,6 +1005,7 @@ mod tests {
         gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len,
         gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
         gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
+        GzCompWriteFailure,
     };
 
     #[test]
@@ -1137,6 +1153,22 @@ mod tests {
         assert_eq!(gzputc_result(0x7f), 0x7f);
         assert_eq!(gzputc_result(0x123), 0x23);
         assert_eq!(gzputc_result(-1), 0xff);
+    }
+
+    #[test]
+    fn gz_comp_write_failure_classifies_retryable_and_fatal_errors() {
+        assert!(matches!(
+            gz_comp_write_failure(crate::stdlib::EAGAIN),
+            GzCompWriteFailure::Retryable
+        ));
+        assert!(matches!(
+            gz_comp_write_failure(crate::stdlib::EWOULDBLOCK),
+            GzCompWriteFailure::Retryable
+        ));
+        assert!(matches!(
+            gz_comp_write_failure(1),
+            GzCompWriteFailure::Fatal
+        ));
     }
 
     #[test]
