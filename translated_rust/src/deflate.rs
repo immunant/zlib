@@ -234,6 +234,25 @@ fn with_owned_deflate_storage<R>(
     Some(result)
 }
 
+/// Run one strategy update through the default allocator's owned workspace.
+///
+/// This keeps the take/reinstall discipline in one place while publishing
+/// only safe slices to the update path.  The wider streaming call can extend
+/// this scope later without having to recreate the same owner juggling around
+/// every header, flush, and strategy step.
+fn with_owned_deflate_workspace<R>(
+    state: &mut crate::src::deflate::deflate_state,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    action: impl FnOnce(&mut crate::src::deflate::deflate_state, &mut DeflateWorkspace<'_>) -> Option<R>,
+) -> Option<R> {
+    with_owned_deflate_storage(state, |state, owned| {
+        let mut workspace = owned.workspace(state, input, output)?;
+        action(state, &mut workspace)
+    })
+    .flatten()
+}
+
 impl DeflateOwnedStorage {
     /// Check that an owned workspace still has exactly the geometry advertised
     /// by a deflate state.  The eventual allocator facade must make this
@@ -3236,13 +3255,11 @@ pub fn deflate(
             let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            let Some(result) = with_owned_deflate_storage(state, |state, owned| {
-                let mut workspace = owned.workspace(state, input, output)?;
-                deflate_update(state, strm, &mut workspace, flush)
-            }) else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            let Some(bstate) = result else {
+            let Some(bstate) =
+                with_owned_deflate_workspace(state, input, output, |state, workspace| {
+                    deflate_update(state, strm, workspace, flush)
+                })
+            else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             (bstate, None)
