@@ -4534,6 +4534,21 @@ fn deflate_fast(
                 } else {
                     ::core::slice::from_raw_parts_mut(state.prev, prev_len)
                 };
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                    return need_more;
+                };
+                if pending_len != 0 && state.pending_buf.is_null() {
+                    return need_more;
+                }
+                // `sym_buf` is the literal-buffer offset within the pending
+                // allocation. Keep this existing no-refill window/hash lend
+                // alive through a checked tree flush, rather than rebuilding
+                // either the symbol cursor or stored-block cursor below.
+                let pending_and_symbols = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                };
                 let Some(previous) = insert_string_state(
                     window,
                     head,
@@ -4556,16 +4571,18 @@ fn deflate_fast(
                         longest_match_state(state, window, prev, hash_head).unwrap_or(0);
                 }
                 if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+                    let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                        return need_more;
+                    };
                     let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                         return need_more;
                     };
-                    if symbol_len != 0 && state.sym_buf.is_null() {
+                    let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
                         return need_more;
-                    }
-                    let symbols = if symbol_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                    };
+                    let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
+                    else {
+                        return need_more;
                     };
                     let Some((flush_now, length)) = fast_tally_match_state(state, symbols) else {
                         return need_more;
@@ -4610,16 +4627,18 @@ fn deflate_fast(
                         state.ins_h = ins_h;
                     }
                 } else {
+                    let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                        return need_more;
+                    };
                     let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                         return need_more;
                     };
-                    if symbol_len != 0 && state.sym_buf.is_null() {
+                    let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
                         return need_more;
-                    }
-                    let symbols = if symbol_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                    };
+                    let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
+                    else {
+                        return need_more;
                     };
                     let Some(flush_now) = tally_current_literal_state(state, window, symbols)
                     else {
@@ -4627,16 +4646,28 @@ fn deflate_fast(
                     };
                     bflush = flush_now as ::core::ffi::c_int;
                 }
+                if bflush != 0 {
+                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+                    let avail_out = {
+                        state.block_start = state.strstart as ::core::ffi::c_long;
+                        let strm = state.strm;
+                        flush_pending(strm)
+                    };
+                    if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                        return result;
+                    }
+                    bflush = 0;
+                }
             } else {
                 let state = &mut *s;
                 let Ok(window_len) = usize::try_from(state.window_size) else {
                     return need_more;
                 };
-                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                     return need_more;
                 };
                 if (window_len != 0 && state.window.is_null())
-                    || (symbol_len != 0 && state.sym_buf.is_null())
+                    || (pending_len != 0 && state.pending_buf.is_null())
                 {
                     return need_more;
                 }
@@ -4645,40 +4676,38 @@ fn deflate_fast(
                 } else {
                     ::core::slice::from_raw_parts(state.window, window_len)
                 };
-                let symbols = if symbol_len == 0 {
+                let pending_and_symbols = if pending_len == 0 {
                     &mut []
                 } else {
-                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                };
+                let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                    return need_more;
+                };
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+                    return need_more;
+                };
+                let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end) else {
+                    return need_more;
                 };
                 let Some(flush_now) = tally_current_literal_state(state, window, symbols) else {
                     return need_more;
                 };
                 bflush = flush_now as ::core::ffi::c_int;
-            }
-            if bflush != 0 {
-                let (block_start, strstart, window) = {
-                    let state = &mut *s;
-                    (state.block_start, state.strstart, state.window)
-                };
-                crate::src::trees::_tr_flush_block(
-                    s,
-                    if block_start >= 0 as ::core::ffi::c_long {
-                        window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                            as *mut crate::stdlib::charf
-                    } else {
-                        ::core::ptr::null_mut::<crate::stdlib::charf>()
-                    },
-                    block_flush_len_state(strstart, block_start),
-                    0 as ::core::ffi::c_int,
-                );
-                let avail_out = {
-                    let state = &mut *s;
-                    state.block_start = strstart as ::core::ffi::c_long;
-                    let strm = state.strm;
-                    flush_pending(strm)
-                };
-                if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                    return result;
+                if bflush != 0 {
+                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+                    let avail_out = {
+                        state.block_start = state.strstart as ::core::ffi::c_long;
+                        let strm = state.strm;
+                        flush_pending(strm)
+                    };
+                    if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                        return result;
+                    }
+                    bflush = 0;
                 }
             }
         }
