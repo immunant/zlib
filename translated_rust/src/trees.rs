@@ -4620,7 +4620,7 @@ fn build_dynamic_trees(state: &mut crate::src::deflate::deflate_state) {
 // Flush a completed block using only references to the deflater, stream,
 // pending allocation, and the already-bound source/symbol ranges.  In
 // particular, block choice and bit emission do not belong in the ABI layer.
-fn tr_flush_block_impl(
+pub(crate) fn tr_flush_block_bound(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream_s,
     pending: &mut [crate::zutil_h::uch],
@@ -4707,7 +4707,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         ))
     };
     let symbols = ::core::slice::from_raw_parts(state.sym_buf, state.sym_next as usize);
-    tr_flush_block_impl(state, stream, pending, source, symbols, stored_len, last);
+    tr_flush_block_bound(state, stream, pending, source, symbols, stored_len, last);
 }
 #[export_name = "_tr_flush_block"]
 
@@ -4741,7 +4741,7 @@ fn tally_symbols(
 // Once the deflater state and its three-byte symbol records are bound, tally
 // bookkeeping is ordinary indexed state manipulation. Keep it reference- and
 // slice-based so the raw allocation boundary stays in the small adapter below.
-fn tally(
+pub(crate) fn tally_bound(
     state: &mut crate::src::deflate::deflate_state,
     sym_buf: &mut [crate::zutil_h::uchf],
     mut dist: ::core::ffi::c_uint,
@@ -4799,7 +4799,7 @@ pub unsafe extern "C" fn _tr_tally(
         state.sym_buf,
         state.lit_bufsize.wrapping_mul(3) as usize,
     );
-    tally(state, sym_buf, dist, lc)
+    tally_bound(state, sym_buf, dist, lc)
 }
 #[export_name = "_tr_tally"]
 
