@@ -150,6 +150,7 @@ macro_rules! compress2_z_at_boundary {
             };
             err = crate::src::deflate::deflate(
                 &mut stream,
+                &mut *state,
                 &mut input,
                 pending_buf,
                 &mut window_hash,

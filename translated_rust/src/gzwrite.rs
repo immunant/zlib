@@ -297,6 +297,7 @@ macro_rules! gz_comp_at_boundary {
                 };
                 ret = crate::src::deflate::deflate(
                     strm,
+                    &mut *pending_state,
                     &mut input,
                     pending_buf,
                     &mut window_hash,

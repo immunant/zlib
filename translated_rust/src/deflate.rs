@@ -2026,6 +2026,7 @@ macro_rules! deflate_params_at_boundary {
                 };
                 let err = crate::src::deflate::deflate(
                     &mut *strm,
+                    &mut *s,
                     &mut input,
                     pending_buf,
                     &mut window_hash,
@@ -3059,6 +3060,7 @@ fn deflate_reborrow<T: ?Sized>(value: &T) -> &T {
 
 pub fn deflate(
     strm_ref: &mut crate::zlib_h::z_stream,
+    s: &mut crate::src::deflate::deflate_state,
     mut input: &mut &[crate::stdlib::Byte],
     pending_buf: &mut [crate::stdlib::Byte],
     window_hash: &mut DeflateWindowHashBuffers<'_>,
@@ -3066,171 +3068,219 @@ pub fn deflate(
     gzip_payloads: DeflateGzipPayloads<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // This legacy dispatcher still has to adopt the callback-owned state,
-    // lend cursor-backed buffers, and inspect the retained gzip header. Keep
-    // that work at one explicit transitional codec boundary so Rust callers do
-    // not inherit an unsafe-function contract.
-    unsafe {
-        let mut old_flush: ::core::ffi::c_int = 0;
-        if flush > crate::zlib_h::Z_BLOCK || flush < 0 as ::core::ffi::c_int {
+    // The ABI boundary has already adopted the callback-owned state and lent
+    // every cursor-backed buffer for this transition. Keep the dispatcher on
+    // those checked references so it never has to reconstruct the state.
+    let mut old_flush: ::core::ffi::c_int = 0;
+    if flush > crate::zlib_h::Z_BLOCK || flush < 0 as ::core::ffi::c_int {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // Validate the separately lent stream and state before changing either
+    // record. The ABI boundary establishes that `s` is the stream's state;
+    // the retained identity token catches an inconsistent direct caller.
+    let (pending, avail_in) = {
+        let stream = deflate_reborrow_mut(strm_ref);
+        if !deflate_state_values_are_valid(
+            stream.zalloc.is_some(),
+            stream.zfree.is_some(),
+            s.strm == stream as *mut crate::zlib_h::z_stream as usize,
+            s.status,
+        ) {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        // This transitional dispatcher still uses raw cursors in its legacy
-        // compression loop. Validate the safe stream and adopt its raw state
-        // once at entry rather than routing through the private state checker.
-        let (s, pending, avail_in) = {
-            let stream = deflate_reborrow_mut(strm_ref);
-            let state_ptr = stream.state as *mut crate::src::deflate::deflate_state;
-            if state_ptr.is_null() {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            let state = &mut *state_ptr;
-            if !deflate_state_values_are_valid(
-                stream.zalloc.is_some(),
-                stream.zfree.is_some(),
-                state.strm == stream as *mut crate::zlib_h::z_stream as usize,
-                state.status,
-            ) {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            if stream.next_out.is_null()
-                || stream.avail_in != 0 as crate::stdlib::uInt && stream.next_in.is_null()
-                || state.status == crate::src::deflate::FINISH_STATE
-                    && flush != crate::zlib_h::Z_FINISH
-            {
-                stream.msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
-                    < -6 as ::core::ffi::c_int
-                    || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-                {
-                    9 as ::core::ffi::c_int
-                } else {
-                    2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
-                }) as usize] as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-                return -2 as ::core::ffi::c_int;
-            }
-            if stream.avail_out == 0 as crate::stdlib::uInt {
-                stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-                    < -6 as ::core::ffi::c_int
-                    || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-                {
-                    9 as ::core::ffi::c_int
-                } else {
-                    2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-                }) as usize] as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-                return -5 as ::core::ffi::c_int;
-            }
-            old_flush = state.last_flush;
-            state.last_flush = flush;
-            let pending = state.pending != 0;
-            (state, pending, stream.avail_in)
-        };
-        // The FFI boundary reduced the caller-retained header to this scalar
-        // snapshot along with its bounded payload views. Do not observe that
-        // caller-owned pointer again in the ordinary compressor.
-        let gzip_header_fields = gzip_payloads.header;
-        let Ok(input_len) = usize::try_from(avail_in) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        if input.len() != input_len {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        if pending {
-            if flush_pending(
-                strm_ref,
-                s,
-                pending_buf,
-                output,
-                FlushPendingMark::OutputFull,
-            )
-            .0 == 0 as crate::stdlib::uInt
-            {
-                return crate::zlib_h::Z_OK;
-            }
-        } else if repeated_flush_is_buffer_error(avail_in, flush, old_flush) {
-            let stream = deflate_reborrow_mut(strm_ref);
-            stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char;
-            return -5 as ::core::ffi::c_int;
-        }
-        let finish_with_input = {
-            let stream = deflate_reborrow(strm_ref);
-            let state = deflate_reborrow(s);
-            state.status == crate::src::deflate::FINISH_STATE
-                && stream.avail_in != 0 as crate::stdlib::uInt
-        };
-        if finish_with_input {
-            let stream = deflate_reborrow_mut(strm_ref);
-            stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char
-                as *mut ::core::ffi::c_char;
-            return -5 as ::core::ffi::c_int;
-        }
+        if stream.next_out.is_null()
+            || stream.avail_in != 0 as crate::stdlib::uInt && stream.next_in.is_null()
+            || s.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
         {
-            let state = deflate_reborrow_mut(s);
-            if state.status == crate::src::deflate::INIT_STATE
-                && state.wrap == 0 as ::core::ffi::c_int
+            stream.msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
+                < -6 as ::core::ffi::c_int
+                || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
             {
-                state.status = crate::src::deflate::BUSY_STATE;
-            }
+                9 as ::core::ffi::c_int
+            } else {
+                2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
+            }) as usize] as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+            return -2 as ::core::ffi::c_int;
         }
-        let initialized_zlib_header = {
-            let state = deflate_reborrow(s);
-            state.status == crate::src::deflate::INIT_STATE
+        if stream.avail_out == 0 as crate::stdlib::uInt {
+            stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
+                < -6 as ::core::ffi::c_int
+                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+            {
+                9 as ::core::ffi::c_int
+            } else {
+                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
+            }) as usize] as *const ::core::ffi::c_char
+                as *mut ::core::ffi::c_char;
+            return -5 as ::core::ffi::c_int;
+        }
+        old_flush = s.last_flush;
+        s.last_flush = flush;
+        let pending = s.pending != 0;
+        (pending, stream.avail_in)
+    };
+    // The FFI boundary reduced the caller-retained header to this scalar
+    // snapshot along with its bounded payload views. Do not observe that
+    // caller-owned pointer again in the ordinary compressor.
+    let gzip_header_fields = gzip_payloads.header;
+    let Ok(input_len) = usize::try_from(avail_in) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if input.len() != input_len {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if pending {
+        if flush_pending(
+            strm_ref,
+            s,
+            pending_buf,
+            output,
+            FlushPendingMark::OutputFull,
+        )
+        .0 == 0 as crate::stdlib::uInt
+        {
+            return crate::zlib_h::Z_OK;
+        }
+    } else if repeated_flush_is_buffer_error(avail_in, flush, old_flush) {
+        let stream = deflate_reborrow_mut(strm_ref);
+        stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
+            < -6 as ::core::ffi::c_int
+            || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+        {
+            9 as ::core::ffi::c_int
+        } else {
+            2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        return -5 as ::core::ffi::c_int;
+    }
+    let finish_with_input = {
+        let stream = deflate_reborrow(strm_ref);
+        let state = deflate_reborrow(s);
+        state.status == crate::src::deflate::FINISH_STATE
+            && stream.avail_in != 0 as crate::stdlib::uInt
+    };
+    if finish_with_input {
+        let stream = deflate_reborrow_mut(strm_ref);
+        stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
+            < -6 as ::core::ffi::c_int
+            || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+        {
+            9 as ::core::ffi::c_int
+        } else {
+            2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        return -5 as ::core::ffi::c_int;
+    }
+    {
+        let state = deflate_reborrow_mut(s);
+        if state.status == crate::src::deflate::INIT_STATE && state.wrap == 0 as ::core::ffi::c_int
+        {
+            state.status = crate::src::deflate::BUSY_STATE;
+        }
+    }
+    let initialized_zlib_header = {
+        let state = deflate_reborrow(s);
+        state.status == crate::src::deflate::INIT_STATE
+    };
+    if initialized_zlib_header {
+        let stream = deflate_reborrow_mut(strm_ref);
+        let state = deflate_reborrow_mut(s);
+        let (header, dictionary_adler) = zlib_header_words(
+            state.w_bits,
+            state.strategy,
+            state.level,
+            state.strstart,
+            stream.adler,
+        );
+        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if initialized_zlib_header {
+        if pending_buf.len() != pending_len {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let header_written = match dictionary_adler {
+            Some((adler_high, adler_low)) => append_zlib_words_state(
+                pending_buf,
+                &mut state.pending,
+                &[header, adler_high, adler_low],
+            ),
+            None => append_zlib_words_state(pending_buf, &mut state.pending, &[header]),
+        };
+        if !header_written {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        stream.adler = crate::src::adler32::ADLER32_INITIAL;
+        state.status = crate::src::deflate::BUSY_STATE;
+    }
+    let zlib_header_is_pending = initialized_zlib_header && {
+        let state = deflate_reborrow(s);
+        state.pending != 0
+    };
+    if zlib_header_is_pending {
+        // A partial pending flush can only leave pending bytes when the
+        // output cursor is full. Have the existing flush boundary commit
+        // `last_flush` for that condition, then use its returned pending
+        // balance instead of re-adopting the raw state record to inspect it.
+        if flush_pending(
+            strm_ref,
+            s,
+            pending_buf,
+            output,
+            FlushPendingMark::PendingRemains,
+        )
+        .1 != Some(0)
+        {
+            return crate::zlib_h::Z_OK;
+        }
+    }
+    let gzip_header_pending = {
+        let state = deflate_reborrow(s);
+        state.status == crate::src::deflate::GZIP_STATE
+    };
+    if gzip_header_pending {
+        // Keep fixed-header construction within one ordinary stream/state
+        // borrow.  The pending buffer is still lent only here, and the
+        // borrow ends before `flush_pending()` can revisit compatibility
+        // state or callback-owned output.
+        let fixed_header_plan = {
             let stream = deflate_reborrow_mut(strm_ref);
             let state = deflate_reborrow_mut(s);
-            let (header, dictionary_adler) = zlib_header_words(
-                state.w_bits,
-                state.strategy,
-                state.level,
-                state.strstart,
-                stream.adler,
-            );
+            stream.adler = crate::src::crc32::crc32_slice(0, &[]);
+            let header = gzip_header_fields.map(|header| GzipFixedHeader {
+                text: header.text,
+                hcrc: header.hcrc,
+                has_extra: header.has_extra,
+                has_name: header.has_name,
+                has_comment: header.has_comment,
+                time: header.time,
+                os: header.os,
+                extra_len: header.extra_len,
+            });
             let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             if pending_buf.len() != pending_len {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
-            let header_written = match dictionary_adler {
-                Some((adler_high, adler_low)) => append_zlib_words_state(
-                    pending_buf,
-                    &mut state.pending,
-                    &[header, adler_high, adler_low],
-                ),
-                None => append_zlib_words_state(pending_buf, &mut state.pending, &[header]),
-            };
-            if !header_written {
+            if !append_gzip_fixed_header_state(
+                pending_buf,
+                &mut state.pending,
+                &mut stream.adler,
+                state.level,
+                state.strategy,
+                header,
+            ) {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
-            stream.adler = crate::src::adler32::ADLER32_INITIAL;
-            state.status = crate::src::deflate::BUSY_STATE;
-        }
-        let zlib_header_is_pending = initialized_zlib_header && {
-            let state = deflate_reborrow(s);
-            state.pending != 0
+            let plan = gzip_fixed_header_plan(header.is_some());
+            if plan.reset_index {
+                state.gzindex = 0 as crate::zutil_h::ulg;
+            }
+            state.status = plan.next_status;
+            plan
         };
-        if zlib_header_is_pending {
-            // A partial pending flush can only leave pending bytes when the
-            // output cursor is full. Have the existing flush boundary commit
-            // `last_flush` for that condition, then use its returned pending
-            // balance instead of re-adopting the raw state record to inspect it.
+        if fixed_header_plan.flush_now {
             if flush_pending(
                 strm_ref,
                 s,
@@ -3243,53 +3293,44 @@ pub fn deflate(
                 return crate::zlib_h::Z_OK;
             }
         }
-        let gzip_header_pending = {
-            let state = deflate_reborrow(s);
-            state.status == crate::src::deflate::GZIP_STATE
-        };
-        if gzip_header_pending {
-            // Keep fixed-header construction within one ordinary stream/state
-            // borrow.  The pending buffer is still lent only here, and the
-            // borrow ends before `flush_pending()` can revisit compatibility
-            // state or callback-owned output.
-            let fixed_header_plan = {
-                let stream = deflate_reborrow_mut(strm_ref);
+    }
+    // The scalar snapshot carries the retained-header metadata through
+    // the remaining gzip transitions. Payload views were lent by the ABI
+    // boundary for this invocation and stay as ordinary safe slices here.
+    let gzip_extra_pending = {
+        let state = deflate_reborrow(s);
+        state.status == crate::src::deflate::EXTRA_STATE
+    };
+    if gzip_extra_pending {
+        // The header value was snapshotted at the ABI boundary; ordinary
+        // state and stream borrows handle every chunk commit.
+        if let Some(extra) = gzip_payloads.extra {
+            loop {
                 let state = deflate_reborrow_mut(s);
-                stream.adler = crate::src::crc32::crc32_slice(0, &[]);
-                let header = gzip_header_fields.map(|header| GzipFixedHeader {
-                    text: header.text,
-                    hcrc: header.hcrc,
-                    has_extra: header.has_extra,
-                    has_name: header.has_name,
-                    has_comment: header.has_comment,
-                    time: header.time,
-                    os: header.os,
-                    extra_len: header.extra_len,
-                });
+                let stream = deflate_reborrow_mut(strm_ref);
                 let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
                 if pending_buf.len() != pending_len {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                if !append_gzip_fixed_header_state(
+                let Some(done) = append_gzip_extra_chunk_state(
                     pending_buf,
                     &mut state.pending,
+                    &mut state.gzindex,
+                    extra,
+                    gzip_header_fields.is_some_and(|header| header.hcrc),
                     &mut stream.adler,
-                    state.level,
-                    state.strategy,
-                    header,
-                ) {
+                ) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if done {
+                    state.gzindex = 0 as crate::zutil_h::ulg;
+                    break;
+                }
+                if state.pending != state.pending_buf_size {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                let plan = gzip_fixed_header_plan(header.is_some());
-                if plan.reset_index {
-                    state.gzindex = 0 as crate::zutil_h::ulg;
-                }
-                state.status = plan.next_status;
-                plan
-            };
-            if fixed_header_plan.flush_now {
                 if flush_pending(
                     strm_ref,
                     s,
@@ -3303,195 +3344,266 @@ pub fn deflate(
                 }
             }
         }
-        // The scalar snapshot carries the retained-header metadata through
-        // the remaining gzip transitions. Payload views were lent by the ABI
-        // boundary for this invocation and stay as ordinary safe slices here.
-        let gzip_extra_pending = {
-            let state = deflate_reborrow(s);
-            state.status == crate::src::deflate::EXTRA_STATE
-        };
-        if gzip_extra_pending {
-            // The header value was snapshotted at the ABI boundary; ordinary
-            // state and stream borrows handle every chunk commit.
-            if let Some(extra) = gzip_payloads.extra {
-                loop {
-                    let state = deflate_reborrow_mut(s);
-                    let stream = deflate_reborrow_mut(strm_ref);
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    if pending_buf.len() != pending_len {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    let Some(done) = append_gzip_extra_chunk_state(
-                        pending_buf,
-                        &mut state.pending,
-                        &mut state.gzindex,
-                        extra,
-                        gzip_header_fields.is_some_and(|header| header.hcrc),
-                        &mut stream.adler,
-                    ) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    if done {
-                        state.gzindex = 0 as crate::zutil_h::ulg;
-                        break;
-                    }
-                    if state.pending != state.pending_buf_size {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    if flush_pending(
-                        strm_ref,
-                        s,
-                        pending_buf,
-                        output,
-                        FlushPendingMark::PendingRemains,
-                    )
-                    .1 != Some(0)
-                    {
-                        return crate::zlib_h::Z_OK;
-                    }
-                }
-            }
-            let state = deflate_reborrow_mut(s);
-            state.status = crate::src::deflate::NAME_STATE;
-        }
-        // NAME follows the same entry snapshot as EXTRA; the temporary C
-        // string view remains at the actual compatibility boundary below.
-        let gzip_name_pending = {
-            let state = deflate_reborrow(s);
-            state.status == crate::src::deflate::NAME_STATE
-        };
-        if gzip_name_pending {
-            if let Some(name) = gzip_payloads.name {
-                loop {
-                    let state = deflate_reborrow_mut(s);
-                    let stream = deflate_reborrow_mut(strm_ref);
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    if pending_buf.len() != pending_len {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    let Some(done) = append_gzip_cstring_chunk_state(
-                        pending_buf,
-                        &mut state.pending,
-                        &mut state.gzindex,
-                        name,
-                        gzip_header_fields.is_some_and(|header| header.hcrc),
-                        &mut stream.adler,
-                    ) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    if done {
-                        state.gzindex = 0 as crate::zutil_h::ulg;
-                        break;
-                    }
-                    if state.pending != state.pending_buf_size {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    if flush_pending(
-                        strm_ref,
-                        s,
-                        pending_buf,
-                        output,
-                        FlushPendingMark::PendingRemains,
-                    )
-                    .1 != Some(0)
-                    {
-                        return crate::zlib_h::Z_OK;
-                    }
-                }
-            }
-            let state = deflate_reborrow_mut(s);
-            state.status = crate::src::deflate::COMMENT_STATE;
-        }
-        let gzip_comment_pending = {
-            let state = deflate_reborrow(s);
-            state.status == crate::src::deflate::COMMENT_STATE
-        };
-        if gzip_comment_pending {
-            if let Some(comment) = gzip_payloads.comment {
-                loop {
-                    let state = deflate_reborrow_mut(s);
-                    let stream = deflate_reborrow_mut(strm_ref);
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    if pending_buf.len() != pending_len {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    let Some(done) = append_gzip_cstring_chunk_state(
-                        pending_buf,
-                        &mut state.pending,
-                        &mut state.gzindex,
-                        comment,
-                        gzip_header_fields.is_some_and(|header| header.hcrc),
-                        &mut stream.adler,
-                    ) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    if done {
-                        state.gzindex = 0 as crate::zutil_h::ulg;
-                        break;
-                    }
-                    if state.pending != state.pending_buf_size {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    if flush_pending(
-                        strm_ref,
-                        s,
-                        pending_buf,
-                        output,
-                        FlushPendingMark::PendingRemains,
-                    )
-                    .1 != Some(0)
-                    {
-                        return crate::zlib_h::Z_OK;
-                    }
-                }
-            }
-            let state = deflate_reborrow_mut(s);
-            state.status = crate::src::deflate::HCRC_STATE;
-        }
-        let (gzip_hcrc_pending, hcrc_pending, hcrc_pending_buf_size) = {
-            let state = deflate_reborrow(s);
-            (
-                state.status == crate::src::deflate::HCRC_STATE,
-                state.pending,
-                state.pending_buf_size,
-            )
-        };
-        if gzip_hcrc_pending {
-            // Snapshot the only header-derived flag and the pending capacity
-            // together.  The scalar planner then owns the two-byte admission
-            // check, avoiding a second raw state adoption before a possible
-            // flush.
-            let hcrc_plan = match gzip_header_fields {
-                None => GzipHcrcPlan {
-                    emit: false,
-                    flush_before_emit: false,
-                },
-                Some(header) => gzip_hcrc_plan(header.hcrc, hcrc_pending, hcrc_pending_buf_size),
-            };
-            if hcrc_plan.emit {
-                if hcrc_plan.flush_before_emit {
-                    if flush_pending(
-                        strm_ref,
-                        s,
-                        pending_buf,
-                        output,
-                        FlushPendingMark::PendingRemains,
-                    )
-                    .1 != Some(0)
-                    {
-                        return crate::zlib_h::Z_OK;
-                    }
-                }
-                let hcrc = {
-                    let stream = deflate_reborrow(strm_ref);
-                    stream.adler
+        let state = deflate_reborrow_mut(s);
+        state.status = crate::src::deflate::NAME_STATE;
+    }
+    // NAME follows the same entry snapshot as EXTRA; the temporary C
+    // string view remains at the actual compatibility boundary below.
+    let gzip_name_pending = {
+        let state = deflate_reborrow(s);
+        state.status == crate::src::deflate::NAME_STATE
+    };
+    if gzip_name_pending {
+        if let Some(name) = gzip_payloads.name {
+            loop {
+                let state = deflate_reborrow_mut(s);
+                let stream = deflate_reborrow_mut(strm_ref);
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
                 };
+                if pending_buf.len() != pending_len {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let Some(done) = append_gzip_cstring_chunk_state(
+                    pending_buf,
+                    &mut state.pending,
+                    &mut state.gzindex,
+                    name,
+                    gzip_header_fields.is_some_and(|header| header.hcrc),
+                    &mut stream.adler,
+                ) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if done {
+                    state.gzindex = 0 as crate::zutil_h::ulg;
+                    break;
+                }
+                if state.pending != state.pending_buf_size {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                if flush_pending(
+                    strm_ref,
+                    s,
+                    pending_buf,
+                    output,
+                    FlushPendingMark::PendingRemains,
+                )
+                .1 != Some(0)
+                {
+                    return crate::zlib_h::Z_OK;
+                }
+            }
+        }
+        let state = deflate_reborrow_mut(s);
+        state.status = crate::src::deflate::COMMENT_STATE;
+    }
+    let gzip_comment_pending = {
+        let state = deflate_reborrow(s);
+        state.status == crate::src::deflate::COMMENT_STATE
+    };
+    if gzip_comment_pending {
+        if let Some(comment) = gzip_payloads.comment {
+            loop {
+                let state = deflate_reborrow_mut(s);
+                let stream = deflate_reborrow_mut(strm_ref);
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if pending_buf.len() != pending_len {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let Some(done) = append_gzip_cstring_chunk_state(
+                    pending_buf,
+                    &mut state.pending,
+                    &mut state.gzindex,
+                    comment,
+                    gzip_header_fields.is_some_and(|header| header.hcrc),
+                    &mut stream.adler,
+                ) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if done {
+                    state.gzindex = 0 as crate::zutil_h::ulg;
+                    break;
+                }
+                if state.pending != state.pending_buf_size {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                if flush_pending(
+                    strm_ref,
+                    s,
+                    pending_buf,
+                    output,
+                    FlushPendingMark::PendingRemains,
+                )
+                .1 != Some(0)
+                {
+                    return crate::zlib_h::Z_OK;
+                }
+            }
+        }
+        let state = deflate_reborrow_mut(s);
+        state.status = crate::src::deflate::HCRC_STATE;
+    }
+    let (gzip_hcrc_pending, hcrc_pending, hcrc_pending_buf_size) = {
+        let state = deflate_reborrow(s);
+        (
+            state.status == crate::src::deflate::HCRC_STATE,
+            state.pending,
+            state.pending_buf_size,
+        )
+    };
+    if gzip_hcrc_pending {
+        // Snapshot the only header-derived flag and the pending capacity
+        // together.  The scalar planner then owns the two-byte admission
+        // check, avoiding a second raw state adoption before a possible
+        // flush.
+        let hcrc_plan = match gzip_header_fields {
+            None => GzipHcrcPlan {
+                emit: false,
+                flush_before_emit: false,
+            },
+            Some(header) => gzip_hcrc_plan(header.hcrc, hcrc_pending, hcrc_pending_buf_size),
+        };
+        if hcrc_plan.emit {
+            if hcrc_plan.flush_before_emit {
+                if flush_pending(
+                    strm_ref,
+                    s,
+                    pending_buf,
+                    output,
+                    FlushPendingMark::PendingRemains,
+                )
+                .1 != Some(0)
+                {
+                    return crate::zlib_h::Z_OK;
+                }
+            }
+            let hcrc = {
+                let stream = deflate_reborrow(strm_ref);
+                stream.adler
+            };
+            let state = deflate_reborrow_mut(s);
+            let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            if pending_buf.len() != pending_len {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            if !append_gzip_hcrc_state(pending_buf, &mut state.pending, hcrc) {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let stream = deflate_reborrow_mut(strm_ref);
+            stream.adler = crate::src::crc32::crc32_slice(0, &[]);
+        }
+        let state = deflate_reborrow_mut(s);
+        state.status = crate::src::deflate::BUSY_STATE;
+        if flush_pending(
+            strm_ref,
+            s,
+            pending_buf,
+            output,
+            FlushPendingMark::PendingRemains,
+        )
+        .1 != Some(0)
+        {
+            return crate::zlib_h::Z_OK;
+        }
+    }
+    let should_compress = {
+        let stream = deflate_reborrow(strm_ref);
+        let state = deflate_reborrow(s);
+        stream.avail_in != 0 as crate::stdlib::uInt
+            || state.lookahead != 0 as crate::stdlib::uInt
+            || flush != crate::zlib_h::Z_NO_FLUSH
+                && state.status != crate::src::deflate::FINISH_STATE
+    };
+    if should_compress {
+        let mut bstate: block_state = {
+            // Reborrow the state once for both compressor selection and
+            // the selected private block encoder.  The encoders own their
+            // separate transitional buffer lends, so this does not extend
+            // an ABI borrow across a callback-capable operation.
+            let state = deflate_reborrow_mut(s);
+            let Some(compressor) = deflate_compressor_plan(state.level, state.strategy) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            match compressor {
+                DeflateCompressor::Stored => deflate_stored(
+                    state,
+                    strm_ref,
+                    &mut input,
+                    pending_buf,
+                    window_hash,
+                    output,
+                    flush,
+                ),
+                DeflateCompressor::Huffman => deflate_huff(
+                    state,
+                    strm_ref,
+                    &mut input,
+                    pending_buf,
+                    window_hash,
+                    output,
+                    flush,
+                ),
+                DeflateCompressor::Rle => deflate_rle(
+                    state,
+                    strm_ref,
+                    &mut input,
+                    pending_buf,
+                    window_hash,
+                    output,
+                    flush,
+                ),
+                DeflateCompressor::Fast => deflate_fast(
+                    state,
+                    strm_ref,
+                    &mut input,
+                    pending_buf,
+                    window_hash,
+                    output,
+                    flush,
+                ),
+                DeflateCompressor::Slow => deflate_slow(
+                    state,
+                    strm_ref,
+                    &mut input,
+                    pending_buf,
+                    window_hash,
+                    output,
+                    flush,
+                ),
+            }
+        };
+        if bstate as ::core::ffi::c_uint
+            == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
+            || bstate as ::core::ffi::c_uint
+                == finish_done as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            let state = deflate_reborrow_mut(s);
+            state.status = crate::src::deflate::FINISH_STATE;
+        }
+        if bstate as ::core::ffi::c_uint == need_more as ::core::ffi::c_int as ::core::ffi::c_uint
+            || bstate as ::core::ffi::c_uint
+                == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            let output_is_full = {
+                let stream = deflate_reborrow(strm_ref);
+                stream.avail_out == 0 as crate::stdlib::uInt
+            };
+            if output_is_full {
+                let state = deflate_reborrow_mut(s);
+                state.last_flush = -1 as ::core::ffi::c_int;
+            }
+            return crate::zlib_h::Z_OK;
+        }
+        if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
+                // This exported stream boundary owns the callback-allocated
+                // pending buffer lend.  The bit alignment itself is a safe
+                // slice/state transition.
                 let state = deflate_reborrow_mut(s);
                 let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                     return crate::zlib_h::Z_STREAM_ERROR;
@@ -3499,243 +3611,112 @@ pub fn deflate(
                 if pending_buf.len() != pending_len {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                if !append_gzip_hcrc_state(pending_buf, &mut state.pending, hcrc) {
+                crate::src::trees::tr_align_state(
+                    pending_buf,
+                    &mut state.pending,
+                    &mut state.bi_buf,
+                    &mut state.bi_valid,
+                );
+            } else if flush != crate::zlib_h::Z_BLOCK {
+                // This stream boundary already owns the callback-allocated
+                // pending buffer lend.  An empty stored block has no caller
+                // buffer, so emit it through the slice-only tree core.
+                let state = deflate_reborrow_mut(s);
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if pending_buf.len() != pending_len {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                let stream = deflate_reborrow_mut(strm_ref);
-                stream.adler = crate::src::crc32::crc32_slice(0, &[]);
+                if !crate::src::trees::tr_stored_block_state(
+                    pending_buf,
+                    &mut state.pending,
+                    &mut state.bi_buf,
+                    &mut state.bi_valid,
+                    &mut state.bi_used,
+                    &[],
+                    0,
+                ) {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                if flush == crate::zlib_h::Z_FULL_FLUSH {
+                    let Ok(head_len) = usize::try_from(state.hash_size) else {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    };
+                    if head_len == 0 || state.head.is_null() || window_hash.head.len() != head_len {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    }
+                    // The per-call ABI boundary already lent the
+                    // callback-allocated hash table. Full flush clears
+                    // that exact checked lend (NIL is zero) through the
+                    // slice-only state core instead of rebuilding a raw
+                    // slice or using libc `memset`.
+                    let head = &mut *window_hash.head;
+                    clear_hash_state(head, &mut state.slid);
+                    if state.lookahead == 0 as crate::stdlib::uInt {
+                        state.strstart = 0 as crate::stdlib::uInt;
+                        state.block_start = 0 as ::core::ffi::c_long;
+                        state.insert = 0 as crate::stdlib::uInt;
+                    }
+                }
             }
-            let state = deflate_reborrow_mut(s);
-            state.status = crate::src::deflate::BUSY_STATE;
             if flush_pending(
                 strm_ref,
                 s,
                 pending_buf,
                 output,
-                FlushPendingMark::PendingRemains,
+                FlushPendingMark::OutputFull,
             )
-            .1 != Some(0)
+            .0 == 0 as crate::stdlib::uInt
             {
                 return crate::zlib_h::Z_OK;
             }
         }
-        let should_compress = {
+    }
+    if flush != crate::zlib_h::Z_FINISH {
+        return crate::zlib_h::Z_OK;
+    }
+    {
+        let state = deflate_reborrow_mut(s);
+        let trailer = {
             let stream = deflate_reborrow(strm_ref);
-            let state = deflate_reborrow(s);
-            stream.avail_in != 0 as crate::stdlib::uInt
-                || state.lookahead != 0 as crate::stdlib::uInt
-                || flush != crate::zlib_h::Z_NO_FLUSH
-                    && state.status != crate::src::deflate::FINISH_STATE
+            deflate_trailer_plan(state.wrap, stream.adler, stream.total_in)
         };
-        if should_compress {
-            let mut bstate: block_state = {
-                // Reborrow the state once for both compressor selection and
-                // the selected private block encoder.  The encoders own their
-                // separate transitional buffer lends, so this does not extend
-                // an ABI borrow across a callback-capable operation.
-                let state = deflate_reborrow_mut(s);
-                let Some(compressor) = deflate_compressor_plan(state.level, state.strategy) else {
-                    return crate::zlib_h::Z_STREAM_ERROR;
-                };
-                match compressor {
-                    DeflateCompressor::Stored => deflate_stored(
-                        state,
-                        strm_ref,
-                        &mut input,
-                        pending_buf,
-                        window_hash,
-                        output,
-                        flush,
-                    ),
-                    DeflateCompressor::Huffman => deflate_huff(
-                        state,
-                        strm_ref,
-                        &mut input,
-                        pending_buf,
-                        window_hash,
-                        output,
-                        flush,
-                    ),
-                    DeflateCompressor::Rle => deflate_rle(
-                        state,
-                        strm_ref,
-                        &mut input,
-                        pending_buf,
-                        window_hash,
-                        output,
-                        flush,
-                    ),
-                    DeflateCompressor::Fast => deflate_fast(
-                        state,
-                        strm_ref,
-                        &mut input,
-                        pending_buf,
-                        window_hash,
-                        output,
-                        flush,
-                    ),
-                    DeflateCompressor::Slow => deflate_slow(
-                        state,
-                        strm_ref,
-                        &mut input,
-                        pending_buf,
-                        window_hash,
-                        output,
-                        flush,
-                    ),
-                }
-            };
-            if bstate as ::core::ffi::c_uint
-                == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
-                || bstate as ::core::ffi::c_uint
-                    == finish_done as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                let state = deflate_reborrow_mut(s);
-                state.status = crate::src::deflate::FINISH_STATE;
-            }
-            if bstate as ::core::ffi::c_uint
-                == need_more as ::core::ffi::c_int as ::core::ffi::c_uint
-                || bstate as ::core::ffi::c_uint
-                    == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                let output_is_full = {
-                    let stream = deflate_reborrow(strm_ref);
-                    stream.avail_out == 0 as crate::stdlib::uInt
-                };
-                if output_is_full {
-                    let state = deflate_reborrow_mut(s);
-                    state.last_flush = -1 as ::core::ffi::c_int;
-                }
-                return crate::zlib_h::Z_OK;
-            }
-            if bstate as ::core::ffi::c_uint
-                == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                    // This exported stream boundary owns the callback-allocated
-                    // pending buffer lend.  The bit alignment itself is a safe
-                    // slice/state transition.
-                    let state = deflate_reborrow_mut(s);
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    if pending_buf.len() != pending_len {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    crate::src::trees::tr_align_state(
-                        pending_buf,
-                        &mut state.pending,
-                        &mut state.bi_buf,
-                        &mut state.bi_valid,
-                    );
-                } else if flush != crate::zlib_h::Z_BLOCK {
-                    // This stream boundary already owns the callback-allocated
-                    // pending buffer lend.  An empty stored block has no caller
-                    // buffer, so emit it through the slice-only tree core.
-                    let state = deflate_reborrow_mut(s);
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    };
-                    if pending_buf.len() != pending_len {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    if !crate::src::trees::tr_stored_block_state(
-                        pending_buf,
-                        &mut state.pending,
-                        &mut state.bi_buf,
-                        &mut state.bi_valid,
-                        &mut state.bi_used,
-                        &[],
-                        0,
-                    ) {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    if flush == crate::zlib_h::Z_FULL_FLUSH {
-                        let Ok(head_len) = usize::try_from(state.hash_size) else {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        };
-                        if head_len == 0
-                            || state.head.is_null()
-                            || window_hash.head.len() != head_len
-                        {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        // The per-call ABI boundary already lent the
-                        // callback-allocated hash table. Full flush clears
-                        // that exact checked lend (NIL is zero) through the
-                        // slice-only state core instead of rebuilding a raw
-                        // slice or using libc `memset`.
-                        let head = &mut *window_hash.head;
-                        clear_hash_state(head, &mut state.slid);
-                        if state.lookahead == 0 as crate::stdlib::uInt {
-                            state.strstart = 0 as crate::stdlib::uInt;
-                            state.block_start = 0 as ::core::ffi::c_long;
-                            state.insert = 0 as crate::stdlib::uInt;
-                        }
-                    }
-                }
-                if flush_pending(
-                    strm_ref,
-                    s,
-                    pending_buf,
-                    output,
-                    FlushPendingMark::OutputFull,
-                )
-                .0 == 0 as crate::stdlib::uInt
-                {
-                    return crate::zlib_h::Z_OK;
-                }
-            }
+        if matches!(trailer, DeflateTrailerPlan::None) {
+            return crate::zlib_h::Z_STREAM_END;
         }
-        if flush != crate::zlib_h::Z_FINISH {
-            return crate::zlib_h::Z_OK;
+        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if pending_buf.len() != pending_len {
+            return crate::zlib_h::Z_STREAM_ERROR;
         }
-        {
-            let state = deflate_reborrow_mut(s);
-            let trailer = {
-                let stream = deflate_reborrow(strm_ref);
-                deflate_trailer_plan(state.wrap, stream.adler, stream.total_in)
-            };
-            if matches!(trailer, DeflateTrailerPlan::None) {
-                return crate::zlib_h::Z_STREAM_END;
+        let trailer_written = match trailer {
+            DeflateTrailerPlan::Gzip { check, total_in } => {
+                append_gzip_trailer_state(pending_buf, &mut state.pending, check, total_in)
             }
-            let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            if pending_buf.len() != pending_len {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            let trailer_written = match trailer {
-                DeflateTrailerPlan::Gzip { check, total_in } => {
-                    append_gzip_trailer_state(pending_buf, &mut state.pending, check, total_in)
-                }
-                DeflateTrailerPlan::Zlib {
-                    check_high,
-                    check_low,
-                } => append_zlib_words_state(
-                    pending_buf,
-                    &mut state.pending,
-                    &[check_high, check_low],
-                ),
-                DeflateTrailerPlan::None => return crate::zlib_h::Z_STREAM_END,
-            };
-            if !trailer_written {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
+            DeflateTrailerPlan::Zlib {
+                check_high,
+                check_low,
+            } => append_zlib_words_state(pending_buf, &mut state.pending, &[check_high, check_low]),
+            DeflateTrailerPlan::None => return crate::zlib_h::Z_STREAM_END,
         };
-        flush_pending(strm_ref, s, pending_buf, output, FlushPendingMark::Never);
-        let pending_after_flush = {
-            let state = deflate_reborrow_mut(s);
-            if state.wrap > 0 as ::core::ffi::c_int {
-                state.wrap = -state.wrap;
-            }
-            state.pending
-        };
-        return if pending_after_flush != 0 as crate::zutil_h::ulg {
-            crate::zlib_h::Z_OK
-        } else {
-            crate::zlib_h::Z_STREAM_END
-        };
+        if !trailer_written {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+    };
+    flush_pending(strm_ref, s, pending_buf, output, FlushPendingMark::Never);
+    let pending_after_flush = {
+        let state = deflate_reborrow_mut(s);
+        if state.wrap > 0 as ::core::ffi::c_int {
+            state.wrap = -state.wrap;
+        }
+        state.pending
+    };
+    if pending_after_flush != 0 as crate::zutil_h::ulg {
+        crate::zlib_h::Z_OK
+    } else {
+        crate::zlib_h::Z_STREAM_END
     }
 }
 #[export_name = "deflate"]
@@ -3789,6 +3770,7 @@ pub unsafe extern "C" fn deflate_ffi(
         };
         deflate(
             &mut *strm,
+            &mut *state,
             &mut input,
             pending_buf,
             &mut window_hash,
