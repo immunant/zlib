@@ -64,6 +64,14 @@ fn gz_look_init_failed(state: &mut crate::gzguts_h::gz_state) {
     state.size = 0;
 }
 
+// Once the gzip input and output allocations have been bounded at the state
+// boundary, recognizing a transparent (non-gzip) stream only needs an
+// ordinary slice copy. Keeping the transfer here avoids a raw C `memcpy` in
+// the lookahead state machine.
+fn gz_copy_lookahead_output(output: &mut [::core::ffi::c_uchar], input: &[::core::ffi::c_uchar]) {
+    output[..input.len()].copy_from_slice(input);
+}
+
 struct GzLoadResult {
     received: ::core::ffi::c_uint,
     status: ::core::ffi::c_int,
@@ -229,13 +237,16 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     let available = state.strm.avail_in;
+    // SAFETY: `gz_avail` maintains `next_in` within the initialized input
+    // allocation for exactly `available` bytes. This one binding is reused
+    // for both header detection and transparent-stream copying below.
+    let input = if available == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(state.strm.next_in, available as usize) }
+    };
     let gzip_header = if available > 3 {
-        // SAFETY: `gz_avail` maintains `next_in` within the initialized input
-        // buffer and `available > 3` makes this four-byte view readable.
-        unsafe {
-            let input = ::core::slice::from_raw_parts(state.strm.next_in, 4);
-            crate::src::gzlib::gz_is_gzip_header([input[0], input[1], input[2], input[3]])
-        }
+        crate::src::gzlib::gz_is_gzip_header([input[0], input[1], input[2], input[3]])
     } else {
         false
     };
@@ -254,13 +265,11 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         crate::src::gzlib::GzLookPlan::Copy { copied } => {
             // SAFETY: `gz_avail` has made `copied` input bytes available, and
             // `out` was allocated with twice the input-buffer capacity. The
-            // ranges are distinct gzip buffers.
+            // ranges are distinct gzip buffers. Bind them once; the transfer
+            // itself is then bounds-checked Rust slice work.
             unsafe {
-                crate::stdlib::memcpy(
-                    state.out as *mut ::core::ffi::c_void,
-                    state.strm.next_in as *const ::core::ffi::c_void,
-                    copied as crate::__stddef_size_t_h::size_t,
-                );
+                let output = ::core::slice::from_raw_parts_mut(state.out, copied as usize);
+                gz_copy_lookahead_output(output, &input[..copied as usize]);
             }
             crate::src::gzlib::gz_set_copy_input(state, copied);
             return 0 as ::core::ffi::c_int;
