@@ -270,6 +270,79 @@ pub struct InflateNormalState {
     pub was: ::core::ffi::c_uint,
 }
 
+// Construct the normal decoder payload independently of the callback-owned
+// `inflate_state` record.  Gzip's embedded inflater needs this exact
+// pointer-free payload as its eventual persistent codec owner; the ABI init
+// boundary still chooses where the enclosing record is allocated.
+fn initial_inflate_normal_state() -> InflateNormalState {
+    InflateNormalState {
+        mode: crate::src::inflate::HEAD,
+        last: 0,
+        wrap: 0,
+        havedict: 0,
+        flags: 0,
+        dmax: 0,
+        check: 0,
+        total: 0,
+        wbits: 0,
+        wsize: 0,
+        whave: 0,
+        wnext: 0,
+        owned_window: None,
+        hold: 0,
+        bits: 0,
+        length: 0,
+        offset: 0,
+        extra: 0,
+        lencode: crate::src::inflate::CodeTableRef::Dynamic(0),
+        distcode: crate::src::inflate::CodeTableRef::Dynamic(0),
+        lenbits: 0,
+        distbits: 0,
+        ncode: 0,
+        nlen: 0,
+        ndist: 0,
+        have: 0,
+        next: 0,
+        lens: [0; 320],
+        work: [0; 288],
+        codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        }),
+        sane: 1,
+        back: -1,
+        was: 0,
+    }
+}
+
+// This owns only the normal decoder payload, which is already free of raw
+// registrations.  It is intentionally not installed in gzip yet: callers
+// still use the ABI adapter until the bounded inflate-call core can consume
+// this owner directly.
+pub(crate) struct InflateGzipOwner {
+    normal: InflateNormalState,
+}
+
+impl InflateGzipOwner {
+    pub(crate) fn new() -> Self {
+        let mut normal = initial_inflate_normal_state();
+        // `inflateInit2_(..., 15 + 16, ...)` selects gzip wrapping and then
+        // runs the normal reset policy.  Keep that policy shared so moving
+        // gzip off the temporary ABI stream cannot change its initial state.
+        let _ = inflate_reset2_normal(&mut normal, 15 + 16).expect("gzip window bits are valid");
+        Self { normal }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        let _ = inflate_reset_core(&mut self.normal);
+    }
+
+    pub(crate) fn normal_mut(&mut self) -> &mut InflateNormalState {
+        &mut self.normal
+    }
+}
+
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::adler32::adler32;
@@ -402,6 +475,38 @@ fn inflate_reset_core(normal: &mut InflateNormalState) -> InflateResetUpdate {
     inflate_reset_keep_core(normal)
 }
 
+// Window-bit normalization and normal-decoder reset are independent of an
+// ABI stream.  Both the exported reset adapter and the future embedded gzip
+// owner use this one policy, leaving only scalar stream publication at the
+// ABI boundary.
+fn inflate_reset2_normal(
+    normal: &mut InflateNormalState,
+    mut window_bits: ::core::ffi::c_int,
+) -> Result<InflateResetUpdate, ::core::ffi::c_int> {
+    let wrap;
+    if window_bits < 0 {
+        if window_bits < -15 {
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
+        }
+        wrap = 0;
+        window_bits = -window_bits;
+    } else {
+        wrap = (window_bits >> 4) + 5;
+        if window_bits < 48 {
+            window_bits &= 15;
+        }
+    }
+    if window_bits != 0 && !(8..=15).contains(&window_bits) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    if normal.owned_window.is_some() && normal.wbits != window_bits as ::core::ffi::c_uint {
+        normal.owned_window = None;
+    }
+    normal.wrap = wrap;
+    normal.wbits = window_bits as ::core::ffi::c_uint;
+    Ok(inflate_reset_core(normal))
+}
+
 pub unsafe fn inflateResetKeep(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -454,41 +559,19 @@ pub unsafe extern "C" fn inflateReset_ffi(
 }
 pub unsafe fn inflateReset2(
     strm: &mut crate::zlib_h::z_stream_s,
-    mut windowBits: ::core::ffi::c_int,
+    windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut wrap: ::core::ffi::c_int = 0;
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if windowBits < 0 as ::core::ffi::c_int {
-        if windowBits < -15 as ::core::ffi::c_int {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        wrap = 0 as ::core::ffi::c_int;
-        windowBits = -windowBits;
-    } else {
-        wrap = (windowBits >> 4 as ::core::ffi::c_int) + 5 as ::core::ffi::c_int;
-        if windowBits < 48 as ::core::ffi::c_int {
-            windowBits &= 15 as ::core::ffi::c_int;
-        }
-    }
-    if windowBits != 0
-        && (windowBits < 8 as ::core::ffi::c_int || windowBits > 15 as ::core::ffi::c_int)
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if state.normal.owned_window.is_some()
-        && state.normal.wbits != windowBits as ::core::ffi::c_uint
-    {
-        state.normal.owned_window = None;
-    }
-    state.normal.wrap = wrap;
-    state.normal.wbits = windowBits as ::core::ffi::c_uint;
     // This variant already owns the validated stream/state projection.  Do
     // not re-enter `inflateReset()` merely to repeat that projection: apply
     // the same pointer-free reset core and publish its stream scalars while
     // both borrows are still in scope.
-    let update = inflate_reset_core(&mut state.normal);
+    let update = match inflate_reset2_normal(&mut state.normal, windowBits) {
+        Ok(update) => update,
+        Err(status) => return status,
+    };
     strm.total_out = 0;
     strm.total_in = strm.total_out;
     strm.msg = ::core::ptr::null_mut();
@@ -567,45 +650,7 @@ pub unsafe extern "C" fn inflateInit2_(
             stream_identity: ::core::ptr::from_mut(strm).addr(),
             head: None,
             window: None,
-            normal: InflateNormalState {
-                mode: crate::src::inflate::HEAD,
-                last: 0,
-                wrap: 0,
-                havedict: 0,
-                flags: 0,
-                dmax: 0,
-                check: 0,
-                total: 0,
-                wbits: 0,
-                wsize: 0,
-                whave: 0,
-                wnext: 0,
-                owned_window: None,
-                hold: 0,
-                bits: 0,
-                length: 0,
-                offset: 0,
-                extra: 0,
-                lencode: crate::src::inflate::CodeTableRef::Dynamic(0),
-                distcode: crate::src::inflate::CodeTableRef::Dynamic(0),
-                lenbits: 0,
-                distbits: 0,
-                ncode: 0,
-                nlen: 0,
-                ndist: 0,
-                have: 0,
-                next: 0,
-                lens: [0; 320],
-                work: [0; 288],
-                codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
-                    op: 0,
-                    bits: 0,
-                    val: 0,
-                }),
-                sane: 1,
-                back: -1,
-                was: 0,
-            },
+            normal: initial_inflate_normal_state(),
         },
     );
     strm.state = Some(
