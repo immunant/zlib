@@ -2498,6 +2498,32 @@ pub(crate) fn bi_flush_or_windup(state: BitOutputState<'_>, action: BitOutputAct
     bit_output(state, action);
 }
 
+// The legacy bit exports have only an opaque deflate-state handle.  Their
+// projection is intentionally limited to the pending allocation: bit output
+// neither reads nor writes the window or hash tables.
+pub(crate) unsafe fn bit_output_from_deflate_state(
+    state: &mut crate::src::deflate::deflate_state,
+    action: BitOutputAction,
+) {
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.callback_storage.pending_len(),
+    );
+    bi_flush_or_windup(
+        BitOutputState {
+            pending_buf,
+            pending: &mut state.pending,
+            bi_buf: &mut state.bi_buf,
+            bi_valid: &mut state.bi_valid,
+            bi_used: &mut state.bi_used,
+        },
+        action,
+    );
+}
+
 fn tr_align_bytes(
     pending_buf: &mut [crate::stdlib::Bytef],
     pending: &mut crate::zutil_h::ulg,
@@ -3232,13 +3258,22 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     } else {
         ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
     };
-    crate::src::deflate::deflate_tree_from_state(
-        state,
-        crate::src::deflate::DeflateTreeAction::StoredBlock {
-            input,
-            stored_len,
-            last,
-        },
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.callback_storage.pending_len(),
+    );
+    stored_block_bytes(
+        pending_buf,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &mut state.bi_used,
+        input,
+        stored_len,
+        last,
     );
 }
 #[export_name = "_tr_flush_bits"]
@@ -3247,10 +3282,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     let Some(state) = s.as_mut() else {
         return;
     };
-    crate::src::deflate::deflate_tree_from_state(
-        state,
-        crate::src::deflate::DeflateTreeAction::BitOutput(BitOutputAction::Flush),
-    );
+    bit_output_from_deflate_state(state, BitOutputAction::Flush);
 }
 #[export_name = "_tr_align"]
 
@@ -3258,10 +3290,7 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let Some(state) = s.as_mut() else {
         return;
     };
-    crate::src::deflate::deflate_tree_from_state(
-        state,
-        crate::src::deflate::DeflateTreeAction::BitOutput(BitOutputAction::Align),
-    );
+    bit_output_from_deflate_state(state, BitOutputAction::Align);
 }
 fn compress_block(
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -3694,13 +3723,48 @@ pub unsafe extern "C" fn _tr_flush_block(
             stored_len as usize,
         ))
     };
-    crate::src::deflate::deflate_tree_from_state(
-        state,
-        crate::src::deflate::DeflateTreeAction::FlushBlock {
-            input,
-            stored_len,
-            last,
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.callback_storage.pending_len(),
+    );
+    let data_type = if state.level > 0 {
+        Some(&mut state.data_type)
+    } else {
+        None
+    };
+    flush_block_from_views(
+        data_type,
+        BlockFlushState {
+            level: state.level,
+            strategy: state.strategy,
+            pending_buf,
+            pending: &mut state.pending,
+            bi_buf: &mut state.bi_buf,
+            bi_valid: &mut state.bi_valid,
+            bi_used: &mut state.bi_used,
+            dyn_ltree: &mut state.dyn_ltree,
+            dyn_dtree: &mut state.dyn_dtree,
+            bl_tree: &mut state.bl_tree,
+            l_desc: &mut state.l_desc,
+            d_desc: &mut state.d_desc,
+            bl_desc: &mut state.bl_desc,
+            heap: &mut state.heap,
+            heap_len: &mut state.heap_len,
+            heap_max: &mut state.heap_max,
+            depth: &mut state.depth,
+            bl_count: &mut state.bl_count,
+            opt_len: &mut state.opt_len,
+            static_len: &mut state.static_len,
+            matches: &mut state.matches,
+            sym_buf_start: state.sym_buf_start,
+            sym_next: &mut state.sym_next,
         },
+        input,
+        stored_len,
+        last,
     );
 }
 #[export_name = "_tr_flush_block"]
@@ -3794,8 +3858,24 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     let Some(state) = s.as_mut() else {
         return 0;
     };
-    crate::src::deflate::deflate_tree_from_state(
-        state,
-        crate::src::deflate::DeflateTreeAction::Tally { dist, lc },
+    let sym_buf_start = state.sym_buf_start;
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.callback_storage.pending_len(),
+    );
+    _tr_tally(
+        TallyState {
+            sym_buf: &mut pending_buf[sym_buf_start..],
+            sym_next: &mut state.sym_next,
+            sym_end: state.sym_end,
+            dyn_ltree: &mut state.dyn_ltree,
+            dyn_dtree: &mut state.dyn_dtree,
+            matches: &mut state.matches,
+        },
+        dist,
+        lc,
     )
 }

@@ -113,7 +113,7 @@ pub struct internal_state {
     // Keep callback pairing as scalar ownership rather than deriving it from
     // raw allocation views during teardown. This distinguishes a partially
     // constructed copy's inherited source views from its own allocations.
-    callback_storage: DeflateCallbackStorageOwner,
+    pub(crate) callback_storage: DeflateCallbackStorageOwner,
     pub wrap: ::core::ffi::c_int,
     gzhead: Option<GzipHeader>,
     pub gzindex: usize,
@@ -441,7 +441,7 @@ enum DeflateStorageSlot {
 // ownership ledger. The ledger decides which handles a stream may release,
 // including during partial initialization and failed deep-copy setup.
 #[derive(Clone, Copy)]
-struct DeflateCallbackStorageOwner {
+pub(crate) struct DeflateCallbackStorageOwner {
     // Keep the exact request geometry with the release ledger.  Callback
     // storage is still represented by provenance-carrying handles at the ABI
     // boundary, but every temporary typed view must use these immutable
@@ -468,6 +468,13 @@ impl DeflateCallbackStorageOwner {
 
     fn storage(&self) -> DeflateStorageLayout {
         self.storage
+    }
+
+    pub(crate) fn pending_len(&self) -> usize {
+        self.storage
+            .pending
+            .byte_len()
+            .expect("validated pending allocation geometry")
     }
 
     fn record_storage(&mut self, slot: DeflateStorageSlot, allocated: bool) {
@@ -4112,162 +4119,6 @@ struct DeflateDispatchStorage<'state> {
     window: &'state mut [crate::stdlib::Bytef],
     prev: &'state mut [crate::src::deflate::Posf],
     head: &'state mut [crate::src::deflate::Posf],
-}
-
-// Tree exports receive only an opaque deflate-state handle, but their pending
-// bytes have the same callback lifetime as normal deflate dispatch.  Carry
-// their pointer-free inputs to this one complete-storage boundary instead of
-// letting each tree adapter recover a pending-only raw slice.
-pub(crate) enum DeflateTreeAction<'input> {
-    BitOutput(crate::src::trees::BitOutputAction),
-    Tally {
-        dist: ::core::ffi::c_uint,
-        lc: ::core::ffi::c_uint,
-    },
-    StoredBlock {
-        input: &'input [crate::stdlib::Bytef],
-        stored_len: crate::zutil_h::ulg,
-        last: ::core::ffi::c_int,
-    },
-    FlushBlock {
-        input: Option<&'input [crate::stdlib::Bytef]>,
-        stored_len: crate::zutil_h::ulg,
-        last: ::core::ffi::c_int,
-    },
-}
-
-// This is the tree-facing C4 projection.  The callback owner verifies that
-// all four allocations completed and that their immutable request geometry
-// still matches before the tree kernel receives ordinary bounded slices.
-pub(crate) unsafe fn deflate_tree_from_state(
-    state: &mut crate::src::deflate::deflate_state,
-    action: DeflateTreeAction<'_>,
-) -> ::core::ffi::c_int {
-    let layout = state.callback_storage.storage();
-    let storage = DeflateCallbackStorage {
-        window: Some(::core::slice::from_raw_parts_mut(
-            state.window.expect("initialized window").as_ptr(),
-            layout
-                .window
-                .byte_len()
-                .expect("validated window allocation geometry"),
-        )),
-        prev: Some(::core::slice::from_raw_parts_mut(
-            state.prev.expect("initialized prev table").as_ptr(),
-            layout
-                .prev
-                .element_len::<crate::src::deflate::Posf>()
-                .expect("validated prev allocation geometry"),
-        )),
-        head: Some(::core::slice::from_raw_parts_mut(
-            state.head.expect("initialized head table").as_ptr(),
-            layout
-                .head
-                .element_len::<crate::src::deflate::Posf>()
-                .expect("validated head allocation geometry"),
-        )),
-        pending: Some(::core::slice::from_raw_parts_mut(
-            state
-                .pending_buf
-                .expect("initialized pending buffer")
-                .as_ptr(),
-            layout
-                .pending
-                .byte_len()
-                .expect("validated pending allocation geometry"),
-        )),
-    };
-    let storage = state
-        .callback_storage
-        .dispatch_storage(storage)
-        .expect("complete tree storage projection");
-    match action {
-        DeflateTreeAction::BitOutput(action) => {
-            crate::src::trees::bi_flush_or_windup(
-                crate::src::trees::BitOutputState {
-                    pending_buf: storage.pending_buf,
-                    pending: &mut state.pending,
-                    bi_buf: &mut state.bi_buf,
-                    bi_valid: &mut state.bi_valid,
-                    bi_used: &mut state.bi_used,
-                },
-                action,
-            );
-            0
-        }
-        DeflateTreeAction::Tally { dist, lc } => crate::src::trees::_tr_tally(
-            crate::src::trees::TallyState {
-                sym_buf: &mut storage.pending_buf[state.sym_buf_start..],
-                sym_next: &mut state.sym_next,
-                sym_end: state.sym_end,
-                dyn_ltree: &mut state.dyn_ltree,
-                dyn_dtree: &mut state.dyn_dtree,
-                matches: &mut state.matches,
-            },
-            dist,
-            lc,
-        ),
-        DeflateTreeAction::StoredBlock {
-            input,
-            stored_len,
-            last,
-        } => {
-            crate::src::trees::stored_block_bytes(
-                storage.pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                &mut state.bi_used,
-                input,
-                stored_len,
-                last,
-            );
-            0
-        }
-        DeflateTreeAction::FlushBlock {
-            input,
-            stored_len,
-            last,
-        } => {
-            let data_type = if state.level > 0 {
-                Some(&mut state.data_type)
-            } else {
-                None
-            };
-            crate::src::trees::flush_block_from_views(
-                data_type,
-                crate::src::trees::BlockFlushState {
-                    level: state.level,
-                    strategy: state.strategy,
-                    pending_buf: storage.pending_buf,
-                    pending: &mut state.pending,
-                    bi_buf: &mut state.bi_buf,
-                    bi_valid: &mut state.bi_valid,
-                    bi_used: &mut state.bi_used,
-                    dyn_ltree: &mut state.dyn_ltree,
-                    dyn_dtree: &mut state.dyn_dtree,
-                    bl_tree: &mut state.bl_tree,
-                    l_desc: &mut state.l_desc,
-                    d_desc: &mut state.d_desc,
-                    bl_desc: &mut state.bl_desc,
-                    heap: &mut state.heap,
-                    heap_len: &mut state.heap_len,
-                    heap_max: &mut state.heap_max,
-                    depth: &mut state.depth,
-                    bl_count: &mut state.bl_count,
-                    opt_len: &mut state.opt_len,
-                    static_len: &mut state.static_len,
-                    matches: &mut state.matches,
-                    sym_buf_start: state.sym_buf_start,
-                    sym_next: &mut state.sym_next,
-                },
-                input,
-                stored_len,
-                last,
-            );
-            0
-        }
-    }
 }
 
 struct DeflateDispatch<'input, 'output, 'state> {
