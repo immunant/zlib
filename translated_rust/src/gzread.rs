@@ -89,61 +89,106 @@ fn pushback_buffer(buffer: &mut [u8], next: usize, have: usize, byte: u8) -> Opt
     Some(next)
 }
 
-unsafe fn gz_load(
-    state: &mut crate::gzguts_h::gz_state,
-    buf: &mut [u8],
-    have: &mut ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut get: ::core::ffi::c_uint = 0;
+enum GzLoad {
+    Loaded {
+        have: ::core::ffi::c_uint,
+        eof: bool,
+        again: bool,
+    },
+    Error {
+        have: ::core::ffi::c_uint,
+        errno_value: ::core::ffi::c_int,
+        again: bool,
+    },
+}
+
+// Reading an owned gzip buffer does not require the ABI-shaped state.  Keep
+// the I/O loop pointer-free and return every state transition for the caller
+// to apply at its existing boundary.
+fn gz_load(fd: &rustix::fd::OwnedFd, buf: &mut [u8]) -> GzLoad {
+    let mut have: ::core::ffi::c_uint = 0;
     let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
         >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint);
-    state.again = 0 as ::core::ffi::c_int;
-    errno::set_errno(errno::Errno(0));
-    *have = 0 as ::core::ffi::c_uint;
     loop {
-        let Some(output) = buf.get_mut(*have as usize..) else {
-            return -1 as ::core::ffi::c_int;
-        };
-        get = output.len() as ::core::ffi::c_uint;
+        // `have` is incremented only by bytes read into this same slice and
+        // stops at its length, so it remains a valid suffix boundary.
+        let output = &mut buf[have as usize..];
+        let mut get = output.len() as ::core::ffi::c_uint;
         if get > max {
             get = max;
         }
-        ret = match rustix::io::read(state.fd.as_ref().unwrap(), &mut output[..get as usize]) {
-            Ok(read) => read as ::core::ffi::c_int,
+        match rustix::io::read(fd, &mut output[..get as usize]) {
+            Ok(0) => {
+                return GzLoad::Loaded {
+                    have,
+                    eof: true,
+                    again: false,
+                };
+            }
+            Ok(read) => {
+                have = have.wrapping_add(read as ::core::ffi::c_uint);
+                if have as usize >= buf.len() {
+                    return GzLoad::Loaded {
+                        have,
+                        eof: false,
+                        again: false,
+                    };
+                }
+            }
             Err(error) => {
-                errno::set_errno(errno::Errno(error.raw_os_error()));
-                -1 as ::core::ffi::c_int
-            }
-        };
-        if ret <= 0 as ::core::ffi::c_int {
-            break;
-        }
-        *have = (*have).wrapping_add(ret as ::core::ffi::c_uint);
-        if *have as usize >= buf.len() {
-            break;
-        }
-    }
-    if ret < 0 as ::core::ffi::c_int {
-        let errno_value = errno::errno().0;
-        if errno_value == crate::stdlib::EAGAIN || errno_value == crate::stdlib::EWOULDBLOCK {
-            state.again = 1 as ::core::ffi::c_int;
-            if *have != 0 as ::core::ffi::c_uint {
-                return 0 as ::core::ffi::c_int;
+                let errno_value = error.raw_os_error();
+                let again = errno_value == crate::stdlib::EAGAIN
+                    || errno_value == crate::stdlib::EWOULDBLOCK;
+                if again && have != 0 {
+                    return GzLoad::Loaded {
+                        have,
+                        eof: false,
+                        again: true,
+                    };
+                }
+                return GzLoad::Error {
+                    have,
+                    errno_value,
+                    again,
+                };
             }
         }
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(errno_value),
-        );
-        return -1 as ::core::ffi::c_int;
     }
-    if ret == 0 as ::core::ffi::c_int {
-        state.eof = 1 as ::core::ffi::c_int;
+}
+
+unsafe fn apply_gz_load(
+    state: &mut crate::gzguts_h::gz_state,
+    result: GzLoad,
+) -> Result<::core::ffi::c_uint, ::core::ffi::c_uint> {
+    match result {
+        GzLoad::Loaded { have, eof, again } => {
+            state.again = again as ::core::ffi::c_int;
+            if eof {
+                state.eof = 1;
+            }
+            Ok(have)
+        }
+        GzLoad::Error {
+            have,
+            errno_value,
+            again,
+        } => {
+            errno::set_errno(errno::Errno(errno_value));
+            state.again = again as ::core::ffi::c_int;
+            let message = errno::Errno(errno_value).to_string();
+            crate::src::gzlib::gz_set_error(
+                &mut state.msg,
+                &mut state.err,
+                &mut state.x.have,
+                state.again,
+                state.path.as_deref(),
+                crate::zlib_h::Z_ERRNO,
+                Some(message.as_bytes()),
+            );
+            Err(have)
+        }
     }
-    return 0 as ::core::ffi::c_int;
 }
 
 unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -182,8 +227,15 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
         let Some(mut buffer) = state.in_0.take() else {
             return -1 as ::core::ffi::c_int;
         };
+        errno::set_errno(errno::Errno(0));
         let ret = if let Some(output) = buffer.get_mut(avail_in as usize..size) {
-            gz_load(state, output, &mut got)
+            match apply_gz_load(state, gz_load(state.fd.as_ref().unwrap(), output)) {
+                Ok(have) => {
+                    got = have;
+                    0
+                }
+                Err(_) => -1,
+            }
         } else {
             -1 as ::core::ffi::c_int
         };
@@ -401,8 +453,14 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 let Some(mut output) = state.out.take() else {
                     return -1 as ::core::ffi::c_int;
                 };
-                let mut have = state.x.have;
-                let ret = gz_load(state, output.as_mut(), &mut have);
+                errno::set_errno(errno::Errno(0));
+                let (ret, have) = match apply_gz_load(
+                    state,
+                    gz_load(state.fd.as_ref().unwrap(), output.as_mut()),
+                ) {
+                    Ok(have) => (0, have),
+                    Err(have) => (-1, have),
+                };
                 state.x.have = have;
                 state.out = Some(output);
                 if ret == -1 as ::core::ffi::c_int {
@@ -535,7 +593,14 @@ unsafe fn gz_read(
                     else {
                         return got;
                     };
-                    err = gz_load(state, destination, &mut n);
+                    errno::set_errno(errno::Errno(0));
+                    match apply_gz_load(state, gz_load(state.fd.as_ref().unwrap(), destination)) {
+                        Ok(have) => n = have,
+                        Err(have) => {
+                            n = have;
+                            err = -1;
+                        }
+                    }
                 } else {
                     let Some(destination) = output.get_mut(got as usize..got as usize + n as usize)
                     else {
