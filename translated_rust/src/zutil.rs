@@ -59,19 +59,78 @@ fn z_error_index(err: ::core::ffi::c_int) -> usize {
     }
 }
 
-#[no_mangle]
+const NEED_DICT: [::core::ffi::c_char; 16] = [
+    b'n' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
+    b'd' as ::core::ffi::c_char, b' ' as ::core::ffi::c_char, b'd' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char, b'c' as ::core::ffi::c_char, b't' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char, b'y' as ::core::ffi::c_char,
+    0,
+];
+const STREAM_END: [::core::ffi::c_char; 11] = [
+    b's' as ::core::ffi::c_char, b't' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char, b'a' as ::core::ffi::c_char, b'm' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char,
+    b'd' as ::core::ffi::c_char, 0,
+];
+const EMPTY: [::core::ffi::c_char; 1] = [0];
+const FILE_ERROR: [::core::ffi::c_char; 11] = [
+    b'f' as ::core::ffi::c_char, b'i' as ::core::ffi::c_char, b'l' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char, b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char, 0,
+];
+const STREAM_ERROR: [::core::ffi::c_char; 13] = [
+    b's' as ::core::ffi::c_char, b't' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char, b'a' as ::core::ffi::c_char, b'm' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    0,
+];
+const DATA_ERROR: [::core::ffi::c_char; 11] = [
+    b'd' as ::core::ffi::c_char, b'a' as ::core::ffi::c_char, b't' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char, b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char, 0,
+];
+const MEM_ERROR: [::core::ffi::c_char; 20] = [
+    b'i' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char, b's' as ::core::ffi::c_char,
+    b'u' as ::core::ffi::c_char, b'f' as ::core::ffi::c_char, b'f' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char, b'c' as ::core::ffi::c_char, b'i' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char, b't' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char, b'm' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
+    b'm' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    b'y' as ::core::ffi::c_char, 0,
+];
+const BUF_ERROR: [::core::ffi::c_char; 13] = [
+    b'b' as ::core::ffi::c_char, b'u' as ::core::ffi::c_char, b'f' as ::core::ffi::c_char,
+    b'f' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char, b'o' as ::core::ffi::c_char, b'r' as ::core::ffi::c_char,
+    0,
+];
+const VERSION_ERROR: [::core::ffi::c_char; 21] = [
+    b'i' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char, b'c' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char, b'm' as ::core::ffi::c_char, b'p' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char, b't' as ::core::ffi::c_char, b'i' as ::core::ffi::c_char,
+    b'b' as ::core::ffi::c_char, b'l' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char, b'v' as ::core::ffi::c_char, b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char, b's' as ::core::ffi::c_char, b'i' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char, b'n' as ::core::ffi::c_char, 0,
+];
 
-pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    b"need dictionary\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream end\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"file error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"data error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"insufficient memory\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"buffer error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+#[no_mangle]
+pub static z_errmsg: [&::core::ffi::c_char; 10] = [
+    &NEED_DICT[0],
+    &STREAM_END[0],
+    &EMPTY[0],
+    &FILE_ERROR[0],
+    &STREAM_ERROR[0],
+    &DATA_ERROR[0],
+    &MEM_ERROR[0],
+    &BUF_ERROR[0],
+    &VERSION_ERROR[0],
+    &EMPTY[0],
 ];
 #[export_name = "zlibVersion"]
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
@@ -83,7 +142,7 @@ pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
 }
 #[export_name = "zError"]
 pub unsafe extern "C" fn zError_ffi(err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    z_errmsg[z_error_index(err)].cast_const()
+    z_errmsg[z_error_index(err)]
 }
 pub unsafe extern "C" fn zcalloc(
     mut _opaque: crate::stdlib::voidpf,

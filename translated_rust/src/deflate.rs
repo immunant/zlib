@@ -746,7 +746,7 @@ pub unsafe extern "C" fn deflateInit2_(
             9 as ::core::ffi::c_int
         } else {
             2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
-        }) as usize];
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -1479,7 +1479,7 @@ pub unsafe extern "C" fn deflate(
             9 as ::core::ffi::c_int
         } else {
             2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
-        }) as usize];
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         return -2 as ::core::ffi::c_int;
     }
     if (*strm).avail_out == 0 as crate::stdlib::uInt {
@@ -1490,7 +1490,7 @@ pub unsafe extern "C" fn deflate(
             9 as ::core::ffi::c_int
         } else {
             2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-        }) as usize];
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
     old_flush = (*s).last_flush;
@@ -1523,7 +1523,7 @@ pub unsafe extern "C" fn deflate(
             9 as ::core::ffi::c_int
         } else {
             2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-        }) as usize];
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
     if (*s).status == crate::src::deflate::FINISH_STATE
@@ -1536,7 +1536,7 @@ pub unsafe extern "C" fn deflate(
             9 as ::core::ffi::c_int
         } else {
             2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-        }) as usize];
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
     if (*s).status == crate::src::deflate::INIT_STATE && (*s).wrap == 0 as ::core::ffi::c_int {
