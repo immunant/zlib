@@ -66,13 +66,16 @@ pub union C2Rust_Unnamed_0 {
 pub type static_tree_desc = crate::src::deflate::static_tree_desc_s;
 
 pub type tree_desc = crate::src::deflate::tree_desc_s;
+pub const STATIC_TREE_LITERAL: u8 = 0;
+pub const STATIC_TREE_DISTANCE: u8 = 1;
+pub const STATIC_TREE_BIT_LENGTH: u8 = 2;
 #[derive(Copy, Clone)]
 #[repr(C)]
 
 pub struct tree_desc_s {
     pub dyn_tree: *mut crate::src::deflate::ct_data,
     pub max_code: ::core::ffi::c_int,
-    pub stat_desc: *const crate::src::deflate::static_tree_desc,
+    pub static_kind: u8,
 }
 
 pub type Pos = crate::zutil_h::ush;
