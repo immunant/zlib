@@ -151,16 +151,13 @@ macro_rules! gz_comp_at_boundary {
                             ) else {
                                 break 'gz_comp_result -1;
                             };
-                            let output_start = output.as_ptr() as usize;
-                            let Some(start_index) = (state_ref.x.next as usize)
-                                .checked_sub(output_start)
-                                .filter(|index| *index <= output.len())
-                            else {
-                                break 'gz_comp_result -1;
-                            };
-                            let Some(end_index) = (state_ref.strm.next_out as usize)
-                                .checked_sub(output_start)
-                                .filter(|index| *index <= output.len())
+                            let Some((start_index, end_index)) =
+                                crate::src::gzwrite::gz_comp_pending_indices(
+                                    output.as_ptr() as usize,
+                                    output.len(),
+                                    state_ref.x.next as usize,
+                                    state_ref.strm.next_out as usize,
+                                )
                             else {
                                 break 'gz_comp_result -1;
                             };
@@ -506,6 +503,24 @@ pub(crate) fn gz_comp_pending_output(
     end_index: usize,
 ) -> Option<&[u8]> {
     output.get(start_index..end_index)
+}
+
+/// Reconcile the two compatibility output cursors to an owned-buffer range.
+/// The export-only compressor adapter supplies address tokens; this core
+/// rejects stale, reversed, or out-of-bounds cursors before it lends the
+/// pending bytes to descriptor I/O.
+pub(crate) fn gz_comp_pending_indices(
+    output_start: usize,
+    output_len: usize,
+    pending_start: usize,
+    pending_end: usize,
+) -> Option<(usize, usize)> {
+    let start_index = pending_start.checked_sub(output_start)?;
+    let end_index = pending_end.checked_sub(output_start)?;
+    if start_index > end_index || end_index > output_len {
+        return None;
+    }
+    Some((start_index, end_index))
 }
 
 /// Commit a direct-write result and map descriptor failure to gzip's stable
