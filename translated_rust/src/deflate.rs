@@ -3086,6 +3086,36 @@ fn stored_block_plan(
     })
 }
 
+/// Select the first stored block for the current mode iteration without
+/// touching callback-owned storage.  Keeping the capacity calculation with
+/// the block admission test prevents the raw mode adapter from reimplementing
+/// any of the wrapping arithmetic.
+fn stored_initial_block_plan(
+    pending_buf_size: crate::zutil_h::ulg,
+    wsize: crate::stdlib::uInt,
+    bi_valid: ::core::ffi::c_int,
+    avail_out: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> Option<StoredBlockPlan> {
+    let min_block = (if pending_buf_size.wrapping_sub(5) > wsize as crate::zutil_h::ulg {
+        wsize as crate::zutil_h::ulg
+    } else {
+        pending_buf_size.wrapping_sub(5)
+    }) as ::core::ffi::c_uint;
+    stored_block_plan(
+        min_block,
+        bi_valid,
+        avail_out,
+        strstart,
+        block_start,
+        avail_in,
+        flush,
+    )
+}
+
 /// Plan the stored block that may be emitted after refilling the history
 /// window.  This is deliberately value-only: the mode adapter retains the
 /// callback-owned pending and window buffers used to carry out the plan.
@@ -3154,22 +3184,15 @@ unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut min_block: ::core::ffi::c_uint =
-        (if (*s).pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
-            > (*s).w_size as crate::zutil_h::ulg
-        {
-            (*s).w_size as crate::zutil_h::ulg
-        } else {
-            (*s).pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
-        }) as ::core::ffi::c_uint;
     let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut len: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut used: ::core::ffi::c_uint = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     loop {
-        let Some(plan) = stored_block_plan(
-            min_block,
+        let Some(plan) = stored_initial_block_plan(
+            (*s).pending_buf_size,
+            (*s).w_size,
             (*s).bi_valid,
             (*(*s).strm).avail_out,
             (*s).strstart,
