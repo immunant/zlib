@@ -595,9 +595,10 @@ macro_rules! deflate_init2_body {
         if strm.is_null() {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        if (*strm).zalloc.is_none() {
-            (*strm).zalloc = Some(
+        let strm_ref = &mut *strm;
+        strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        if strm_ref.zalloc.is_none() {
+            strm_ref.zalloc = Some(
                 crate::src::zutil::zcalloc_ffi
                     as unsafe extern "C" fn(
                         crate::stdlib::voidpf,
@@ -605,10 +606,10 @@ macro_rules! deflate_init2_body {
                         ::core::ffi::c_uint,
                     ) -> crate::stdlib::voidpf,
             ) as crate::zlib_h::alloc_func;
-            (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+            strm_ref.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         }
-        if (*strm).zfree.is_none() {
-            (*strm).zfree = Some(
+        if strm_ref.zfree.is_none() {
+            strm_ref.zfree = Some(
                 crate::src::zutil::zcfree_ffi
                     as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
             ) as crate::zlib_h::free_func;
@@ -617,9 +618,9 @@ macro_rules! deflate_init2_body {
         else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        s = Some((*strm).zalloc.expect("non-null function pointer"))
+        s = Some(strm_ref.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
+            strm_ref.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::deflate_state;
@@ -627,7 +628,7 @@ macro_rules! deflate_init2_body {
             return crate::zlib_h::Z_MEM_ERROR;
         }
         ::core::ptr::write_bytes(s, 0, 1);
-        (*strm).state = s as *mut crate::src::deflate::internal_state;
+        strm_ref.state = s as *mut crate::src::deflate::internal_state;
         (*s).strm = strm;
         (*s).status = crate::src::deflate::INIT_STATE;
         (*s).wrap = config.wrap;
@@ -644,31 +645,31 @@ macro_rules! deflate_init2_body {
             .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
             .wrapping_sub(1 as crate::stdlib::uInt)
             .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-        (*s).window = Some((*strm).zalloc.expect("non-null function pointer"))
+        (*s).window = Some(strm_ref.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
+            strm_ref.opaque,
             (*s).w_size,
             (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>() as usize)
                 as crate::stdlib::uInt,
         ) as *mut crate::stdlib::Bytef;
-        (*s).prev = Some((*strm).zalloc.expect("non-null function pointer"))
+        (*s).prev = Some(strm_ref.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
+            strm_ref.opaque,
             (*s).w_size,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
-        (*s).head = Some((*strm).zalloc.expect("non-null function pointer"))
+        (*s).head = Some(strm_ref.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
+            strm_ref.opaque,
             (*s).hash_size,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
         (*s).high_water = 0 as crate::zutil_h::ulg;
         (*s).lit_bufsize = ((1 as ::core::ffi::c_int) << config.mem_level + 6 as ::core::ffi::c_int)
             as crate::stdlib::uInt;
-        (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
+        (*s).pending_buf = Some(strm_ref.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
+            strm_ref.opaque,
             (*s).lit_bufsize,
             4 as crate::stdlib::uInt,
         ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
@@ -680,7 +681,7 @@ macro_rules! deflate_init2_body {
             || (*s).pending_buf.is_null()
         {
             (*s).status = crate::src::deflate::FINISH_STATE;
-            (*strm).msg = crate::src::zutil::zError(crate::zlib_h::Z_MEM_ERROR).as_ptr()
+            strm_ref.msg = crate::src::zutil::zError(crate::zlib_h::Z_MEM_ERROR).as_ptr()
                 as *mut ::core::ffi::c_char;
             deflateEnd_ffi(strm);
             return crate::zlib_h::Z_MEM_ERROR;
@@ -695,7 +696,7 @@ macro_rules! deflate_init2_body {
         (*s).strategy = config.strategy;
         (*s).method = config.method as crate::stdlib::Byte;
         let state = &mut *s;
-        deflate_reset_keep_state(&mut *strm, state);
+        deflate_reset_keep_state(strm_ref, state);
         let head_ptr = state.head;
         let hash_size = state.hash_size as usize;
         let head = ::core::slice::from_raw_parts_mut(head_ptr, hash_size);

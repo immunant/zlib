@@ -2698,7 +2698,7 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     state_ref.have = have;
     len = consumed;
     strm_ref.avail_in = strm_ref.avail_in.wrapping_sub(len);
-    strm_ref.next_in = strm_ref.next_in.offset(len as isize);
+    strm_ref.next_in = strm_ref.next_in.wrapping_add(len as usize);
     strm_ref.total_in = strm_ref.total_in.wrapping_add(len as crate::stdlib::uLong);
     if state_ref.have != 4 as ::core::ffi::c_uint {
         return crate::zlib_h::Z_DATA_ERROR;

@@ -4828,7 +4828,10 @@ pub unsafe extern "C" fn crc32_ffi(
     mut buf: *const ::core::ffi::c_uchar,
     mut len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    crc32_z_ffi(crc, buf, len as crate::stdlib::z_size_t)
+    match crc32_input_plan(buf.is_null(), len as crate::stdlib::z_size_t) {
+        Crc32InputPlan::Initial => 0 as crate::stdlib::uLong,
+        Crc32InputPlan::Slice { len } => crc32_slice(crc, ::core::slice::from_raw_parts(buf, len)),
+    }
 }
 pub fn crc32_combine_gen64(len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
     if len2 < 0 as crate::stdlib::off64_t {
