@@ -2693,6 +2693,25 @@ struct DeflateCopyPreparation {
     plan: DeflateCopyPlan,
 }
 
+impl DeflateCopyPreparation {
+    // This is the pointer-free commit point for a deep copy.  The callback
+    // boundary is still responsible for preserving zalloc/zfree pairing, but
+    // once it has supplied owned storage it need not repeat the geometry or
+    // range validation performed while preparing the copy.
+    fn copy_into_owned(
+        &self,
+        source: &DeflateOwnedStorage,
+    ) -> Option<DeflateOwnedStorage> {
+        let mut destination = self.plan.storage.allocate_owned()?;
+        copy_deflate_storage_views(
+            source.source_views(),
+            destination.destination_views(),
+            &self.plan.layout,
+        )
+        .then_some(destination)
+    }
+}
+
 // This is the safe half of the eventual custom-allocation owner.  It has the
 // same four independently sized regions as zlib's callback allocation path,
 // but exposes only owned slices to copy/reset cores.  The ABI adapter cannot
@@ -2746,13 +2765,6 @@ impl DeflateOwnedStorage {
         }
     }
 
-    // Deep-copy through the same bounded kernel used by callback-backed
-    // storage.  This gives the future owner conversion a wholly pointer-free
-    // transaction endpoint: allocation publication stays at the boundary,
-    // while the copied bytes remain in typed owners.
-    fn copy_from(&mut self, source: &Self, layout: &DeflateCopyLayout) -> bool {
-        copy_deflate_storage_views(source.source_views(), self.destination_views(), layout)
-    }
 }
 
 // Copy exactly the initialized logical ranges of a deflate state.  Both
