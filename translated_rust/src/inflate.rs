@@ -655,35 +655,6 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
-// Keep the state projection tied to the exclusive stream borrow.  Callers
-// first validate the raw ABI pointer with `as_mut()` and then use this helper
-// for the association check, so no projected state reference can outlive the
-// stream it belongs to.
-pub(crate) unsafe fn inflate_stream_and_state<'stream>(
-    stream: &'stream mut crate::zlib_h::z_stream_s,
-) -> Option<(
-    &'stream mut crate::zlib_h::z_stream_s,
-    &'stream mut crate::src::inflate::inflate_state,
-)> {
-    if stream.zalloc.is_none() || stream.zfree.is_none() {
-        return None;
-    }
-    let identity = ::core::ptr::from_mut(stream).addr();
-    let state = stream
-        .state?
-        .cast::<crate::src::inflate::inflate_state>()
-        .as_mut();
-    if state.stream_identity != identity
-        || (state.decoder.normal.mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || state.decoder.normal.mode as ::core::ffi::c_uint
-            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        return None;
-    }
-    Some((stream, state))
-}
-
 struct InflateResetUpdate {
     adler: Option<crate::stdlib::uLong>,
 }
@@ -1571,6 +1542,29 @@ impl InflateStreamResult {
         match self {
             Self::Scalar(result) => result,
             Self::Status(_) => unreachable!("scalar request must return a scalar result"),
+        }
+    }
+}
+
+// Every request reports the same invalid-stream result at the association
+// boundary, except for the scalar APIs' value-specific stream-error result.
+// Keeping that mapping pointer-free lets the two existing projections share
+// it without adding another ABI-shaped helper.
+fn inflate_stream_error(request: &InflateStreamRequest<'_>) -> InflateStreamResult {
+    match request {
+        InflateStreamRequest::Scalar(action) => {
+            InflateStreamResult::Scalar(inflate_normal_scalar_stream_error(*action))
+        }
+        InflateStreamRequest::Decode(_)
+        | InflateStreamRequest::Fast(_)
+        | InflateStreamRequest::Sync
+        | InflateStreamRequest::End
+        | InflateStreamRequest::Reset(_)
+        | InflateStreamRequest::Dictionary { .. }
+        | InflateStreamRequest::SetDictionary(_)
+        | InflateStreamRequest::Header
+        | InflateStreamRequest::Back(_) => {
+            InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR)
         }
     }
 }
@@ -3323,24 +3317,28 @@ pub(crate) unsafe fn inflate_from_stream(
     request: InflateStreamRequest<'_>,
     mut header_registration: Option<&mut crate::zlib_h::gz_header_s>,
 ) -> InflateStreamResult {
-    let Some((strm, state)) = inflate_stream_and_state(strm) else {
-        return match request {
-            InflateStreamRequest::Scalar(action) => {
-                InflateStreamResult::Scalar(inflate_normal_scalar_stream_error(action))
-            }
-            InflateStreamRequest::Decode(_)
-            | InflateStreamRequest::Fast(_)
-            | InflateStreamRequest::Sync
-            | InflateStreamRequest::End
-            | InflateStreamRequest::Reset(_)
-            | InflateStreamRequest::Dictionary { .. }
-            | InflateStreamRequest::SetDictionary(_)
-            | InflateStreamRequest::Header
-            | InflateStreamRequest::Back(_) => {
-                InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR)
-            }
-        };
+    // This is the sole normal-inflate stream/state projection.  Keep the
+    // opaque handle conversion beside the request-specific cursor, header,
+    // callback-back, and teardown work; a shared forwarding helper would add
+    // an unsafe boundary without shortening either transaction.
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return inflate_stream_error(&request);
+    }
+    let identity = ::core::ptr::from_mut(strm).addr();
+    let Some(state_handle) = strm.state else {
+        return inflate_stream_error(&request);
     };
+    let state = state_handle
+        .cast::<crate::src::inflate::inflate_state>()
+        .as_mut();
+    if state.stream_identity != identity
+        || (state.decoder.normal.mode as ::core::ffi::c_uint)
+            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
+        || state.decoder.normal.mode as ::core::ffi::c_uint
+            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
+    {
+        return inflate_stream_error(&request);
+    }
     let request = match inflate_normal_request(&mut state.decoder.normal, request) {
         Ok(result) => return result,
         Err(request) => request,
@@ -3978,9 +3976,24 @@ pub unsafe fn inflateCopy(
     // C's behavior even for a source/destination alias while all state
     // access remains scoped to the checked source stream.
     let destination_stream = {
-        let Some((source, state)) = inflate_stream_and_state(source) else {
+        if source.zalloc.is_none() || source.zfree.is_none() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let source_identity = ::core::ptr::from_mut(source).addr();
+        let Some(state_handle) = source.state else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
+        let state = state_handle
+            .cast::<crate::src::inflate::inflate_state>()
+            .as_mut();
+        if state.stream_identity != source_identity
+            || (state.decoder.normal.mode as ::core::ffi::c_uint)
+                < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
+            || state.decoder.normal.mode as ::core::ffi::c_uint
+                > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
         let mut copied_state = None;
         let status = inflate_publish_callback_owner(
             source,
