@@ -1106,7 +1106,9 @@ fn inflateBackInit_(
     if ret != crate::zlib_h::Z_OK {
         return ret;
     }
-    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm, None) else {
+    let Some((strm, state)) =
+        crate::src::inflate::inflateStateCheck::<crate::src::inflate::inflate_state>(strm, None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     (strm.total_in, strm.total_out, strm.data_type, strm.adler) = public_fields;
@@ -1146,7 +1148,9 @@ pub(crate) fn inflateBack(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm, None) else {
+    let Some((strm, state)) =
+        crate::src::inflate::inflateStateCheck::<crate::src::inflate::inflate_state>(strm, None)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some(callback_window) = callback_window else {
@@ -1254,7 +1258,9 @@ pub unsafe extern "C" fn inflateBack_ffi(
     // callback window before binding its caller-owned storage.  This keeps
     // the raw `strm.state` conversion in the established inflater boundary.
     let (window, wbits, wsize) = {
-        let Some((_bound_strm, state)) = crate::src::inflate::inflateStateCheck(strm, None) else {
+        let Some((_bound_strm, state)) = crate::src::inflate::inflateStateCheck::<
+            crate::src::inflate::inflate_state,
+        >(strm, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         (state.window, state.wbits, state.wsize)

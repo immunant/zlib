@@ -1118,27 +1118,10 @@ fn deflateStateCheck<'a>(
     &'a mut crate::zlib_h::z_stream,
     &'a mut crate::src::deflate::deflate_state,
 )> {
-    let strm_ptr = ::core::ptr::from_mut(strm);
-    let state_ptr = strm.state as *mut crate::src::deflate::deflate_state;
-    if state_ptr.is_null() {
-        return None;
-    }
-    // SAFETY: the stream reference is already bound by the caller. Its
-    // non-null state pointer is checked for the reciprocal stream link and
-    // state invariants before the reference is exposed. The copy path may
-    // instead provide the complete initial state for a fresh allocation.
-    let state = unsafe { &mut *state_ptr };
-    if let Some(initial) = initial {
-        state.clone_from(initial);
-        return Some((strm, state));
-    }
-    if !deflate_state_is_valid(strm, state, state.strm == strm_ptr) {
-        return None;
-    }
-    Some((strm, state))
+    crate::src::inflate::inflateStateCheck(strm, initial)
 }
 
-fn deflate_state_is_valid(
+pub(crate) fn deflate_state_is_valid_for_binding(
     strm: &crate::zlib_h::z_stream,
     state: &crate::src::deflate::deflate_state,
     points_back_to_stream: bool,
