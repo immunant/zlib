@@ -5440,19 +5440,19 @@ unsafe fn deflate_rle(
             .expect("pending storage layout matches its allocation");
         match deflate_rle_tally_plan(state.match_length) {
             DeflateRleTallyPlan::MatchWithoutCount => {
-                let tally = deflate_rle_match_tally_plan(state.match_length, state.sym_next);
-                state.sym_next = tally.next_sym;
-                assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
-                state.dyn_ltree[tally.length_tree_index].fc.value = state.dyn_ltree
-                    [tally.length_tree_index]
-                    .fc
-                    .value
-                    .wrapping_add(1);
-                state.dyn_dtree[tally.distance_tree_index].fc.value = state.dyn_dtree
-                    [tally.distance_tree_index]
-                    .fc
-                    .value
-                    .wrapping_add(1);
+                // RLE matches always have distance one.  Route them through
+                // the same bounded pending/symbol owner as the fast and slow
+                // strategies, instead of maintaining a second direct symbol
+                // write and frequency-update sequence here.
+                if !deflate_tally_match(
+                    &mut storage,
+                    state,
+                    state.match_length,
+                    state.strstart,
+                    state.strstart.wrapping_sub(1),
+                ) {
+                    return need_more;
+                }
                 bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
                 (state.lookahead, state.strstart, state.match_length) =
                     deflate_rle_match_state_after_emit(
@@ -5466,15 +5466,9 @@ unsafe fn deflate_rle(
                 else {
                     return need_more;
                 };
-                let tally =
-                    deflate_literal_tally_plan(literal as crate::zutil_h::uch, state.sym_next);
-                state.sym_next = tally.next_sym;
-                assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
-                state.dyn_ltree[tally.literal_tree_index].fc.value = state.dyn_ltree
-                    [tally.literal_tree_index]
-                    .fc
-                    .value
-                    .wrapping_add(1);
+                if !deflate_tally_literal(&mut storage, state, literal as crate::zutil_h::uch) {
+                    return need_more;
+                }
                 bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
                 (state.lookahead, state.strstart) =
                     deflate_literal_state_after_emit(state.lookahead, state.strstart);
@@ -5589,14 +5583,9 @@ unsafe fn deflate_huff(
         );
         let mut storage = PendingStorageView::new(pending, layout)
             .expect("pending storage layout matches its allocation");
-        let tally = deflate_literal_tally_plan(literal, state.sym_next);
-        state.sym_next = tally.next_sym;
-        assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
-        state.dyn_ltree[tally.literal_tree_index].fc.value = state.dyn_ltree
-            [tally.literal_tree_index]
-            .fc
-            .value
-            .wrapping_add(1);
+        if !deflate_tally_literal(&mut storage, state, literal) {
+            return need_more;
+        }
         bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
         (state.lookahead, state.strstart) =
             deflate_literal_state_after_emit(state.lookahead, state.strstart);
@@ -6083,6 +6072,26 @@ mod tests {
             state.dyn_ltree[b'R' as usize].fc.value,
             before_literal_frequency
         );
+    }
+
+    #[test]
+    fn shared_match_tally_preserves_the_rle_distance_one_encoding() {
+        let layout = pending_storage_layout(4);
+        let mut bytes = [0xaa; 16];
+        let mut storage = PendingStorageView::new(&mut bytes, layout).unwrap();
+        let mut state = super::internal_state::newly_allocated();
+        state.sym_next = 7;
+
+        assert!(deflate_tally_match(&mut storage, &mut state, 6, 100, 99));
+
+        // The RLE strategy's historic hand-written triplet is distance one,
+        // followed by the match length offset.  Its strategy path now uses
+        // this shared owner-backed core, so retain the exact byte and tree
+        // accounting contract here.
+        assert_eq!(state.sym_next, 10);
+        assert_eq!(&storage.symbol_bytes()[7..10], &[1, 0, 3]);
+        assert_eq!(state.dyn_ltree[deflate_length_tree_index(3)].fc.value, 1);
+        assert_eq!(state.dyn_dtree[0].fc.value, 1);
     }
 
     #[test]
