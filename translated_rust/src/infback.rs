@@ -78,7 +78,7 @@ fn initialize_inflate_back_state(
     state.whave = 0 as ::core::ffi::c_uint;
     state.sane = 1 as ::core::ffi::c_int;
 }
-pub unsafe fn inflateBackInit_(
+pub fn inflateBackInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut windowBits: ::core::ffi::c_int,
     window: Option<&mut [::core::ffi::c_uchar]>,
@@ -119,17 +119,22 @@ pub unsafe fn inflateBackInit_(
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    let state = Some(strm.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        strm.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
+    // The ABI allocator remains the only unsafe boundary in this named
+    // initializer. Its returned allocation is validated before being made
+    // into the initialized state reference below.
+    let state = unsafe {
+        Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state
+    };
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
     strm.state = state as *mut crate::src::deflate::internal_state;
-    let state = &mut *state;
+    let state = unsafe { &mut *state };
     initialize_inflate_back_state(state, windowBits);
     state.window = window.as_mut_ptr();
     return crate::zlib_h::Z_OK;
