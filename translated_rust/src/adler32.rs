@@ -50,15 +50,11 @@ pub(crate) fn adler32_slice(
     adler | sum2 << 16
 }
 
-pub unsafe extern "C" fn adler32_z(
+pub(crate) fn adler32_z(
     adler: crate::stdlib::uLong,
-    buf: *const crate::stdlib::Bytef,
-    len: crate::stdlib::z_size_t,
+    buf: &[crate::stdlib::Bytef],
 ) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return ADLER32_INITIAL;
-    }
-    adler32_slice(adler, unsafe { core::slice::from_raw_parts(buf, len) })
+    adler32_slice(adler, buf)
 }
 
 #[export_name = "adler32_z"]
@@ -68,7 +64,10 @@ pub unsafe extern "C" fn adler32_z_ffi(
     buf: *const crate::stdlib::Bytef,
     len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
-    unsafe { adler32_z(adler, buf, len) }
+    if buf.is_null() {
+        return ADLER32_INITIAL;
+    }
+    adler32_z(adler, unsafe { core::slice::from_raw_parts(buf, len) })
 }
 #[export_name = "adler32"]
 
@@ -77,7 +76,12 @@ pub unsafe extern "C" fn adler32_ffi(
     buf: *const crate::stdlib::Bytef,
     len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    unsafe { adler32_z(adler, buf, len as crate::stdlib::z_size_t) }
+    if buf.is_null() {
+        return ADLER32_INITIAL;
+    }
+    adler32_z(adler, unsafe {
+        core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t)
+    })
 }
 fn adler32_combine_(
     adler1: crate::stdlib::uLong,

@@ -149,8 +149,6 @@ pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
 pub const WIN_INIT: ::core::ffi::c_int = crate::zutil_h::MAX_MATCH;
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::adler32::adler32_z as adler32;
-pub use crate::src::crc32::crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
@@ -1099,8 +1097,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     if wrap == 1 as ::core::ffi::c_int {
         (*strm).adler = crate::src::adler32::adler32_z(
             (*strm).adler,
-            dictionary,
-            dictLength as crate::stdlib::z_size_t,
+            core::slice::from_raw_parts(dictionary, dictLength as usize),
         );
     }
     (*s).wrap = 0 as ::core::ffi::c_int;
