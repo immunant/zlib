@@ -148,6 +148,20 @@ struct GzWriteInput<'a> {
     remaining: crate::stdlib::z_size_t,
 }
 
+// A complete gzip write starts with only caller-owned input.  Keep that
+// request pointer-free so admission and byte accounting can be shared by
+// every write entry point; the ABI-shaped state adapter below is solely
+// responsible for initialization, seek materialization, and codec dispatch.
+struct GzWriteTransaction<'a> {
+    request: GzWriteInput<'a>,
+}
+
+fn gz_write(input: &[u8]) -> Option<GzWriteTransaction<'_>> {
+    (!input.is_empty()).then_some(GzWriteTransaction {
+        request: GzWriteInput::new(input),
+    })
+}
+
 impl<'a> GzWriteInput<'a> {
     fn new(input: &'a [u8]) -> Self {
         Self {
@@ -684,12 +698,12 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
 }
 
-unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate::stdlib::z_size_t {
-    let mut request = GzWriteInput::new(input);
+unsafe fn gz_write_from_state(
+    state: &mut crate::gzguts_h::gz_state,
+    transaction: GzWriteTransaction<'_>,
+) -> crate::stdlib::z_size_t {
+    let mut request = transaction.request;
     let mut ret: ::core::ffi::c_int = 0;
-    if request.is_empty() {
-        return 0 as crate::stdlib::z_size_t;
-    }
     if state.buffers.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
     {
         return 0 as crate::stdlib::z_size_t;
@@ -830,7 +844,10 @@ unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> ::core
         );
         return 0 as ::core::ffi::c_int;
     }
-    return gz_write(state, input) as ::core::ffi::c_int;
+    let Some(transaction) = gz_write(input) else {
+        return 0;
+    };
+    return gz_write_from_state(state, transaction) as ::core::ffi::c_int;
 }
 #[export_name = "gzwrite"]
 
@@ -890,7 +907,10 @@ unsafe fn gzfwrite(
         return 0 as crate::stdlib::z_size_t;
     };
     return if len != 0 {
-        gz_write(state, input).wrapping_div(size)
+        let Some(transaction) = gz_write(input) else {
+            return 0;
+        };
+        gz_write_from_state(state, transaction).wrapping_div(size)
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -936,12 +956,16 @@ unsafe fn gzputc(
         path: state.path.as_deref(),
     }
     .clear();
-    // `gz_write()` owns the whole write transaction: initialization, pending
+    // `gz_write_from_state()` owns the ABI-state portion of the whole write
+    // transaction: initialization, pending
     // forward-seek zero fill, bounded input buffering, and the embedded
     // deflate dispatch.  Feeding it the one-byte slice preserves the full
     // buffer fallback (flush the old prefix before appending this byte)
     // without giving this entry point a second cursor transition.
-    if gz_write(state, &buf) != 1 as crate::stdlib::z_size_t {
+    let Some(transaction) = gz_write(&buf) else {
+        return -1;
+    };
+    if gz_write_from_state(state, transaction) != 1 as crate::stdlib::z_size_t {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
@@ -990,7 +1014,9 @@ unsafe fn gzputs(state: &mut crate::gzguts_h::gz_state, text: &[u8]) -> ::core::
         );
         return -1 as ::core::ffi::c_int;
     }
-    let put = gz_write(state, text);
+    let put = gz_write(text)
+        .map(|transaction| gz_write_from_state(state, transaction))
+        .unwrap_or(0);
     return if len != 0 && put == 0 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
