@@ -1330,13 +1330,18 @@ mod callback_owner {
         for slot in DeflateAllocationPlan::allocation_slots() {
             let callback = stream.zalloc;
             let opaque = stream.opaque;
-            let allocation = callback.and_then(|callback| {
-                ::core::ptr::NonNull::new(callback(
+            // Match the just-reloaded callback result here, before this loop
+            // can publish a slot or advance to another callback request.
+            // Keeping the nullable result as a local also prevents an FFI
+            // wrapper from inheriting any part of this transaction.
+            let allocation = match callback {
+                Some(callback) => ::core::ptr::NonNull::new(callback(
                     opaque,
                     plan.allocation_for(slot).items,
                     plan.allocation_for(slot).size,
-                ))
-            });
+                )),
+                None => None,
+            };
             match slot {
                 DeflateCallbackSlot::State => {
                     let Some(allocation) = allocation else {
