@@ -241,12 +241,8 @@ pub struct config_s {
     pub func: compress_func,
 }
 #[no_mangle]
-
-pub static mut deflate_copyright: [::core::ffi::c_char; 70] = unsafe {
-    ::core::mem::transmute::<[u8; 70], [::core::ffi::c_char; 70]>(
-        *b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0",
-    )
-};
+pub static deflate_copyright: [u8; 70] =
+    *b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0";
 
 pub const NIL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 
@@ -3544,7 +3540,15 @@ unsafe extern "C" fn deflate_huff(
 
 #[cfg(test)]
 mod tests {
-    use super::{gzip_header_crc, gzip_header_crc_pending};
+    use super::{deflate_copyright, gzip_header_crc, gzip_header_crc_pending};
+
+    #[test]
+    fn copyright_export_has_stable_bytes() {
+        assert_eq!(
+            deflate_copyright,
+            *b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0"
+        );
+    }
 
     #[test]
     fn gzip_header_crc_matches_fixed_header() {
