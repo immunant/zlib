@@ -1277,11 +1277,6 @@ pub(crate) fn gzclose_r_impl(
     ret
 }
 
-/// Compatibility entry point for Rust callers that still hold the legacy
-/// unsafe close contract.  New implementation code uses `gzclose_r_impl`.
-pub unsafe fn gzclose_r(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
-    gzclose_r_impl(owned)
-}
 #[export_name = "gzclose_r"]
 
 pub unsafe extern "C" fn gzclose_r_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
