@@ -226,9 +226,9 @@ fn inflate_back_distance_table_spec(
     }
 }
 
-// The table builder itself is an FFI boundary, but selecting the destination
-// table and publishing its root width are ordinary decoder state changes.
-// Keep those changes reference-based before the caller makes that raw call.
+// Selecting the destination table and publishing its root width are ordinary
+// decoder state changes. The bounded builder below keeps its owned workspace
+// reference-based as well.
 fn inflate_back_prepare_dynamic_table(
     state: &mut crate::src::inflate::inflate_state,
     target: InflateBackDynamicTableTarget,
@@ -246,6 +246,61 @@ fn inflate_back_prepare_dynamic_table(
             state.distbits = spec.root_bits;
         }
     }
+}
+
+fn inflate_back_build_dynamic_table(
+    state: &mut crate::src::inflate::inflate_state,
+    target: InflateBackDynamicTableTarget,
+    spec: &InflateBackDynamicTableSpec,
+) -> ::core::ffi::c_int {
+    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+    let code_base = state.codes.as_ptr().addr();
+    let byte_offset = match state.next.addr().checked_sub(code_base) {
+        Some(offset) if offset % code_size == 0 => offset,
+        _ => return 1,
+    };
+    let table_start = byte_offset / code_size;
+    let lens_start = spec.lens_offset;
+    let lens_end = match lens_start.checked_add(spec.code_count as usize) {
+        Some(end) if end <= state.lens.len() => end,
+        _ => return 1,
+    };
+    if table_start > state.codes.len() {
+        return 1;
+    }
+    let mut root_bits = match target {
+        InflateBackDynamicTableTarget::CodeLengths
+        | InflateBackDynamicTableTarget::LiteralLengths => state.lenbits,
+        InflateBackDynamicTableTarget::Distances => state.distbits,
+    };
+    let used = {
+        let lens = &state.lens[lens_start..lens_end];
+        let table = &mut state.codes[table_start..];
+        match crate::src::inftrees::inflate_table_bound(
+            spec.table_type,
+            lens,
+            spec.code_count,
+            table,
+            &mut root_bits,
+            &mut state.work,
+        ) {
+            Ok(used) => used,
+            Err(error) => return error,
+        }
+    };
+    let Some(next) = table_start.checked_add(used) else {
+        return 1;
+    };
+    if next > state.codes.len() {
+        return 1;
+    }
+    state.next = state.codes[next..].as_mut_ptr();
+    match target {
+        InflateBackDynamicTableTarget::CodeLengths
+        | InflateBackDynamicTableTarget::LiteralLengths => state.lenbits = root_bits,
+        InflateBackDynamicTableTarget::Distances => state.distbits = root_bits,
+    }
+    0
 }
 
 fn inflate_back_state_config(window_bits: ::core::ffi::c_int) -> InflateBackStateConfig {
@@ -1098,13 +1153,10 @@ pub unsafe extern "C" fn inflateBack(
                         InflateBackDynamicTableTarget::CodeLengths,
                         &code_length_table,
                     );
-                    ret = crate::src::inftrees::inflate_table(
-                        code_length_table.table_type,
-                        &raw mut state_ref.lens as *mut ::core::ffi::c_ushort,
-                        code_length_table.code_count,
-                        &raw mut state_ref.next as *mut _ as *mut *mut crate::src::inftrees::code,
-                        &raw mut state_ref.lenbits,
-                        &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
+                    ret = inflate_back_build_dynamic_table(
+                        state_ref,
+                        InflateBackDynamicTableTarget::CodeLengths,
+                        &code_length_table,
                     );
                     if ret != 0 {
                         inflate_back_report_error(
@@ -1236,14 +1288,10 @@ pub unsafe extern "C" fn inflateBack(
                                 InflateBackDynamicTableTarget::LiteralLengths,
                                 &literal_length_table,
                             );
-                            ret = crate::src::inftrees::inflate_table(
-                                literal_length_table.table_type,
-                                &raw mut state_ref.lens as *mut ::core::ffi::c_ushort,
-                                literal_length_table.code_count,
-                                &raw mut state_ref.next as *mut _
-                                    as *mut *mut crate::src::inftrees::code,
-                                &raw mut state_ref.lenbits,
-                                &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
+                            ret = inflate_back_build_dynamic_table(
+                                state_ref,
+                                InflateBackDynamicTableTarget::LiteralLengths,
+                                &literal_length_table,
                             );
                             if ret != 0 {
                                 inflate_back_report_error(
@@ -1262,15 +1310,10 @@ pub unsafe extern "C" fn inflateBack(
                                     InflateBackDynamicTableTarget::Distances,
                                     &distance_table,
                                 );
-                                ret = crate::src::inftrees::inflate_table(
-                                    distance_table.table_type,
-                                    (&raw mut state_ref.lens as *mut ::core::ffi::c_ushort)
-                                        .wrapping_add(distance_table.lens_offset),
-                                    distance_table.code_count,
-                                    &raw mut state_ref.next as *mut _
-                                        as *mut *mut crate::src::inftrees::code,
-                                    &raw mut state_ref.distbits,
-                                    &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
+                                ret = inflate_back_build_dynamic_table(
+                                    state_ref,
+                                    InflateBackDynamicTableTarget::Distances,
+                                    &distance_table,
                                 );
                                 if ret != 0 {
                                     inflate_back_report_error(

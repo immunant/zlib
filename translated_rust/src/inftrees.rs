@@ -3234,6 +3234,24 @@ fn inflate_table_capacity(
     }
 }
 
+// The decoder's owned workspaces can be built without a second raw-pointer
+// binding. The C ABI adapter below remains responsible for binding foreign
+// pointers before reaching this implementation.
+pub(crate) fn inflate_table_bound(
+    type_0: crate::src::inftrees::codetype,
+    lens: &[::core::ffi::c_ushort],
+    codes: ::core::ffi::c_uint,
+    table: &mut [crate::src::inftrees::code],
+    bits: &mut ::core::ffi::c_uint,
+    work: &mut [::core::ffi::c_ushort],
+) -> Result<usize, ::core::ffi::c_int> {
+    let table_len = inflate_table_capacity(type_0, lens, *bits)?;
+    let Some(table) = table.get_mut(..table_len) else {
+        return Err(1);
+    };
+    inflate_table_impl(type_0, lens, codes, table, bits, work)
+}
+
 pub unsafe extern "C" fn inflate_table(
     type_0: crate::src::inftrees::codetype,
     lens: *mut ::core::ffi::c_ushort,
@@ -3245,13 +3263,13 @@ pub unsafe extern "C" fn inflate_table(
     let lens = ::core::slice::from_raw_parts(lens, codes as usize);
     let work = ::core::slice::from_raw_parts_mut(work, codes as usize);
     let bits = &mut *bits;
+    let table_start = *table;
     let table_len = match inflate_table_capacity(type_0, lens, *bits) {
         Ok(table_len) => table_len,
         Err(error) => return error,
     };
-    let table_start = *table;
     let table_entries = ::core::slice::from_raw_parts_mut(table_start, table_len);
-    match inflate_table_impl(type_0, lens, codes, table_entries, bits, work) {
+    match inflate_table_bound(type_0, lens, codes, table_entries, bits, work) {
         Ok(used) => {
             // `inflate_table_impl()` only reports entries it initialized in
             // the bounded table view above. Publish its cursor through that
