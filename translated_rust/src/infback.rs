@@ -192,10 +192,13 @@ pub unsafe extern "C" fn inflateBack(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if strm.is_null() || (*strm).state.is_null() {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm = &mut *strm;
+    if strm.state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     state.mode = crate::src::inflate::TYPE;
