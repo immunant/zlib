@@ -829,10 +829,11 @@ pub unsafe extern "C" fn gzread_ffi(
                 return -1 as ::core::ffi::c_int;
             }
             GzReadZeroResult::Errno => {
-                crate::src::gzlib::gz_error(
+                let errno = gz_last_os_errno();
+                crate::src::gzlib::gz_error_with_os_error(
                     &mut *state,
                     crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                    errno,
                 );
                 return -1 as ::core::ffi::c_int;
             }
