@@ -563,17 +563,30 @@ unsafe fn gz_comp(
 }
 
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut first: ::core::ffi::c_int = 0;
-    let mut ret: ::core::ffi::c_int = 0;
-    if state.strm.avail_in != 0
-        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    first = 1 as ::core::ffi::c_int;
+    // Treat pre-existing buffered input and each staged zero chunk as the
+    // same pending compressor request.  This keeps the zero-fill policy in
+    // the pointer-free `GzZeroStep`/`GzZeroProgress` pair and leaves a single
+    // compressor boundary below this ABI-shaped state adapter.
+    let mut needs_compress = state.strm.avail_in != 0;
+    let mut staged_zero: Option<GzZeroStep> = None;
+    let mut first = true;
     loop {
+        if needs_compress {
+            let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None);
+            if let Some(step) = staged_zero.take() {
+                let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
+                state.x.pos = progress.position;
+                state.skip = progress.skip;
+            }
+            if ret == -1 as ::core::ffi::c_int {
+                return -1 as ::core::ffi::c_int;
+            }
+            if !first && state.skip == 0 {
+                return 0;
+            }
+        }
         let step = GzZeroStep::new(state.buffers.size, state.skip);
-        if first != 0 {
+        if first {
             if state
                 .buffers
                 .input
@@ -583,7 +596,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             {
                 return -1;
             }
-            first = 0 as ::core::ffi::c_int;
+            first = false;
         }
         state.strm.avail_in = step.input_len;
         let Some(input) = state.buffers.input.as_deref() else {
@@ -594,18 +607,9 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return -1;
         };
         state.buffers.input_cursor = Some(cursor);
-        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None);
-        let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
-        state.x.pos = progress.position;
-        state.skip = progress.skip;
-        if ret == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if state.skip == 0 {
-            break;
-        }
+        staged_zero = Some(step);
+        needs_compress = true;
     }
-    return 0 as ::core::ffi::c_int;
 }
 
 unsafe fn gz_write(
