@@ -731,39 +731,38 @@ pub unsafe extern "C" fn gzgets(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
-    left = (len as ::core::ffi::c_uint).wrapping_sub(1 as ::core::ffi::c_uint);
+    left = crate::src::gzlib::gz_gets_remaining(len);
     if left != 0 {
         while !(state.x.have == 0 as ::core::ffi::c_uint
             && gz_fetch(state) == -1 as ::core::ffi::c_int)
         {
-            if state.x.have == 0 as ::core::ffi::c_uint {
-                state.past = 1 as ::core::ffi::c_int;
-                break;
-            } else {
-                n = if state.x.have > left {
-                    left
-                } else {
-                    state.x.have
-                };
-                eol = crate::stdlib::memchr(
-                    state.x.next as *const ::core::ffi::c_void,
-                    '\n' as ::core::ffi::c_int,
-                    n as crate::__stddef_size_t_h::size_t,
-                ) as *mut ::core::ffi::c_uchar;
-                if !eol.is_null() {
-                    n = (eol.offset_from(state.x.next) as ::core::ffi::c_uint)
-                        .wrapping_add(1 as ::core::ffi::c_uint);
-                }
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    state.x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
-                gz_consume(state, n as crate::stdlib::off64_t);
-                left = left.wrapping_sub(n);
-                buf = buf.wrapping_add(n as usize);
-                if !(left != 0 && eol.is_null()) {
+            match crate::src::gzlib::gz_gets_plan(state.x.have, left) {
+                crate::src::gzlib::GzGetsPlan::Empty => {
+                    crate::src::gzlib::gz_gets_mark_past(state);
                     break;
+                }
+                crate::src::gzlib::GzGetsPlan::Copy(chunk) => {
+                    n = chunk;
+                    eol = crate::stdlib::memchr(
+                        state.x.next as *const ::core::ffi::c_void,
+                        '\n' as ::core::ffi::c_int,
+                        n as crate::__stddef_size_t_h::size_t,
+                    ) as *mut ::core::ffi::c_uchar;
+                    if !eol.is_null() {
+                        n = (eol.offset_from(state.x.next) as ::core::ffi::c_uint)
+                            .wrapping_add(1 as ::core::ffi::c_uint);
+                    }
+                    crate::stdlib::memcpy(
+                        buf as *mut ::core::ffi::c_void,
+                        state.x.next as *const ::core::ffi::c_void,
+                        n as crate::__stddef_size_t_h::size_t,
+                    );
+                    gz_consume(state, n as crate::stdlib::off64_t);
+                    crate::src::gzlib::gz_gets_after_copy(&mut left, n);
+                    buf = buf.wrapping_add(n as usize);
+                    if !crate::src::gzlib::gz_gets_should_continue(left, !eol.is_null()) {
+                        break;
+                    }
                 }
             }
         }

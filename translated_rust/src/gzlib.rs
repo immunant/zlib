@@ -720,6 +720,51 @@ pub(crate) fn gz_read_mark_past(state: &mut crate::gzguts_h::gz_state, remaining
     }
 }
 
+// `gzgets()` owns the caller string and its raw buffer copies.  Keep only the
+// bounded line-read selection and integer bookkeeping here, where neither
+// operation needs those pointers.
+pub(crate) enum GzGetsPlan {
+    Empty,
+    Copy(::core::ffi::c_uint),
+}
+
+pub(crate) fn gz_gets_plan(
+    available: ::core::ffi::c_uint,
+    remaining: ::core::ffi::c_uint,
+) -> GzGetsPlan {
+    if available == 0 {
+        GzGetsPlan::Empty
+    } else {
+        GzGetsPlan::Copy(if available > remaining {
+            remaining
+        } else {
+            available
+        })
+    }
+}
+
+pub(crate) fn gz_gets_remaining(len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
+    (len as ::core::ffi::c_uint).wrapping_sub(1)
+}
+
+pub(crate) fn gz_gets_after_copy(
+    remaining: &mut ::core::ffi::c_uint,
+    copied: ::core::ffi::c_uint,
+) {
+    *remaining = remaining.wrapping_sub(copied);
+}
+
+pub(crate) fn gz_gets_mark_past(state: &mut crate::gzguts_h::gz_state) {
+    state.past = 1;
+}
+
+pub(crate) fn gz_gets_should_continue(
+    remaining: ::core::ffi::c_uint,
+    found_eol: bool,
+) -> bool {
+    remaining != 0 && !found_eol
+}
+
 // Plan a pushed-back byte without touching the output buffer.  The read
 // adapter retains the pointer movement, overlapping copy, and byte store;
 // this keeps the corresponding gzip cursor/accounting transition local.
