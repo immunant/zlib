@@ -9,6 +9,32 @@ pub(crate) type BitCount = u32;
 pub(crate) type Checksum = u32;
 pub(crate) type StreamOffset = i64;
 
+/// Classifies a foreign input buffer before an FFI wrapper creates a slice.
+///
+/// A null input pointer has a distinct meaning for zlib's checksum APIs,
+/// including when its advertised length is non-zero.  A non-null empty input,
+/// on the other hand, is a valid empty slice and must not require a raw slice
+/// construction.  Keeping this distinction in safe code makes the boundary
+/// rule shared by checksum wrappers explicit and testable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FfiInputKind {
+    Null,
+    Empty,
+    NonEmpty,
+}
+
+impl FfiInputKind {
+    pub(crate) fn from_nullable_parts(pointer_is_null: bool, len: ByteCount) -> Self {
+        if pointer_is_null {
+            Self::Null
+        } else if len == 0 {
+            Self::Empty
+        } else {
+            Self::NonEmpty
+        }
+    }
+}
+
 /// A checked, forward-only view of input supplied to a safe implementation.
 ///
 /// The cursor owns no storage and never exposes raw pointers.  Callers can
@@ -164,8 +190,8 @@ pub(crate) fn off64_from_stream_offset(value: StreamOffset) -> Option<crate::std
 mod tests {
     use super::{
         byte_count_from_uint, checksum_from_ulong, off64_from_stream_offset,
-        stream_offset_from_off64, uint_from_byte_count, ulong_from_checksum, BitCount, InputCursor,
-        OutputCursor,
+        stream_offset_from_off64, uint_from_byte_count, ulong_from_checksum, BitCount,
+        FfiInputKind, InputCursor, OutputCursor,
     };
 
     #[test]
@@ -197,6 +223,26 @@ mod tests {
     #[test]
     fn bit_count_is_explicitly_fixed_width() {
         assert_eq!(core::mem::size_of::<BitCount>(), 4);
+    }
+
+    #[test]
+    fn ffi_input_kind_distinguishes_null_empty_and_nonempty_inputs() {
+        assert_eq!(
+            FfiInputKind::from_nullable_parts(true, 0),
+            FfiInputKind::Null
+        );
+        assert_eq!(
+            FfiInputKind::from_nullable_parts(true, 1),
+            FfiInputKind::Null
+        );
+        assert_eq!(
+            FfiInputKind::from_nullable_parts(false, 0),
+            FfiInputKind::Empty
+        );
+        assert_eq!(
+            FfiInputKind::from_nullable_parts(false, 1),
+            FfiInputKind::NonEmpty
+        );
     }
 
     #[test]
