@@ -275,10 +275,7 @@ unsafe extern "C" fn gz_write(
                 .next_in
                 .offset((*state).strm.avail_in as isize)
                 .offset_from((*state).in_0) as ::core::ffi::c_uint;
-            copy = (*state).size.wrapping_sub(have);
-            if copy as crate::stdlib::z_size_t > len {
-                copy = len as ::core::ffi::c_uint;
-            }
+            copy = crate::src::gzlib::gz_buffer_space((*state).size, have, len);
             crate::stdlib::memcpy(
                 (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,

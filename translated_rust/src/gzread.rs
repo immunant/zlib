@@ -408,9 +408,7 @@ unsafe extern "C" fn gz_read(
         n = crate::src::gzlib::gz_stream_chunk(len);
         's_28: {
             if (*state).x.have != 0 {
-                if (*state).x.have < n {
-                    n = (*state).x.have;
-                }
+                n = crate::src::gzlib::gz_buffered_chunk(len, (*state).x.have);
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
                     (*state).x.next as *const ::core::ffi::c_void,

@@ -78,6 +78,32 @@ pub fn gz_syscall_chunk(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if len > max { max } else { len }
 }
 
+// Choose the amount a bulk gzip operation may handle in one stream request.
+// `available` is only a bound when data is already buffered.
+pub(crate) fn gz_buffered_chunk(
+    len: crate::stdlib::z_size_t,
+    available: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let chunk = gz_stream_chunk(len);
+    if chunk > available { available } else { chunk }
+}
+
+// Return how much input fits in the gzip input buffer.  Valid gzip state has
+// `buffered <= size`; wrapping preserves the translated C arithmetic if a
+// corrupt state reaches this internal path.
+pub(crate) fn gz_buffer_space(
+    size: ::core::ffi::c_uint,
+    buffered: ::core::ffi::c_uint,
+    remaining: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_uint {
+    let space = size.wrapping_sub(buffered);
+    if space as crate::stdlib::z_size_t > remaining {
+        remaining as ::core::ffi::c_uint
+    } else {
+        space
+    }
+}
+
 // Keep the logical gzip position update independent of the raw buffer
 // adapters used by the read and write paths.
 pub(crate) fn gz_advance_pos(state: &mut crate::gzguts_h::gz_state, count: crate::stdlib::uInt) {
