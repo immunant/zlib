@@ -771,25 +771,29 @@ pub unsafe extern "C" fn gzputc_ffi(
     };
     gzputc(state, c)
 }
-unsafe fn gzputs(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> ::core::ffi::c_int {
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
+/// Write a C-string payload through the state-carrying compressor facade.
+///
+/// The C entry point performs the pointer conversion once, then this helper
+/// owns all stream validation and write-state mutation.
+fn gzputs_impl(compressor: &mut GzCompressor<'_>, input: &[u8]) -> ::core::ffi::c_int {
+    if compressor.state.mode != crate::gzguts_h::GZ_WRITE
+        || compressor.state.err != crate::zlib_h::Z_OK && compressor.state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
+    crate::src::gzlib::gz_error_state(compressor.state, crate::zlib_h::Z_OK, None);
     let len = input.len();
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
         || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
     {
         crate::src::gzlib::gz_error_state(
-            state,
+            compressor.state,
             crate::zlib_h::Z_STREAM_ERROR,
             Some(c"string length does not fit in int"),
         );
         return -1 as ::core::ffi::c_int;
     }
-    let put = gz_write(state, input);
+    let put = compressor.write(input);
     return if len != 0 && put == 0 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
@@ -809,7 +813,7 @@ pub unsafe extern "C" fn gzputs_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1;
     };
-    gzputs(state, input)
+    gzputs_impl(&mut GzCompressor { state }, input)
 }
 #[derive(Default)]
 struct GzFlushFailures {
