@@ -22,6 +22,49 @@ pub const LENS: crate::src::inftrees::codetype = 1;
 
 pub const DISTS: crate::src::inftrees::codetype = 2;
 
+/// Build the table entry for one canonical symbol using immutable lookup
+/// tables.  Keeping this decision separate from the raw table cursor lets the
+/// table builder treat an out-of-range base/extra lookup as zlib's existing
+/// invalid-code marker instead of ever indexing an unchecked table.
+fn inflate_table_symbol(
+    symbol: ::core::ffi::c_ushort,
+    match_symbol: ::core::ffi::c_uint,
+    base: Option<&[::core::ffi::c_ushort]>,
+    extra: Option<&[::core::ffi::c_ushort]>,
+) -> crate::src::inftrees::code {
+    let symbol = symbol as ::core::ffi::c_uint;
+    if symbol.wrapping_add(1) < match_symbol {
+        crate::src::inftrees::code {
+            op: 0,
+            bits: 0,
+            val: symbol as ::core::ffi::c_ushort,
+        }
+    } else if symbol >= match_symbol {
+        let index = symbol.wrapping_sub(match_symbol) as usize;
+        if let Some((&base, &extra)) =
+            base.and_then(|base| extra.and_then(|extra| base.get(index).zip(extra.get(index))))
+        {
+            crate::src::inftrees::code {
+                op: extra as ::core::ffi::c_uchar,
+                bits: 0,
+                val: base,
+            }
+        } else {
+            crate::src::inftrees::code {
+                op: 64,
+                bits: 0,
+                val: 0,
+            }
+        }
+    } else {
+        crate::src::inftrees::code {
+            op: 32 + 64,
+            bits: 0,
+            val: 0,
+        }
+    }
+}
+
 pub mod inffixed_h {
 
     pub static lenfix: [crate::src::inftrees::code; 512] = [
@@ -3148,31 +3191,10 @@ pub unsafe extern "C" fn inflate_table(
     }
     loop {
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
-        if (*work.wrapping_add(sym as usize) as ::core::ffi::c_uint)
-            .wrapping_add(1 as ::core::ffi::c_uint)
-            < match_0
-        {
-            here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-            here.val = *work.wrapping_add(sym as usize);
-        } else if *work.wrapping_add(sym as usize) as ::core::ffi::c_uint >= match_0 {
-            let index = (*work.wrapping_add(sym as usize) as ::core::ffi::c_uint)
-                .wrapping_sub(match_0) as usize;
-            if let (Some(base), Some(extra)) = (base, extra) {
-                if let Some((&base, &extra)) = base.get(index).zip(extra.get(index)) {
-                    here.op = extra as ::core::ffi::c_uchar;
-                    here.val = base;
-                } else {
-                    here.op = 64 as ::core::ffi::c_uchar;
-                    here.val = 0 as ::core::ffi::c_ushort;
-                }
-            } else {
-                here.op = 64 as ::core::ffi::c_uchar;
-                here.val = 0 as ::core::ffi::c_ushort;
-            }
-        } else {
-            here.op = (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-            here.val = 0 as ::core::ffi::c_ushort;
-        }
+        let symbol = *work.wrapping_add(sym as usize);
+        let entry = inflate_table_symbol(symbol, match_0, base, extra);
+        here.op = entry.op;
+        here.val = entry.val;
         incr = (1 as ::core::ffi::c_uint) << len.wrapping_sub(drop_0);
         fill = (1 as ::core::ffi::c_uint) << curr;
         min = fill;
