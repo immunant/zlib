@@ -354,28 +354,23 @@ fn read_buf_updated_adler(
     }
 }
 
-unsafe fn read_buf(
-    strm: crate::zlib_h::z_streamp,
-    buf: *mut crate::stdlib::Bytef,
-    size: ::core::ffi::c_uint,
+fn read_buf(
+    strm: &mut crate::zlib_h::z_stream_s,
+    wrap: ::core::ffi::c_int,
+    out: &mut [crate::stdlib::Bytef],
 ) -> ::core::ffi::c_uint {
-    let strm = &mut *strm;
-    let state = &*strm.state;
     let mut len: ::core::ffi::c_uint = strm.avail_in as ::core::ffi::c_uint;
-    if len > size {
-        len = size;
+    if len as usize > out.len() {
+        len = out.len() as ::core::ffi::c_uint;
     }
     if len == 0 as ::core::ffi::c_uint {
         return 0 as ::core::ffi::c_uint;
     }
     strm.avail_in = strm.avail_in.wrapping_sub(len);
-    crate::stdlib::memcpy(
-        buf as *mut ::core::ffi::c_void,
-        strm.next_in as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
-    );
-    let copied = ::core::slice::from_raw_parts(buf, len as usize);
-    strm.adler = read_buf_updated_adler(state.wrap, strm.adler, copied);
+    let copied = &mut out[..len as usize];
+    let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, len as usize) };
+    copied.copy_from_slice(input);
+    strm.adler = read_buf_updated_adler(wrap, strm.adler, copied);
     strm.next_in = strm.next_in.wrapping_add(len as usize);
     strm.total_in = strm.total_in.wrapping_add(len as crate::stdlib::uLong);
     return len;
@@ -425,13 +420,16 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
             break;
         }
-        n = read_buf(
-            (*s).strm,
-            (*s).window
-                .wrapping_add((*s).strstart as usize)
-                .wrapping_add((*s).lookahead as usize),
-            more,
+        let state = &mut *s;
+        let strm = &mut *state.strm;
+        let out = ::core::slice::from_raw_parts_mut(
+            state
+                .window
+                .wrapping_add(state.strstart as usize)
+                .wrapping_add(state.lookahead as usize),
+            more as usize,
         );
+        n = read_buf(strm, state.wrap, out);
         (*s).lookahead = (*s).lookahead.wrapping_add(n);
         if (*s).lookahead.wrapping_add((*s).insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -2612,7 +2610,10 @@ unsafe fn deflate_stored(
             len = len.wrapping_sub(left);
         }
         if len != 0 {
-            read_buf((*s).strm, (*(*s).strm).next_out, len);
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            let out = ::core::slice::from_raw_parts_mut(strm.next_out, len as usize);
+            read_buf(strm, state.wrap, out);
             (*(*s).strm).next_out = (*(*s).strm).next_out.wrapping_add(len as usize);
             (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
             (*(*s).strm).total_out = (*(*s).strm)
@@ -2700,7 +2701,13 @@ unsafe fn deflate_stored(
         have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
-        read_buf((*s).strm, (*s).window.offset((*s).strstart as isize), have);
+        let state = &mut *s;
+        let strm = &mut *state.strm;
+        let out = ::core::slice::from_raw_parts_mut(
+            state.window.offset(state.strstart as isize),
+            have as usize,
+        );
+        read_buf(strm, state.wrap, out);
         (*s).strstart = (*s).strstart.wrapping_add(have);
         (*s).insert = deflate_stored_advance_insert((*s).insert, (*s).w_size, have);
     }
