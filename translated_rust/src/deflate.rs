@@ -386,40 +386,43 @@ fn read_buf_bytes(
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
+    // Keep the ABI-state projection at this boundary.  The work below uses
+    // the checked slice helpers and this single scoped state view instead of
+    // repeatedly dereferencing the raw state cursor.
+    let state = &mut *s;
+    let mut wsize: crate::stdlib::uInt = state.w_size;
     loop {
-        more = (*s)
+        more = state
             .window_size
-            .wrapping_sub((*s).lookahead as crate::zutil_h::ulg)
-            .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
+            .wrapping_sub(state.lookahead as crate::zutil_h::ulg)
+            .wrapping_sub(state.strstart as crate::zutil_h::ulg)
             as ::core::ffi::c_uint;
         if ::core::mem::size_of::<::core::ffi::c_int>() <= 2 as usize {
             if more == 0 as ::core::ffi::c_uint
-                && (*s).strstart == 0 as crate::stdlib::uInt
-                && (*s).lookahead == 0 as crate::stdlib::uInt
+                && state.strstart == 0 as crate::stdlib::uInt
+                && state.lookahead == 0 as crate::stdlib::uInt
             {
                 more = wsize as ::core::ffi::c_uint;
             } else if more == -1 as ::core::ffi::c_int as ::core::ffi::c_uint {
                 more = more.wrapping_sub(1);
             }
         }
-        if (*s).strstart
+        if state.strstart
             >= wsize.wrapping_add(
-                (*s).w_size
+                state.w_size
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
             )
         {
             // `window` is allocated with exactly `window_size` bytes in
             // `deflateInit2_()` and `deflateCopy()`.
-            let window = ::core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
+            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
             slide_window_bytes(window, wsize, more);
-            (*s).match_start = (*s).match_start.wrapping_sub(wsize);
-            (*s).strstart = (*s).strstart.wrapping_sub(wsize);
-            (*s).block_start -= wsize as ::core::ffi::c_long;
-            if (*s).insert > (*s).strstart {
-                (*s).insert = (*s).strstart;
+            state.match_start = state.match_start.wrapping_sub(wsize);
+            state.strstart = state.strstart.wrapping_sub(wsize);
+            state.block_start -= wsize as ::core::ffi::c_long;
+            if state.insert > state.strstart {
+                state.insert = state.strstart;
             }
-            let state = &mut *s;
             // `head` and `prev` are allocated at these exact element counts
             // in `deflateInit2_()` and `deflateCopy()`.
             let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
@@ -429,10 +432,9 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             state.slid = 1 as ::core::ffi::c_int;
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
-        if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
+        if (&*state.strm).avail_in == 0 as crate::stdlib::uInt {
             break;
         }
-        let state = &mut *s;
         let stream = &mut *state.strm;
         n = stream.avail_in.min(more);
         if n != 0 {
@@ -450,11 +452,10 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             stream.next_in = next_in;
             stream.total_in = stream.total_in.wrapping_add(n as crate::stdlib::uLong);
         }
-        (*s).lookahead = (*s).lookahead.wrapping_add(n);
-        if (*s).lookahead.wrapping_add((*s).insert)
+        state.lookahead = state.lookahead.wrapping_add(n);
+        if state.lookahead.wrapping_add(state.insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
-            let state = &mut *s;
             let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
             // These are the exact capacities allocated by `deflateInit2_()`
             // and `deflateCopy()`. Keep the raw views local to this update,
@@ -486,36 +487,36 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                 }
             }
         }
-        if !((*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && (*(*s).strm).avail_in != 0 as crate::stdlib::uInt)
+        if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            && (&*state.strm).avail_in != 0 as crate::stdlib::uInt)
         {
             break;
         }
     }
-    if (*s).high_water < (*s).window_size {
-        let mut curr: crate::zutil_h::ulg = ((*s).strstart as crate::zutil_h::ulg)
-            .wrapping_add((*s).lookahead as crate::zutil_h::ulg);
+    if state.high_water < state.window_size {
+        let mut curr: crate::zutil_h::ulg = (state.strstart as crate::zutil_h::ulg)
+            .wrapping_add(state.lookahead as crate::zutil_h::ulg);
         let mut init: crate::zutil_h::ulg = 0;
-        if (*s).high_water < curr {
-            init = (*s).window_size.wrapping_sub(curr);
+        if state.high_water < curr {
+            init = state.window_size.wrapping_sub(curr);
             if init > crate::src::deflate::WIN_INIT as crate::zutil_h::ulg {
                 init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
             }
-            let window = ::core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
+            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
             clear_window_bytes(window, curr, init);
-            (*s).high_water = curr.wrapping_add(init);
-        } else if (*s).high_water
+            state.high_water = curr.wrapping_add(init);
+        } else if state.high_water
             < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
         {
             init = curr
                 .wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-                .wrapping_sub((*s).high_water);
-            if init > (*s).window_size.wrapping_sub((*s).high_water) {
-                init = (*s).window_size.wrapping_sub((*s).high_water);
+                .wrapping_sub(state.high_water);
+            if init > state.window_size.wrapping_sub(state.high_water) {
+                init = state.window_size.wrapping_sub(state.high_water);
             }
-            let window = ::core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
-            clear_window_bytes(window, (*s).high_water, init);
-            (*s).high_water = (*s).high_water.wrapping_add(init);
+            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+            clear_window_bytes(window, state.high_water, init);
+            state.high_water = state.high_water.wrapping_add(init);
         }
     }
 }
