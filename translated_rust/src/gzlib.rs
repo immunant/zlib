@@ -394,6 +394,31 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     gzrewind(file)
 }
+/// Validate and normalize a gzip seek request without touching the opaque
+/// handle or descriptor.  The boolean records the `SEEK_CUR` side effect of
+/// consuming a previously scheduled skip.
+fn gzseek_offset_state(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    whence: ::core::ffi::c_int,
+    pos: crate::stdlib::off64_t,
+    past: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+    offset: crate::stdlib::off64_t,
+) -> Option<(crate::stdlib::off64_t, bool)> {
+    if (mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE)
+        || (err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR)
+    {
+        return None;
+    }
+    match whence {
+        crate::stdlib::SEEK_SET => Some((offset.wrapping_sub(pos), false)),
+        crate::stdlib::SEEK_CUR => {
+            Some((offset.wrapping_add(if past != 0 { 0 } else { skip }), true))
+        }
+        _ => None,
+    }
+}
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
     mut offset: crate::stdlib::off64_t,
@@ -407,23 +432,20 @@ pub unsafe extern "C" fn gzseek64(
         return -1 as crate::stdlib::off64_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
+    let state_ref = &mut *state;
+    let Some((normalized_offset, clear_skip)) = gzseek_offset_state(
+        state_ref.mode,
+        state_ref.err,
+        whence,
+        state_ref.x.pos,
+        state_ref.past,
+        state_ref.skip,
+        offset,
+    ) else {
         return -1 as crate::stdlib::off64_t;
-    }
-    if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
-        return -1 as crate::stdlib::off64_t;
-    }
-    if whence != crate::stdlib::SEEK_SET && whence != crate::stdlib::SEEK_CUR {
-        return -1 as crate::stdlib::off64_t;
-    }
-    if whence == crate::stdlib::SEEK_SET {
-        offset -= (*state).x.pos;
-    } else {
-        offset += if (*state).past != 0 {
-            0 as crate::stdlib::off64_t
-        } else {
-            (*state).skip
-        };
+    };
+    offset = normalized_offset;
+    if clear_skip {
         (*state).skip = 0 as crate::stdlib::off64_t;
     }
     if (*state).mode == crate::gzguts_h::GZ_READ
