@@ -1406,13 +1406,8 @@ pub unsafe fn inflate(
                                                                                         );
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
-                                                                                if !(*state)
-                                                                                    .head
-                                                                                    .is_null()
-                                                                                {
-                                                                                    (*(*state)
-                                                                                        .head)
-                                                                                        .time = hold
+                                                                                if let Some(header) = header.as_deref_mut() {
+                                                                                    header.time = hold
                                                                                         as crate::stdlib::uLong;
                                                                                 }
                                                                                 if (*state).flags & 0x200 as ::core::ffi::c_int != 0
