@@ -1866,78 +1866,78 @@ pub unsafe fn deflateInit2_(
         stream,
         initialization.allocation,
         |callback_storage| crate::src::deflate::internal_state {
-        data_type: stream_data_type,
-        status: initialization.initial_state.status,
-        pending_buf: None,
-        pending_buf_size: initialization.initial_state.pending_buf_size,
-        pending_out: initialization.initial_state.pending_out,
-        pending: initialization.initial_state.pending,
-        callback_storage,
-        wrap: initialization.initial_state.wrap,
-        gzhead: None,
-        gzindex: initialization.initial_state.gzindex,
-        method: initialization.initial_state.method,
-        last_flush: initialization.initial_state.last_flush,
-        w_size: initialization.initial_state.w_size,
-        w_bits: initialization.initial_state.w_bits,
-        w_mask: initialization.initial_state.w_mask,
-        window: None,
-        window_size: initialization.initial_state.window_size,
-        prev: None,
-        head: None,
-        ins_h: initialization.initial_state.ins_h,
-        hash_size: initialization.initial_state.hash_size,
-        hash_bits: initialization.initial_state.hash_bits,
-        hash_mask: initialization.initial_state.hash_mask,
-        hash_shift: initialization.initial_state.hash_shift,
-        block_start: 0,
-        match_length: 0,
-        prev_match: 0,
-        match_available: 0,
-        strstart: 0,
-        match_start: 0,
-        lookahead: 0,
-        prev_length: 0,
-        max_chain_length: 0,
-        max_lazy_match: 0,
-        level: 0,
-        strategy: 0,
-        good_match: 0,
-        nice_match: 0,
-        dyn_ltree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 573],
-        dyn_dtree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 61],
-        bl_tree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 39],
-        l_desc: crate::src::deflate::tree_desc_s {
-            kind: crate::src::deflate::TreeKind::LitLen,
-            max_code: 0,
+            data_type: stream_data_type,
+            status: initialization.initial_state.status,
+            pending_buf: None,
+            pending_buf_size: initialization.initial_state.pending_buf_size,
+            pending_out: initialization.initial_state.pending_out,
+            pending: initialization.initial_state.pending,
+            callback_storage,
+            wrap: initialization.initial_state.wrap,
+            gzhead: None,
+            gzindex: initialization.initial_state.gzindex,
+            method: initialization.initial_state.method,
+            last_flush: initialization.initial_state.last_flush,
+            w_size: initialization.initial_state.w_size,
+            w_bits: initialization.initial_state.w_bits,
+            w_mask: initialization.initial_state.w_mask,
+            window: None,
+            window_size: initialization.initial_state.window_size,
+            prev: None,
+            head: None,
+            ins_h: initialization.initial_state.ins_h,
+            hash_size: initialization.initial_state.hash_size,
+            hash_bits: initialization.initial_state.hash_bits,
+            hash_mask: initialization.initial_state.hash_mask,
+            hash_shift: initialization.initial_state.hash_shift,
+            block_start: 0,
+            match_length: 0,
+            prev_match: 0,
+            match_available: 0,
+            strstart: 0,
+            match_start: 0,
+            lookahead: 0,
+            prev_length: 0,
+            max_chain_length: 0,
+            max_lazy_match: 0,
+            level: 0,
+            strategy: 0,
+            good_match: 0,
+            nice_match: 0,
+            dyn_ltree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 573],
+            dyn_dtree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 61],
+            bl_tree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 39],
+            l_desc: crate::src::deflate::tree_desc_s {
+                kind: crate::src::deflate::TreeKind::LitLen,
+                max_code: 0,
+            },
+            d_desc: crate::src::deflate::tree_desc_s {
+                kind: crate::src::deflate::TreeKind::Dist,
+                max_code: 0,
+            },
+            bl_desc: crate::src::deflate::tree_desc_s {
+                kind: crate::src::deflate::TreeKind::BitLen,
+                max_code: 0,
+            },
+            bl_count: [0; 16],
+            heap: [0; 573],
+            heap_len: 0,
+            heap_max: 0,
+            depth: [0; 573],
+            sym_buf_start: 0,
+            lit_bufsize: 0,
+            sym_next: 0,
+            sym_end: 0,
+            opt_len: 0,
+            static_len: 0,
+            matches: 0,
+            insert: 0,
+            bi_buf: 0,
+            bi_valid: 0,
+            bi_used: 0,
+            high_water: 0,
+            slid: 0,
         },
-        d_desc: crate::src::deflate::tree_desc_s {
-            kind: crate::src::deflate::TreeKind::Dist,
-            max_code: 0,
-        },
-        bl_desc: crate::src::deflate::tree_desc_s {
-            kind: crate::src::deflate::TreeKind::BitLen,
-            max_code: 0,
-        },
-        bl_count: [0; 16],
-        heap: [0; 573],
-        heap_len: 0,
-        heap_max: 0,
-        depth: [0; 573],
-        sym_buf_start: 0,
-        lit_bufsize: 0,
-        sym_next: 0,
-        sym_end: 0,
-        opt_len: 0,
-        static_len: 0,
-        matches: 0,
-        insert: 0,
-        bi_buf: 0,
-        bi_valid: 0,
-        bi_used: 0,
-        high_water: 0,
-        slid: 0,
-    },
     ) else {
         stream.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
@@ -1950,7 +1950,7 @@ pub unsafe fn deflateInit2_(
             .load(::core::sync::atomic::Ordering::Relaxed);
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let Some((stream, state, storage_request)) =
+    let Some((stream, _state_handle, state, storage_request)) =
         deflate_stream_and_state(stream, DeflateStorageProjection::Complete)
     else {
         unreachable!("complete callback storage must project")
@@ -2292,16 +2292,18 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     projection: DeflateStorageProjection<'request>,
 ) -> Option<(
     &'stream mut crate::zlib_h::z_stream_s,
+    ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
     &'stream mut crate::src::deflate::deflate_state,
     DeflateCallbackStorageRequest<'stream>,
 )> {
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return None;
     }
-    let state = strm
-        .state?
-        .cast::<crate::src::deflate::deflate_state>()
-        .as_mut();
+    // Convert the opaque state handle once, before any operation-specific
+    // dispatch.  The resulting typed handle accompanies the scoped state
+    // borrow so teardown does not re-read `strm.state` after the projection.
+    let mut state_handle = strm.state?.cast::<crate::src::deflate::deflate_state>();
+    let state = state_handle.as_mut();
     let admission = admit_deflate_projection(
         state.status,
         state.callback_storage.storage(),
@@ -2313,8 +2315,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     let storage_layout = admission.storage_layout;
     let dispatch_cursors = admission.dispatch_cursors;
     let lifecycle = state.callback_storage;
-    let (state, mut storage) =
-        callback_owner::storage_request(state, storage_layout, &projection);
+    let (state, mut storage) = callback_owner::storage_request(state, storage_layout, &projection);
     if dispatch_cursors {
         if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
             strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
@@ -2332,7 +2333,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     }
     if let DeflateStorageProjection::DictionaryInstall { dictionary, result } = projection {
         let Some(storage) = storage.into_dictionary_storage() else {
-            return Some((strm, state, lifecycle.empty_request()));
+            return Some((strm, state_handle, state, lifecycle.empty_request()));
         };
         let mut dictionary_state = DictionaryState {
             wrap: state.wrap,
@@ -2360,7 +2361,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             dictionary,
             strm.adler,
         ) else {
-            return Some((strm, state, lifecycle.empty_request()));
+            return Some((strm, state_handle, state, lifecycle.empty_request()));
         };
         state.wrap = dictionary_state.wrap;
         state.slid = dictionary_state.slid;
@@ -2377,7 +2378,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             strm.adler = checksum;
         }
         *result = crate::zlib_h::Z_OK;
-        return Some((strm, state, lifecycle.empty_request()));
+        return Some((strm, state_handle, state, lifecycle.empty_request()));
     }
     if let DeflateStorageProjection::DictionaryQuery {
         dictionary,
@@ -2386,7 +2387,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     } = projection
     {
         let Some(window) = storage.window() else {
-            return Some((strm, state, storage));
+            return Some((strm, state_handle, state, storage));
         };
         let mut len = state.strstart.wrapping_add(state.lookahead);
         if len > state.w_size {
@@ -2403,9 +2404,9 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             dictionary,
             dict_length,
         );
-        return Some((strm, state, storage));
+        return Some((strm, state_handle, state, storage));
     }
-    Some((strm, state, storage))
+    Some((strm, state_handle, state, storage))
 }
 
 // Insert the initial dictionary strings into the hash chains.  The caller
@@ -2958,7 +2959,7 @@ pub unsafe fn deflateSetHeader(
     strm: &mut crate::zlib_h::z_stream_s,
     head: Option<&crate::zlib_h::gz_header_s>,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state, _storage)) =
+    let Some((_strm, _state_handle, state, _storage)) =
         deflate_stream_and_state(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -5810,7 +5811,8 @@ pub(crate) unsafe fn deflate_scalar_from_abi_stream(
             }),
         ),
     };
-    let Some((strm, state, storage)) = deflate_stream_and_state(strm, projection) else {
+    let Some((strm, _state_handle, state, storage)) = deflate_stream_and_state(strm, projection)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     match operation {
@@ -6161,14 +6163,11 @@ pub unsafe fn deflateEnd(
     // Convert the opaque state before dispatching to the callback owner.  The
     // owner retains both the state allocation and all backing handles through
     // the complete matching-release transaction.
-    let Some((strm, state, _)) = deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    let Some((strm, state_handle, state, _)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state_handle = strm
-        .state
-        .expect("validated state projection has an opaque state")
-        .cast::<crate::src::deflate::deflate_state>();
     drop(state.gzhead.take());
     callback_owner::release(strm, state_handle, state)
 }
@@ -6224,7 +6223,7 @@ unsafe fn deflate_copy_from_abi_boundary(
     dest: &mut crate::zlib_h::z_stream_s,
     source: &mut crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_int {
-    let Some((source, ss, source_storage)) =
+    let Some((source, _source_state_handle, ss, source_storage)) =
         deflate_stream_and_state(source, DeflateStorageProjection::Complete)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -6337,69 +6336,69 @@ unsafe fn deflate_copy_from_abi_boundary(
             storage,
         },
         |callback_storage| crate::src::deflate::internal_state {
-        data_type: payload.data_type,
-        status: payload.status,
-        pending_buf: None,
-        pending_buf_size: payload.pending_buf_size,
-        pending_out: payload.pending_out,
-        pending: payload.pending,
-        callback_storage,
-        wrap: payload.wrap,
-        gzhead: payload.gzhead,
-        gzindex: payload.gzindex,
-        method: payload.method,
-        last_flush: payload.last_flush,
-        w_size: payload.w_size,
-        w_bits: payload.w_bits,
-        w_mask: payload.w_mask,
-        window: None,
-        window_size: payload.window_size,
-        prev: None,
-        head: None,
-        ins_h: payload.ins_h,
-        hash_size: payload.hash_size,
-        hash_bits: payload.hash_bits,
-        hash_mask: payload.hash_mask,
-        hash_shift: payload.hash_shift,
-        block_start: payload.block_start,
-        match_length: payload.match_length,
-        prev_match: payload.prev_match,
-        match_available: payload.match_available,
-        strstart: payload.strstart,
-        match_start: payload.match_start,
-        lookahead: payload.lookahead,
-        prev_length: payload.prev_length,
-        max_chain_length: payload.max_chain_length,
-        max_lazy_match: payload.max_lazy_match,
-        level: payload.level,
-        strategy: payload.strategy,
-        good_match: payload.good_match,
-        nice_match: payload.nice_match,
-        dyn_ltree: payload.tree.dyn_ltree,
-        dyn_dtree: payload.tree.dyn_dtree,
-        bl_tree: payload.tree.bl_tree,
-        l_desc: payload.tree.l_desc,
-        d_desc: payload.tree.d_desc,
-        bl_desc: payload.tree.bl_desc,
-        bl_count: payload.tree.bl_count,
-        heap: payload.tree.heap,
-        heap_len: payload.tree.heap_len,
-        heap_max: payload.tree.heap_max,
-        depth: payload.tree.depth,
-        sym_buf_start: payload.sym_buf_start,
-        lit_bufsize: payload.lit_bufsize,
-        sym_next: payload.sym_next,
-        sym_end: payload.sym_end,
-        opt_len: payload.opt_len,
-        static_len: payload.static_len,
-        matches: payload.matches,
-        insert: payload.insert,
-        bi_buf: payload.bi_buf,
-        bi_valid: payload.bi_valid,
-        bi_used: payload.bi_used,
-        high_water: payload.high_water,
-        slid: payload.slid,
-    },
+            data_type: payload.data_type,
+            status: payload.status,
+            pending_buf: None,
+            pending_buf_size: payload.pending_buf_size,
+            pending_out: payload.pending_out,
+            pending: payload.pending,
+            callback_storage,
+            wrap: payload.wrap,
+            gzhead: payload.gzhead,
+            gzindex: payload.gzindex,
+            method: payload.method,
+            last_flush: payload.last_flush,
+            w_size: payload.w_size,
+            w_bits: payload.w_bits,
+            w_mask: payload.w_mask,
+            window: None,
+            window_size: payload.window_size,
+            prev: None,
+            head: None,
+            ins_h: payload.ins_h,
+            hash_size: payload.hash_size,
+            hash_bits: payload.hash_bits,
+            hash_mask: payload.hash_mask,
+            hash_shift: payload.hash_shift,
+            block_start: payload.block_start,
+            match_length: payload.match_length,
+            prev_match: payload.prev_match,
+            match_available: payload.match_available,
+            strstart: payload.strstart,
+            match_start: payload.match_start,
+            lookahead: payload.lookahead,
+            prev_length: payload.prev_length,
+            max_chain_length: payload.max_chain_length,
+            max_lazy_match: payload.max_lazy_match,
+            level: payload.level,
+            strategy: payload.strategy,
+            good_match: payload.good_match,
+            nice_match: payload.nice_match,
+            dyn_ltree: payload.tree.dyn_ltree,
+            dyn_dtree: payload.tree.dyn_dtree,
+            bl_tree: payload.tree.bl_tree,
+            l_desc: payload.tree.l_desc,
+            d_desc: payload.tree.d_desc,
+            bl_desc: payload.tree.bl_desc,
+            bl_count: payload.tree.bl_count,
+            heap: payload.tree.heap,
+            heap_len: payload.tree.heap_len,
+            heap_max: payload.tree.heap_max,
+            depth: payload.tree.depth,
+            sym_buf_start: payload.sym_buf_start,
+            lit_bufsize: payload.lit_bufsize,
+            sym_next: payload.sym_next,
+            sym_end: payload.sym_end,
+            opt_len: payload.opt_len,
+            static_len: payload.static_len,
+            matches: payload.matches,
+            insert: payload.insert,
+            bi_buf: payload.bi_buf,
+            bi_valid: payload.bi_valid,
+            bi_used: payload.bi_used,
+            high_water: payload.high_water,
+            slid: payload.slid,
+        },
     ) else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
@@ -6409,7 +6408,7 @@ unsafe fn deflate_copy_from_abi_boundary(
     let source_storage = source_storage
         .into_dispatch_storage()
         .expect("complete source copy storage projection");
-    let Some((_dest, destination_state, destination_storage)) =
+    let Some((_dest, _destination_state_handle, destination_state, destination_storage)) =
         deflate_stream_and_state(dest, DeflateStorageProjection::Complete)
     else {
         deflateEnd(::core::ptr::NonNull::from(dest));
