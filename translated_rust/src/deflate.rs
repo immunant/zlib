@@ -1371,6 +1371,19 @@ unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::
     let state = &*state;
     deflate_state_check_references(stream, state, state.strm == strm)
 }
+
+macro_rules! deflate_state_check_at_ffi_boundary {
+    ($strm:expr) => {{
+        let strm = $strm;
+        if strm.is_null() {
+            true
+        } else {
+            let state = (*strm).state;
+            state.is_null()
+                || deflate_state_check_references(&*strm, &*state, (*state).strm == strm) != 0
+        }
+    }};
+}
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
@@ -1684,23 +1697,37 @@ pub unsafe extern "C" fn deflateReset_ffi(
 ) -> ::core::ffi::c_int {
     deflateReset(strm)
 }
-pub unsafe extern "C" fn deflateSetHeader(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
-) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    (*(*strm).state).gzhead = head;
-    return crate::zlib_h::Z_OK;
+fn deflate_set_header_allowed(wrap: ::core::ffi::c_int) -> bool {
+    wrap == 2 as ::core::ffi::c_int
 }
+
+fn deflate_set_header_core(
+    state: &crate::src::deflate::deflate_state,
+) -> Result<(), ::core::ffi::c_int> {
+    if deflate_set_header_allowed(state.wrap) {
+        Ok(())
+    } else {
+        Err(crate::zlib_h::Z_STREAM_ERROR)
+    }
+}
+
 #[export_name = "deflateSetHeader"]
 
 pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    deflateSetHeader(strm, head)
+    if deflate_state_check_at_ffi_boundary!(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+
+    let state = &mut *(*strm).state;
+    if let Err(status) = deflate_set_header_core(state) {
+        return status;
+    }
+
+    state.gzhead = head;
+    crate::zlib_h::Z_OK
 }
 fn deflate_pending_value(pending: crate::zutil_h::ulg) -> Result<::core::ffi::c_uint, ()> {
     let value = pending as ::core::ffi::c_uint;
@@ -5049,6 +5076,14 @@ mod tests {
             deflate_dictionary_state_after_load(crate::stdlib::uInt::MAX, 1),
             (0, 0, 1, 0, previous_match_length, previous_match_length, 0),
         );
+    }
+
+    #[test]
+    fn deflate_set_header_requires_gzip_wrapping() {
+        assert!(!super::deflate_set_header_allowed(0));
+        assert!(!super::deflate_set_header_allowed(1));
+        assert!(super::deflate_set_header_allowed(2));
+        assert!(!super::deflate_set_header_allowed(-2));
     }
 
     #[test]
