@@ -206,19 +206,46 @@ fn gz_comp(
             || flush != crate::zlib_h::Z_NO_FLUSH
                 && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
         {
-            while strm.next_out > state.x.next {
+            loop {
+                let output_len = state.out.len();
+                let output_start = state.out.as_ptr().addr();
+                let Some(cursor) = state.x.next.addr().checked_sub(output_start) else {
+                    crate::src::gzlib::gz_static_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal write buffer corrupt\0",
+                    );
+                    return -1 as ::core::ffi::c_int;
+                };
+                let Some(produced) = strm.next_out.addr().checked_sub(output_start) else {
+                    crate::src::gzlib::gz_static_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal write buffer corrupt\0",
+                    );
+                    return -1 as ::core::ffi::c_int;
+                };
+                if cursor > produced || produced > output_len {
+                    crate::src::gzlib::gz_static_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal write buffer corrupt\0",
+                    );
+                    return -1 as ::core::ffi::c_int;
+                }
+                let pending = produced - cursor;
+                if pending == 0 {
+                    break;
+                }
                 gz_clear_errno();
                 state.again = 0 as ::core::ffi::c_int;
-                put = if unsafe { strm.next_out.offset_from(state.x.next) }
-                    > max as ::core::ffi::c_int as isize
-                {
-                    max
-                } else {
-                    unsafe { strm.next_out.offset_from(state.x.next) as ::core::ffi::c_uint }
-                };
+                put = pending.min(max as usize) as ::core::ffi::c_uint;
                 // The pending range is bounded by the gzip output buffer.
-                let output = unsafe { ::core::slice::from_raw_parts(state.x.next, put as usize) };
-                writ = match rustix::io::write(fd, output) {
+                let write_result = rustix::io::write(
+                    fd,
+                    &state.out[cursor..cursor + put as usize],
+                );
+                writ = match write_result {
                     Ok(written) => written as ::core::ffi::c_int,
                     Err(error) => {
                         if error == rustix::io::Errno::AGAIN
@@ -231,7 +258,7 @@ fn gz_comp(
                         return -1 as ::core::ffi::c_int;
                     }
                 };
-                state.x.next = state.x.next.wrapping_add(writ as usize);
+                state.x.next = state.out.as_mut_ptr().wrapping_add(cursor + writ as usize);
             }
             if strm.avail_out == 0 as crate::stdlib::uInt {
                 strm.avail_out = state.size as crate::stdlib::uInt;
