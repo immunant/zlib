@@ -1661,16 +1661,17 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if deflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    // The boundary macro above validated both compatibility records. Adopt
+    // them once so the bit-buffer state machine below has no repeated raw
+    // stream/state dereferences.
+    let s = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || (*s).sym_buf
-            < (*s).pending_out.wrapping_add(
+        || s.sym_buf
+            < s.pending_out.wrapping_add(
                 (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
                     as usize,
             )
@@ -1678,23 +1679,23 @@ pub unsafe extern "C" fn deflatePrime_ffi(
         return crate::zlib_h::Z_BUF_ERROR;
     }
     loop {
-        let Some(step) = prime_bits_step((*s).bi_buf, (*s).bi_valid, bits, value) else {
+        let Some(step) = prime_bits_step(s.bi_buf, s.bi_valid, bits, value) else {
             return crate::zlib_h::Z_BUF_ERROR;
         };
-        (*s).bi_buf = step.bi_buf;
-        (*s).bi_valid = step.bi_valid;
-        let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+        s.bi_buf = step.bi_buf;
+        s.bi_valid = step.bi_valid;
+        let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
             return crate::zlib_h::Z_BUF_ERROR;
         };
-        if pending_len != 0 && (*s).pending_buf.is_null() {
+        if pending_len != 0 && s.pending_buf.is_null() {
             return crate::zlib_h::Z_BUF_ERROR;
         }
         let pending_buf = if pending_len == 0 {
             &mut []
         } else {
-            ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+            ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
         };
-        crate::src::trees::flush_bits_state(&mut *s, pending_buf);
+        crate::src::trees::flush_bits_state(s, pending_buf);
         value = step.value;
         bits = step.bits;
         if bits == 0 {
