@@ -55,6 +55,7 @@ struct GzWriteFailure {
 // whether an operation may proceed.  Keep the policy independent from the
 // ABI-shaped owner: the eventual gzip-state facade can construct this directly
 // and leave all handle conversion at the boundary.
+#[derive(Clone, Copy)]
 struct GzWritePolicy {
     mode: ::core::ffi::c_int,
     err: ::core::ffi::c_int,
@@ -419,6 +420,65 @@ pub(crate) enum GzWriteOperation<'a> {
         strategy: ::core::ffi::c_int,
     },
     Close,
+}
+
+// Admission reads only scalar gzip state.  Keep that snapshot separate from
+// the ABI-shaped state adapter so the later persistent write owner can take
+// over operation selection without retaining a `gz_state` reference or any
+// of its callback-backed codec fields.
+#[derive(Clone, Copy)]
+struct GzWriteStateSnapshot {
+    policy: GzWritePolicy,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+}
+
+enum GzWriteAdmission<'a> {
+    Close,
+    Flush(GzFlushPlan),
+    SetParams {
+        level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+        plan: GzSetParamsPlan,
+    },
+    Write {
+        input: &'a [u8],
+        flavor: GzWriteFlavor,
+        policy: GzWritePolicy,
+    },
+}
+
+// This is deliberately limited to selection.  Clearing errors and mutating
+// gzip/codec state remain at the existing adapter until the write owner also
+// carries the complete embedded-deflater lifecycle.
+fn gzip_write_admission<'input>(
+    operation: GzWriteOperation<'input>,
+    state: GzWriteStateSnapshot,
+) -> GzWriteAdmission<'input> {
+    match operation {
+        GzWriteOperation::Close => GzWriteAdmission::Close,
+        GzWriteOperation::Flush { flush } => {
+            GzWriteAdmission::Flush(gzflush_plan(&state.policy, flush))
+        }
+        GzWriteOperation::SetParams { level, strategy } => GzWriteAdmission::SetParams {
+            level,
+            strategy,
+            plan: gzsetparams_plan(
+                &state.policy,
+                state.level,
+                state.strategy,
+                level,
+                strategy,
+                state.skip,
+            ),
+        },
+        GzWriteOperation::Write { input, flavor } => GzWriteAdmission::Write {
+            input,
+            flavor,
+            policy: state.policy,
+        },
+    }
 }
 
 fn gzwrite_plan<'input>(
@@ -1321,12 +1381,26 @@ pub(crate) unsafe fn gzip_write_state_adapter(
     state: &mut crate::gzguts_h::gz_state,
     operation: GzWriteOperation<'_>,
 ) -> crate::stdlib::z_size_t {
-    let (transaction, result) = match operation {
+    // Take a fresh scalar snapshot for every public operation.  Compressor
+    // requests can initialize, retune, or materialize a deferred seek, so a
+    // snapshot must never survive a request and be reused by the next one.
+    let snapshot = GzWriteStateSnapshot {
+        policy: GzWritePolicy {
+            mode: state.mode,
+            err: state.err,
+            again: state.again,
+            direct: state.direct,
+        },
+        level: state.level,
+        strategy: state.strategy,
+        skip: state.skip,
+    };
+    let (transaction, result) = match gzip_write_admission(operation, snapshot) {
         // Close is a write-side codec request followed by the pointer-free
         // resource transaction.  Keep it in this established state adapter
         // so the close path does not need a second ABI-shaped gzip facade.
-        GzWriteOperation::Close => {
-            let Some(mut result) = GzWriteCloseResult::begin(state.mode) else {
+        GzWriteAdmission::Close => {
+            let Some(mut result) = GzWriteCloseResult::begin(snapshot.policy.mode) else {
                 return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
             };
             let mut deflater_closed = false;
@@ -1351,14 +1425,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
             resources.release_write_buffers(deflater_closed);
             return result.finish(resources.finish()) as crate::stdlib::z_size_t;
         }
-        GzWriteOperation::Flush { flush } => {
-            let policy = GzWritePolicy {
-                mode: state.mode,
-                err: state.err,
-                again: state.again,
-                direct: state.direct,
-            };
-            let plan = gzflush_plan(&policy, flush);
+        GzWriteAdmission::Flush(plan) => {
             if matches!(plan, GzFlushPlan::Reject) {
                 return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
             }
@@ -1386,21 +1453,11 @@ pub(crate) unsafe fn gzip_write_state_adapter(
             }
             return state.err as crate::stdlib::z_size_t;
         }
-        GzWriteOperation::SetParams { level, strategy } => {
-            let policy = GzWritePolicy {
-                mode: state.mode,
-                err: state.err,
-                again: state.again,
-                direct: state.direct,
-            };
-            let plan = gzsetparams_plan(
-                &policy,
-                state.level,
-                state.strategy,
-                level,
-                strategy,
-                state.skip,
-            );
+        GzWriteAdmission::SetParams {
+            level,
+            strategy,
+            plan,
+        } => {
             if matches!(plan, GzSetParamsPlan::Reject) {
                 return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
             }
@@ -1443,13 +1500,11 @@ pub(crate) unsafe fn gzip_write_state_adapter(
             state.strategy = strategy;
             return crate::zlib_h::Z_OK as crate::stdlib::z_size_t;
         }
-        GzWriteOperation::Write { input, flavor } => {
-            let policy = GzWritePolicy {
-                mode: state.mode,
-                err: state.err,
-                again: state.again,
-                direct: state.direct,
-            };
+        GzWriteAdmission::Write {
+            input,
+            flavor,
+            policy,
+        } => {
             let plan = gzwrite_plan(
                 input,
                 flavor,
