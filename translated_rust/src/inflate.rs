@@ -95,10 +95,21 @@ pub fn inflate_error_message(strm: &crate::zlib_h::z_stream) -> Option<&'static 
         .copied()
         .find(|message| strm.msg == message.as_ptr().cast_mut())
 }
+
+/// Return a non-dereferenceable identity for an owning stream.
+///
+/// `inflate_state` is opaque at the ABI boundary, so its former raw stream
+/// back-pointer only served the malformed-stream association check. Retaining
+/// the address identity preserves that check without storing a second raw
+/// pointer that implementation code could follow.
+fn stream_identity(strm: &crate::zlib_h::z_stream) -> usize {
+    ::core::ptr::from_ref(strm).addr()
+}
+
 #[repr(C)]
 
 pub struct inflate_state {
-    pub strm: crate::zlib_h::z_streamp,
+    pub strm: usize,
     pub mode: crate::src::inflate::inflate_mode,
     pub last: ::core::ffi::c_int,
     pub wrap: ::core::ffi::c_int,
@@ -233,7 +244,7 @@ fn inflate_state_valid(
     state: &crate::src::inflate::inflate_state,
 ) -> bool {
     inflate_stream_has_allocators(strm)
-        && state.strm.cast_const() == ::core::ptr::from_ref(strm)
+        && state.strm == stream_identity(strm)
         && state.mode >= crate::src::inflate::HEAD
         && state.mode <= crate::src::inflate::SYNC
 }
@@ -376,7 +387,7 @@ fn initialize_inflate_state_base(
     state: &mut crate::src::inflate::inflate_state,
     strm: &mut crate::zlib_h::z_stream,
 ) {
-    state.strm = ::core::ptr::from_mut(strm);
+    state.strm = stream_identity(strm);
     state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     state.mode = crate::src::inflate::HEAD;
 }
@@ -2959,7 +2970,7 @@ pub fn inflateCopy(
     *dest_ref = *source_ref;
     let copy_ref = unsafe { &mut *copy };
     *copy_ref = copy_inflate_state(state_ref);
-    copy_ref.strm = ::core::ptr::from_mut(dest_ref);
+    copy_ref.strm = stream_identity(dest_ref);
     if let Some((lencode_index, distcode_index)) = table_indices {
         let copy_codes = ::core::ptr::from_mut(&mut copy_ref.codes).cast::<crate::src::inftrees::code>();
         copy_ref.lencode = copy_codes.wrapping_add(lencode_index);
