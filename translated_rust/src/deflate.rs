@@ -458,6 +458,60 @@ fn insert_pending_strings_state(
     true
 }
 
+fn clear_window_tail_state(
+    window: &mut [crate::stdlib::Byte],
+    window_size: crate::zutil_h::ulg,
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    high_water: &mut crate::zutil_h::ulg,
+) -> bool {
+    if *high_water >= window_size {
+        return true;
+    }
+    let Ok(window_size) = usize::try_from(window_size) else {
+        return false;
+    };
+    if window_size > window.len() {
+        return false;
+    }
+
+    let curr = (strstart as crate::zutil_h::ulg).wrapping_add(lookahead as crate::zutil_h::ulg);
+    let Ok(curr_index) = usize::try_from(curr) else {
+        return false;
+    };
+    if curr_index > window_size {
+        return false;
+    }
+    let high_water_value = *high_water;
+    let (start, init) = if *high_water < curr {
+        let init = window_size
+            .wrapping_sub(curr_index)
+            .min(crate::src::deflate::WIN_INIT as usize);
+        (curr_index, init)
+    } else if *high_water < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
+    {
+        let Ok(high_water) = usize::try_from(high_water_value) else {
+            return false;
+        };
+        let init = (curr
+            .wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
+            .wrapping_sub(high_water_value) as usize)
+            .min(window_size.wrapping_sub(high_water));
+        (high_water, init)
+    } else {
+        return true;
+    };
+    let Some(end) = start.checked_add(init) else {
+        return false;
+    };
+    if end > window_size {
+        return false;
+    }
+    window[start..end].fill(0);
+    *high_water = end as crate::zutil_h::ulg;
+    true
+}
+
 unsafe extern "C" fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
@@ -586,35 +640,25 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         }
     }
     if (*s).high_water < (*s).window_size {
-        let mut curr: crate::zutil_h::ulg = ((*s).strstart as crate::zutil_h::ulg)
-            .wrapping_add((*s).lookahead as crate::zutil_h::ulg);
-        let mut init: crate::zutil_h::ulg = 0;
-        if (*s).high_water < curr {
-            init = (*s).window_size.wrapping_sub(curr);
-            if init > crate::src::deflate::WIN_INIT as crate::zutil_h::ulg {
-                init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
-            }
-            crate::stdlib::memset(
-                (*s).window.offset(curr as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).high_water = curr.wrapping_add(init);
-        } else if (*s).high_water
-            < curr.wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-        {
-            init = curr
-                .wrapping_add(crate::src::deflate::WIN_INIT as crate::zutil_h::ulg)
-                .wrapping_sub((*s).high_water);
-            if init > (*s).window_size.wrapping_sub((*s).high_water) {
-                init = (*s).window_size.wrapping_sub((*s).high_water);
-            }
-            crate::stdlib::memset(
-                (*s).window.offset((*s).high_water as isize) as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).high_water = (*s).high_water.wrapping_add(init);
+        let Ok(window_len) = usize::try_from((*s).window_size) else {
+            return;
+        };
+        if window_len != 0 && (*s).window.is_null() {
+            return;
+        }
+        let window = if window_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut((*s).window, window_len)
+        };
+        if !clear_window_tail_state(
+            window,
+            (*s).window_size,
+            (*s).strstart,
+            (*s).lookahead,
+            &mut (*s).high_water,
+        ) {
+            return;
         }
     }
 }
