@@ -3716,10 +3716,10 @@ fn bi_windup(
     bi_windup_state(state, pending);
 }
 
-unsafe fn gen_codes(
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
-    mut bl_count: *mut crate::zutil_h::ushf,
+fn gen_codes(
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    bl_count: &[crate::zutil_h::ush],
 ) {
     let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
     let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
@@ -3727,19 +3727,19 @@ unsafe fn gen_codes(
     let mut n: ::core::ffi::c_int = 0;
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
-        code = code.wrapping_add(
-            *bl_count.offset((bits - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_uint
-        ) << 1 as ::core::ffi::c_int;
+        code = code.wrapping_add(bl_count[(bits - 1 as ::core::ffi::c_int) as usize]
+            as ::core::ffi::c_uint)
+            << 1 as ::core::ffi::c_int;
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
-        let mut len: ::core::ffi::c_int = (*tree.offset(n as isize)).dl.dad as ::core::ffi::c_int;
+        let len: ::core::ffi::c_int = tree[n as usize].dl.dad as ::core::ffi::c_int;
         if len != 0 as ::core::ffi::c_int {
             let c2rust_fresh57 = next_code[len as usize];
             next_code[len as usize] = next_code[len as usize].wrapping_add(1);
-            (*tree.offset(n as isize)).fc.freq =
+            tree[n as usize].fc.freq =
                 bi_reverse(c2rust_fresh57 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
         n += 1;
@@ -4028,11 +4028,8 @@ unsafe fn build_tree(
     (*s).heap_max -= 1;
     (*s).heap[(*s).heap_max as usize] = (*s).heap[SMALLEST as usize];
     gen_bitlen(s, desc);
-    gen_codes(
-        tree,
-        max_code,
-        &raw mut (*s).bl_count as *mut crate::zutil_h::ushf,
-    );
+    let codes = ::core::slice::from_raw_parts_mut(tree, elems as usize);
+    gen_codes(codes, max_code, &(*s).bl_count);
 }
 
 unsafe fn scan_tree(
