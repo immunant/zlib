@@ -1413,7 +1413,11 @@ pub unsafe extern "C" fn inflateBack(
                                 left,
                                 state_ref.length,
                             );
-                            from = put.offset(match_copy.from_offset);
+                            // `inflate_back_distance_fits()` above bounds this
+                            // window-relative back-reference. Keep the cursor
+                            // calculation non-unsafe; the bounded copy below
+                            // performs the actual accesses.
+                            from = put.wrapping_offset(match_copy.from_offset);
                             copy = match_copy.count;
                             inflate_back_consume_output_copy(
                                 state_ref,
