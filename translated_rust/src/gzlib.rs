@@ -1541,16 +1541,22 @@ fn gz_buffer(
     state.want = size;
     0
 }
+
+// Gzip file handles are opaque addresses. Resolve this one through the
+// owned-state registry so the exported ABI adapter need not recreate a
+// mutable reference from the foreign handle. Buffer configuration neither
+// removes the state nor calls through a user callback while the registry is
+// borrowed.
+fn gzbuffer_handle(file_key: usize, size: ::core::ffi::c_uint) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| gz_buffer(state, size)).unwrap_or(-1)
+}
 #[export_name = "gzbuffer"]
 
 pub unsafe extern "C" fn gzbuffer_ffi(
     mut file: crate::zlib_h::gzFile,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    gz_buffer(&mut *(file as crate::gzguts_h::gz_statep), size)
+    gzbuffer_handle(file.addr(), size)
 }
 // Rewind receives an already-bound state from its FFI entry point. Seeking a
 // descriptor has no memory precondition, so only error-record ownership below
