@@ -349,6 +349,26 @@ fn deflate_hash_update(
     (ins_h << hash_shift ^ byte as crate::stdlib::uInt) & hash_mask
 }
 
+fn deflate_insert_string(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    strstart: crate::stdlib::uInt,
+) -> crate::src::deflate::IPos {
+    state.ins_h = deflate_hash_update(
+        state.ins_h,
+        state.hash_shift,
+        state.hash_mask,
+        window[strstart.wrapping_add((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt)
+            as usize],
+    );
+    let previous_head = head[state.ins_h as usize];
+    prev[(strstart & state.w_mask) as usize] = previous_head;
+    head[state.ins_h as usize] = strstart as crate::src::deflate::Posf;
+    previous_head as crate::src::deflate::IPos
+}
+
 fn read_buf_updated_adler(
     wrap: ::core::ffi::c_int,
     adler: crate::stdlib::uLong,
@@ -2439,133 +2459,62 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 }
 fn longest_match(
     s: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+    prev: &[crate::src::deflate::Posf],
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
-    unsafe {
-        let mut chain_length: ::core::ffi::c_uint = s.max_chain_length as ::core::ffi::c_uint;
-        let mut scan: *mut crate::stdlib::Bytef = s.window.wrapping_offset(s.strstart as isize);
-        let mut match_0: *mut crate::stdlib::Bytef =
-            ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        let mut len: ::core::ffi::c_int = 0;
-        let mut best_len: ::core::ffi::c_int = s.prev_length as ::core::ffi::c_int;
-        let mut nice_match: ::core::ffi::c_int = s.nice_match;
-        let mut limit: crate::src::deflate::IPos = if s.strstart
-            > s.w_size
-                .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-        {
-            (s.strstart as crate::src::deflate::IPos).wrapping_sub(
-                s.w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
-            )
-        } else {
-            NIL as crate::src::deflate::IPos
-        };
-        let mut prev: *mut crate::src::deflate::Posf = s.prev;
-        let mut wmask: crate::stdlib::uInt = s.w_mask;
-        let mut strend: *mut crate::stdlib::Bytef = s
-            .window
-            .wrapping_offset(s.strstart as isize)
-            .wrapping_offset(crate::zutil_h::MAX_MATCH as isize);
-        let mut scan_end1: crate::stdlib::Byte = *scan
-            .wrapping_offset((best_len - 1 as ::core::ffi::c_int) as isize)
-            as crate::stdlib::Byte;
-        let mut scan_end: crate::stdlib::Byte =
-            *scan.wrapping_offset(best_len as isize) as crate::stdlib::Byte;
-        if s.prev_length >= s.good_match {
-            chain_length >>= 2 as ::core::ffi::c_int;
+    let mut chain_length: ::core::ffi::c_uint = s.max_chain_length as ::core::ffi::c_uint;
+    let mut best_len: usize = s.prev_length as usize;
+    let mut nice_match: usize = s.nice_match as usize;
+    let limit: crate::src::deflate::IPos = if s.strstart
+        > s.w_size
+            .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
+    {
+        (s.strstart as crate::src::deflate::IPos).wrapping_sub(
+            s.w_size
+                .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
+        )
+    } else {
+        NIL as crate::src::deflate::IPos
+    };
+    let scan_start = s.strstart as usize;
+    let wmask = s.w_mask;
+    if s.prev_length >= s.good_match {
+        chain_length >>= 2 as ::core::ffi::c_int;
+    }
+    if nice_match > s.lookahead as usize {
+        nice_match = s.lookahead as usize;
+    }
+    loop {
+        let match_start = cur_match as usize;
+        let max_len = (crate::zutil_h::MAX_MATCH as usize)
+            .min(window.len().saturating_sub(scan_start))
+            .min(window.len().saturating_sub(match_start));
+        let mut len = 0usize;
+        while len < max_len && window[scan_start + len] == window[match_start + len] {
+            len += 1;
         }
-        if nice_match as crate::stdlib::uInt > s.lookahead {
-            nice_match = s.lookahead as ::core::ffi::c_int;
-        }
-        loop {
-            match_0 = s.window.wrapping_offset(cur_match as isize);
-            if !(*match_0.wrapping_offset(best_len as isize) as ::core::ffi::c_int
-                != scan_end as ::core::ffi::c_int
-                || *match_0.wrapping_offset((best_len - 1 as ::core::ffi::c_int) as isize)
-                    as ::core::ffi::c_int
-                    != scan_end1 as ::core::ffi::c_int
-                || *match_0 as ::core::ffi::c_int != *scan as ::core::ffi::c_int
-                || {
-                    match_0 = match_0.wrapping_offset(1);
-                    *match_0 as ::core::ffi::c_int
-                        != *scan.wrapping_offset(1 as ::core::ffi::c_int as isize)
-                            as ::core::ffi::c_int
-                })
-            {
-                scan = scan.wrapping_offset(2 as ::core::ffi::c_int as isize);
-                match_0 = match_0.wrapping_offset(1);
-                loop {
-                    scan = scan.wrapping_offset(1);
-                    match_0 = match_0.wrapping_offset(1);
-                    if !(*scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                        && {
-                            scan = scan.wrapping_offset(1);
-                            match_0 = match_0.wrapping_offset(1);
-                            *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                        }
-                        && {
-                            scan = scan.wrapping_offset(1);
-                            match_0 = match_0.wrapping_offset(1);
-                            *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                        }
-                        && {
-                            scan = scan.wrapping_offset(1);
-                            match_0 = match_0.wrapping_offset(1);
-                            *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                        }
-                        && {
-                            scan = scan.wrapping_offset(1);
-                            match_0 = match_0.wrapping_offset(1);
-                            *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                        }
-                        && {
-                            scan = scan.wrapping_offset(1);
-                            match_0 = match_0.wrapping_offset(1);
-                            *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                        }
-                        && {
-                            scan = scan.wrapping_offset(1);
-                            match_0 = match_0.wrapping_offset(1);
-                            *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                        }
-                        && {
-                            scan = scan.wrapping_offset(1);
-                            match_0 = match_0.wrapping_offset(1);
-                            *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                        }
-                        && scan < strend)
-                    {
-                        break;
-                    }
-                }
-                len = crate::zutil_h::MAX_MATCH
-                    - (strend as usize).wrapping_sub(scan as usize) as ::core::ffi::c_int;
-                scan = strend.wrapping_offset(-(crate::zutil_h::MAX_MATCH as isize));
-                if len > best_len {
-                    s.match_start = cur_match as crate::stdlib::uInt;
-                    best_len = len;
-                    if len >= nice_match {
-                        break;
-                    }
-                    scan_end1 = *scan.wrapping_offset((best_len - 1 as ::core::ffi::c_int) as isize)
-                        as crate::stdlib::Byte;
-                    scan_end = *scan.wrapping_offset(best_len as isize) as crate::stdlib::Byte;
-                }
-            }
-            cur_match = *prev.wrapping_offset((cur_match as crate::stdlib::uInt & wmask) as isize)
-                as crate::src::deflate::IPos;
-            if !(cur_match > limit && {
-                chain_length = chain_length.wrapping_sub(1);
-                chain_length != 0 as ::core::ffi::c_uint
-            }) {
+        if len > best_len {
+            s.match_start = cur_match as crate::stdlib::uInt;
+            best_len = len;
+            if len >= nice_match {
                 break;
             }
         }
-        if best_len as crate::stdlib::uInt <= s.lookahead {
-            return best_len as crate::stdlib::uInt;
+        cur_match =
+            prev[(cur_match as crate::stdlib::uInt & wmask) as usize] as crate::src::deflate::IPos;
+        if cur_match <= limit {
+            break;
         }
-        return s.lookahead;
+        chain_length = chain_length.wrapping_sub(1);
+        if chain_length == 0 as ::core::ffi::c_uint {
+            break;
+        }
     }
+    if best_len as crate::stdlib::uInt <= s.lookahead {
+        return best_len as crate::stdlib::uInt;
+    }
+    s.lookahead
 }
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
@@ -2968,23 +2917,16 @@ fn deflate_fast(
                     break;
                 }
             }
+            let window =
+                &*::core::ptr::slice_from_raw_parts(state.window, state.window_size as usize);
+            let prev =
+                &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
+            let head =
+                &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
             hash_head = NIL as crate::src::deflate::IPos;
             if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-                state.ins_h = deflate_hash_update(
-                    state.ins_h,
-                    state.hash_shift,
-                    state.hash_mask,
-                    *state.window.wrapping_add(state.strstart.wrapping_add(
-                        (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                    ) as usize),
-                );
-                let previous_head = *state.head.wrapping_add(state.ins_h as usize);
-                *state
-                    .prev
-                    .wrapping_add((state.strstart & state.w_mask) as usize) = previous_head;
-                hash_head = previous_head as crate::src::deflate::IPos;
-                *state.head.wrapping_add(state.ins_h as usize) =
-                    state.strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                let strstart = state.strstart;
+                hash_head = deflate_insert_string(state, window, head, prev, strstart);
             }
             if hash_head != NIL as crate::src::deflate::IPos
                 && (state.strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
@@ -2992,7 +2934,7 @@ fn deflate_fast(
                         .w_size
                         .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
             {
-                state.match_length = longest_match(state, hash_head);
+                state.match_length = longest_match(state, window, prev, hash_head);
             }
             if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
                 let len: crate::zutil_h::uch =
@@ -3027,22 +2969,8 @@ fn deflate_fast(
                     state.match_length = state.match_length.wrapping_sub(1);
                     loop {
                         state.strstart = state.strstart.wrapping_add(1);
-                        state.ins_h = deflate_hash_update(
-                            state.ins_h,
-                            state.hash_shift,
-                            state.hash_mask,
-                            *state.window.wrapping_add(state.strstart.wrapping_add(
-                                (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int)
-                                    as crate::stdlib::uInt,
-                            ) as usize),
-                        );
-                        let previous_head = *state.head.wrapping_add(state.ins_h as usize);
-                        *state
-                            .prev
-                            .wrapping_add((state.strstart & state.w_mask) as usize) = previous_head;
-                        hash_head = previous_head as crate::src::deflate::IPos;
-                        *state.head.wrapping_add(state.ins_h as usize) =
-                            state.strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                        let strstart = state.strstart;
+                        hash_head = deflate_insert_string(state, window, head, prev, strstart);
                         state.match_length = state.match_length.wrapping_sub(1);
                         if !(state.match_length != 0 as crate::stdlib::uInt) {
                             break;
@@ -3052,20 +2980,17 @@ fn deflate_fast(
                 } else {
                     state.strstart = state.strstart.wrapping_add(state.match_length);
                     state.match_length = 0 as crate::stdlib::uInt;
-                    state.ins_h =
-                        *state.window.wrapping_add(state.strstart as usize) as crate::stdlib::uInt;
+                    state.ins_h = window[state.strstart as usize] as crate::stdlib::uInt;
                     state.ins_h = deflate_hash_update(
                         state.ins_h,
                         state.hash_shift,
                         state.hash_mask,
-                        *state.window.wrapping_add(
-                            state.strstart.wrapping_add(1 as crate::stdlib::uInt) as usize,
-                        ),
+                        window[state.strstart.wrapping_add(1 as crate::stdlib::uInt) as usize],
                     );
                 }
             } else {
                 let cc: crate::zutil_h::uch =
-                    *state.window.wrapping_add(state.strstart as usize) as crate::zutil_h::uch;
+                    window[state.strstart as usize] as crate::zutil_h::uch;
                 append_deflate_sym_bytes(
                     sym_buf,
                     &mut state.sym_next,
@@ -3165,23 +3090,16 @@ fn deflate_slow(
                     break;
                 }
             }
+            let window =
+                &*::core::ptr::slice_from_raw_parts(state.window, state.window_size as usize);
+            let prev =
+                &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
+            let head =
+                &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
             hash_head = NIL as crate::src::deflate::IPos;
             if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-                state.ins_h = deflate_hash_update(
-                    state.ins_h,
-                    state.hash_shift,
-                    state.hash_mask,
-                    *state.window.wrapping_add(state.strstart.wrapping_add(
-                        (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                    ) as usize),
-                );
-                let previous_head = *state.head.wrapping_add(state.ins_h as usize);
-                *state
-                    .prev
-                    .wrapping_add((state.strstart & state.w_mask) as usize) = previous_head;
-                hash_head = previous_head as crate::src::deflate::IPos;
-                *state.head.wrapping_add(state.ins_h as usize) =
-                    state.strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                let strstart = state.strstart;
+                hash_head = deflate_insert_string(state, window, head, prev, strstart);
             }
             state.prev_length = state.match_length;
             state.prev_match = state.match_start as crate::src::deflate::IPos;
@@ -3194,7 +3112,7 @@ fn deflate_slow(
                         .w_size
                         .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
             {
-                state.match_length = longest_match(state, hash_head);
+                state.match_length = longest_match(state, window, prev, hash_head);
                 if state.match_length <= 5 as crate::stdlib::uInt
                     && (state.strategy == crate::zlib_h::Z_FILTERED
                         || state.match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -3245,22 +3163,8 @@ fn deflate_slow(
                 loop {
                     state.strstart = state.strstart.wrapping_add(1);
                     if state.strstart <= max_insert {
-                        state.ins_h = deflate_hash_update(
-                            state.ins_h,
-                            state.hash_shift,
-                            state.hash_mask,
-                            *state.window.wrapping_add(state.strstart.wrapping_add(
-                                (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int)
-                                    as crate::stdlib::uInt,
-                            ) as usize),
-                        );
-                        let previous_head = *state.head.wrapping_add(state.ins_h as usize);
-                        *state
-                            .prev
-                            .wrapping_add((state.strstart & state.w_mask) as usize) = previous_head;
-                        hash_head = previous_head as crate::src::deflate::IPos;
-                        *state.head.wrapping_add(state.ins_h as usize) =
-                            state.strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                        let strstart = state.strstart;
+                        hash_head = deflate_insert_string(state, window, head, prev, strstart);
                     }
                     state.prev_length = state.prev_length.wrapping_sub(1);
                     if !(state.prev_length != 0 as crate::stdlib::uInt) {
@@ -3293,9 +3197,8 @@ fn deflate_slow(
                     }
                 }
             } else if state.match_available != 0 {
-                let cc: crate::zutil_h::uch = *state
-                    .window
-                    .wrapping_add(state.strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize)
+                let cc: crate::zutil_h::uch = window
+                    [state.strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize]
                     as crate::zutil_h::uch;
                 append_deflate_sym_bytes(
                     sym_buf,
@@ -3334,9 +3237,10 @@ fn deflate_slow(
             }
         }
         if state.match_available != 0 {
-            let cc_0: crate::zutil_h::uch = *state
-                .window
-                .wrapping_add(state.strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize)
+            let window =
+                &*::core::ptr::slice_from_raw_parts(state.window, state.window_size as usize);
+            let cc_0: crate::zutil_h::uch = window
+                [state.strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize]
                 as crate::zutil_h::uch;
             append_deflate_sym_bytes(
                 sym_buf,
