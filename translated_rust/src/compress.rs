@@ -127,9 +127,7 @@ macro_rules! compress2_z_at_boundary {
             }
         }
         *destLen = compress_output_len(capacity, left, stream.avail_out);
-        crate::src::deflate::deflateEnd(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
+        crate::src::deflate::deflateEnd(&mut stream);
         if err == crate::zlib_h::Z_STREAM_END {
             crate::zlib_h::Z_OK
         } else {

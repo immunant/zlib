@@ -1037,8 +1037,10 @@ pub fn deflateInit2_(
         if windowBits == 8 as ::core::ffi::c_int {
             windowBits = 9 as ::core::ffi::c_int;
         }
-        s = Some(strm_ref.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+        let Some(zalloc) = strm_ref.zalloc else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        s = zalloc(
             strm_ref.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
@@ -1076,34 +1078,43 @@ pub fn deflateInit2_(
         // Do not retain the state borrow across a custom allocator callback.
         // Publish each allocation immediately, matching zlib's observable
         // partial-initialization state for allocator hooks.
-        let window = Some(strm_ref.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+        let Some(zalloc) = strm_ref.zalloc else {
+            let _ = deflateEnd(strm_ref);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let window = zalloc(
             strm_ref.opaque,
             w_size,
             (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
                 as crate::stdlib::uInt,
         ) as *mut crate::stdlib::Bytef;
         (&mut *s).window = window;
-        let prev = Some(strm_ref.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+        let Some(zalloc) = strm_ref.zalloc else {
+            let _ = deflateEnd(strm_ref);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let prev = zalloc(
             strm_ref.opaque,
             w_size,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
         (&mut *s).prev = prev;
-        let head = Some(strm_ref.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+        let Some(zalloc) = strm_ref.zalloc else {
+            let _ = deflateEnd(strm_ref);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let head = zalloc(
             strm_ref.opaque,
             hash_size,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
         (&mut *s).head = head;
-        let pending_buf = Some(strm_ref.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm_ref.opaque,
-            lit_bufsize,
-            4 as crate::stdlib::uInt,
-        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+        let Some(zalloc) = strm_ref.zalloc else {
+            let _ = deflateEnd(strm_ref);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let pending_buf = zalloc(strm_ref.opaque, lit_bufsize, 4 as crate::stdlib::uInt)
+            as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
         (&mut *s).pending_buf = pending_buf;
         if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
             (&mut *s).status = crate::src::deflate::FINISH_STATE;
@@ -3255,7 +3266,7 @@ fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
     }
 }
 
-pub fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     // This compatibility teardown still has to adopt the ABI stream/state
     // records and invoke its C allocator. Keep that work at this codec
     // boundary so Rust callers do not inherit an unsafe-function contract.
@@ -3264,10 +3275,6 @@ pub fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
         // allocation. A custom `zfree` is foreign code, so do not retain a Rust
         // borrow of the stream or state while it runs.
         let (state_ptr, zfree, opaque, status, pending_buf, head, prev, window) = {
-            if strm.is_null() {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            let strm = &mut *strm;
             let state_ptr = strm.state as *mut crate::src::deflate::deflate_state;
             if state_ptr.is_null() {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -3281,9 +3288,12 @@ pub fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
             ) {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
+            let Some(zfree) = strm.zfree else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
             let snapshot = (
                 state_ptr,
-                strm.zfree.expect("non-null function pointer"),
+                zfree,
                 strm.opaque,
                 state.status,
                 state.pending_buf,
@@ -3306,14 +3316,17 @@ pub fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
             zfree(opaque, window as crate::stdlib::voidpf);
         }
         zfree(opaque, state_ptr as crate::stdlib::voidpf);
-        (&mut *strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
         deflate_end_status(status)
     }
 }
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    deflateEnd(strm)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflateEnd(&mut *strm)
 }
 #[export_name = "deflateCopy"]
 pub unsafe extern "C" fn deflateCopy_ffi(
@@ -3364,23 +3377,23 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         || dest_state.head.is_null()
         || dest_state.pending_buf.is_null()
     {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     let Some(window_len) = usize::try_from(dest_state.window_size).ok() else {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some(prev_capacity) = usize::try_from(dest_state.w_size).ok() else {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some(head_len) = usize::try_from(dest_state.hash_size).ok() else {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some(pending_capacity) = usize::try_from(dest_state.pending_buf_size).ok() else {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if (window_len != 0 && source_state.window.is_null())
@@ -3388,7 +3401,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         || (head_len != 0 && source_state.head.is_null())
         || (pending_capacity != 0 && source_state.pending_buf.is_null())
     {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let window_len_to_copy = usize::try_from(source_state.high_water)
@@ -3445,7 +3458,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
             },
         )
     else {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let src_window = if window_len == 0 {
@@ -3504,7 +3517,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         dst_sym,
         src_sym,
     ) {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     dest_state.pending_out = dest_state.pending_buf.wrapping_add(pending_range.start);

@@ -111,9 +111,7 @@ macro_rules! gzclose_write_at_boundary {
                 }
                 if state_ref.size != 0 {
                     if state_ref.direct == 0 {
-                        crate::src::deflate::deflateEnd(
-                            &raw mut state_ref.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-                        );
+                        crate::src::deflate::deflateEnd(&mut state_ref.strm);
                     }
                 }
                 let fd = crate::src::gzclose::gzclose_write_release_state(state_ref);
