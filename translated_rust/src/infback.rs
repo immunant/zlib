@@ -73,6 +73,27 @@ fn set_back_error(strm: &mut crate::zlib_h::z_stream_s, message: &'static [u8]) 
     strm.msg = message.as_ptr() as *mut ::core::ffi::c_char;
 }
 
+fn copy_match_bytes(
+    window: &mut [u8],
+    source: usize,
+    destination: usize,
+    count: usize,
+) -> bool {
+    let Some(source_end) = source.checked_add(count) else {
+        return false;
+    };
+    let Some(destination_end) = destination.checked_add(count) else {
+        return false;
+    };
+    if source_end > window.len() || destination_end > window.len() {
+        return false;
+    }
+    for offset in 0..count {
+        window[destination + offset] = window[source + offset];
+    }
+    true
+}
+
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -159,7 +180,6 @@ pub unsafe fn inflateBack(
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -943,30 +963,30 @@ pub unsafe fn inflateBack(
                                     break '_inf_leave;
                                 }
                             }
+                            let put_index = state.wsize.wrapping_sub(left) as usize;
                             copy = state.wsize.wrapping_sub(state.offset);
+                            let from_index: usize;
                             if copy < left {
-                                from = put.offset(copy as isize);
+                                from_index = put_index + copy as usize;
                                 copy = left.wrapping_sub(copy);
                             } else {
-                                from = put.offset(-(state.offset as isize));
+                                from_index = put_index.wrapping_sub(state.offset as usize);
                                 copy = left;
                             }
                             if copy > state.length {
                                 copy = state.length;
                             }
+                            let window = ::core::slice::from_raw_parts_mut(
+                                state.window,
+                                state.wsize as usize,
+                            );
+                            if !copy_match_bytes(window, from_index, put_index, copy as usize) {
+                                ret = crate::zlib_h::Z_STREAM_ERROR;
+                                break '_inf_leave;
+                            }
                             state.length = state.length.wrapping_sub(copy);
                             left = left.wrapping_sub(copy);
-                            loop {
-                                let c2rust_fresh20 = from;
-                                from = from.offset(1);
-                                let c2rust_fresh21 = put;
-                                put = put.offset(1);
-                                *c2rust_fresh21 = *c2rust_fresh20;
-                                copy = copy.wrapping_sub(1);
-                                if copy == 0 {
-                                    break;
-                                }
-                            }
+                            put = state.window.wrapping_add(put_index + copy as usize);
                             if state.length == 0 as ::core::ffi::c_uint {
                                 break;
                             }
