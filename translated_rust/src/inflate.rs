@@ -3667,6 +3667,22 @@ fn inflate_copy_match_from_output(
     true
 }
 
+/// Copy one bounded segment from the initialized history window.
+///
+/// The caller supplies the output range for this single match step.  Wrapped
+/// histories are deliberately represented by separate match plans, so this
+/// never treats the callback-backed window allocation as a wrapping slice.
+fn inflate_copy_match_from_window(
+    window: &[crate::stdlib::Bytef],
+    wnext: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    index: ::core::ffi::c_uint,
+    count: ::core::ffi::c_uint,
+    output: &mut [crate::stdlib::Bytef],
+) -> Option<WindowMatchStep> {
+    WindowStorage::new(window, wnext, whave)?.copy_match_to(index, count, output)
+}
+
 fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
     let mut got = *have;
     let mut next = 0_usize;
@@ -4016,6 +4032,7 @@ mod tests {
         inflate_align_to_byte_boundary, inflate_apply_gzip_header_completion,
         inflate_assign_data_type, inflate_block_header, inflate_call_progress,
         inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
+        inflate_copy_match_from_window,
         inflate_copy_progress, inflate_data_type_value, inflate_dictionary_checksum,
         inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
         inflate_distance_extra_update, inflate_flush_stops_after_fixed_trees,
@@ -4509,6 +4526,31 @@ mod tests {
 
         assert!(inflate_copy_match_from_output(&mut output, 3, 1, 0));
         assert_eq!(output, original);
+    }
+
+    #[test]
+    fn inflate_window_match_copy_stops_at_the_wrapped_suffix() {
+        let window = *b"abcdefgh";
+        let mut output = *b"____";
+
+        assert_eq!(
+            inflate_copy_match_from_window(&window, 3, 8, 6, 5, &mut output),
+            Some(super::WindowMatchStep {
+                segment: super::WindowMatchSegment { start: 6, len: 2 },
+                remaining: 3,
+                next_index: Some(0),
+            })
+        );
+        assert_eq!(output, *b"gh__");
+    }
+
+    #[test]
+    fn inflate_window_match_copy_rejects_invalid_partial_history_without_writing() {
+        let window = *b"abc_____";
+        let mut output = *b"__";
+
+        assert_eq!(inflate_copy_match_from_window(&window, 2, 3, 0, 2, &mut output), None);
+        assert_eq!(output, *b"__");
     }
 
     #[test]
