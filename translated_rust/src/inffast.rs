@@ -46,12 +46,11 @@ pub use crate::zlib_h::gz_headerp;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
-pub unsafe extern "C" fn inflate_fast(
+pub unsafe fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
+    state: &mut crate::src::inflate::inflate_state,
     mut start: ::core::ffi::c_uint,
 ) {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut last: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -75,7 +74,6 @@ pub unsafe extern "C" fn inflate_fast(
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
     in_0 = crate::input_pointer!((*strm).next_in) as *mut ::core::ffi::c_uchar;
     last = in_0.offset((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
     out = (*strm).next_out as *mut ::core::ffi::c_uchar;
@@ -177,7 +175,10 @@ pub unsafe extern "C" fn inflate_fast(
                             op = dist.wrapping_sub(op);
                             if op > whave {
                                 if (*state).sane != 0 {
-                                    crate::zlib_h::set_stream_message(&mut *strm, c"invalid distance too far back");
+                                    crate::zlib_h::set_stream_message(
+                                        &mut *strm,
+                                        c"invalid distance too far back",
+                                    );
                                     (*state).mode = crate::src::inflate::BAD;
                                     break 's_627;
                                 }
@@ -389,7 +390,9 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
 ) {
-    inflate_fast(strm, start)
+    if let Some(state_handle) = (&*strm).inflate_state() {
+        inflate_fast(strm, &mut state_handle.borrow_mut(), start)
+    }
 }
 pub use crate::src::inflate::inflate_mode;
 pub use crate::src::inflate::inflate_state;

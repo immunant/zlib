@@ -156,7 +156,7 @@ unsafe extern "C" fn gz_open(
             avail_out: 0,
             total_out: 0,
             msg: None,
-            state: ::core::ptr::null_mut(),
+            state: None,
             zalloc: None,
             zfree: None,
             opaque: crate::zlib_h::Opaque::default(),
@@ -164,7 +164,6 @@ unsafe extern "C" fn gz_open(
             adler: 0,
             reserved: 0,
         },
-        deflate_state_key: None,
     }));
     while *mode != 0 {
         if *mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int

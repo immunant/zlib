@@ -129,11 +129,6 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_MEM_ERROR, Some(c"out of memory"));
         return -1 as ::core::ffi::c_int;
     }
-    state.deflate_state_key = crate::src::deflate::take_last_deflate_state_key();
-    if state.deflate_state_key.is_none() {
-        crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_MEM_ERROR, Some(c"out of memory"));
-        return -1 as ::core::ffi::c_int;
-    }
     state.strm.next_in = crate::zlib_h::InputBuffer::default();
     state.size = state.want;
     state.out_start = 0;
@@ -163,11 +158,10 @@ fn gz_comp(
         if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        if let Some(state_key) = state.deflate_state_key {
-            crate::src::deflate::deflateReset(&mut state.strm, state_key);
-        } else {
+        let Some(deflate_state) = state.strm.deflate_state() else {
             return -1;
-        }
+        };
+        crate::src::deflate::deflateReset(&mut state.strm, &mut deflate_state.borrow_mut());
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
@@ -200,7 +194,7 @@ fn gz_comp(
             }
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(&mut state.strm, flush);
+        ret = crate::src::deflate::deflate_stream(&mut state.strm, flush);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error_safe(
                 state,
@@ -603,7 +597,6 @@ pub unsafe extern "C" fn gzflush_ffi(
 }
 fn gzsetparams(
     state: &mut crate::gzguts_h::gz_state,
-    deflate_state: Option<&mut crate::src::deflate::deflate_state>,
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -623,10 +616,15 @@ fn gzsetparams(
         {
             return state.err;
         }
-        let Some(deflate_state) = deflate_state else {
+        let Some(deflate_state) = state.strm.deflate_state() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        crate::src::deflate::deflateParams(&mut state.strm, deflate_state, level, strategy);
+        crate::src::deflate::deflateParams(
+            &mut state.strm,
+            &mut deflate_state.borrow_mut(),
+            level,
+            strategy,
+        );
     }
     state.level = level;
     state.strategy = strategy;
@@ -643,12 +641,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let deflate_state = if state.size == 0 {
-        None
-    } else {
-        state.strm.state.as_mut()
-    };
-    gzsetparams(state, deflate_state, level, strategy)
+    gzsetparams(state, level, strategy)
 }
 pub struct GzCloseWrite {
     pub result: ::core::ffi::c_int,

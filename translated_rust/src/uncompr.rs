@@ -40,7 +40,7 @@ pub unsafe extern "C" fn uncompress2_z(
         avail_out: 0,
         total_out: 0,
         msg: None,
-        state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
+        state: None,
         zalloc: None,
         zfree: None,
         opaque: crate::zlib_h::Opaque::default(),

@@ -82,9 +82,6 @@ pub mod gzguts_h {
         pub err: ::core::ffi::c_int,
         pub msg: Option<std::ffi::CString>,
         pub strm: crate::zlib_h::z_stream,
-        // The deflater is Rust-owned; retain its registry key so gzip
-        // implementation code never needs to follow `strm.state`.
-        pub deflate_state_key: Option<usize>,
     }
 
     pub type gz_statep = *mut crate::gzguts_h::gz_state;
@@ -144,11 +141,7 @@ pub mod zlib_h {
     };
 
     pub type alloc_func = Option<
-        extern "C" fn(
-            Opaque,
-            crate::stdlib::uInt,
-            crate::stdlib::uInt,
-        ) -> crate::stdlib::voidpf,
+        extern "C" fn(Opaque, crate::stdlib::uInt, crate::stdlib::uInt) -> crate::stdlib::voidpf,
     >;
 
     pub type free_func = Option<extern "C" fn(Opaque, crate::stdlib::voidpf) -> ()>;
@@ -176,9 +169,17 @@ pub mod zlib_h {
         }
     }
 
+    /// The compressor and decompressor use different private state types.  C
+    /// stored either allocation behind `z_stream::state`; Rust keeps that
+    /// choice explicit and owns the allocation instead.
+    #[derive(Clone)]
+    pub enum StreamState {
+        Deflate(::std::rc::Rc<::std::cell::RefCell<crate::src::deflate::internal_state>>),
+        Inflate(::std::rc::Rc<::std::cell::RefCell<crate::src::inflate::inflate_state>>),
+    }
+
     #[derive(Clone)]
     #[repr(C)]
-
     pub struct z_stream_s {
         pub next_in: InputBuffer,
         pub avail_in: crate::stdlib::uInt,
@@ -189,7 +190,9 @@ pub mod zlib_h {
         // `Rc<CString>` owns a fixed diagnostic without a raw pointer while the
         // nullable smart pointer retains the original one-word C ABI layout.
         pub msg: Option<::std::rc::Rc<::std::ffi::CString>>,
-        pub state: *mut crate::src::deflate::internal_state,
+        // This remains one word, but is now a nullable Rust-owned state
+        // handle rather than an untyped allocation pointer.
+        pub state: Option<Box<StreamState>>,
         pub zalloc: crate::zlib_h::alloc_func,
         pub zfree: crate::zlib_h::free_func,
         pub opaque: Opaque,
@@ -198,15 +201,46 @@ pub mod zlib_h {
         pub reserved: crate::stdlib::uLong,
     }
 
-    pub fn set_stream_message(
-        stream: &mut z_stream_s,
-        message: &'static ::core::ffi::CStr,
-    ) {
+    pub fn set_stream_message(stream: &mut z_stream_s, message: &'static ::core::ffi::CStr) {
         stream.msg = crate::stream_message!(message);
     }
 
     pub fn clear_stream_message(stream: &mut z_stream_s) {
         stream.msg = None;
+    }
+
+    impl z_stream_s {
+        pub fn deflate_state(
+            &self,
+        ) -> Option<::std::rc::Rc<::std::cell::RefCell<crate::src::deflate::internal_state>>>
+        {
+            match self.state.as_deref() {
+                Some(StreamState::Deflate(state)) => Some(::std::rc::Rc::clone(state)),
+                _ => None,
+            }
+        }
+
+        pub fn inflate_state(
+            &self,
+        ) -> Option<::std::rc::Rc<::std::cell::RefCell<crate::src::inflate::inflate_state>>>
+        {
+            match self.state.as_deref() {
+                Some(StreamState::Inflate(state)) => Some(::std::rc::Rc::clone(state)),
+                _ => None,
+            }
+        }
+
+        pub fn set_deflate_state(&mut self, state: crate::src::deflate::internal_state) {
+            self.state = Some(Box::new(StreamState::Deflate(::std::rc::Rc::new(
+                ::std::cell::RefCell::new(state),
+            ))));
+        }
+
+        pub fn set_inflate_state(&mut self, state: crate::src::inflate::inflate_state) {
+            self.state = Some(Box::new(StreamState::Inflate(::std::rc::Rc::new(
+                ::std::cell::RefCell::new(state),
+            ))));
+        }
     }
 
     pub type z_streamp = *mut crate::zlib_h::z_stream;

@@ -74,8 +74,6 @@ pub unsafe extern "C" fn inflateBackInit_(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if version.is_null()
         || *version.offset(0 as isize) as ::core::ffi::c_int
             != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
@@ -98,23 +96,14 @@ pub unsafe extern "C" fn inflateBackInit_(
     if (*strm).zfree.is_none() {
         (*strm).zfree = Some(crate::src::zutil::zcfree);
     }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
-    (*state).window = window;
-    (*state).wnext = 0 as ::core::ffi::c_uint;
-    (*state).whave = 0 as ::core::ffi::c_uint;
-    (*state).sane = 1 as ::core::ffi::c_int;
+    let mut state = crate::src::inflate::inflate_state::default();
+    state.strm = strm;
+    state.dmax = 32768 as ::core::ffi::c_uint;
+    state.wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
+    state.wsize = (1 as ::core::ffi::c_uint) << windowBits;
+    state.window = window;
+    state.sane = 1 as ::core::ffi::c_int;
+    (*strm).set_inflate_state(state);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackInit_"]
@@ -135,8 +124,6 @@ pub unsafe extern "C" fn inflateBack(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
@@ -178,10 +165,13 @@ pub unsafe extern "C" fn inflateBack(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if strm.is_null() || (*strm).state.is_null() {
+    if strm.is_null() || (&*strm).inflate_state().is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state_handle = (&*strm)
+        .inflate_state()
+        .expect("inflate-back state was checked above");
+    let mut state = state_handle.borrow_mut();
     crate::zlib_h::clear_stream_message(&mut *strm);
     (*state).mode = crate::src::inflate::TYPE;
     (*state).last = 0 as ::core::ffi::c_int;
@@ -238,9 +228,7 @@ pub unsafe extern "C" fn inflateBack(
                             (*state).mode = crate::src::inflate::STORED;
                         }
                         1 => {
-                            crate::src::inftrees::inflate_fixed(
-                                state as *mut crate::src::inflate::inflate_state,
-                            );
+                            crate::src::inftrees::inflate_fixed(&mut *state);
                             (*state).mode = crate::src::inflate::LEN;
                         }
                         2 => {
@@ -361,7 +349,10 @@ pub unsafe extern "C" fn inflateBack(
                 if (*state).nlen > 286 as ::core::ffi::c_uint
                     || (*state).ndist > 30 as ::core::ffi::c_uint
                 {
-                    crate::zlib_h::set_stream_message(&mut *strm, c"too many length or distance symbols");
+                    crate::zlib_h::set_stream_message(
+                        &mut *strm,
+                        c"too many length or distance symbols",
+                    );
                     (*state).mode = crate::src::inflate::BAD;
                     continue;
                 } else {
@@ -414,7 +405,7 @@ pub unsafe extern "C" fn inflateBack(
                         &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                     );
                     if ret != 0 {
-                    crate::zlib_h::set_stream_message(&mut *strm, c"invalid code lengths set");
+                        crate::zlib_h::set_stream_message(&mut *strm, c"invalid code lengths set");
                         (*state).mode = crate::src::inflate::BAD;
                         continue;
                     } else {
@@ -484,7 +475,10 @@ pub unsafe extern "C" fn inflateBack(
                                     hold >>= here.bits as ::core::ffi::c_int;
                                     bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
                                     if (*state).have == 0 as ::core::ffi::c_uint {
-                                        crate::zlib_h::set_stream_message(&mut *strm, c"invalid bit length repeat");
+                                        crate::zlib_h::set_stream_message(
+                                            &mut *strm,
+                                            c"invalid bit length repeat",
+                                        );
                                         (*state).mode = crate::src::inflate::BAD;
                                         break;
                                     } else {
@@ -587,7 +581,10 @@ pub unsafe extern "C" fn inflateBack(
                                 if (*state).have.wrapping_add(copy)
                                     > (*state).nlen.wrapping_add((*state).ndist)
                                 {
-                                    crate::zlib_h::set_stream_message(&mut *strm, c"invalid bit length repeat");
+                                    crate::zlib_h::set_stream_message(
+                                        &mut *strm,
+                                        c"invalid bit length repeat",
+                                    );
                                     (*state).mode = crate::src::inflate::BAD;
                                     break;
                                 } else {
@@ -613,7 +610,10 @@ pub unsafe extern "C" fn inflateBack(
                         if (*state).lens[256 as usize] as ::core::ffi::c_int
                             == 0 as ::core::ffi::c_int
                         {
-                            crate::zlib_h::set_stream_message(&mut *strm, c"invalid code -- missing end-of-block");
+                            crate::zlib_h::set_stream_message(
+                                &mut *strm,
+                                c"invalid code -- missing end-of-block",
+                            );
                             (*state).mode = crate::src::inflate::BAD;
                             continue;
                         } else {
@@ -631,7 +631,10 @@ pub unsafe extern "C" fn inflateBack(
                                 &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                             );
                             if ret != 0 {
-                                crate::zlib_h::set_stream_message(&mut *strm, c"invalid literal/lengths set");
+                                crate::zlib_h::set_stream_message(
+                                    &mut *strm,
+                                    c"invalid literal/lengths set",
+                                );
                                 (*state).mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
@@ -649,7 +652,10 @@ pub unsafe extern "C" fn inflateBack(
                                     &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                                 );
                                 if ret != 0 {
-                                    crate::zlib_h::set_stream_message(&mut *strm, c"invalid distances set");
+                                    crate::zlib_h::set_stream_message(
+                                        &mut *strm,
+                                        c"invalid distances set",
+                                    );
                                     (*state).mode = crate::src::inflate::BAD;
                                     continue;
                                 } else {
@@ -681,9 +687,11 @@ pub unsafe extern "C" fn inflateBack(
             (*strm).avail_in = have as crate::stdlib::uInt;
             (*state).hold = hold;
             (*state).bits = bits;
+            let wsize = (*state).wsize;
             crate::src::inffast::inflate_fast(
                 strm as *mut crate::zlib_h::z_stream_s,
-                (*state).wsize,
+                &mut *state,
+                wsize,
             );
             put = (*strm).next_out as *mut ::core::ffi::c_uchar;
             left = (*strm).avail_out as ::core::ffi::c_uint;
@@ -914,7 +922,10 @@ pub unsafe extern "C" fn inflateBack(
                                 0 as ::core::ffi::c_uint
                             })
                     {
-                        crate::zlib_h::set_stream_message(&mut *strm, c"invalid distance too far back");
+                        crate::zlib_h::set_stream_message(
+                            &mut *strm,
+                            c"invalid distance too far back",
+                        );
                         (*state).mode = crate::src::inflate::BAD;
                     } else {
                         loop {
@@ -988,14 +999,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
     inflateBack(strm, in_0, in_desc, out, out_desc)
 }
 pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
+    if strm.is_null() || (&*strm).inflate_state().is_none() || (*strm).zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    (*strm).state = None;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackEnd"]
