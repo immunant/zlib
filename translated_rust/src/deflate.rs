@@ -3239,53 +3239,53 @@ fn deflate_stored_impl(
 }
 
 // `deflate_fast` is the established configuration-table target for fast
-// compression. It now owns the common raw-buffer binding for every
-// symbol-based strategy, leaving the other strategy dispatchers
-// reference- and slice-based.
+// compression. Reuse the common window/hash/input binder used by the stored
+// strategy, leaving this dispatcher to bind only its pending, symbol, and
+// caller-output ranges.
 fn deflate_fast(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
     // SAFETY: the validated compression dispatch supplies one live deflater
-    // and its bounded allocations and caller cursors for this call.
+    // and its bounded pending/symbol allocations plus caller output cursor.
+    // `fill_window()` binds the remaining validated state and input ranges.
     unsafe {
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
         let pending =
             ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
         let symbols = ::core::slice::from_raw_parts_mut(
             state.sym_buf,
             state.lit_bufsize.wrapping_mul(3) as usize,
         );
-        let input = if stream.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-        };
         let output = if stream.avail_out == 0 {
             &mut []
         } else {
             ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
         };
-        if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff_impl(
-                state, stream, window, head, prev, pending, symbols, input, output, flush,
-            )
-        } else if state.strategy == crate::zlib_h::Z_RLE {
-            deflate_rle_impl(
-                state, stream, window, head, prev, pending, symbols, input, output, flush,
-            )
-        } else if state.level <= 3 {
-            deflate_fast_impl(
-                state, stream, window, head, prev, pending, symbols, input, output, flush,
-            )
-        } else {
-            deflate_slow_impl(
-                state, stream, window, head, prev, pending, symbols, input, output, flush,
-            )
-        }
+        fill_window(
+            state,
+            stream,
+            true,
+            |state, stream, window, head, prev, input| {
+                if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
+                    deflate_huff_impl(
+                        state, stream, window, head, prev, pending, symbols, input, output, flush,
+                    )
+                } else if state.strategy == crate::zlib_h::Z_RLE {
+                    deflate_rle_impl(
+                        state, stream, window, head, prev, pending, symbols, input, output, flush,
+                    )
+                } else if state.level <= 3 {
+                    deflate_fast_impl(
+                        state, stream, window, head, prev, pending, symbols, input, output, flush,
+                    )
+                } else {
+                    deflate_slow_impl(
+                        state, stream, window, head, prev, pending, symbols, input, output, flush,
+                    )
+                }
+            },
+        )
     }
 }
 
