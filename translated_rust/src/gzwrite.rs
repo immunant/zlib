@@ -114,6 +114,28 @@ fn gzputs_length_fits_int(len: crate::stdlib::z_size_t) -> bool {
     (len as ::core::ffi::c_int) >= 0 && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
 }
 
+// The compressed large-write path is bounded by zlib's uInt input cursor,
+// independently of the caller slice. Keep that chunk selection pointer-free
+// so a future gzip write owner can carry this cursor policy without an ABI
+// stream.
+struct GzCompressionChunk {
+    input_len: crate::stdlib::uInt,
+}
+
+impl GzCompressionChunk {
+    fn next(remaining: crate::stdlib::z_size_t) -> Self {
+        let mut input_len = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
+        if input_len as crate::stdlib::z_size_t > remaining {
+            input_len = remaining as crate::stdlib::uInt;
+        }
+        Self { input_len }
+    }
+
+    fn consumed(&self, remaining: crate::stdlib::uInt) -> crate::stdlib::uInt {
+        self.input_len.wrapping_sub(remaining)
+    }
+}
+
 fn gzfwrite_length(
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
@@ -719,16 +741,13 @@ unsafe fn gz_write(
         }
         state.strm.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
         loop {
-            let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            if n as crate::stdlib::z_size_t > len {
-                n = len as ::core::ffi::c_uint;
-            }
-            state.strm.avail_in = n as crate::stdlib::uInt;
+            let chunk = GzCompressionChunk::next(len);
+            state.strm.avail_in = chunk.input_len;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, Some(input));
-            n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
-            state.x.pos += n as crate::stdlib::off64_t;
-            input = &input[n as usize..];
-            len = len.wrapping_sub(n as crate::stdlib::z_size_t);
+            let consumed = chunk.consumed(state.strm.avail_in);
+            state.x.pos += consumed as crate::stdlib::off64_t;
+            input = &input[consumed as usize..];
+            len = len.wrapping_sub(consumed as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
                 return if state.again != 0 {
                     put.wrapping_sub(len)
