@@ -52,6 +52,45 @@ struct GzWriteFailure {
     would_block: bool,
 }
 
+// This is the pointer-free portion of the gzip write state that determines
+// whether an operation may proceed.  Keep the policy independent from the
+// ABI-shaped owner: the eventual gzip-state facade can construct this directly
+// and leave all handle conversion at the boundary.
+struct GzWritePolicy {
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    direct: ::core::ffi::c_int,
+}
+
+impl GzWritePolicy {
+    fn accepts_write(&self) -> bool {
+        self.mode == crate::gzguts_h::GZ_WRITE
+            && (self.err == crate::zlib_h::Z_OK || self.again != 0)
+    }
+
+    fn accepts_params(&self) -> bool {
+        self.accepts_write() && self.direct == 0
+    }
+}
+
+fn gzwrite_length_fits_int(len: usize) -> bool {
+    (len as ::core::ffi::c_uint as ::core::ffi::c_int) >= 0
+}
+
+fn gzputs_length_fits_int(len: crate::stdlib::z_size_t) -> bool {
+    (len as ::core::ffi::c_int) >= 0
+        && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
+}
+
+fn gzfwrite_length(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<crate::stdlib::z_size_t> {
+    let len = nitems.wrapping_mul(size);
+    (size == 0 || len.wrapping_div(size) == nitems).then_some(len)
+}
+
 fn gz_write_failure(errno_value: ::core::ffi::c_int) -> GzWriteFailure {
     GzWriteFailure {
         errno_value,
@@ -384,13 +423,17 @@ unsafe fn gzwrite(
         return 0 as ::core::ffi::c_int;
     };
     let state = state.as_mut();
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-    {
+    let policy = GzWritePolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+        direct: state.direct,
+    };
+    if !policy.accepts_write() {
         return 0 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
-    if (input.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
+    if !gzwrite_length_fits_int(input.len()) {
         crate::src::gzlib::gz_set_error(
             &mut state.msg,
             &mut state.err,
@@ -427,19 +470,21 @@ unsafe fn gzfwrite(
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
     let Some(mut state) = state else {
         return 0 as crate::stdlib::z_size_t;
     };
     let state = state.as_mut();
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-    {
+    let policy = GzWritePolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+        direct: state.direct,
+    };
+    if !policy.accepts_write() {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
+    let Some(len) = gzfwrite_length(size, nitems) else {
         crate::src::gzlib::gz_set_error(
             &mut state.msg,
             &mut state.err,
@@ -450,7 +495,7 @@ unsafe fn gzfwrite(
             Some(b"request does not fit in a size_t"),
         );
         return 0 as crate::stdlib::z_size_t;
-    }
+    };
     return if len != 0 {
         gz_write(state, input).wrapping_div(size)
     } else {
@@ -486,9 +531,13 @@ unsafe fn gzputc(
         return -1 as ::core::ffi::c_int;
     };
     let state = state.as_mut();
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-    {
+    let policy = GzWritePolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+        direct: state.direct,
+    };
+    if !policy.accepts_write() {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
@@ -550,22 +599,22 @@ unsafe fn gzputs(
     mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
     text: &[u8],
 ) -> ::core::ffi::c_int {
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut put: crate::stdlib::z_size_t = 0;
     let Some(mut state) = state else {
         return -1 as ::core::ffi::c_int;
     };
     let state = state.as_mut();
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-    {
+    let policy = GzWritePolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+        direct: state.direct,
+    };
+    if !policy.accepts_write() {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
-    len = text.len() as crate::stdlib::z_size_t;
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
-        || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
-    {
+    let len = text.len() as crate::stdlib::z_size_t;
+    if !gzputs_length_fits_int(len) {
         crate::src::gzlib::gz_set_error(
             &mut state.msg,
             &mut state.err,
@@ -577,7 +626,7 @@ unsafe fn gzputs(
         );
         return -1 as ::core::ffi::c_int;
     }
-    put = gz_write(state, text);
+    let put = gz_write(state, text);
     return if len != 0 && put == 0 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
@@ -607,9 +656,13 @@ unsafe fn gzflush(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let state = state.as_mut();
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-    {
+    let policy = GzWritePolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+        direct: state.direct,
+    };
+    if !policy.accepts_write() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
@@ -642,10 +695,13 @@ unsafe fn gzsetparams(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let state = state.as_mut();
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-        || state.direct != 0
-    {
+    let policy = GzWritePolicy {
+        mode: state.mode,
+        err: state.err,
+        again: state.again,
+        direct: state.direct,
+    };
+    if !policy.accepts_params() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
