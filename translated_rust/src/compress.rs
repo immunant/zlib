@@ -93,14 +93,14 @@ fn compress_stream() -> crate::zlib_h::z_stream {
     }
 }
 
-// Raw byte cursors are only carried into the stream here; their associated
-// lengths have already been bound as references by the caller.  The driver
-// never dereferences either cursor directly, so keep this implementation
-// safe and reserve the foreign-pointer binding for the exported adapters.
-pub fn compress2_z(
-    mut dest: *mut crate::stdlib::Bytef,
+// The one-shot driver receives byte ranges already bound by its ABI adapter.
+// It still preserves a null zero-capacity output cursor when publishing the
+// temporary stream: `deflate()` distinguishes that C cursor state before it
+// examines `avail_out`.
+fn compress2_z_bound(
+    mut dest: Option<&mut [crate::stdlib::Bytef]>,
     destLen: &mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
+    source: Option<&[crate::stdlib::Bytef]>,
     mut sourceLen: crate::stdlib::z_size_t,
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -109,7 +109,7 @@ pub fn compress2_z(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;
     let mut capacity: crate::stdlib::z_size_t = 0;
-    if !compress_buffers_valid(source.is_null(), sourceLen, dest.is_null(), *destLen) {
+    if !compress_buffers_valid(source.is_none(), sourceLen, dest.is_none(), *destLen) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     capacity = *destLen;
@@ -127,9 +127,13 @@ pub fn compress2_z(
     if err != crate::zlib_h::Z_OK {
         return err;
     }
-    stream.next_out = dest;
+    stream.next_out = dest
+        .as_deref_mut()
+        .map_or(::core::ptr::null_mut(), <[crate::stdlib::Bytef]>::as_mut_ptr);
     stream.avail_out = 0 as crate::stdlib::uInt;
-    stream.next_in = source as *mut crate::stdlib::Bytef;
+    stream.next_in = source
+        .map_or(::core::ptr::null(), <[crate::stdlib::Bytef]>::as_ptr)
+        as *mut crate::stdlib::Bytef;
     stream.avail_in = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
@@ -167,9 +171,50 @@ pub unsafe extern "C" fn compress2_z_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // SAFETY: the foreign caller supplied the required destination-length
-    // output pointer. `compress2_z` validates the associated byte buffers.
-    compress2_z(dest, unsafe { &mut *destLen }, source, sourceLen, level)
+    // output pointer and its advertised byte ranges. The named driver owns
+    // all compression behavior after this one ABI binding.
+    let dest_len = unsafe { &mut *destLen };
+    // This preflight must precede every range binding: zlib reports an
+    // invalid null/nonzero pair without touching the other caller cursor.
+    if !compress_buffers_valid(source.is_null(), sourceLen, dest.is_null(), *dest_len) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let destination = if dest.is_null() {
+        None
+    } else if *dest_len == 0 {
+        Some(&mut [] as &mut [crate::stdlib::Bytef])
+    } else {
+        Some(unsafe { ::core::slice::from_raw_parts_mut(dest, *dest_len) })
+    };
+    let source = if source.is_null() {
+        None
+    } else if sourceLen == 0 {
+        Some(&[] as &[crate::stdlib::Bytef])
+    } else {
+        Some(unsafe { ::core::slice::from_raw_parts(source, sourceLen) })
+    };
+    compress2_z_bound(destination, dest_len, source, sourceLen, level)
 }
+
+fn compress2_legacy_bound(
+    destination: Option<&mut [crate::stdlib::Bytef]>,
+    dest_len: &mut crate::stdlib::uLongf,
+    source: Option<&[crate::stdlib::Bytef]>,
+    source_len: crate::stdlib::uLong,
+    level: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let mut got = *dest_len as crate::stdlib::z_size_t;
+    let ret = compress2_z_bound(
+        destination,
+        &mut got,
+        source,
+        source_len as crate::stdlib::z_size_t,
+        level,
+    );
+    *dest_len = got as crate::stdlib::uLong as crate::stdlib::uLongf;
+    ret
+}
+
 #[export_name = "compress2"]
 pub unsafe extern "C" fn compress2_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -181,19 +226,36 @@ pub unsafe extern "C" fn compress2_ffi(
     if destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // The ABI boundary binds the length output and performs the legacy-width
-    // conversion; the named size_t implementation retains buffer handling.
+    // Bind the legacy output and both advertised byte ranges once. Width
+    // conversion remains in the named safe dispatcher.
     let dest_len = unsafe { &mut *destLen };
-    let mut got = *dest_len as crate::stdlib::z_size_t;
-    let ret = compress2_z(
-        dest,
-        &mut got,
-        source,
+    if !compress_buffers_valid(
+        source.is_null(),
         sourceLen as crate::stdlib::z_size_t,
-        level,
-    );
-    *dest_len = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    ret
+        dest.is_null(),
+        *dest_len as crate::stdlib::z_size_t,
+    ) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let destination = if dest.is_null() {
+        None
+    } else if *dest_len == 0 {
+        Some(&mut [] as &mut [crate::stdlib::Bytef])
+    } else {
+        Some(unsafe {
+            ::core::slice::from_raw_parts_mut(dest, *dest_len as crate::stdlib::z_size_t)
+        })
+    };
+    let source = if source.is_null() {
+        None
+    } else if sourceLen == 0 {
+        Some(&[] as &[crate::stdlib::Bytef])
+    } else {
+        Some(unsafe {
+            ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t)
+        })
+    };
+    compress2_legacy_bound(destination, dest_len, source, sourceLen, level)
 }
 #[export_name = "compress_z"]
 
@@ -206,11 +268,28 @@ pub unsafe extern "C" fn compress_z_ffi(
     if destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // The only ABI work is binding the length output before dispatching to
-    // the size_t implementation with zlib's default level.
-    compress2_z(
-        dest,
-        unsafe { &mut *destLen },
+    // Bind the caller ranges before dispatching to the named size_t driver.
+    let dest_len = unsafe { &mut *destLen };
+    if !compress_buffers_valid(source.is_null(), sourceLen, dest.is_null(), *dest_len) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let destination = if dest.is_null() {
+        None
+    } else if *dest_len == 0 {
+        Some(&mut [] as &mut [crate::stdlib::Bytef])
+    } else {
+        Some(unsafe { ::core::slice::from_raw_parts_mut(dest, *dest_len) })
+    };
+    let source = if source.is_null() {
+        None
+    } else if sourceLen == 0 {
+        Some(&[] as &[crate::stdlib::Bytef])
+    } else {
+        Some(unsafe { ::core::slice::from_raw_parts(source, sourceLen) })
+    };
+    compress2_z_bound(
+        destination,
+        dest_len,
         source,
         sourceLen,
         crate::zlib_h::Z_DEFAULT_COMPRESSION,
@@ -227,19 +306,41 @@ pub unsafe extern "C" fn compress_ffi(
     if destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // As with `compress2_ffi`, retain legacy-width conversion at the ABI
-    // edge and keep the raw buffers in the named size_t implementation.
+    // Bind the legacy output and byte ranges before the safe dispatcher.
     let dest_len = unsafe { &mut *destLen };
-    let mut got = *dest_len as crate::stdlib::z_size_t;
-    let ret = compress2_z(
-        dest,
-        &mut got,
-        source,
+    if !compress_buffers_valid(
+        source.is_null(),
         sourceLen as crate::stdlib::z_size_t,
+        dest.is_null(),
+        *dest_len as crate::stdlib::z_size_t,
+    ) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let destination = if dest.is_null() {
+        None
+    } else if *dest_len == 0 {
+        Some(&mut [] as &mut [crate::stdlib::Bytef])
+    } else {
+        Some(unsafe {
+            ::core::slice::from_raw_parts_mut(dest, *dest_len as crate::stdlib::z_size_t)
+        })
+    };
+    let source = if source.is_null() {
+        None
+    } else if sourceLen == 0 {
+        Some(&[] as &[crate::stdlib::Bytef])
+    } else {
+        Some(unsafe {
+            ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t)
+        })
+    };
+    compress2_legacy_bound(
+        destination,
+        dest_len,
+        source,
+        sourceLen,
         crate::zlib_h::Z_DEFAULT_COMPRESSION,
-    );
-    *dest_len = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    ret
+    )
 }
 // Keep the bound calculation value-only so the exported ABI functions only
 // select their public integer width.  The wrapping arithmetic and overflow
