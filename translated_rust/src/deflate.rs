@@ -1632,7 +1632,8 @@ macro_rules! deflate_state_check_at_ffi_boundary {
         }
     }};
 }
-pub unsafe extern "C" fn deflateSetDictionary(
+#[export_name = "deflateSetDictionary"]
+pub unsafe extern "C" fn deflateSetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
@@ -1723,15 +1724,6 @@ pub unsafe extern "C" fn deflateSetDictionary(
     (*strm).avail_in = avail as crate::stdlib::uInt;
     (*s).wrap = wrap;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "deflateSetDictionary"]
-
-pub unsafe extern "C" fn deflateSetDictionary_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    deflateSetDictionary(strm, dictionary, dictLength)
 }
 fn deflate_dictionary_len(
     strstart: crate::stdlib::uInt,
