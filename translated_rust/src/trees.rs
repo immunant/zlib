@@ -3766,6 +3766,13 @@ fn bit_length_correction(
         .wrapping_mul(frequency)
 }
 
+fn tree_bit_length_cost(
+    frequency: crate::zutil_h::ulg,
+    bit_length: crate::zutil_h::ulg,
+) -> crate::zutil_h::ulg {
+    frequency.wrapping_mul(bit_length)
+}
+
 fn tally_symbol_bytes(
     dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
@@ -4081,19 +4088,16 @@ unsafe fn gen_bitlen(
                 xbits = *extra.offset((n - base) as isize) as ::core::ffi::c_int;
             }
             f = (*tree.offset(n as isize)).fc.value;
-            (*s).opt_len =
-                (*s).opt_len
-                    .wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
-                        (bits + xbits) as ::core::ffi::c_uint as crate::zutil_h::ulg,
-                    ));
+            (*s).opt_len = (*s).opt_len.wrapping_add(tree_bit_length_cost(
+                f as crate::zutil_h::ulg,
+                (bits + xbits) as ::core::ffi::c_uint as crate::zutil_h::ulg,
+            ));
             if !stree.is_null() {
-                (*s).static_len =
-                    (*s).static_len
-                        .wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
-                            ((*stree.offset(n as isize)).dl.len as ::core::ffi::c_int + xbits)
-                                as ::core::ffi::c_uint
-                                as crate::zutil_h::ulg,
-                        ));
+                (*s).static_len = (*s).static_len.wrapping_add(tree_bit_length_cost(
+                    f as crate::zutil_h::ulg,
+                    ((*stree.offset(n as isize)).dl.len as ::core::ffi::c_int + xbits)
+                        as ::core::ffi::c_uint as crate::zutil_h::ulg,
+                ));
             }
         }
         h += 1;
@@ -5358,9 +5362,9 @@ mod tests {
         pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
         reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
-        tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_next_cursor,
-        tree_parent_depth, tree_run_continues, tree_run_limits, BlockEncoding, HeapChild,
-        ScanTreeAction, TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
+        tree_next_cursor, tree_parent_depth, tree_run_continues, tree_run_limits, BlockEncoding,
+        HeapChild, ScanTreeAction, TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5668,6 +5672,15 @@ mod tests {
     fn bit_length_correction_preserves_unsigned_wrapping_delta() {
         assert_eq!(bit_length_correction(7, 4, 3), 9);
         assert_eq!(bit_length_correction(3, 5, 2), crate::zutil_h::ulg::MAX - 3);
+    }
+
+    #[test]
+    fn tree_bit_length_cost_multiplies_with_unsigned_wrapping() {
+        assert_eq!(tree_bit_length_cost(7, 3), 21);
+        assert_eq!(
+            tree_bit_length_cost(crate::zutil_h::ulg::MAX, 2),
+            crate::zutil_h::ulg::MAX.wrapping_sub(1),
+        );
     }
 
     #[test]

@@ -251,6 +251,14 @@ fn inflate_is_gzip_header(wrap: ::core::ffi::c_int, hold: crate::stdlib::uLong) 
     wrap & 2 != 0 && hold == 0x8b1f as crate::stdlib::uLong
 }
 
+fn inflate_gzip_window_bits(wbits: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    if wbits == 0 {
+        15
+    } else {
+        wbits
+    }
+}
+
 fn inflate_zlib_header_error(
     wrap: ::core::ffi::c_int,
     hold: crate::stdlib::uLong,
@@ -1111,9 +1119,7 @@ pub unsafe extern "C" fn inflate(
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     if inflate_is_gzip_header((*state).wrap, hold) {
-                        if (*state).wbits == 0 as ::core::ffi::c_uint {
-                            (*state).wbits = 15 as ::core::ffi::c_uint;
-                        }
+                        (*state).wbits = inflate_gzip_window_bits((*state).wbits);
                         (*state).check = crate::src::crc32::CRC32_INITIAL as ::core::ffi::c_ulong;
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
@@ -3071,14 +3077,14 @@ mod tests {
         inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
         inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
         inflate_gzip_flags_error, inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_extra,
-        inflate_gzip_header_has_name, inflate_head_skip_mode, inflate_header_crc_enabled,
-        inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
-        inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
-        inflate_mode_is_valid, inflate_mode_on_entry, inflate_needs_buffer_error,
-        inflate_output_checksum, inflate_prime_update, inflate_reset2_discards_window,
-        inflate_reset2_params, inflate_reset_keep_adler, inflate_should_update_window,
-        inflate_state_check_impl, inflate_state_check_result, inflate_state_is_usable,
-        inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
+        inflate_gzip_header_has_name, inflate_gzip_window_bits, inflate_head_skip_mode,
+        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
+        inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
+        inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_mode_on_entry,
+        inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
+        inflate_reset2_discards_window, inflate_reset2_params, inflate_reset_keep_adler,
+        inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
+        inflate_state_is_usable, inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
@@ -3178,6 +3184,13 @@ mod tests {
         assert!(inflate_is_gzip_header(3, 0x8b1f));
         assert!(!inflate_is_gzip_header(1, 0x8b1f));
         assert!(!inflate_is_gzip_header(2, 0x1f8b));
+    }
+
+    #[test]
+    fn inflate_gzip_window_bits_defaults_only_zero_width() {
+        assert_eq!(inflate_gzip_window_bits(0), 15);
+        assert_eq!(inflate_gzip_window_bits(8), 8);
+        assert_eq!(inflate_gzip_window_bits(15), 15);
     }
 
     #[test]
