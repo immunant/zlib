@@ -208,7 +208,7 @@ pub(crate) fn inflate_one_shot(
             .wrapping_add(stream.avail_out as crate::stdlib::z_size_t),
     };
     unsafe {
-        inflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+        inflateEnd(&mut stream);
     }
     Ok(progress)
 }
@@ -2857,10 +2857,7 @@ pub unsafe extern "C" fn inflate_ffi(
     };
     inflate(strm, flush)
 }
-pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let Some(stream) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+pub unsafe fn inflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     // Keep the ABI projections at the callback-release boundary.  The
     // window must be dropped before the caller-owned state allocation is
     // released, and the stream must continue to point at that state during
@@ -2879,7 +2876,10 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    inflateEnd(strm)
+    let Some(stream) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflateEnd(stream)
 }
 #[export_name = "inflateGetDictionary"]
 

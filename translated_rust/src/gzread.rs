@@ -1641,9 +1641,7 @@ pub unsafe fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if state.buffers.size != 0 {
-        crate::src::inflate::inflateEnd(
-            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
+        crate::src::inflate::inflateEnd(&mut state.strm);
         state.buffers.output = None;
         state.buffers.input = None;
     }

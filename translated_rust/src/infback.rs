@@ -1354,5 +1354,8 @@ pub unsafe extern "C" fn inflateBack_ffi(
 pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     crate::src::inflate::inflateEnd(strm)
 }
