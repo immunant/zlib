@@ -3395,15 +3395,17 @@ unsafe extern "C" fn deflate_rle(
             (*s).strstart = (*s).strstart.wrapping_add(1);
         }
         if bflush != 0 {
+            let block = if state.block_start >= 0 as ::core::ffi::c_long {
+                window[state.block_start as usize..state.strstart as usize]
+                    .as_ptr()
+                    .cast_mut()
+                    .cast::<crate::stdlib::charf>()
+            } else {
+                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            };
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
-                if (*s).block_start >= 0 as ::core::ffi::c_long {
-                    (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
+                block,
                 ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
                 0 as ::core::ffi::c_int,
             );
