@@ -204,7 +204,7 @@ pub use crate::zutil_h::DEF_WBITS;
 // It validates the two associated allocations and then returns their bound
 // references, so small inflater operations do not need to repeat raw stream
 // and state dereferences after checking them.
-unsafe fn inflateStateCheck<'a>(
+fn inflateStateCheck<'a>(
     mut strm: crate::zlib_h::z_streamp,
 ) -> Option<(
     &'a mut crate::zlib_h::z_stream,
@@ -213,16 +213,21 @@ unsafe fn inflateStateCheck<'a>(
     if strm.is_null() {
         return None;
     }
-    let strm_ref = &mut *strm;
-    let state_ptr = strm_ref.state as *mut crate::src::inflate::inflate_state;
-    if state_ptr.is_null() {
-        return None;
+    // SAFETY: this private adapter first rejects null stream and state
+    // pointers, then validates their reciprocal link and state range before
+    // exposing either allocation to its reference-only callers.
+    unsafe {
+        let strm_ref = &mut *strm;
+        let state_ptr = strm_ref.state as *mut crate::src::inflate::inflate_state;
+        if state_ptr.is_null() {
+            return None;
+        }
+        let state = &mut *state_ptr;
+        if !inflate_state_is_valid(strm_ref, state, state.strm == strm) {
+            return None;
+        }
+        Some((strm_ref, state))
     }
-    let state = &mut *state_ptr;
-    if !inflate_state_is_valid(strm_ref, state, state.strm == strm) {
-        return None;
-    }
-    Some((strm_ref, state))
 }
 
 fn inflate_state_is_valid(
