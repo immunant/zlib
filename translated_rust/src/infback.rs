@@ -1243,13 +1243,15 @@ where
 // decoder work: after assembling a pointer-free invocation owner, it calls
 // `inflateBack()` and only writes the completed scalar/cursor state back to
 // the caller's stream.
-pub unsafe extern "C" fn inflateBack(
+pub unsafe fn inflateBack<InputVisitor, OutputVisitor>(
     strm: &mut crate::zlib_h::z_stream_s,
-    mut in_0: crate::zlib_h::in_func,
-    mut in_desc: *mut ::core::ffi::c_void,
-    mut out: crate::zlib_h::out_func,
-    mut out_desc: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
+    input_visit: InputVisitor,
+    output_visit: OutputVisitor,
+) -> ::core::ffi::c_int
+where
+    InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
+    OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
+{
     // Keep this state borrow tied to the stream for the entire invocation.
     // The decoder tables and owned back-mode workspace cannot outlive either
     // the stream association check or the callback-backed state.
@@ -1260,16 +1262,7 @@ pub unsafe extern "C" fn inflateBack(
     raw_state.decoder.normal.mode = crate::src::inflate::TYPE;
     raw_state.decoder.normal.last = 0;
     raw_state.decoder.normal.whave = 0;
-    let mut next = strm.next_in as *mut ::core::ffi::c_uchar;
-    let mut have = if next.is_null() {
-        0
-    } else {
-        strm.avail_in as ::core::ffi::c_uint
-    };
-    let back_window = raw_state
-        .back_window
-        .as_mut()
-        .expect("inflateBack window");
+    let back_window = raw_state.back_window.as_mut().expect("inflateBack window");
     let window = &mut back_window.bytes.as_mut()[..raw_state.decoder.normal.wsize as usize];
     let mut state = InflateBackDecoderState {
         mode: raw_state.decoder.normal.mode,
@@ -1294,28 +1287,8 @@ pub unsafe extern "C" fn inflateBack(
         codes: &mut raw_state.decoder.normal.codes,
         sane: raw_state.decoder.normal.sane,
     };
-    let output = InflateBackOutput::new(window, |bytes| {
-        out.expect("non-null function pointer")(
-            out_desc,
-            bytes.as_ptr().cast_mut(),
-            bytes.len() as u32,
-        )
-    });
-    let input = InflateBackInput::new(|consume| {
-        if have == 0 {
-            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-            if have == 0 {
-                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                return;
-            }
-        }
-        // The visitor returns exactly the consumed prefix, which is then the
-        // only portion reflected in the raw cursor published on return.
-        let bytes = ::core::slice::from_raw_parts(next, have as usize);
-        let used = consume(bytes).min(bytes.len());
-        next = next.wrapping_add(used);
-        have = have.wrapping_sub(used as ::core::ffi::c_uint);
-    });
+    let output = InflateBackOutput::new(window, output_visit);
+    let input = InflateBackInput::new(input_visit);
     let mut invocation = InflateBackInvocation {
         state,
         input,
@@ -1344,8 +1317,6 @@ pub unsafe extern "C" fn inflateBack(
     if let Some(message) = completion.result.message {
         strm.msg = message.as_ptr().cast_mut().cast();
     }
-    strm.next_in = next as *mut crate::stdlib::Bytef;
-    strm.avail_in = have as crate::stdlib::uInt;
     completion.result.status
 }
 #[export_name = "inflateBack"]
@@ -1360,7 +1331,45 @@ pub unsafe extern "C" fn inflateBack_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateBack(strm, in_0, in_desc, out, out_desc)
+    // Raw callback cursor adaptation belongs to the ABI boundary.  The named
+    // decoder implementation sees only scoped input slices and output slices;
+    // this wrapper retains the callback-provided cursor and republishes it
+    // only after that decoder request has completed.
+    let mut next = strm.next_in.cast::<::core::ffi::c_uchar>();
+    let mut have = if next.is_null() {
+        0
+    } else {
+        strm.avail_in as ::core::ffi::c_uint
+    };
+    let status = inflateBack(
+        strm,
+        |consume| {
+            if have == 0 {
+                have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                if have == 0 {
+                    next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                    return;
+                }
+            }
+            // The callback cursor is exposed only for this invocation of the
+            // continuation.  It never escapes as a fabricated long-lived
+            // slice or reference.
+            let bytes = ::core::slice::from_raw_parts(next, have as usize);
+            let used = consume(bytes).min(bytes.len());
+            next = next.wrapping_add(used);
+            have = have.wrapping_sub(used as ::core::ffi::c_uint);
+        },
+        |bytes| {
+            out.expect("non-null function pointer")(
+                out_desc,
+                bytes.as_ptr().cast_mut(),
+                bytes.len() as u32,
+            )
+        },
+    );
+    strm.next_in = next.cast::<crate::stdlib::Bytef>();
+    strm.avail_in = have as crate::stdlib::uInt;
+    status
 }
 #[export_name = "inflateBackEnd"]
 
