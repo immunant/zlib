@@ -2833,6 +2833,23 @@ fn stored_block_available_output(
     }
 }
 
+fn stored_block_payload_len(
+    left: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    available_output: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let max_stored = MAX_STORED as ::core::ffi::c_uint;
+    let input_available =
+        (left as crate::zutil_h::ulg).wrapping_add(avail_in as crate::zutil_h::ulg);
+    let payload_len = if (max_stored as crate::zutil_h::ulg) > input_available {
+        (left as crate::stdlib::uInt).wrapping_add(avail_in) as ::core::ffi::c_uint
+    } else {
+        max_stored
+    };
+
+    payload_len.min(available_output)
+}
+
 fn stored_block_should_wait(
     len: ::core::ffi::c_uint,
     min_block: ::core::ffi::c_uint,
@@ -2901,16 +2918,7 @@ unsafe extern "C" fn deflate_stored(
         };
         have = available_output;
         left = ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as ::core::ffi::c_uint;
-        if len as crate::zutil_h::ulg
-            > (left as crate::zutil_h::ulg)
-                .wrapping_add((*(*s).strm).avail_in as crate::zutil_h::ulg)
-        {
-            len = (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in)
-                as ::core::ffi::c_uint;
-        }
-        if len > have {
-            len = have;
-        }
+        len = stored_block_payload_len(left, (*(*s).strm).avail_in, have);
         if stored_block_should_wait(len, min_block, left, (*(*s).strm).avail_in, flush) {
             break;
         }
@@ -3989,9 +3997,9 @@ mod tests {
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_len,
         read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
         stored_block_available_output, stored_block_can_emit, stored_block_is_last,
-        stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
-        symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction, DeflatePreflight,
-        DeflateRleRefillAction,
+        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction,
+        DeflatePreflight, DeflateRleRefillAction,
     };
 
     #[test]
@@ -4587,6 +4595,24 @@ mod tests {
         assert_eq!(stored_block_available_output(7, 5), None);
         assert_eq!(stored_block_available_output(7, 9), Some(3));
         assert_eq!(stored_block_available_output(-1, 5), Some(0));
+    }
+
+    #[test]
+    fn stored_block_payload_len_limits_input_maximum_and_output_capacity() {
+        assert_eq!(stored_block_payload_len(20, 30, 100), 50);
+        assert_eq!(
+            stored_block_payload_len(60_000, 10_000, 100_000),
+            crate::src::deflate::MAX_STORED as u32
+        );
+        assert_eq!(stored_block_payload_len(60_000, 10_000, 4_096), 4_096);
+        assert_eq!(
+            stored_block_payload_len(
+                ::core::ffi::c_uint::MAX,
+                1,
+                crate::src::deflate::MAX_STORED as u32,
+            ),
+            crate::src::deflate::MAX_STORED as u32,
+        );
     }
 
     #[test]

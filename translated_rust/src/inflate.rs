@@ -286,6 +286,34 @@ fn inflate_zlib_window_params(
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum InflateZlibHeaderTransition {
+    Error(InflateZlibHeaderError),
+    InvalidWindow {
+        hold: crate::stdlib::uLong,
+        bits: ::core::ffi::c_uint,
+    },
+    Accepted(InflateZlibWindowParams),
+}
+
+fn inflate_zlib_header_transition(
+    wrap: ::core::ffi::c_int,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+    configured_wbits: ::core::ffi::c_uint,
+) -> InflateZlibHeaderTransition {
+    if let Some(error) = inflate_zlib_header_error(wrap, hold) {
+        return InflateZlibHeaderTransition::Error(error);
+    }
+
+    let hold = hold >> 4;
+    let bits = bits.wrapping_sub(4);
+    match inflate_zlib_window_params(hold, configured_wbits) {
+        Some(params) => InflateZlibHeaderTransition::Accepted(params),
+        None => InflateZlibHeaderTransition::InvalidWindow { hold, bits },
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateBlockKind {
     Stored,
     Fixed,
@@ -1078,44 +1106,54 @@ pub unsafe extern "C" fn inflate(
                         if !(*state).head.is_null() {
                             (*(*state).head).done = -1 as ::core::ffi::c_int;
                         }
-                        let zlib_header_error = inflate_zlib_header_error((*state).wrap, hold);
-                        if zlib_header_error == Some(InflateZlibHeaderError::IncorrectCheck) {
-                            (*strm).msg = b"incorrect header check\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
-                            continue;
-                        } else if zlib_header_error
-                            == Some(InflateZlibHeaderError::UnknownCompressionMethod)
-                        {
-                            (*strm).msg = b"unknown compression method\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
-                            continue;
-                        } else {
-                            hold >>= 4 as ::core::ffi::c_int;
-                            bits =
-                                bits.wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                            let Some(window_params) =
-                                inflate_zlib_window_params(hold, (*state).wbits)
-                            else {
+                        match inflate_zlib_header_transition(
+                            (*state).wrap,
+                            hold,
+                            bits,
+                            (*state).wbits,
+                        ) {
+                            InflateZlibHeaderTransition::Error(
+                                InflateZlibHeaderError::IncorrectCheck,
+                            ) => {
+                                (*strm).msg = b"incorrect header check\0".as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
+                                (*state).mode = crate::src::inflate::BAD;
+                                continue;
+                            }
+                            InflateZlibHeaderTransition::Error(
+                                InflateZlibHeaderError::UnknownCompressionMethod,
+                            ) => {
+                                (*strm).msg = b"unknown compression method\0".as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
+                                (*state).mode = crate::src::inflate::BAD;
+                                continue;
+                            }
+                            InflateZlibHeaderTransition::InvalidWindow {
+                                hold: transition_hold,
+                                bits: transition_bits,
+                            } => {
+                                hold = transition_hold;
+                                bits = transition_bits;
                                 (*strm).msg = b"invalid window size\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
                                 (*state).mode = crate::src::inflate::BAD;
                                 continue;
-                            };
-                            (*state).wbits = window_params.wbits;
-                            (*state).dmax = window_params.dmax;
-                            (*state).flags = 0 as ::core::ffi::c_int;
-                            (*state).check =
-                                crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
-                            (*strm).adler = (*state).check as crate::stdlib::uLong;
-                            (*state).mode = window_params.next_mode;
-                            hold = 0 as ::core::ffi::c_ulong;
-                            bits = 0 as ::core::ffi::c_uint;
-                            continue;
+                            }
+                            InflateZlibHeaderTransition::Accepted(window_params) => {
+                                (*state).wbits = window_params.wbits;
+                                (*state).dmax = window_params.dmax;
+                                (*state).flags = 0 as ::core::ffi::c_int;
+                                (*state).check =
+                                    crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
+                                (*strm).adler = (*state).check as crate::stdlib::uLong;
+                                (*state).mode = window_params.next_mode;
+                                hold = 0 as ::core::ffi::c_ulong;
+                                bits = 0 as ::core::ffi::c_uint;
+                                continue;
+                            }
                         }
                     }
                 }
@@ -2997,14 +3035,15 @@ mod tests {
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
-        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
-        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
-        update_window_core, window_allocation_failed, window_allocation_request,
-        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
-        InflateCopyProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
-        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
-        InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
+        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
+        stored_block_length, syncsearch_safe, update_window_core, window_allocation_failed,
+        window_allocation_request, window_needs_allocation, window_update_plan,
+        DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress, InflateGzipFlags,
+        InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
+        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -3279,6 +3318,33 @@ mod tests {
     fn inflate_zlib_window_params_rejects_oversized_headers() {
         assert_eq!(inflate_zlib_window_params(8, 0), None);
         assert_eq!(inflate_zlib_window_params(3, 10), None);
+    }
+
+    #[test]
+    fn inflate_zlib_header_transition_preserves_error_and_window_consumption_order() {
+        assert_eq!(
+            inflate_zlib_header_transition(0, 0x9c78, 16, 0),
+            InflateZlibHeaderTransition::Error(InflateZlibHeaderError::IncorrectCheck)
+        );
+        assert_eq!(
+            inflate_zlib_header_transition(1, 0x0977, 16, 0),
+            InflateZlibHeaderTransition::Error(InflateZlibHeaderError::UnknownCompressionMethod)
+        );
+        assert_eq!(
+            inflate_zlib_header_transition(1, 0x1c88, 16, 0),
+            InflateZlibHeaderTransition::InvalidWindow {
+                hold: 0x1c8,
+                bits: 12,
+            }
+        );
+        assert_eq!(
+            inflate_zlib_header_transition(1, 0x9c78, 16, 0),
+            InflateZlibHeaderTransition::Accepted(InflateZlibWindowParams {
+                wbits: 15,
+                dmax: 32_768,
+                next_mode: TYPE,
+            })
+        );
     }
 
     #[test]

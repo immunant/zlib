@@ -175,11 +175,22 @@ fn gz_avail_action(
     }
 }
 
-fn gz_avail_refill_len(
+#[derive(Debug, PartialEq, Eq)]
+struct GzAvailRefillPlan {
+    input_offset: usize,
+    read_len: ::core::ffi::c_uint,
+    prior_avail_in: crate::stdlib::uInt,
+}
+
+fn gz_avail_refill_plan(
     size: ::core::ffi::c_uint,
     avail_in: crate::stdlib::uInt,
-) -> ::core::ffi::c_uint {
-    size.wrapping_sub(avail_in as ::core::ffi::c_uint)
+) -> GzAvailRefillPlan {
+    GzAvailRefillPlan {
+        input_offset: avail_in as usize,
+        read_len: size.wrapping_sub(avail_in as ::core::ffi::c_uint),
+        prior_avail_in: avail_in,
+    }
 }
 
 fn gz_avail_should_compact(compact_input: bool, input_is_buffer_start: bool) -> bool {
@@ -682,15 +693,14 @@ unsafe fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int 
                 let state_ref = &mut *state;
                 let p = state_ref.in_0;
                 let q = state_ref.strm.next_in;
+                let plan = gz_avail_refill_plan(state_ref.size, state_ref.strm.avail_in);
                 if gz_avail_should_compact(compact_input, q == p) {
                     core::ptr::copy(q, p, state_ref.strm.avail_in as usize);
                 }
                 (
-                    state_ref
-                        .in_0
-                        .wrapping_add(state_ref.strm.avail_in as usize),
-                    gz_avail_refill_len(state_ref.size, state_ref.strm.avail_in),
-                    state_ref.strm.avail_in,
+                    state_ref.in_0.wrapping_add(plan.input_offset),
+                    plan.read_len,
+                    plan.prior_avail_in,
                 )
             };
             let load = gz_load(state, buf, len);
@@ -1506,9 +1516,23 @@ mod tests {
     }
 
     #[test]
-    fn gz_avail_refill_len_preserves_remaining_buffer_wrapping() {
-        assert_eq!(gz_avail_refill_len(16, 4), 12);
-        assert_eq!(gz_avail_refill_len(0, 1), ::core::ffi::c_uint::MAX);
+    fn gz_avail_refill_plan_preserves_refill_layout_and_wrapping() {
+        assert_eq!(
+            gz_avail_refill_plan(16, 4),
+            GzAvailRefillPlan {
+                input_offset: 4,
+                read_len: 12,
+                prior_avail_in: 4,
+            }
+        );
+        assert_eq!(
+            gz_avail_refill_plan(0, 1),
+            GzAvailRefillPlan {
+                input_offset: 1,
+                read_len: ::core::ffi::c_uint::MAX,
+                prior_avail_in: 1,
+            }
+        );
     }
 
     #[test]
