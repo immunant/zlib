@@ -136,8 +136,16 @@ impl GzDeflater<'_> {
         crate::src::deflate::deflate_reset_impl(self.stream, state)
     }
 
-    fn compress(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
-        crate::src::deflate::DeflateCall::new(self.stream).compress(flush)
+    fn compress(
+        &mut self,
+        input: &[crate::stdlib::Bytef],
+        output: &mut [crate::stdlib::Bytef],
+        flush: ::core::ffi::c_int,
+    ) -> ::core::ffi::c_int {
+        let Some(state) = (unsafe { self.stream.state.as_mut() }) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        crate::src::deflate::DeflateCall::new(self.stream, state, input, output).compress(flush)
     }
 
     fn set_params(&mut self, level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) {
@@ -439,10 +447,73 @@ impl GzCompressor<'_> {
                 .reset();
                 state.reset = 0;
             }
+            let input = if state.strm.avail_in == 0 {
+                &[][..]
+            } else {
+                let Some(start) = state
+                    .strm
+                    .next_in
+                    .addr()
+                    .checked_sub(state.in_0.as_ptr().addr())
+                else {
+                    crate::src::gzlib::gz_error_state(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(c"internal error: input buffer corrupt"),
+                    );
+                    return -1;
+                };
+                let Some(end) = start.checked_add(state.strm.avail_in as usize) else {
+                    crate::src::gzlib::gz_error_state(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(c"internal error: input buffer corrupt"),
+                    );
+                    return -1;
+                };
+                let Some(input) = state.in_0.get(start..end) else {
+                    crate::src::gzlib::gz_error_state(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(c"internal error: input buffer corrupt"),
+                    );
+                    return -1;
+                };
+                input
+            };
+            let Some(output_start) = state
+                .strm
+                .next_out
+                .addr()
+                .checked_sub(state.out.as_ptr().addr())
+            else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"internal error: output buffer corrupt"),
+                );
+                return -1;
+            };
+            let Some(output_end) = output_start.checked_add(state.strm.avail_out as usize) else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"internal error: output buffer corrupt"),
+                );
+                return -1;
+            };
+            let Some(output) = state.out.get_mut(output_start..output_end) else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"internal error: output buffer corrupt"),
+                );
+                return -1;
+            };
             ret = GzDeflater {
                 stream: &mut state.strm,
             }
-            .compress(flush);
+            .compress(input, output, flush);
             buffers_ready = true;
             reset = false;
             if ret == -1 {
@@ -536,116 +607,114 @@ fn gz_zero_impl(compressor: &mut GzCompressor<'_>) -> ::core::ffi::c_int {
 }
 
 impl GzCompressor<'_> {
-fn write(&mut self, input: &[u8]) -> crate::stdlib::z_size_t {
-    let state = &mut *self.state;
-    let len = input.len();
-    let mut put: crate::stdlib::z_size_t = len;
-    let mut ret: ::core::ffi::c_int = 0;
-    if len == 0 as crate::stdlib::z_size_t {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if state.size == 0 as ::core::ffi::c_uint
-        && gz_initialize_buffers(state) == -1 as ::core::ffi::c_int
-    {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if state.skip != 0 && gz_zero_impl(&mut GzCompressor { state }) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    let Ok(capacity) = usize::try_from(state.size) else {
-        return 0 as crate::stdlib::z_size_t;
-    };
-    if capacity == 0 || state.in_0.len() < capacity {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    let mut consumed = 0usize;
-    if input.len() < capacity {
-        loop {
-            if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
-            }
-            let Some(have) = state
-                .strm
-                .next_in
-                .addr()
-                .checked_sub(state.in_0.as_ptr().addr())
-                .and_then(|offset| offset.checked_add(state.strm.avail_in as usize))
-            else {
-                return 0 as crate::stdlib::z_size_t;
-            };
-            if have > capacity {
-                return 0 as crate::stdlib::z_size_t;
-            }
-            let copy = (capacity - have).min(input.len() - consumed);
-            state.in_0[have..have + copy].copy_from_slice(&input[consumed..consumed + copy]);
-            state.strm.avail_in = state
-                .strm
-                .avail_in
-                .wrapping_add(copy as crate::stdlib::uInt);
-            state.x.pos += copy as crate::stdlib::off64_t;
-            consumed += copy;
-            if consumed == input.len() {
-                break;
-            }
-            if (GzCompressor { state }).buffered(crate::zlib_h::Z_NO_FLUSH)
-                == -1 as ::core::ffi::c_int
-            {
-                return if state.again != 0 {
-                    put.wrapping_sub((input.len() - consumed) as crate::stdlib::z_size_t)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
-            }
+    fn write(&mut self, input: &[u8]) -> crate::stdlib::z_size_t {
+        let state = &mut *self.state;
+        let len = input.len();
+        let mut put: crate::stdlib::z_size_t = len;
+        let mut ret: ::core::ffi::c_int = 0;
+        if len == 0 as crate::stdlib::z_size_t {
+            return 0 as crate::stdlib::z_size_t;
         }
-    } else {
-        if state.strm.avail_in != 0
-            && (GzCompressor { state }).buffered(crate::zlib_h::Z_NO_FLUSH)
-                == -1 as ::core::ffi::c_int
+        if state.size == 0 as ::core::ffi::c_uint
+            && gz_initialize_buffers(state) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
-        loop {
-            let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            let remaining = input.len() - consumed;
-            if n as usize > remaining {
-                n = remaining as ::core::ffi::c_uint;
-            }
-            state.strm.next_in = input[consumed..].as_ptr() as *mut crate::stdlib::Bytef;
-            state.strm.avail_in = n as crate::stdlib::uInt;
-            let direct = state.direct != 0;
-            ret = (GzCompressor { state }).compress(
-                crate::zlib_h::Z_NO_FLUSH,
-                if direct {
-                    Some(GzCompInput::External(
-                        &input[consumed..consumed + n as usize],
-                    ))
-                } else {
-                    Some(GzCompInput::Buffered)
-                },
-            );
-            n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
-            state.x.pos += n as crate::stdlib::off64_t;
-            consumed += n as usize;
-            if ret == -1 as ::core::ffi::c_int {
-                return if state.again != 0 {
-                    put.wrapping_sub((input.len() - consumed) as crate::stdlib::z_size_t)
-                } else {
-                    0 as crate::stdlib::z_size_t
+        if state.skip != 0 && gz_zero_impl(&mut GzCompressor { state }) == -1 as ::core::ffi::c_int
+        {
+            return 0 as crate::stdlib::z_size_t;
+        }
+        let Ok(capacity) = usize::try_from(state.size) else {
+            return 0 as crate::stdlib::z_size_t;
+        };
+        if capacity == 0 || state.in_0.len() < capacity {
+            return 0 as crate::stdlib::z_size_t;
+        }
+        let mut consumed = 0usize;
+        if input.len() < capacity {
+            loop {
+                if state.strm.avail_in == 0 as crate::stdlib::uInt {
+                    state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
+                }
+                let Some(have) = state
+                    .strm
+                    .next_in
+                    .addr()
+                    .checked_sub(state.in_0.as_ptr().addr())
+                    .and_then(|offset| offset.checked_add(state.strm.avail_in as usize))
+                else {
+                    return 0 as crate::stdlib::z_size_t;
                 };
+                if have > capacity {
+                    return 0 as crate::stdlib::z_size_t;
+                }
+                let copy = (capacity - have).min(input.len() - consumed);
+                state.in_0[have..have + copy].copy_from_slice(&input[consumed..consumed + copy]);
+                state.strm.avail_in = state
+                    .strm
+                    .avail_in
+                    .wrapping_add(copy as crate::stdlib::uInt);
+                state.x.pos += copy as crate::stdlib::off64_t;
+                consumed += copy;
+                if consumed == input.len() {
+                    break;
+                }
+                if (GzCompressor { state }).buffered(crate::zlib_h::Z_NO_FLUSH)
+                    == -1 as ::core::ffi::c_int
+                {
+                    return if state.again != 0 {
+                        put.wrapping_sub((input.len() - consumed) as crate::stdlib::z_size_t)
+                    } else {
+                        0 as crate::stdlib::z_size_t
+                    };
+                }
             }
-            if consumed == input.len() {
-                break;
+        } else {
+            if state.strm.avail_in != 0
+                && (GzCompressor { state }).buffered(crate::zlib_h::Z_NO_FLUSH)
+                    == -1 as ::core::ffi::c_int
+            {
+                return 0 as crate::stdlib::z_size_t;
+            }
+            loop {
+                let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
+                let remaining = input.len() - consumed;
+                if n as usize > remaining {
+                    n = remaining as ::core::ffi::c_uint;
+                }
+                state.strm.next_in = input[consumed..].as_ptr() as *mut crate::stdlib::Bytef;
+                state.strm.avail_in = n as crate::stdlib::uInt;
+                let direct = state.direct != 0;
+                ret = (GzCompressor { state }).compress(
+                    crate::zlib_h::Z_NO_FLUSH,
+                    if direct {
+                        Some(GzCompInput::External(
+                            &input[consumed..consumed + n as usize],
+                        ))
+                    } else {
+                        Some(GzCompInput::Buffered)
+                    },
+                );
+                n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
+                state.x.pos += n as crate::stdlib::off64_t;
+                consumed += n as usize;
+                if ret == -1 as ::core::ffi::c_int {
+                    return if state.again != 0 {
+                        put.wrapping_sub((input.len() - consumed) as crate::stdlib::z_size_t)
+                    } else {
+                        0 as crate::stdlib::z_size_t
+                    };
+                }
+                if consumed == input.len() {
+                    break;
+                }
             }
         }
+        return put;
     }
-    return put;
-}
 }
 
-fn gzwrite_impl(
-    compressor: &mut GzCompressor<'_>,
-    buf: &[u8],
-) -> ::core::ffi::c_int {
+fn gzwrite_impl(compressor: &mut GzCompressor<'_>, buf: &[u8]) -> ::core::ffi::c_int {
     let len = buf.len() as ::core::ffi::c_uint;
     if compressor.state.mode != crate::gzguts_h::GZ_WRITE
         || compressor.state.err != crate::zlib_h::Z_OK && compressor.state.again == 0
@@ -735,10 +804,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     gzfwrite_impl(&mut GzCompressor { state }, input, size, nitems)
 }
-fn gzputc_impl(
-    compressor: &mut GzCompressor<'_>,
-    c: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+fn gzputc_impl(compressor: &mut GzCompressor<'_>, c: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if compressor.state.mode != crate::gzguts_h::GZ_WRITE
         || compressor.state.err != crate::zlib_h::Z_OK && compressor.state.again == 0
     {
@@ -829,12 +895,7 @@ fn gzflush_impl(
     flush: ::core::ffi::c_int,
     behavior: GzFlushBehavior<'_>,
 ) -> ::core::ffi::c_int {
-    let (
-        validate_state,
-        clear_error,
-        stop_after_zero_failure,
-        mut failures,
-    ) = match behavior {
+    let (validate_state, clear_error, stop_after_zero_failure, mut failures) = match behavior {
         GzFlushBehavior::Public => (true, true, true, None),
         GzFlushBehavior::Closing(failures) => (false, false, false, Some(failures)),
     };

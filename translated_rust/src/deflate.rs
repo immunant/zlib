@@ -600,15 +600,24 @@ pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
 pub use crate::src::zutil::zcfree;
 
-pub use crate::stdlib::Byte;
-pub use crate::stdlib::Bytef;
-pub use crate::stdlib::MAX_MEM_LEVEL;
-pub use crate::stdlib::MAX_WBITS;
 pub use crate::stdlib::charf;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::stdlib::z_size_t;
+pub use crate::stdlib::Byte;
+pub use crate::stdlib::Bytef;
+pub use crate::stdlib::MAX_MEM_LEVEL;
+pub use crate::stdlib::MAX_WBITS;
+pub use crate::zlib_h::alloc_func;
+pub use crate::zlib_h::free_func;
+pub use crate::zlib_h::gz_header;
+pub use crate::zlib_h::gz_header_s;
+pub use crate::zlib_h::gz_headerp;
+pub use crate::zlib_h::z_stream;
+pub use crate::zlib_h::z_stream_s;
+pub use crate::zlib_h::z_streamp;
+pub use crate::zlib_h::ZLIB_VERSION;
 pub use crate::zlib_h::Z_BLOCK;
 pub use crate::zlib_h::Z_BUF_ERROR;
 pub use crate::zlib_h::Z_DATA_ERROR;
@@ -630,23 +639,14 @@ pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_UNKNOWN;
 pub use crate::zlib_h::Z_VERSION_ERROR;
-pub use crate::zlib_h::ZLIB_VERSION;
-pub use crate::zlib_h::alloc_func;
-pub use crate::zlib_h::free_func;
-pub use crate::zlib_h::gz_header;
-pub use crate::zlib_h::gz_header_s;
-pub use crate::zlib_h::gz_headerp;
-pub use crate::zlib_h::z_stream;
-pub use crate::zlib_h::z_stream_s;
-pub use crate::zlib_h::z_streamp;
-pub use crate::zutil_h::DEF_MEM_LEVEL;
-pub use crate::zutil_h::MAX_MATCH;
-pub use crate::zutil_h::MIN_MATCH;
-pub use crate::zutil_h::PRESET_DICT;
 pub use crate::zutil_h::uch;
 pub use crate::zutil_h::uchf;
 pub use crate::zutil_h::ulg;
 pub use crate::zutil_h::ush;
+pub use crate::zutil_h::DEF_MEM_LEVEL;
+pub use crate::zutil_h::MAX_MATCH;
+pub use crate::zutil_h::MIN_MATCH;
+pub use crate::zutil_h::PRESET_DICT;
 
 pub const block_done: block_state = 1;
 
@@ -1351,13 +1351,13 @@ fn deflate_params_stream_is_valid(strm: &crate::zlib_h::z_stream_s) -> bool {
 /// independent of the raw-pointer-based general stream checker.
 fn deflate_params_state_is_valid(s: &crate::src::deflate::deflate_state) -> bool {
     s.status == crate::src::deflate::INIT_STATE
-            || s.status == crate::src::deflate::GZIP_STATE
-            || s.status == crate::src::deflate::EXTRA_STATE
-            || s.status == crate::src::deflate::NAME_STATE
-            || s.status == crate::src::deflate::COMMENT_STATE
-            || s.status == crate::src::deflate::HCRC_STATE
-            || s.status == crate::src::deflate::BUSY_STATE
-            || s.status == crate::src::deflate::FINISH_STATE
+        || s.status == crate::src::deflate::GZIP_STATE
+        || s.status == crate::src::deflate::EXTRA_STATE
+        || s.status == crate::src::deflate::NAME_STATE
+        || s.status == crate::src::deflate::COMMENT_STATE
+        || s.status == crate::src::deflate::HCRC_STATE
+        || s.status == crate::src::deflate::BUSY_STATE
+        || s.status == crate::src::deflate::FINISH_STATE
 }
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
@@ -1856,23 +1856,49 @@ struct DeflateParamsStream<'a> {
     stream: &'a mut crate::zlib_h::z_stream_s,
 }
 
-/// A short-lived handle for one legacy ABI-stream compression step.
+/// A short-lived, fully borrowed view of one deflate step.
 ///
-/// Gzip and other safe staging code use this named boundary rather than
-/// invoking the legacy state-machine entry point themselves.  The remaining
-/// unsafe transition stays beside the stream implementation until the ABI
-/// stream's cursors and state link have owners of their own.
-pub(crate) struct DeflateCall<'a> {
-    stream: &'a mut crate::zlib_h::z_stream_s,
+/// The ABI stream continues to carry its cursor pointers at the C boundary,
+/// but codec and gzip code operate on these bounded buffer views.  Progress
+/// is committed to the ABI carrier only when this view is dropped.
+pub(crate) struct DeflateCall<'stream, 'input, 'output> {
+    stream: &'stream mut crate::zlib_h::z_stream_s,
+    state: &'stream mut crate::src::deflate::deflate_state,
+    input: &'input [crate::stdlib::Bytef],
+    input_pos: usize,
+    output: &'output mut [crate::stdlib::Bytef],
+    output_pos: usize,
 }
 
-impl<'a> DeflateCall<'a> {
-    pub(crate) fn new(stream: &'a mut crate::zlib_h::z_stream_s) -> Self {
-        Self { stream }
+impl<'stream, 'input, 'output> DeflateCall<'stream, 'input, 'output> {
+    pub(crate) fn new(
+        stream: &'stream mut crate::zlib_h::z_stream_s,
+        state: &'stream mut crate::src::deflate::deflate_state,
+        input: &'input [crate::stdlib::Bytef],
+        output: &'output mut [crate::stdlib::Bytef],
+    ) -> Self {
+        Self {
+            stream,
+            state,
+            input,
+            input_pos: 0,
+            output,
+            output_pos: 0,
+        }
     }
 
     pub(crate) fn compress(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
-        unsafe { deflate(self.stream, flush) }
+        deflate_impl(self, flush)
+    }
+}
+
+impl Drop for DeflateCall<'_, '_, '_> {
+    fn drop(&mut self) {
+        if !self.input.is_empty() {
+            self.stream.next_in =
+                self.input.as_ptr().wrapping_add(self.input_pos) as *mut crate::stdlib::Bytef;
+        }
+        self.stream.next_out = self.output.as_mut_ptr().wrapping_add(self.output_pos);
     }
 }
 
@@ -2223,10 +2249,7 @@ pub unsafe extern "C" fn deflateBound_ffi(
     deflate_bound_z_impl(stream.zip(state), sourceLen as crate::stdlib::z_size_t)
         as crate::stdlib::uLong
 }
-fn put_short_msb(
-    s: &mut crate::src::deflate::deflate_state,
-    b: crate::stdlib::uInt,
-) {
+fn put_short_msb(s: &mut crate::src::deflate::deflate_state, b: crate::stdlib::uInt) {
     s.put_pending_byte((b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte);
     s.put_pending_byte((b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte);
 }
@@ -2239,6 +2262,8 @@ fn put_short_msb(
 fn flush_pending_impl(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
+    output: &mut [crate::stdlib::Bytef],
+    output_pos: &mut usize,
 ) {
     let mut len: ::core::ffi::c_uint = 0;
     crate::src::trees::flush_bits_impl(s);
@@ -2260,20 +2285,63 @@ fn flush_pending_impl(
     let Some(source) = pending.get(start..end) else {
         return;
     };
-    if !write_stream_bytes(strm, source) {
+    let Some(end) = output_pos.checked_add(source.len()) else {
         return;
-    }
+    };
+    let Some(destination) = output.get_mut(*output_pos..end) else {
+        return;
+    };
+    destination.copy_from_slice(source);
+    *output_pos = end;
+    strm.avail_out = strm.avail_out.wrapping_sub(len);
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
     s.pending_out = s.pending_out.wrapping_add(len as usize);
     s.pending = s.pending.wrapping_sub(len as crate::zutil_h::ulg);
     if s.pending == 0 as crate::zutil_h::ulg {
         s.pending_out = 0;
     }
 }
-pub unsafe fn deflate(
+
+fn commit_deflate_progress(
     strm: &mut crate::zlib_h::z_stream_s,
+    input_pos: &mut usize,
+    input_len: usize,
+    output_pos: &mut usize,
+    output_len: usize,
+    progress: (
+        usize,
+        usize,
+        crate::stdlib::uLong,
+        crate::stdlib::uLong,
+        crate::stdlib::uLong,
+    ),
+    data_type: Option<::core::ffi::c_int>,
+) {
+    *input_pos = input_pos.saturating_add(progress.0).min(input_len);
+    *output_pos = output_pos.saturating_add(progress.1).min(output_len);
+    strm.avail_in = (input_len - *input_pos) as crate::stdlib::uInt;
+    strm.avail_out = (output_len - *output_pos) as crate::stdlib::uInt;
+    strm.total_in = progress.2;
+    strm.total_out = progress.3;
+    strm.adler = progress.4;
+    if let Some(data_type) = data_type {
+        strm.data_type = data_type;
+    }
+}
+
+fn deflate_impl(
+    call: &mut DeflateCall<'_, '_, '_>,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut old_flush: ::core::ffi::c_int = 0;
+    let strm = &mut *call.stream;
+    let s = &mut *call.state;
+    let input = call.input;
+    let input_pos = &mut call.input_pos;
+    let output = &mut *call.output;
+    let output_pos = &mut call.output_pos;
+    let input_len = input.len();
+    let output_len = output.len();
     // Validate the ABI carrier before following its state link.  The state
     // machine validation then operates on the borrowed state below, rather
     // than dispatching through the raw-pointer checker.
@@ -2286,13 +2354,12 @@ pub unsafe fn deflate(
     // Validate the state link before borrowing it.  The resulting reference
     // carries the state through this call, avoiding repeated raw-state
     // dereferences in the compression state machine.
-    let s = &mut *strm.state;
     if !deflate_params_state_is_valid(s) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let gzhead = gzip_header_clone((*s).gzhead);
-    if strm.next_out.is_null()
-        || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.is_null()
+    if input.len().saturating_sub(*input_pos) != strm.avail_in as usize
+        || output.len().saturating_sub(*output_pos) != strm.avail_out as usize
         || (*s).status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
     {
         strm.msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
@@ -2321,7 +2388,7 @@ pub unsafe fn deflate(
     old_flush = (*s).last_flush;
     (*s).last_flush = flush;
     if (*s).pending != 0 as crate::zutil_h::ulg {
-        flush_pending_impl(s, strm);
+        flush_pending_impl(s, strm, output, output_pos);
         if strm.avail_out == 0 as crate::stdlib::uInt {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2407,7 +2474,7 @@ pub unsafe fn deflate(
         // equivalent empty update.
         strm.adler = crate::src::adler32::adler32_z(1, &[]);
         (*s).status = crate::src::deflate::BUSY_STATE;
-        flush_pending_impl(s, strm);
+        flush_pending_impl(s, strm, output, output_pos);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2433,7 +2500,7 @@ pub unsafe fn deflate(
             });
             (*s).put_pending_byte(3);
             (*s).status = crate::src::deflate::BUSY_STATE;
-            flush_pending_impl(s, strm);
+            flush_pending_impl(s, strm, output, output_pos);
             if (*s).pending != 0 as crate::zutil_h::ulg {
                 (*s).last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -2510,7 +2577,7 @@ pub unsafe fn deflate(
                     }
                 }
                 (*s).gzindex = (*s).gzindex.wrapping_add(copy);
-                flush_pending_impl(s, strm);
+                flush_pending_impl(s, strm, output, output_pos);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2556,7 +2623,7 @@ pub unsafe fn deflate(
                             strm.adler = crate::src::crc32::crc32_z(strm.adler, bytes);
                         }
                     }
-                    flush_pending_impl(s, strm);
+                    flush_pending_impl(s, strm, output, output_pos);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
                         (*s).last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2594,7 +2661,7 @@ pub unsafe fn deflate(
                             strm.adler = crate::src::crc32::crc32_z(strm.adler, bytes);
                         }
                     }
-                    flush_pending_impl(s, strm);
+                    flush_pending_impl(s, strm, output, output_pos);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
                         (*s).last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2625,7 +2692,7 @@ pub unsafe fn deflate(
             != 0
         {
             if (*s).pending.wrapping_add(2 as crate::zutil_h::ulg) > (*s).pending_buf_size {
-                flush_pending_impl(s, strm);
+                flush_pending_impl(s, strm, output, output_pos);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2636,7 +2703,7 @@ pub unsafe fn deflate(
             strm.adler = crate::src::crc32::crc32(0 as crate::stdlib::uLong, &[]);
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
-        flush_pending_impl(s, strm);
+        flush_pending_impl(s, strm, output, output_pos);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2646,27 +2713,17 @@ pub unsafe fn deflate(
         || (*s).lookahead != 0 as crate::stdlib::uInt
         || flush != crate::zlib_h::Z_NO_FLUSH && (*s).status != crate::src::deflate::FINISH_STATE
     {
-        // The stream and its input cursor were validated before entering the
-        // compression state machine.  Every engine receives this one bounded
-        // view and tracks progress through the ABI cursor it updates.
-        let input = if strm.avail_in == 0 {
-            &[]
-        } else {
-            core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-        };
-        // `avail_out` and `next_out` were checked on entry.  All compression
-        // engines below use the same bounded output view, so form it once
-        // instead of repeating the ABI conversion in each dispatch arm.
-        let output_len = strm.avail_out as usize;
-        let output = core::slice::from_raw_parts_mut(strm.next_out, output_len);
+        // The boundary already converted both ABI cursors to these bounded
+        // slices.  Each engine reports cursor progress back to `call` after
+        // its borrow ends.
         let mut bstate: block_state = need_more;
         bstate = (if (*s).level == 0 as ::core::ffi::c_int
             || matches!(
                 configuration_table[(*s).level as usize].func,
                 CompressionEngine::Stored
-            )
-        {
-            let input_len = input.len();
+            ) {
+            let input = &input[*input_pos..];
+            let output = &mut output[*output_pos..];
             let mut io = DeflateStoredIo {
                 input,
                 input_pos: 0,
@@ -2677,19 +2734,27 @@ pub unsafe fn deflate(
                 adler: strm.adler,
             };
             let result = deflate_stored(s, &mut io, flush);
-            if input_len != 0 {
-                strm.next_in =
-                    io.input.as_ptr().wrapping_add(io.input_pos) as *mut crate::stdlib::Bytef;
-            }
-            strm.avail_in = io.avail_in();
-            strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-            strm.avail_out = io.avail_out();
-            strm.total_in = io.total_in;
-            strm.total_out = io.total_out;
-            strm.adler = io.adler;
+            let progress = (
+                io.input_pos,
+                io.output_pos,
+                io.total_in,
+                io.total_out,
+                io.adler,
+            );
+            drop(io);
+            commit_deflate_progress(
+                strm,
+                input_pos,
+                input_len,
+                output_pos,
+                output_len,
+                progress,
+                None,
+            );
             result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            let input_len = input.len();
+            let input = &input[*input_pos..];
+            let output = &mut output[*output_pos..];
             let mut io = DeflateFastIo {
                 input,
                 input_pos: 0,
@@ -2701,20 +2766,28 @@ pub unsafe fn deflate(
                 data_type: strm.data_type,
             };
             let result = deflate_huff(&mut *s, &mut io, flush);
-            if input_len != 0 {
-                strm.next_in = io.input.as_ptr().wrapping_add(io.input_pos)
-                    as *mut crate::stdlib::Bytef;
-            }
-            strm.avail_in = io.avail_in();
-            strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-            strm.avail_out = io.avail_out();
-            strm.total_in = io.total_in;
-            strm.total_out = io.total_out;
-            strm.adler = io.adler;
-            strm.data_type = io.data_type;
+            let progress = (
+                io.input_pos,
+                io.output_pos,
+                io.total_in,
+                io.total_out,
+                io.adler,
+                io.data_type,
+            );
+            drop(io);
+            commit_deflate_progress(
+                strm,
+                input_pos,
+                input_len,
+                output_pos,
+                output_len,
+                (progress.0, progress.1, progress.2, progress.3, progress.4),
+                Some(progress.5),
+            );
             result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
-            let input_len = input.len();
+            let input = &input[*input_pos..];
+            let output = &mut output[*output_pos..];
             let mut io = DeflateFastIo {
                 input,
                 input_pos: 0,
@@ -2726,17 +2799,24 @@ pub unsafe fn deflate(
                 data_type: strm.data_type,
             };
             let result = deflate_rle(s, &mut io, flush);
-            if input_len != 0 {
-                strm.next_in = io.input.as_ptr().wrapping_add(io.input_pos)
-                    as *mut crate::stdlib::Bytef;
-            }
-            strm.avail_in = io.avail_in();
-            strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-            strm.avail_out = io.avail_out();
-            strm.total_in = io.total_in;
-            strm.total_out = io.total_out;
-            strm.adler = io.adler;
-            strm.data_type = io.data_type;
+            let progress = (
+                io.input_pos,
+                io.output_pos,
+                io.total_in,
+                io.total_out,
+                io.adler,
+                io.data_type,
+            );
+            drop(io);
+            commit_deflate_progress(
+                strm,
+                input_pos,
+                input_len,
+                output_pos,
+                output_len,
+                (progress.0, progress.1, progress.2, progress.3, progress.4),
+                Some(progress.5),
+            );
             result as ::core::ffi::c_uint
         } else {
             (match configuration_table[(*s).level as usize].func {
@@ -2744,7 +2824,8 @@ pub unsafe fn deflate(
                     unreachable!("stored levels use the slice-based engine")
                 }
                 CompressionEngine::Fast => {
-                    let input_len = input.len();
+                    let input = &input[*input_pos..];
+                    let output = &mut output[*output_pos..];
                     let mut io = DeflateFastIo {
                         input,
                         input_pos: 0,
@@ -2756,21 +2837,29 @@ pub unsafe fn deflate(
                         data_type: strm.data_type,
                     };
                     let result = deflate_fast(s, &mut io, flush);
-                    if input_len != 0 {
-                        strm.next_in = io.input.as_ptr().wrapping_add(io.input_pos)
-                            as *mut crate::stdlib::Bytef;
-                    }
-                    strm.avail_in = io.avail_in();
-                    strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-                    strm.avail_out = io.avail_out();
-                    strm.total_in = io.total_in;
-                    strm.total_out = io.total_out;
-                    strm.adler = io.adler;
-                    strm.data_type = io.data_type;
+                    let progress = (
+                        io.input_pos,
+                        io.output_pos,
+                        io.total_in,
+                        io.total_out,
+                        io.adler,
+                        io.data_type,
+                    );
+                    drop(io);
+                    commit_deflate_progress(
+                        strm,
+                        input_pos,
+                        input_len,
+                        output_pos,
+                        output_len,
+                        (progress.0, progress.1, progress.2, progress.3, progress.4),
+                        Some(progress.5),
+                    );
                     result
                 }
                 CompressionEngine::Slow => {
-                    let input_len = input.len();
+                    let input = &input[*input_pos..];
+                    let output = &mut output[*output_pos..];
                     let mut io = DeflateFastIo {
                         input,
                         input_pos: 0,
@@ -2782,17 +2871,24 @@ pub unsafe fn deflate(
                         data_type: strm.data_type,
                     };
                     let result = deflate_slow(&mut *s, &mut io, flush);
-                    if input_len != 0 {
-                        strm.next_in = io.input.as_ptr().wrapping_add(io.input_pos)
-                            as *mut crate::stdlib::Bytef;
-                    }
-                    strm.avail_in = io.avail_in();
-                    strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-                    strm.avail_out = io.avail_out();
-                    strm.total_in = io.total_in;
-                    strm.total_out = io.total_out;
-                    strm.adler = io.adler;
-                    strm.data_type = io.data_type;
+                    let progress = (
+                        io.input_pos,
+                        io.output_pos,
+                        io.total_in,
+                        io.total_out,
+                        io.adler,
+                        io.data_type,
+                    );
+                    drop(io);
+                    commit_deflate_progress(
+                        strm,
+                        input_pos,
+                        input_len,
+                        output_pos,
+                        output_len,
+                        (progress.0, progress.1, progress.2, progress.3, progress.4),
+                        Some(progress.5),
+                    );
                     result
                 }
             }) as ::core::ffi::c_uint
@@ -2840,7 +2936,7 @@ pub unsafe fn deflate(
                     }
                 }
             }
-            flush_pending_impl(s, strm);
+            flush_pending_impl(s, strm, output, output_pos);
             if strm.avail_out == 0 as crate::stdlib::uInt {
                 (*s).last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -2872,7 +2968,7 @@ pub unsafe fn deflate(
             (strm.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
         );
     }
-    flush_pending_impl(s, strm);
+    flush_pending_impl(s, strm, output, output_pos);
     if (*s).wrap > 0 as ::core::ffi::c_int {
         (*s).wrap = -(*s).wrap;
     }
@@ -2882,6 +2978,36 @@ pub unsafe fn deflate(
         crate::zlib_h::Z_STREAM_END
     };
 }
+/// Convert the ABI stream's raw state and cursor fields once, then run the
+/// codec against the bounded `DeflateCall` view.
+pub unsafe fn deflate(
+    strm: &mut crate::zlib_h::z_stream_s,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if !deflate_params_stream_is_valid(strm) || flush > crate::zlib_h::Z_BLOCK || flush < 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &mut *strm.state;
+    if strm.next_out.is_null()
+        || (strm.avail_in != 0 && strm.next_in.is_null())
+        || (state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH)
+    {
+        strm.msg = crate::src::zutil::z_errmsg[4].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if strm.avail_out == 0 {
+        strm.msg = crate::src::zutil::z_errmsg[7].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_BUF_ERROR;
+    }
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+    };
+    let output = core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+    DeflateCall::new(strm, state, input, output).compress(flush)
+}
+
 #[export_name = "deflate"]
 
 pub unsafe extern "C" fn deflate_ffi(
@@ -2898,18 +3024,16 @@ pub unsafe extern "C" fn deflate_ffi(
 /// The state allocation itself remains the responsibility of
 /// `deflate_end_release()`: it was obtained through the stream's ABI
 /// allocator and must be returned through that same allocator.
-pub fn deflateEnd(
-    state: &mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
+pub fn deflateEnd(state: &mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     let (status, gzhead, head, prev, pending, allocations) = {
         if state.status != crate::src::deflate::INIT_STATE
-                && state.status != crate::src::deflate::GZIP_STATE
-                && state.status != crate::src::deflate::EXTRA_STATE
-                && state.status != crate::src::deflate::NAME_STATE
-                && state.status != crate::src::deflate::COMMENT_STATE
-                && state.status != crate::src::deflate::HCRC_STATE
-                && state.status != crate::src::deflate::BUSY_STATE
-                && state.status != crate::src::deflate::FINISH_STATE
+            && state.status != crate::src::deflate::GZIP_STATE
+            && state.status != crate::src::deflate::EXTRA_STATE
+            && state.status != crate::src::deflate::NAME_STATE
+            && state.status != crate::src::deflate::COMMENT_STATE
+            && state.status != crate::src::deflate::HCRC_STATE
+            && state.status != crate::src::deflate::BUSY_STATE
+            && state.status != crate::src::deflate::FINISH_STATE
         {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
