@@ -707,20 +707,19 @@ pub unsafe extern "C" fn gz_error(
     if err == crate::zlib_h::Z_MEM_ERROR {
         return;
     }
-    (*state).msg = crate::stdlib::malloc(
-        crate::stdlib::strlen((*state).path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_char;
+    let msg_len = crate::stdlib::strlen(msg);
+    let path_len = crate::stdlib::strlen((*state).path);
+    let len = path_len
+        .wrapping_add(msg_len)
+        .wrapping_add(3 as crate::__stddef_size_t_h::size_t);
+    (*state).msg = crate::stdlib::malloc(len) as *mut ::core::ffi::c_char;
     if (*state).msg.is_null() {
         (*state).err = crate::zlib_h::Z_MEM_ERROR;
         return;
     }
     crate::stdlib::snprintf(
         (*state).msg,
-        crate::stdlib::strlen((*state).path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
+        len,
         b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
         (*state).path,
         b": \0".as_ptr() as *const ::core::ffi::c_char,
