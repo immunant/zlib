@@ -560,6 +560,17 @@ fn gzseek_rewind_offset_state(
     (offset >= 0).then_some(offset)
 }
 
+/// Record a pending seek once all descriptor and buffered-output work has
+/// completed.  The return value deliberately uses the legacy wrapping
+/// signed arithmetic for the reported logical position.
+fn gzseek_schedule_state(
+    state: &mut crate::gzguts_h::gz_state,
+    offset: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    state.skip = offset;
+    state.x.pos.wrapping_add(offset)
+}
+
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
     mut offset: crate::stdlib::off64_t,
@@ -632,8 +643,7 @@ pub unsafe extern "C" fn gzseek64(
         }
         offset = remaining_offset;
     }
-    (*state).skip = offset;
-    return (*state).x.pos + offset;
+    gzseek_schedule_state(state_ref, offset)
 }
 #[export_name = "gzseek64"]
 
