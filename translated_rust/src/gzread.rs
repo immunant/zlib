@@ -668,48 +668,38 @@ fn gz_skip_buffer_plan(
     )
 }
 
-/// Plan the scalar effects of consuming buffered bytes for a pending seek.
-/// The ABI cursor is committed separately at the export boundary after it
-/// has been reconciled with the owned output allocation.
-fn gz_skip_commit(
+/// One validated buffered-seek transition. The public `gzgetc` macro can
+/// alter `x.next` between calls, so the export boundary first reconciles
+/// that ABI cursor to `next_index`; this core validates the whole advertised
+/// range before returning the new index and scalar state to publish.
+struct GzSkipBufferedCommit {
+    next_index: usize,
+    have: crate::stdlib::uInt,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+}
+
+fn gz_skip_buffer_commit_plan(
+    output_len: usize,
+    next_index: usize,
     have: crate::stdlib::uInt,
     pos: crate::stdlib::off64_t,
     skip: crate::stdlib::off64_t,
     consume: ::core::ffi::c_uint,
-) -> Option<(
-    crate::stdlib::uInt,
-    crate::stdlib::off64_t,
-    crate::stdlib::off64_t,
-)> {
+) -> Option<GzSkipBufferedCommit> {
     if consume > have || skip < consume as crate::stdlib::off64_t {
-        return None;
-    }
-    Some((
-        have.wrapping_sub(consume),
-        pos.wrapping_add(consume as crate::stdlib::off64_t),
-        skip.wrapping_sub(consume as crate::stdlib::off64_t),
-    ))
-}
-
-/// Advance a buffered-seek cursor using only owned-buffer indices.  The
-/// public `gzgetc` macro can alter `x.next` between calls, so the export
-/// boundary must reconcile that ABI cursor before it can consume buffered
-/// bytes.  Validate the whole advertised buffered range as well as the
-/// consumed prefix before returning the next index.
-fn gz_skip_buffer_next_index(
-    output_len: usize,
-    next_index: usize,
-    have: crate::stdlib::uInt,
-    consume: ::core::ffi::c_uint,
-) -> Option<usize> {
-    if consume > have {
         return None;
     }
     let end = next_index.checked_add(have as usize)?;
     if end > output_len {
         return None;
     }
-    next_index.checked_add(consume as usize)
+    Some(GzSkipBufferedCommit {
+        next_index: next_index.checked_add(consume as usize)?,
+        have: have.wrapping_sub(consume),
+        pos: pos.wrapping_add(consume as crate::stdlib::off64_t),
+        skip: skip.wrapping_sub(consume as crate::stdlib::off64_t),
+    })
 }
 
 /// Limit a direct copy from already-buffered gzip output to the amount that
@@ -997,7 +987,7 @@ macro_rules! gz_read_at_boundary {
                         }
                     }
                     Ok(GzSkipStep::Advance { consumed, complete }) => {
-                        let next_index = {
+                        let commit = {
                             let Some(output) = state_ref
                                 .buffers
                                 .as_ref()
@@ -1012,23 +1002,17 @@ macro_rules! gz_read_at_boundary {
                             ) else {
                                 break 'gz_read_result 0;
                             };
-                            let Some(next_index) = gz_skip_buffer_next_index(
+                            let Some(commit) = gz_skip_buffer_commit_plan(
                                 output.len(),
                                 next_index,
                                 state_ref.x.have,
+                                state_ref.x.pos,
+                                state_ref.skip,
                                 consumed,
                             ) else {
                                 break 'gz_read_result 0;
                             };
-                            next_index
-                        };
-                        let Some((have, pos, skip)) = gz_skip_commit(
-                            state_ref.x.have,
-                            state_ref.x.pos,
-                            state_ref.skip,
-                            consumed,
-                        ) else {
-                            break 'gz_read_result 0;
+                            commit
                         };
                         let Some(output) = state_ref
                             .buffers
@@ -1037,10 +1021,10 @@ macro_rules! gz_read_at_boundary {
                         else {
                             break 'gz_read_result 0;
                         };
-                        state_ref.x.next = output.as_mut_ptr().wrapping_add(next_index);
-                        state_ref.x.have = have;
-                        state_ref.x.pos = pos;
-                        state_ref.skip = skip;
+                        state_ref.x.next = output.as_mut_ptr().wrapping_add(commit.next_index);
+                        state_ref.x.have = commit.have;
+                        state_ref.x.pos = commit.pos;
+                        state_ref.skip = commit.skip;
                         if complete {
                             break;
                         }
@@ -1453,7 +1437,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
                 }
             }
             Ok(GzSkipStep::Advance { consumed, complete }) => {
-                let next_index = {
+                let commit = {
                     let Some(output) = state
                         .buffers
                         .as_ref()
@@ -1468,17 +1452,17 @@ pub unsafe extern "C" fn gzungetc_ffi(
                     ) else {
                         return -1;
                     };
-                    let Some(next_index) =
-                        gz_skip_buffer_next_index(output.len(), next_index, state.x.have, consumed)
-                    else {
+                    let Some(commit) = gz_skip_buffer_commit_plan(
+                        output.len(),
+                        next_index,
+                        state.x.have,
+                        state.x.pos,
+                        state.skip,
+                        consumed,
+                    ) else {
                         return -1;
                     };
-                    next_index
-                };
-                let Some((have, pos, skip)) =
-                    gz_skip_commit(state.x.have, state.x.pos, state.skip, consumed)
-                else {
-                    return -1;
+                    commit
                 };
                 let Some(output) = state
                     .buffers
@@ -1487,10 +1471,10 @@ pub unsafe extern "C" fn gzungetc_ffi(
                 else {
                     return -1;
                 };
-                state.x.next = output.as_mut_ptr().wrapping_add(next_index);
-                state.x.have = have;
-                state.x.pos = pos;
-                state.skip = skip;
+                state.x.next = output.as_mut_ptr().wrapping_add(commit.next_index);
+                state.x.have = commit.have;
+                state.x.pos = commit.pos;
+                state.skip = commit.skip;
                 if complete {
                     break;
                 }
@@ -1580,7 +1564,7 @@ pub unsafe extern "C" fn gzgets_ffi(
                 }
             }
             Ok(GzSkipStep::Advance { consumed, complete }) => {
-                let next_index = {
+                let commit = {
                     let Some(output) = state
                         .buffers
                         .as_ref()
@@ -1595,17 +1579,17 @@ pub unsafe extern "C" fn gzgets_ffi(
                     ) else {
                         return ::core::ptr::null_mut();
                     };
-                    let Some(next_index) =
-                        gz_skip_buffer_next_index(output.len(), next_index, state.x.have, consumed)
-                    else {
+                    let Some(commit) = gz_skip_buffer_commit_plan(
+                        output.len(),
+                        next_index,
+                        state.x.have,
+                        state.x.pos,
+                        state.skip,
+                        consumed,
+                    ) else {
                         return ::core::ptr::null_mut();
                     };
-                    next_index
-                };
-                let Some((have, pos, skip)) =
-                    gz_skip_commit(state.x.have, state.x.pos, state.skip, consumed)
-                else {
-                    return ::core::ptr::null_mut();
+                    commit
                 };
                 let Some(output) = state
                     .buffers
@@ -1614,10 +1598,10 @@ pub unsafe extern "C" fn gzgets_ffi(
                 else {
                     return ::core::ptr::null_mut();
                 };
-                state.x.next = output.as_mut_ptr().wrapping_add(next_index);
-                state.x.have = have;
-                state.x.pos = pos;
-                state.skip = skip;
+                state.x.next = output.as_mut_ptr().wrapping_add(commit.next_index);
+                state.x.have = commit.have;
+                state.x.pos = commit.pos;
+                state.skip = commit.skip;
                 if complete {
                     break;
                 }
