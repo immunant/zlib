@@ -3325,20 +3325,33 @@ macro_rules! inflate_end_at_boundary {
         if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
-            let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-            if !(*state).window.is_null() {
-                Some((*strm).zfree.expect("non-null function pointer"))
-                    .expect("non-null function pointer")(
-                    (*strm).opaque,
-                    (*state).window as crate::stdlib::voidpf,
-                );
+            // Snapshot exactly one callback invocation at a time. A custom
+            // allocator may observe or mutate the public stream, so no Rust
+            // borrow of it can survive either callback. This remains an ABI
+            // boundary: the safe inflate core never owns callback-allocated
+            // state or invokes the caller's free function.
+            let (window, zfree, opaque) = {
+                let strm_ref = &mut *strm;
+                let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+                let state_ref = &mut *state;
+                match strm_ref.zfree {
+                    Some(zfree) => (state_ref.window, zfree, strm_ref.opaque),
+                    None => return crate::zlib_h::Z_STREAM_ERROR,
+                }
+            };
+            if !window.is_null() {
+                zfree(opaque, window as crate::stdlib::voidpf);
             }
-            Some((*strm).zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                (*strm).opaque,
-                (*strm).state as crate::stdlib::voidpf,
-            );
-            (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+            let (state, zfree, opaque) = {
+                let strm_ref = &mut *strm;
+                match strm_ref.zfree {
+                    Some(zfree) => (strm_ref.state, zfree, strm_ref.opaque),
+                    None => return crate::zlib_h::Z_STREAM_ERROR,
+                }
+            };
+            zfree(opaque, state as crate::stdlib::voidpf);
+            let strm_ref = &mut *strm;
+            strm_ref.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
             crate::zlib_h::Z_OK
         }
     }};
