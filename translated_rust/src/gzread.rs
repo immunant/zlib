@@ -4665,88 +4665,84 @@ mod tests {
     }
 }
 
-fn gz_read(
-    state: &mut crate::gzguts_h::gz_state,
-    mut buf: crate::stdlib::voidp,
-    mut len: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
-    let mut got: crate::stdlib::z_size_t = 0;
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    match gz_read_setup(len, state.skip) {
-        GzReadSetup::ReturnEmpty => return 0 as crate::stdlib::z_size_t,
-        GzReadSetup::Skip => {
-            if gz_skip!(state) {
-                return 0 as crate::stdlib::z_size_t;
-            }
-        }
-        GzReadSetup::Read => {}
-    }
-    got = 0 as crate::stdlib::z_size_t;
-    err = 0 as ::core::ffi::c_int;
-    loop {
-        let step = gz_read_step(
-            len,
-            state.x.have,
-            state.eof,
-            state.strm.avail_in,
-            state.how,
-            state.size,
-        );
-        n = step.chunk_len;
-        let advance = gz_read_action_advances_output(&step.action);
-        match step.action {
-            GzReadAction::DrainBuffered => {
-                let next = state.x.next;
-                let have = state.x.have;
-                let state_err = state.err;
-                let plan = gz_read_drain_plan(have, state_err, n);
-                // `gz_read`'s callers establish the destination range at the
-                // FFI boundary.  Keep this C copy at that remaining external
-                // buffer boundary while the surrounding read state machine is
-                // safe Rust.
-                unsafe {
-                    crate::stdlib::memcpy(
-                        buf as *mut ::core::ffi::c_void,
-                        next as *const ::core::ffi::c_void,
-                        n as crate::__stddef_size_t_h::size_t,
+// The caller buffer and all raw I/O/decompression crossings belong to the
+// exported read APIs.  Expand this loop at those ABI boundaries so the shared
+// read-state helpers remain safe Rust, just as gzip-write does for its loop.
+macro_rules! gz_read_at_ffi_boundary {
+    ($state:expr, $buf:expr, $len:expr $(,)?) => {{
+        let state = &mut *$state;
+        let mut buf = $buf;
+        let mut len = $len;
+        let mut got: crate::stdlib::z_size_t = 0;
+        let mut n: ::core::ffi::c_uint = 0;
+        let mut err: ::core::ffi::c_int = 0;
+        match gz_read_setup(len, state.skip) {
+            GzReadSetup::ReturnEmpty => 0 as crate::stdlib::z_size_t,
+            GzReadSetup::Skip if gz_skip!(state) => 0 as crate::stdlib::z_size_t,
+            GzReadSetup::Skip | GzReadSetup::Read => {
+                loop {
+                    let step = gz_read_step(
+                        len,
+                        state.x.have,
+                        state.eof,
+                        state.strm.avail_in,
+                        state.how,
+                        state.size,
                     );
+                    n = step.chunk_len;
+                    let advance = gz_read_action_advances_output(&step.action);
+                    match step.action {
+                        GzReadAction::DrainBuffered => {
+                            let next = state.x.next;
+                            let have = state.x.have;
+                            let state_err = state.err;
+                            let plan = gz_read_drain_plan(have, state_err, n);
+                            crate::stdlib::memcpy(
+                                buf as *mut ::core::ffi::c_void,
+                                next as *const ::core::ffi::c_void,
+                                n as crate::__stddef_size_t_h::size_t,
+                            );
+                            state.x.next = state.x.next.wrapping_add(plan.next_advance);
+                            gz_read_apply_drain_plan(&mut state.x.have, &mut err, &plan);
+                        }
+                        GzReadAction::StopAtEof => break,
+                        GzReadAction::Fetch => {
+                            if let Some(fetch_error) =
+                                gz_read_fetch_error(gz_fetch(state), state.x.have)
+                            {
+                                err = fetch_error;
+                            }
+                        }
+                        GzReadAction::Load => {
+                            let load = gz_load(state, buf as *mut ::core::ffi::c_uchar, n);
+                            n = load.have;
+                            err = gz_read_load_status(load.failed);
+                        }
+                        GzReadAction::Decompress => {
+                            state.strm.avail_out = n as crate::stdlib::uInt;
+                            state.strm.next_out =
+                                buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
+                            err = gz_decomp(state);
+                            (n, state.x.have) = gz_read_take_decompressed(state.x.have);
+                        }
+                    }
+                    let progress = gz_read_loop_progress(advance, len, got, state.x.pos, n, err);
+                    len = progress.len;
+                    got = progress.got;
+                    state.x.pos = progress.pos;
+                    if advance {
+                        buf = (buf as *mut ::core::ffi::c_char).wrapping_add(n as usize)
+                            as crate::stdlib::voidp;
+                    }
+                    if !progress.should_continue {
+                        break;
+                    }
                 }
-                state.x.next = state.x.next.wrapping_add(plan.next_advance);
-                gz_read_apply_drain_plan(&mut state.x.have, &mut err, &plan);
-            }
-            GzReadAction::StopAtEof => break,
-            GzReadAction::Fetch => {
-                if let Some(fetch_error) = gz_read_fetch_error(gz_fetch(state), state.x.have) {
-                    err = fetch_error;
-                }
-            }
-            GzReadAction::Load => {
-                let load = gz_load(state, buf as *mut ::core::ffi::c_uchar, n);
-                n = load.have;
-                err = gz_read_load_status(load.failed);
-            }
-            GzReadAction::Decompress => {
-                state.strm.avail_out = n as crate::stdlib::uInt;
-                state.strm.next_out = buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
-                err = gz_decomp(state);
-                (n, state.x.have) = gz_read_take_decompressed(state.x.have);
+                gz_read_note_past_eof(&mut state.past, len, state.eof);
+                got
             }
         }
-        let progress = gz_read_loop_progress(advance, len, got, state.x.pos, n, err);
-        len = progress.len;
-        got = progress.got;
-        state.x.pos = progress.pos;
-        if advance {
-            buf =
-                (buf as *mut ::core::ffi::c_char).wrapping_add(n as usize) as crate::stdlib::voidp;
-        }
-        if !progress.should_continue {
-            break;
-        }
-    }
-    gz_read_note_past_eof(&mut state.past, len, state.eof);
-    return got;
+    }};
 }
 
 #[export_name = "gzread"]
@@ -4789,7 +4785,7 @@ pub unsafe extern "C" fn gzread_ffi(
         );
         return -1 as ::core::ffi::c_int;
     }
-    len = gz_read(&mut *state, buf, request_len) as ::core::ffi::c_uint;
+    len = gz_read_at_ffi_boundary!(state, buf, request_len) as ::core::ffi::c_uint;
     if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
         let (code, message) = (
             gz_read_deferred_error_code(error),
@@ -4860,7 +4856,7 @@ pub unsafe extern "C" fn gzfread_ffi(
     len = request_len;
     let read = match gz_fread_action(len) {
         GzFreadAction::ReturnZero => 0 as crate::stdlib::z_size_t,
-        GzFreadAction::Read => gz_fread_items_read(size, gz_read(&mut *state, buf, len)),
+        GzFreadAction::Read => gz_fread_items_read(size, gz_read_at_ffi_boundary!(state, buf, len)),
     };
     if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
         let (code, message) = (
@@ -4908,8 +4904,8 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
         }
         GzgetcAction::Read => {}
     }
-    let read = gz_read(
-        state_ref,
+    let read = gz_read_at_ffi_boundary!(
+        state,
         &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
         1 as crate::stdlib::z_size_t,
     );
