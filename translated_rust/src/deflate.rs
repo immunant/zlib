@@ -1525,13 +1525,34 @@ pub unsafe extern "C" fn deflateReset_ffi(
 ) -> ::core::ffi::c_int {
     deflateReset(strm)
 }
+// Header registration is ordinary owned-state policy once the ABI header has
+// been copied.  Keeping the mode check and replacement here lets the boundary
+// project the stream/state once, and keeps a future pointer-free deflate
+// owner from having to reproduce gzip-header lifetime rules.
+fn install_gzip_header(
+    wrap: ::core::ffi::c_int,
+    slot: &mut Option<GzipHeader>,
+    header: Option<GzipHeader>,
+) -> ::core::ffi::c_int {
+    if wrap != 2 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    *slot = header;
+    crate::zlib_h::Z_OK
+}
+
 pub unsafe extern "C" fn deflateSetHeader(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
+    if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    // The state is valid after `deflateStateCheck()`.  Project the two ABI
+    // owners once, then keep mode selection and replacement in the
+    // pointer-free header core below.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     let header = if head.is_null() {
         None
     } else {
@@ -1568,8 +1589,7 @@ pub unsafe extern "C" fn deflateSetHeader(
             hcrc: header.hcrc != 0,
         })
     };
-    (*(*strm).state).gzhead = header;
-    return crate::zlib_h::Z_OK;
+    install_gzip_header(state.wrap, &mut state.gzhead, header)
 }
 #[export_name = "deflateSetHeader"]
 
