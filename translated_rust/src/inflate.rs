@@ -578,14 +578,15 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     inflate_prime_from_state(allocators_present, state, bits, value)
 }
 unsafe fn updatewindow(
-    strm: &mut crate::zlib_h::z_stream_s,
+    zalloc: crate::zlib_h::alloc_func,
+    opaque: crate::stdlib::voidpf,
     state: &mut crate::src::inflate::inflate_state,
     end: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
     if state.window.is_null() {
-        state.window = Some(strm.zalloc.expect("non-null function pointer"))
+        state.window = Some(zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            strm.opaque,
+            opaque,
             (1 as crate::stdlib::uInt) << state.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
@@ -2373,7 +2374,13 @@ pub unsafe fn inflate(
                 || flush != crate::zlib_h::Z_FINISH)
     {
         let copied = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint) as usize;
-        if updatewindow(strm.0, &mut *state, &output[put - copied..put]) != 0 {
+        if updatewindow(
+            (*strm).zalloc,
+            (*strm).opaque,
+            &mut *state,
+            &output[put - copied..put],
+        ) != 0
+        {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2577,10 +2584,11 @@ pub unsafe fn inflateSetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // Validate the stream before borrowing the state behind its raw link.
-    if inflateStateCheck(strm as *mut crate::zlib_h::z_stream_s) != 0 {
+    let zalloc = strm.zalloc;
+    let opaque = strm.opaque;
+    let Some(state) = inflate_validate_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    };
     if state.wrap != 0 as ::core::ffi::c_int
         && state.mode as ::core::ffi::c_uint
             != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -2596,7 +2604,7 @@ pub unsafe fn inflateSetDictionary(
             return crate::zlib_h::Z_DATA_ERROR;
         }
     }
-    if updatewindow(strm, state, dictionary) != 0 {
+    if updatewindow(zalloc, opaque, state, dictionary) != 0 {
         state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
