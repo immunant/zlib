@@ -871,7 +871,7 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
     crate::src::gzlib::gz_error_state(&mut *state, crate::zlib_h::Z_OK, None);
     ::core::mem::ManuallyDrop::drop(&mut (*state).path);
     ret = crate::stdlib::close((*state).fd);
-    crate::stdlib::free(state as *mut ::core::ffi::c_void);
+    drop(Box::from_raw(::core::ptr::slice_from_raw_parts_mut(state, 1)));
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
