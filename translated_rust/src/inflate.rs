@@ -279,12 +279,14 @@ pub unsafe extern "C" fn inflateReset2(
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut wrap: ::core::ffi::c_int = 0;
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    // `inflateStateCheck()` established the ABI association.  Project it
+    // once so the reset policy below works on Rust references rather than
+    // repeatedly dereferencing the raw stream and state pointers.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     if windowBits < 0 as ::core::ffi::c_int {
         if windowBits < -15 as ::core::ffi::c_int {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -302,15 +304,15 @@ pub unsafe extern "C" fn inflateReset2(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).window.is_some() && (*state).wbits != windowBits as ::core::ffi::c_uint {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window.expect("window checked").as_ptr() as crate::stdlib::voidpf,
+    if state.window.is_some() && state.wbits != windowBits as ::core::ffi::c_uint {
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
+            state.window.expect("window checked").as_ptr() as crate::stdlib::voidpf,
         );
-        (*state).window = None;
+        state.window = None;
     }
-    (*state).wrap = wrap;
-    (*state).wbits = windowBits as ::core::ffi::c_uint;
+    state.wrap = wrap;
+    state.wbits = windowBits as ::core::ffi::c_uint;
     return inflateReset(strm);
 }
 #[export_name = "inflateReset2"]
