@@ -258,7 +258,10 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+unsafe fn gz_decomp(
+    state: &mut crate::gzguts_h::gz_state,
+    output: &mut [u8],
+) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let had = state.strm.avail_out as ::core::ffi::c_uint;
     loop {
@@ -277,19 +280,46 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
             break;
         } else {
-            let input = ::core::slice::from_raw_parts(
-                state.strm.next_in,
-                state.strm.avail_in as usize,
-            );
-            let output = ::core::slice::from_raw_parts_mut(
-                state.strm.next_out,
-                state.strm.avail_out as usize,
-            );
+            let input_len = state.strm.avail_in as usize;
+            let Some(input_start) = state
+                .strm
+                .next_in
+                .addr()
+                .checked_sub(state.in_0.as_ptr().addr())
+            else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"state corrupt"),
+                );
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            };
+            if input_start > state.in_0.len() || input_len > state.in_0.len() - input_start {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"state corrupt"),
+                );
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            }
+            let output_len = state.strm.avail_out as usize;
+            if output_len > output.len() {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"state corrupt"),
+                );
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            }
+            let input = &state.in_0[input_start..input_start + input_len];
             ret = crate::src::inflate::inflate(
                 &mut state.strm,
                 crate::zlib_h::Z_NO_FLUSH,
                 input,
-                output,
+                &mut output[..output_len],
             );
             if state.strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
@@ -335,8 +365,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     }
     state.x.have =
         (had as crate::stdlib::uInt).wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
-    state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize)
-        as *mut ::core::ffi::c_uchar;
+    state.x.next = output.as_mut_ptr() as *mut ::core::ffi::c_uchar;
     if ret == crate::zlib_h::Z_STREAM_END {
         state.junk = 0 as ::core::ffi::c_int;
         state.how = crate::gzguts_h::LOOK;
@@ -369,10 +398,14 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return 0 as ::core::ffi::c_int;
             }
             crate::gzguts_h::GZIP => {
-                state.strm.avail_out =
-                    (state.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                state.strm.next_out = state.out.as_mut_ptr();
-                if gz_decomp(state) == -1 as ::core::ffi::c_int {
+                // Move the output owner out for the duration of decompression so
+                // its slice can be passed independently of the gzip state.
+                let mut output = std::mem::take(&mut state.out);
+                state.strm.avail_out = output.len() as crate::stdlib::uInt;
+                state.strm.next_out = output.as_mut_ptr();
+                let result = gz_decomp(state, &mut output);
+                state.out = output;
+                if result == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
@@ -491,7 +524,7 @@ unsafe fn gz_read_impl(
                 } else {
                     state.strm.avail_out = n as crate::stdlib::uInt;
                     state.strm.next_out = buf[out..].as_mut_ptr() as *mut crate::stdlib::Bytef;
-                    err = gz_decomp(state);
+                    err = gz_decomp(state, &mut buf[out..out + n as usize]);
                     n = state.x.have;
                     state.x.have = 0 as ::core::ffi::c_uint;
                 }
