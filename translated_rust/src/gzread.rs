@@ -564,44 +564,40 @@ pub unsafe extern "C" fn gzread_ffi(
 ) -> ::core::ffi::c_int {
     gzread(file, buf, len)
 }
-pub unsafe extern "C" fn gzfread(
-    mut buf: crate::stdlib::voidp,
-    mut size: crate::stdlib::z_size_t,
-    mut nitems: crate::stdlib::z_size_t,
-    mut file: crate::zlib_h::gzFile,
+enum GzfreadBuffer<'a> {
+    Empty,
+    Bytes(&'a mut [u8]),
+    Overflow,
+}
+
+fn gzfread_impl(
+    state: &mut crate::gzguts_h::gz_state,
+    size: crate::stdlib::z_size_t,
+    buffer: GzfreadBuffer<'_>,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if state.mode != crate::gzguts_h::GZ_READ {
         return 0 as crate::stdlib::z_size_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    let state = &mut *state;
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(c"request does not fit in a size_t"),
-        );
-        return 0 as crate::stdlib::z_size_t;
-    }
-    return if len != 0 {
-        gz_read(state as *mut _, buf, len).wrapping_div(size)
-    } else {
-        0 as crate::stdlib::z_size_t
+    let buffer = match buffer {
+        GzfreadBuffer::Empty => return 0,
+        GzfreadBuffer::Bytes(buffer) => buffer,
+        GzfreadBuffer::Overflow => {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(c"request does not fit in a size_t"),
+            );
+            return 0;
+        }
     };
+    unsafe { gz_read_impl(state, buffer) }.wrapping_div(size)
 }
 #[export_name = "gzfread"]
 
@@ -611,7 +607,15 @@ pub unsafe extern "C" fn gzfread_ffi(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    gzfread(buf, size, nitems, file)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0;
+    };
+    let buffer = match nitems.checked_mul(size) {
+        Some(0) => GzfreadBuffer::Empty,
+        Some(len) => GzfreadBuffer::Bytes(::core::slice::from_raw_parts_mut(buf.cast(), len)),
+        None => GzfreadBuffer::Overflow,
+    };
+    gzfread_impl(state, size, buffer)
 }
 fn gzgetc_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_READ {
