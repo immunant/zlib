@@ -44,27 +44,20 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-// All callers have already validated and bound the gzip state.  Keep this
-// initialization adapter reference-bound; allocation and deflate setup remain
-// its raw FFI boundaries.
-unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// All callers have already validated and bound the gzip state. Keep this
+// coordinator reference-bound; its allocation, cleanup, deflater setup, and
+// error bridges are confined to the initialization boundary below.
+fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    state.in_0 = crate::stdlib::malloc(
-        (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-    ) as *mut ::core::ffi::c_uchar;
-    if state.in_0.is_null() {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_MEM_ERROR,
-            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.direct == 0 {
-        state.out = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
-            as *mut ::core::ffi::c_uchar;
-        if state.out.is_null() {
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+    // SAFETY: the validated write state is uninitialized on entry. This
+    // boundary allocates its gzip buffers, configures its deflater, and on
+    // failure frees only allocations made here before updating that same
+    // state's error record.
+    unsafe {
+        state.in_0 = crate::stdlib::malloc(
+            (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
+        ) as *mut ::core::ffi::c_uchar;
+        if state.in_0.is_null() {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -72,30 +65,43 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
-        state.strm.zalloc = None;
-        state.strm.zfree = None;
-        state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        ret = crate::src::deflate::deflateInit2_(
-            &mut state.strm,
-            state.level,
-            8 as ::core::ffi::c_int,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            8 as ::core::ffi::c_int,
-            state.strategy,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        );
-        if ret != crate::zlib_h::Z_OK {
-            crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+        if state.direct == 0 {
+            state.out = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
+                as *mut ::core::ffi::c_uchar;
+            if state.out.is_null() {
+                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                return -1 as ::core::ffi::c_int;
+            }
+            state.strm.zalloc = None;
+            state.strm.zfree = None;
+            state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+            ret = crate::src::deflate::deflateInit2_(
+                &mut state.strm,
+                state.level,
+                8 as ::core::ffi::c_int,
+                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                8 as ::core::ffi::c_int,
+                state.strategy,
+                crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
             );
-            return -1 as ::core::ffi::c_int;
+            if ret != crate::zlib_h::Z_OK {
+                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                return -1 as ::core::ffi::c_int;
+            }
+            state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
         }
-        state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
     state.size = state.want;
     if state.direct == 0 {
@@ -117,10 +123,7 @@ fn gz_comp(
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
     if crate::src::gzlib::gz_write_needs_init(state)
-        // SAFETY: the validated write state is uninitialized exactly when
-        // this predicate is true, so `gz_init` may allocate and configure its
-        // gzip buffers and deflater.
-        && unsafe { gz_init(state) } == -1 as ::core::ffi::c_int
+        && gz_init(state) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -297,9 +300,9 @@ fn gz_write(
         match crate::src::gzlib::gz_write_plan(state, len) {
             crate::src::gzlib::GzWritePlan::Empty => return 0 as crate::stdlib::z_size_t,
             crate::src::gzlib::GzWritePlan::Initialize => {
-                // SAFETY: this plan is selected only for an uninitialized,
-                // validated write state, which `gz_init` configures.
-                if unsafe { gz_init(state) } == -1 as ::core::ffi::c_int {
+                // This plan is selected only for an uninitialized, validated
+                // write state, which `gz_init` configures.
+                if gz_init(state) == -1 as ::core::ffi::c_int {
                     return 0 as crate::stdlib::z_size_t;
                 }
             }
