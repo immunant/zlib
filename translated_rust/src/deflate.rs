@@ -2385,6 +2385,42 @@ fn deflate_finish_gzip_header(
     crate::zlib_h::Z_STREAM_END
 }
 
+// The ordinary outcomes of preparation do not need to re-bind the raw
+// stream/state pair.  Keep them on the references already checked by the
+// dispatcher, so only the caller-owned gzip header follows the separate
+// foreign-data path below.
+fn deflate_finish_prepared(
+    stream: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    flush: ::core::ffi::c_int,
+    preparation: DeflatePreparation,
+) -> Option<::core::ffi::c_int> {
+    match preparation {
+        DeflatePreparation::Return(result) => Some(result),
+        DeflatePreparation::Compress => Some(deflate_compress_and_finish(stream, state, flush)),
+        DeflatePreparation::GzipHeader => None,
+    }
+}
+
+// Once the retained gzip header has been bound, choosing whether to continue
+// compression is entirely reference-based.  This keeps the raw header
+// conversion in the one small section of `deflate()` that needs it.
+fn deflate_finish_bound_gzip_header(
+    stream: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    flush: ::core::ffi::c_int,
+    head: &crate::zlib_h::gz_header,
+    extra: Option<&[crate::stdlib::Bytef]>,
+    name: Option<&::core::ffi::CStr>,
+    comment: Option<&::core::ffi::CStr>,
+) -> ::core::ffi::c_int {
+    match deflate_finish_gzip_header(stream, state, head, extra, name, comment) {
+        crate::zlib_h::Z_OK => crate::zlib_h::Z_OK,
+        crate::zlib_h::Z_STREAM_END => deflate_compress_and_finish(stream, state, flush),
+        result => result,
+    }
+}
+
 // The raw stream handle is validated and bound by `deflateStateCheck()` before
 // any state transition. Keep the core dispatcher safe; the exported adapter
 // below retains the foreign-call boundary.
@@ -2398,19 +2434,11 @@ pub extern "C" fn deflate(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let preparation = {
-        let (stream, state) = deflateStateCheck(strm).expect("stream validated above");
-        deflate_prepare_call(stream, state, flush)
-    };
-    match preparation {
-        DeflatePreparation::Return(result) => return result,
-        DeflatePreparation::Compress => {
-            let (stream, state) = deflateStateCheck(strm).expect("stream validated above");
-            return deflate_compress_and_finish(stream, state, flush);
-        }
-        DeflatePreparation::GzipHeader => {}
-    }
     let (stream, state) = deflateStateCheck(strm).expect("stream validated above");
+    let preparation = deflate_prepare_call(stream, state, flush);
+    if let Some(result) = deflate_finish_prepared(stream, state, flush, preparation) {
+        return result;
+    }
     // SAFETY: `deflateSetHeader()` retains caller-owned header storage. The
     // ABI requires those optional fields to remain valid through deflate().
     let head = unsafe { &*state.gzhead };
@@ -2431,11 +2459,7 @@ pub extern "C" fn deflate(
     } else {
         Some(unsafe { ::core::ffi::CStr::from_ptr(head.comment as *const ::core::ffi::c_char) })
     };
-    return match deflate_finish_gzip_header(stream, state, head, extra, name, comment) {
-        crate::zlib_h::Z_OK => crate::zlib_h::Z_OK,
-        crate::zlib_h::Z_STREAM_END => deflate_compress_and_finish(stream, state, flush),
-        result => result,
-    };
+    deflate_finish_bound_gzip_header(stream, state, flush, head, extra, name, comment)
 }
 #[export_name = "deflate"]
 
