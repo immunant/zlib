@@ -3646,17 +3646,50 @@ fn flush_pending(
     *output_pos += len as usize;
     len
 }
+
+// A deflate call accepts only the public flush range.  Keep validation and
+// the no-progress ordering comparison in a pointer-free request so the
+// eventual stream/state owner can make this decision before it projects ABI
+// cursors or callback-backed storage.
+#[derive(Clone, Copy)]
+struct DeflateFlush(::core::ffi::c_int);
+
+impl DeflateFlush {
+    fn parse(flush: ::core::ffi::c_int) -> Option<Self> {
+        (0..=crate::zlib_h::Z_BLOCK)
+            .contains(&flush)
+            .then_some(Self(flush))
+    }
+
+    fn raw(self) -> ::core::ffi::c_int {
+        self.0
+    }
+
+    fn repeats_without_input(self, previous: ::core::ffi::c_int) -> bool {
+        let rank = |flush: ::core::ffi::c_int| {
+            flush * 2
+                - if flush > crate::zlib_h::Z_FINISH {
+                    9
+                } else {
+                    0
+                }
+        };
+        rank(self.0) <= rank(previous) && self.0 != crate::zlib_h::Z_FINISH
+    }
+}
+
 // The export wrapper owns the nullable ABI-stream conversion.  This adapter
 // keeps the opaque-state and callback-backed storage projections together,
 // so the lower-level codecs continue to receive only bounded views.
 pub unsafe extern "C" fn deflate(
     strm: &mut crate::zlib_h::z_stream_s,
-    mut flush: ::core::ffi::c_int,
+    flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut old_flush: ::core::ffi::c_int = 0;
-    if flush > crate::zlib_h::Z_BLOCK || flush < 0 as ::core::ffi::c_int {
+    let Some(flush_request) = DeflateFlush::parse(flush) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
+    let flush = flush_request.raw();
     // Keep the ABI projections at this boundary. The lower-level block
     // routines receive these scoped stream/state borrows directly.
     let Some((strm, s)) = deflate_stream_and_state(strm) else {
@@ -3725,19 +3758,7 @@ pub unsafe extern "C" fn deflate(
             return crate::zlib_h::Z_OK;
         }
     } else if strm.avail_in == 0 as crate::stdlib::uInt
-        && flush * 2 as ::core::ffi::c_int
-            - (if flush > 4 as ::core::ffi::c_int {
-                9 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            })
-            <= old_flush * 2 as ::core::ffi::c_int
-                - (if old_flush > 4 as ::core::ffi::c_int {
-                    9 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-        && flush != crate::zlib_h::Z_FINISH
+        && flush_request.repeats_without_input(old_flush)
     {
         strm.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
