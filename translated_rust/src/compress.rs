@@ -138,10 +138,7 @@ pub fn compress2_z(
         if stream.avail_in == 0 as crate::stdlib::uInt {
             (stream.avail_in, sourceLen) = compress_chunk(sourceLen, max);
         }
-        err = crate::src::deflate::deflate(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            compress_flush(sourceLen),
-        );
+        err = crate::src::deflate::deflate(&mut stream, compress_flush(sourceLen));
         if err != crate::zlib_h::Z_OK {
             break;
         }

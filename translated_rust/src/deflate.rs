@@ -1498,17 +1498,16 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     };
     deflatePrime(strm, bits, value)
 }
-// All raw stream/state binding is contained in `deflateStateCheck()` and the
-// bounded helpers it calls, so this implementation itself has no unsafe
-// contract. The exported ABI wrapper below remains the foreign-call boundary.
-pub extern "C" fn deflateParams(
-    mut strm: crate::zlib_h::z_streamp,
+// Parameter changes operate on an already-bound stream. The exported wrapper
+// below is the only place that accepts the raw C handle.
+pub fn deflateParams(
+    strm: &mut crate::zlib_h::z_stream,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
+    if deflateStateCheck(strm as *mut _).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    }
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
@@ -1519,15 +1518,20 @@ pub extern "C" fn deflateParams(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let func = configuration_table[state.level as usize].func;
-    if (strategy != state.strategy || func != configuration_table[level as usize].func)
-        && state.last_flush != -2 as ::core::ffi::c_int
-    {
-        let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
+    let needs_flush = {
+        let (_, state) = deflateStateCheck(strm as *mut _).expect("stream validated above");
+        let func = configuration_table[state.level as usize].func;
+        (strategy != state.strategy || func != configuration_table[level as usize].func)
+            && state.last_flush != -2 as ::core::ffi::c_int
+    };
+    if needs_flush {
+        let err = deflate(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if _strm.avail_in != 0
+        let (stream, state) =
+            deflateStateCheck(strm as *mut _).expect("stream remains valid after deflate");
+        if stream.avail_in != 0
             || state.strstart as ::core::ffi::c_long - state.block_start
                 + state.lookahead as ::core::ffi::c_long
                 != 0
@@ -1535,12 +1539,13 @@ pub extern "C" fn deflateParams(
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
+    let (stream, state) = deflateStateCheck(strm as *mut _).expect("stream validated above");
     // `fill_window()` already owns the one validated binding of these
     // deflater allocations. Reuse it here rather than creating a second raw
     // slice view solely for the parameter update.
     fill_window(
         state,
-        _strm,
+        stream,
         false,
         |state, _stream, _window, head, prev, _input| {
             deflate_params(state, head, prev, level, strategy)
@@ -1584,6 +1589,11 @@ pub unsafe extern "C" fn deflateParams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this adapter only binds the foreign stream; the reference-bound
+    // implementation retains validation and parameter-change behavior.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateParams(strm, level, strategy)
 }
 fn deflate_tune(
@@ -2561,20 +2571,21 @@ fn deflate_finish_bound_gzip_header(
     }
 }
 
-// The raw stream handle is validated and bound by `deflateStateCheck()` before
-// any state transition. Keep the core dispatcher safe; the exported adapter
-// below retains the foreign-call boundary.
-pub extern "C" fn deflate(
-    mut strm: crate::zlib_h::z_streamp,
+// The core dispatcher receives an already-bound stream reference.  This keeps
+// the raw C stream handle at the export boundary; state validation still
+// happens before any transition below.
+pub fn deflate(
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm).is_none()
+    if deflateStateCheck(strm as *mut _).is_none()
         || flush > crate::zlib_h::Z_BLOCK
         || flush < 0 as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let (stream, state) = deflateStateCheck(strm).expect("stream validated above");
+    let (stream, state) =
+        deflateStateCheck(strm as *mut _).expect("stream validated above");
     let preparation = deflate_prepare_call(stream, state, flush);
     if let Some(result) = deflate_finish_prepared(stream, state, flush, preparation) {
         return result;
@@ -2607,6 +2618,11 @@ pub unsafe extern "C" fn deflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this ABI adapter only binds the caller-owned stream. The core
+    // dispatcher retains all state validation and compression behavior.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflate(strm, flush)
 }
 // The public ABI wrapper binds the foreign stream pointer.  Teardown itself
