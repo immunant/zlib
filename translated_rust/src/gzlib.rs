@@ -646,30 +646,22 @@ pub unsafe extern "C" fn gzerror_ffi(
 ) -> *const ::core::ffi::c_char {
     gzerror(file, errnum)
 }
-pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+fn gzclearerr_state(state: &mut crate::gzguts_h::gz_state) {
+    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
         return;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0 as ::core::ffi::c_int;
+        state.past = 0 as ::core::ffi::c_int;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
-    }
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    gz_error_state(state, crate::zlib_h::Z_OK, None);
 }
 #[export_name = "gzclearerr"]
 
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
-    gzclearerr(file)
+    if let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() {
+        gzclearerr_state(state);
+    }
 }
 pub(crate) fn gz_error_state(
     state: &mut crate::gzguts_h::gz_state,
