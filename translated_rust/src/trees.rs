@@ -5217,7 +5217,6 @@ pub unsafe extern "C" fn _tr_stored_block(
 }
 
 #[export_name = "_tr_stored_block"]
-
 pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
@@ -5226,7 +5225,9 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 ) {
     _tr_stored_block(s, buf, stored_len, last)
 }
-pub(crate) unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
+#[export_name = "_tr_flush_bits"]
+
+pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     if s.is_null() || (*s).pending_buf.is_null() {
         return;
     }
@@ -5235,12 +5236,6 @@ pub(crate) unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflat
     };
     let pending_buf = ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len);
     flush_bits_state(&mut *s, pending_buf);
-}
-
-#[export_name = "_tr_flush_bits"]
-
-pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s)
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
     if s.is_null() {

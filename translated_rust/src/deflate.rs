@@ -1504,7 +1504,18 @@ pub unsafe extern "C" fn deflatePrime_ffi(
         };
         (*s).bi_buf = step.bi_buf;
         (*s).bi_valid = step.bi_valid;
-        crate::src::trees::bi_flush(s as *mut crate::src::deflate::internal_state);
+        let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+            return crate::zlib_h::Z_BUF_ERROR;
+        };
+        if pending_len != 0 && (*s).pending_buf.is_null() {
+            return crate::zlib_h::Z_BUF_ERROR;
+        }
+        let pending_buf = if pending_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+        };
+        crate::src::trees::flush_bits_state(&mut *s, pending_buf);
         value = step.value;
         bits = step.bits;
         if bits == 0 {
@@ -2126,31 +2137,57 @@ fn set_stored_block_length_state(
 }
 
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        (*strm).state as *mut crate::src::deflate::deflate_state;
-    crate::src::trees::bi_flush(s as *mut crate::src::deflate::internal_state);
+    if strm.is_null() {
+        return;
+    }
+    let strm = &mut *strm;
+    let state = strm.state as *mut crate::src::deflate::deflate_state;
+    if state.is_null() {
+        return;
+    }
+    let s = &mut *state;
+    let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
+        return;
+    };
+    if pending_len != 0 && s.pending_buf.is_null() {
+        return;
+    }
+    let pending_buf = if pending_len == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
+    };
+    crate::src::trees::flush_bits_state(s, pending_buf);
     let Some((len, reset_pending_out)) =
-        flush_pending_state((*s).pending_buf_size, &mut (*s).pending, (*strm).avail_out)
+        flush_pending_state(s.pending_buf_size, &mut s.pending, strm.avail_out)
     else {
         return;
     };
     if len == 0 {
         return;
     }
+    let Ok(len) = usize::try_from(len) else {
+        return;
+    };
+    if (len != 0 && (strm.next_out.is_null() || s.pending_out.is_null()))
+        || len > strm.avail_out as usize
+    {
+        return;
+    }
     crate::stdlib::memcpy(
-        (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_out as *const ::core::ffi::c_void,
+        strm.next_out as *mut ::core::ffi::c_void,
+        s.pending_out as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
     // The copied length is bounded by the validated output and pending
     // spans above. Preserve zlib's cursor advance without an unsafe pointer
     // offset operation in this transitional ABI adapter.
-    (*strm).next_out = (*strm).next_out.wrapping_add(len as usize);
-    (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
-    (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
-    (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
+    strm.next_out = strm.next_out.wrapping_add(len);
+    s.pending_out = s.pending_out.wrapping_add(len);
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm.avail_out = strm.avail_out.wrapping_sub(len as crate::stdlib::uInt);
     if reset_pending_out {
-        (*s).pending_out = (*s).pending_buf;
+        s.pending_out = s.pending_buf;
     }
 }
 
