@@ -203,6 +203,40 @@ fn inflate_fast_pull_byte(
     Ok(true)
 }
 
+/// Copy a match whose source is entirely in already-produced output.  Copy in
+/// distance-sized chunks so each source range precedes its destination: this
+/// preserves deflate's repeated-pattern behavior for matches longer than the
+/// distance while still using slice-checked overlapping copies.
+fn inflate_fast_copy_output_match(
+    output: &mut [u8],
+    output_at: &mut usize,
+    dist: usize,
+    len: usize,
+) -> bool {
+    if dist == 0 || *output_at < dist || len > output.len().saturating_sub(*output_at) {
+        return false;
+    }
+
+    let mut remaining = len;
+    while remaining != 0 {
+        let copy = remaining.min(dist);
+        let source = *output_at - dist;
+        let Some(source_end) = source.checked_add(copy) else {
+            return false;
+        };
+        let Some(destination_end) = output_at.checked_add(copy) else {
+            return false;
+        };
+        if source_end > *output_at || destination_end > output.len() {
+            return false;
+        }
+        output.copy_within(source..source_end, *output_at);
+        *output_at = destination_end;
+        remaining -= copy;
+    }
+    true
+}
+
 /// Decode the fast-path portion of a deflate stream using only bounded
 /// buffers.  The ABI adapter owns construction of these views and commits the
 /// resulting cursors, so this core cannot retain or dereference foreign
@@ -439,23 +473,10 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
                     }
                     len -= take;
                 }
-                while len != 0 {
-                    if output_at < dist {
-                        mode = Some(crate::src::inflate::BAD);
-                        error = Some(17);
-                        break 'fast;
-                    }
-                    let Some(&byte) = output.get(output_at - dist) else {
-                        mode = Some(crate::src::inflate::BAD);
-                        error = Some(17);
-                        break 'fast;
-                    };
-                    let Some(slot) = output.get_mut(output_at) else {
-                        break 'fast;
-                    };
-                    *slot = byte;
-                    output_at += 1;
-                    len -= 1;
+                if !inflate_fast_copy_output_match(output, &mut output_at, dist, len) {
+                    mode = Some(crate::src::inflate::BAD);
+                    error = Some(17);
+                    break 'fast;
                 }
                 break 'code;
             }
