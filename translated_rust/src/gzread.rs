@@ -46,107 +46,86 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-unsafe extern "C" fn gz_load(
-    mut state: crate::gzguts_h::gz_statep,
-    mut buf: *mut ::core::ffi::c_uchar,
-    mut len: ::core::ffi::c_uint,
-    mut have: *mut ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut get: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
-    (*state).again = 0 as ::core::ffi::c_int;
-    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-    *have = 0 as ::core::ffi::c_uint;
-    loop {
-        get = len.wrapping_sub(*have);
-        if get > max {
-            get = max;
-        }
-        ret = crate::stdlib::read(
-            (*state).fd,
-            buf.offset(*have as isize) as *mut ::core::ffi::c_void,
-            get as crate::__stddef_size_t_h::size_t,
-        ) as ::core::ffi::c_int;
-        if ret <= 0 as ::core::ffi::c_int {
-            break;
-        }
-        *have = (*have).wrapping_add(ret as ::core::ffi::c_uint);
-        if *have >= len {
-            break;
+struct GzLoad {
+    bytes: usize,
+    eof: bool,
+}
+
+fn gz_load(file: &mut std::fs::File, buf: &mut [u8]) -> Result<GzLoad, (usize, std::io::Error)> {
+    use std::io::Read;
+
+    let max = ((-1i32 as u32 >> 2) + 1) as usize;
+    let mut have = 0;
+    while have < buf.len() {
+        let get = (buf.len() - have).min(max);
+        match file.read(&mut buf[have..have + get]) {
+            Ok(0) => return Ok(GzLoad { bytes: have, eof: true }),
+            Ok(read) => have += read,
+            Err(error) => return Err((have, error)),
         }
     }
-    if ret < 0 as ::core::ffi::c_int {
-        if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-            || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-        {
-            (*state).again = 1 as ::core::ffi::c_int;
-            if *have != 0 as ::core::ffi::c_uint {
-                return 0 as ::core::ffi::c_int;
+    Ok(GzLoad { bytes: have, eof: false })
+}
+
+fn gz_load_result(
+    state: &mut crate::gzguts_h::gz_state,
+    result: Result<GzLoad, (usize, std::io::Error)>,
+) -> Result<usize, ()> {
+    state.again = 0;
+    match result {
+        Ok(load) => {
+            state.eof = load.eof as ::core::ffi::c_int;
+            Ok(load.bytes)
+        }
+        Err((bytes, error)) => {
+            state.again = (error.kind() == std::io::ErrorKind::WouldBlock) as ::core::ffi::c_int;
+            if state.again != 0 && bytes != 0 {
+                return Ok(bytes);
             }
+            let message = std::ffi::CString::new(error.to_string()).ok();
+            crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_ERRNO, message.as_deref());
+            Err(())
         }
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(*crate::stdlib::__errno_location()),
-        );
-        return -1 as ::core::ffi::c_int;
     }
-    if ret == 0 as ::core::ffi::c_int {
-        (*state).eof = 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
 }
 
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let mut got: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
+    let state = &mut *state;
+    if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).eof == 0 as ::core::ffi::c_int {
-        if (*strm).avail_in != 0 {
-            let mut p: *mut ::core::ffi::c_uchar = (*state).in_buf.as_mut_ptr();
-            let q = (*strm)
-                .next_in
-                .0
-                .expect("non-null input cursor");
-            let mut q = ::core::ptr::with_exposed_provenance::<::core::ffi::c_uchar>(q.get());
-            if q != p as *const ::core::ffi::c_uchar {
-                let mut n: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-                loop {
-                    let c2rust_fresh0 = q;
-                    q = q.offset(1);
-                    let c2rust_fresh1 = p;
-                    p = p.offset(1);
-                    *c2rust_fresh1 = *c2rust_fresh0;
-                    n = n.wrapping_sub(1);
-                    if n == 0 {
-                        break;
-                    }
-                }
-            }
+    if state.eof == 0 {
+        let available = state.strm.avail_in as usize;
+        if available > state.in_end || state.in_end > state.in_buf.len() || available > state.size as usize {
+            crate::src::gzlib::gz_error_safe(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(c"input buffer state corrupt"),
+            );
+            return -1;
         }
-        if gz_load(
-            state,
-            (*state)
-                .in_buf
-                .as_mut_ptr()
-                .offset((*strm).avail_in as isize),
-            (*state)
-                .size
-                .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
-            &raw mut got,
-        ) == -1 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
+        let start = state.in_end - available;
+        if start != 0 {
+            state.in_buf.copy_within(start..state.in_end, 0);
         }
-        (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
-        (*strm).next_in = crate::input_cursor!((*state).in_buf.as_mut_ptr());
+        state.in_end = available;
+        let capacity = state.size as usize;
+        let result = {
+            let (read_file, in_buf) = (&mut state.read_file, &mut state.in_buf);
+            let file = read_file
+                .as_mut()
+                .expect("gzip read descriptor must be adopted at the FFI boundary");
+            gz_load(file, &mut in_buf[available..capacity])
+        };
+        let got = match gz_load_result(state, result) {
+            Ok(got) => got,
+            Err(()) => return -1,
+        };
+        state.in_end += got;
+        state.strm.avail_in = (available + got) as crate::stdlib::uInt;
+        state.strm.next_in = crate::input_cursor!(state.in_buf.as_mut_ptr());
     }
-    return 0 as ::core::ffi::c_int;
+    0
 }
 
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
@@ -325,16 +304,20 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 }
             }
             crate::gzguts_h::COPY => {
-                if gz_load(
-                    state,
-                    (*state).out_buf.as_mut_ptr(),
-                    (*state).size << 1 as ::core::ffi::c_int,
-                    &raw mut (*state).x.have,
-                ) == -1 as ::core::ffi::c_int
-                {
-                    return -1 as ::core::ffi::c_int;
-                }
-                (*state).x.next = 0;
+                let state = &mut *state;
+                let output_len = state.size as usize * 2;
+                let result = {
+                    let (read_file, out_buf) = (&mut state.read_file, &mut state.out_buf);
+                    let file = read_file
+                        .as_mut()
+                        .expect("gzip read descriptor must be adopted at the FFI boundary");
+                    gz_load(file, &mut out_buf[..output_len])
+                };
+                state.x.have = match gz_load_result(state, result) {
+                    Ok(got) => got as ::core::ffi::c_uint,
+                    Err(()) => return -1,
+                };
+                state.x.next = 0;
                 return 0 as ::core::ffi::c_int;
             }
             crate::gzguts_h::GZIP => {
@@ -448,7 +431,10 @@ unsafe extern "C" fn gz_read(
                     }
                     break 's_28;
                 } else if (*state).how == crate::gzguts_h::COPY {
-                    err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
+                    if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                        err = -1;
+                    }
+                    break 's_28;
                 } else {
                     (*state).strm.avail_out = n as crate::stdlib::uInt;
                     (*state).strm.next_out = crate::output_cursor!(buf);
@@ -852,11 +838,8 @@ pub unsafe extern "C" fn gzclose_r_ffi(file: crate::zlib_h::gzFile) -> ::core::f
         crate::src::inflate::inflateEnd(&mut state.strm);
     }
     crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_OK, None);
-    let ret = crate::stdlib::close(state.fd);
+    let read_file = state.read_file.take();
     drop(Box::from_raw(state));
-    if ret != 0 {
-        crate::zlib_h::Z_ERRNO
-    } else {
-        close.result
-    }
+    drop(read_file);
+    close.result
 }

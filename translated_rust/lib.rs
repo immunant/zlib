@@ -55,6 +55,10 @@ pub mod gzguts_h {
         // owned handle here lets the gzip write path use `std::io::Write`
         // instead of calling the libc write entry point.
         pub write_file: Option<std::fs::File>,
+        // Read descriptors use the same ownership model.  `gzread` can then
+        // pass bounded Rust slices to `Read::read` instead of handing a raw
+        // buffer to libc.
+        pub read_file: Option<std::fs::File>,
         // `gz_state` is opaque at the C ABI boundary.  Keep the text it owns
         // in Rust containers instead of separately allocated C buffers.
         pub path: std::ffi::CString,

@@ -48,13 +48,10 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
                 crate::src::inflate::inflateEnd(&mut state.strm);
             }
             crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_OK, None);
-            let ret = crate::stdlib::close(state.fd);
+            let read_file = state.read_file.take();
             drop(Box::from_raw(state));
-            if ret != 0 {
-                crate::zlib_h::Z_ERRNO
-            } else {
-                close.result
-            }
+            drop(read_file);
+            close.result
         }
         GzClose::Write(close) => {
             if !close.valid {
