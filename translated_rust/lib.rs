@@ -142,7 +142,6 @@ pub mod zlib_h {
 
     pub type gz_header = crate::zlib_h::gz_header_s;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct gz_header_s {
