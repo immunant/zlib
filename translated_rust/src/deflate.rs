@@ -2056,22 +2056,29 @@ fn flush_pending_bound(
     }
 }
 
-// The validated deflate dispatch is the only caller. Reuse its narrow state
-// checker to bind the stream and live state, then keep the transfer itself
-// bounded and reference-based in `flush_pending_bound()`.
-fn flush_pending(
+// Pending output is an allocation owned by the validated deflater. Bind it
+// once at this narrow boundary so the several block strategies that need it
+// can keep their transfer logic slice-based.  Output is bound only for an
+// operation that will actually transfer bytes, preserving callers that only
+// manipulate pending state from touching an unrelated output cursor.
+fn flush_pending<T>(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
-    transfer: bool,
-    operation: impl FnOnce(&mut crate::src::deflate::deflate_state, &mut [crate::zutil_h::uch]),
-) {
+    bind_output: bool,
+    operation: impl FnOnce(
+        &mut crate::src::deflate::deflate_state,
+        &mut crate::zlib_h::z_stream,
+        &mut [crate::zutil_h::uch],
+        Option<&mut [crate::stdlib::Bytef]>,
+    ) -> T,
+) -> T {
     // SAFETY: the validated deflater owns `pending_buf` for
-    // `pending_buf_size` bytes, and a nonempty output cursor has `avail_out`
-    // writable bytes for this call.
-    let (pending_buf, output) = unsafe {
+    // `pending_buf_size` bytes. A transferring call with a nonempty output
+    // cursor has `avail_out` writable bytes supplied by its caller.
+    unsafe {
         let pending_buf =
             ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        let output = if stream.avail_out == 0 {
+        let output = if !bind_output || stream.avail_out == 0 {
             None
         } else {
             Some(::core::slice::from_raw_parts_mut(
@@ -2079,12 +2086,25 @@ fn flush_pending(
                 stream.avail_out as usize,
             ))
         };
-        (pending_buf, output)
-    };
-    operation(state, pending_buf);
-    if transfer {
-        flush_pending_bound(state, stream, pending_buf, output);
+        operation(state, stream, pending_buf, output)
     }
+}
+
+// The validated deflate dispatch is the only caller. Reuse the common pending
+// binding above, then keep the transfer itself bounded and reference-based in
+// `flush_pending_bound()`.
+fn flush_pending_transfer(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    transfer: bool,
+    operation: impl FnOnce(&mut crate::src::deflate::deflate_state, &mut [crate::zutil_h::uch]),
+) {
+    flush_pending(state, stream, transfer, |state, stream, pending_buf, output| {
+        operation(state, pending_buf);
+        if transfer {
+            flush_pending_bound(state, stream, pending_buf, output);
+        }
+    });
 }
 
 fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
@@ -2221,7 +2241,7 @@ fn deflate_compress_and_finish(
                         state.insert = 0;
                     }
                 }
-                flush_pending(state, stream, true, |state, pending| {
+                flush_pending_transfer(state, stream, true, |state, pending| {
                     if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
                         let end_code = crate::src::trees::static_ltree[256].fc.freq;
                         let end_len = crate::src::trees::static_ltree[256].dl.dad as ::core::ffi::c_int;
@@ -2231,7 +2251,7 @@ fn deflate_compress_and_finish(
                     }
                 });
             } else {
-                flush_pending(state, stream, true, |_state, _pending| {});
+                flush_pending_transfer(state, stream, true, |_state, _pending| {});
             }
             if stream.avail_out == 0 {
                 state.last_flush = -1;
@@ -2247,7 +2267,7 @@ fn deflate_compress_and_finish(
     }
     let checksum = stream.adler;
     let total_in = stream.total_in;
-    flush_pending(state, stream, true, |state, pending| {
+    flush_pending_transfer(state, stream, true, |state, pending| {
         if state.wrap == 2 {
             write_gzip_trailer(state, pending, checksum, total_in);
         } else {
@@ -2298,7 +2318,7 @@ fn deflate_prepare_call(
     let old_flush = state.last_flush;
     state.last_flush = flush;
     if state.pending != 0 {
-        flush_pending(state, stream, true, |_state, _pending| {});
+        flush_pending_transfer(state, stream, true, |_state, _pending| {});
         if stream.avail_out == 0 {
             state.last_flush = -1;
             return DeflatePreparation::Return(crate::zlib_h::Z_OK);
@@ -2316,7 +2336,7 @@ fn deflate_prepare_call(
     }
     if state.status == crate::src::deflate::INIT_STATE {
         let dictionary_adler = stream.adler;
-        flush_pending(state, stream, true, |state, pending| {
+        flush_pending_transfer(state, stream, true, |state, pending| {
             deflate_start_zlib_stream(state, pending, dictionary_adler);
         });
         stream.adler = crate::src::adler32::adler32_buffer(0, None);
@@ -2333,7 +2353,7 @@ fn deflate_prepare_call(
     if !state.gzhead.is_null() {
         return DeflatePreparation::GzipHeader;
     }
-    flush_pending(state, stream, true, |state, pending| {
+    flush_pending_transfer(state, stream, true, |state, pending| {
         write_gzip_prefix(state, pending);
         write_gzip_default_fields(state, pending);
     });
@@ -2356,7 +2376,7 @@ fn deflate_update_gzip_header_crc(
 ) {
     let checksum = stream.adler;
     let mut updated = None;
-    flush_pending(state, stream, false, |state, pending| {
+    flush_pending_transfer(state, stream, false, |state, pending| {
         let end = state.pending as usize;
         if end > begin {
             updated = Some(crate::src::crc32::crc32_bytes(checksum, &pending[begin..end]));
@@ -2379,7 +2399,7 @@ fn deflate_write_gzip_header_bytes(
             if hcrc {
                 deflate_update_gzip_header_crc(stream, state, begin);
             }
-            flush_pending(state, stream, true, |_state, _pending| {});
+            flush_pending_transfer(state, stream, true, |_state, _pending| {});
             if state.pending != 0 {
                 state.last_flush = -1;
                 return false;
@@ -2388,7 +2408,7 @@ fn deflate_write_gzip_header_bytes(
         }
         let copy = (state.pending_buf_size - state.pending)
             .min(bytes.len() as crate::zutil_h::ulg - state.gzindex) as usize;
-        flush_pending(state, stream, false, |state, pending| {
+        flush_pending_transfer(state, stream, false, |state, pending| {
             let start = state.pending as usize;
             let index = state.gzindex as usize;
             pending[start..start + copy].copy_from_slice(&bytes[index..index + copy]);
@@ -2412,7 +2432,7 @@ fn deflate_finish_gzip_header(
     comment: Option<&::core::ffi::CStr>,
 ) -> ::core::ffi::c_int {
     if state.status == crate::src::deflate::GZIP_STATE {
-        flush_pending(state, stream, false, |state, pending| {
+        flush_pending_transfer(state, stream, false, |state, pending| {
             write_gzip_prefix(state, pending);
             write_gzip_header_fields(state, pending, head);
             state.gzindex = 0;
@@ -2459,20 +2479,20 @@ fn deflate_finish_gzip_header(
     if state.status == crate::src::deflate::HCRC_STATE {
         if head.hcrc != 0 {
             if state.pending.wrapping_add(2) > state.pending_buf_size {
-                flush_pending(state, stream, true, |_state, _pending| {});
+                flush_pending_transfer(state, stream, true, |_state, _pending| {});
                 if state.pending != 0 {
                     state.last_flush = -1;
                     return crate::zlib_h::Z_OK;
                 }
             }
             let checksum = stream.adler;
-            flush_pending(state, stream, false, |state, pending| {
+            flush_pending_transfer(state, stream, false, |state, pending| {
                 write_gzip_header_crc(state, pending, checksum);
             });
             stream.adler = crate::src::crc32::crc32_buffer(0, None);
         }
         state.status = crate::src::deflate::BUSY_STATE;
-        flush_pending(state, stream, true, |_state, _pending| {});
+        flush_pending_transfer(state, stream, true, |_state, _pending| {});
         if state.pending != 0 {
             state.last_flush = -1;
             return crate::zlib_h::Z_OK;
@@ -3186,19 +3206,12 @@ fn deflate_stored(
     stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    // SAFETY: the compression dispatch invokes this only with the validated
-    // state maintained by `deflate()`. `pending_buf` and the output cursor are
-    // the two ranges not supplied by the shared window/input binder below.
-    unsafe {
-        let pending =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        let output = if stream.avail_out == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-        };
-        deflate_stored_bound(state, stream, pending, output, flush)
-    }
+    // The compression dispatch invokes this only with the validated state
+    // maintained by `deflate()`. The common adapter supplies its pending
+    // allocation and, when present, the caller's writable output range.
+    flush_pending(state, stream, true, |state, stream, pending, output| {
+        deflate_stored_bound(state, stream, pending, output.unwrap_or(&mut []), flush)
+    })
 }
 
 // The stored-block algorithm only needs the bounded buffers supplied by its
