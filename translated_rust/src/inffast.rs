@@ -103,9 +103,15 @@ fn publish_inflate_fast_result(
 ) {
     if let Some(error) = result.error {
         strm.msg = match error {
-            InflateFastError::DistanceTooFarBack => b"invalid distance too far back\0".as_ptr(),
-            InflateFastError::InvalidDistanceCode => b"invalid distance code\0".as_ptr(),
-            InflateFastError::InvalidLengthCode => b"invalid literal/length code\0".as_ptr(),
+            InflateFastError::DistanceTooFarBack => {
+                crate::src::inflate::INFLATE_MSG_DISTANCE_TOO_FAR_BACK.as_ptr()
+            }
+            InflateFastError::InvalidDistanceCode => {
+                crate::src::inflate::INFLATE_MSG_INVALID_DISTANCE_CODE.as_ptr()
+            }
+            InflateFastError::InvalidLengthCode => {
+                crate::src::inflate::INFLATE_MSG_INVALID_LITERAL_LENGTH_CODE.as_ptr()
+            }
         } as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
     }
     strm.next_in = input[result.input_index..].as_ptr() as *mut crate::stdlib::Bytef;
