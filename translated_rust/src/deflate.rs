@@ -1853,6 +1853,23 @@ impl<'a> DeflateState<'a> {
     }
 }
 
+/// The parameter-update path only needs to ask the main compressor for a
+/// block boundary.  Keeping that dispatch behind this stream facade lets the
+/// parameter logic operate on its already-borrowed state without itself
+/// crossing back into the raw-stream implementation.
+struct DeflateParamsStream<'a> {
+    stream: &'a mut crate::zlib_h::z_stream_s,
+}
+
+impl DeflateParamsStream<'_> {
+    fn flush_block(&mut self) -> ::core::ffi::c_int {
+        // `deflate` owns the remaining ABI cursor conversions for a complete
+        // compression step.  This facade is intentionally the only
+        // parameter-update route into that implementation.
+        unsafe { deflate(self.stream, crate::zlib_h::Z_BLOCK) }
+    }
+}
+
 pub unsafe fn deflatePrime(
     strm: &mut crate::zlib_h::z_stream_s,
     mut bits: ::core::ffi::c_int,
@@ -1950,7 +1967,7 @@ pub unsafe fn deflateParams(
     if (strategy != s.strategy || func != configuration_table[level as usize].func)
         && s.last_flush != -2 as ::core::ffi::c_int
     {
-        let err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
+        let err = DeflateParamsStream { stream: strm }.flush_block();
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
