@@ -420,9 +420,9 @@ pub(crate) fn gz_consume(
 }
 
 // Public entry points have already checked and bound the gzip state.  Keep
-// this internal reader reference-bound; the caller buffer remains its only
-// raw input boundary.
-unsafe fn gz_read(
+// this internal reader reference-bound; the caller buffer copy remains its
+// only raw input boundary.
+fn gz_read(
     state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidp,
     mut len: crate::stdlib::z_size_t,
@@ -443,11 +443,17 @@ unsafe fn gz_read(
         match crate::src::gzlib::gz_read_plan(state, len) {
             crate::src::gzlib::GzReadPlan::Buffered(chunk) => {
                 n = chunk;
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    state.x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
+                // SAFETY: the public reader entry point supplied a writable
+                // caller buffer of the requested length, and `x.next` plus
+                // `x.have` identifies the initialized internal output range.
+                // `gz_read_plan` bounds this copy by both ranges.
+                unsafe {
+                    crate::stdlib::memcpy(
+                        buf as *mut ::core::ffi::c_void,
+                        state.x.next as *const ::core::ffi::c_void,
+                        n as crate::__stddef_size_t_h::size_t,
+                    );
+                }
                 n = gz_consume(state, n as crate::stdlib::off64_t);
                 consumed_buffered = true;
                 if state.err != crate::zlib_h::Z_OK {
