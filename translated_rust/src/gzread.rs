@@ -46,7 +46,7 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-use crate::src::gzlib::{GzCodecCall, GzCodecInput};
+use crate::src::gzlib::{GzCodecCall, GzCodecInput, GzCodecResult};
 
 fn is_gzip_header(input: &[u8]) -> bool {
     input.len() >= 4 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32
@@ -172,15 +172,6 @@ struct GzDecompLoopState<'a> {
     message: &'a mut Option<Box<[u8]>>,
     buffered: &'a mut ::core::ffi::c_uint,
     path: Option<&'a [u8]>,
-}
-
-struct GzInflateResult {
-    result: ::core::ffi::c_int,
-    input: GzCodecInput,
-    output_available: crate::stdlib::uInt,
-    total_in: crate::stdlib::uLong,
-    total_out: crate::stdlib::uLong,
-    data_error_message: Option<&'static [u8]>,
 }
 
 // LOOK mode has a complete pointer-free transition once the boundary has
@@ -637,7 +628,7 @@ impl GzDecompLoopState<'_> {
 fn gz_decomp_loop(
     mut decomp: crate::src::gzlib::GzDecompState,
     state: &mut GzDecompLoopState<'_>,
-    mut inflate: impl FnMut(GzCodecCall<'_>) -> Option<GzInflateResult>,
+    mut inflate: impl FnMut(GzCodecCall<'_>) -> Option<GzCodecResult>,
 ) -> crate::src::gzlib::GzDecompFinish {
     let mut result = crate::zlib_h::Z_OK;
     loop {
@@ -660,8 +651,8 @@ fn gz_decomp_loop(
             break;
         };
         result = call.result;
-        decomp.record_input(call.input);
-        match decomp.record_inflate(result, call.output_available, call.total_in, call.total_out) {
+        decomp.record_input(&call.input);
+        match decomp.record_inflate(&call) {
             crate::src::gzlib::GzDecompAction::Continue => {}
             crate::src::gzlib::GzDecompAction::Stop => break,
             crate::src::gzlib::GzDecompAction::Junk => {
@@ -888,7 +879,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             } else {
                 None
             };
-            Some(GzInflateResult {
+            Some(GzCodecResult {
                 result,
                 input,
                 output_available: strm.avail_out,

@@ -909,6 +909,19 @@ pub(crate) struct GzDecompFinish {
     pub(crate) how: ::core::ffi::c_int,
 }
 
+// An embedded inflate pass returns this pointer-free snapshot to gzip's read
+// state machine.  The small ABI projection that invokes inflate constructs it
+// at the boundary; refill, result handling, and output accounting therefore
+// never need to inspect a `z_stream` themselves.
+pub(crate) struct GzCodecResult {
+    pub(crate) result: ::core::ffi::c_int,
+    pub(crate) input: GzCodecInput,
+    pub(crate) output_available: crate::stdlib::uInt,
+    pub(crate) total_in: crate::stdlib::uLong,
+    pub(crate) total_out: crate::stdlib::uLong,
+    pub(crate) data_error_message: Option<&'static [u8]>,
+}
+
 // The decompression loop mutates only these scalar gzip fields in response to
 // an inflate result.  Keep that transition with the bounded output accounting
 // so an eventual owned gzip codec can run the loop without borrowing the ABI
@@ -955,8 +968,8 @@ impl GzDecompState {
         self.input.available() == 0
     }
 
-    pub(crate) fn record_input(&mut self, input: GzCodecInput) {
-        self.input = input;
+    pub(crate) fn record_input(&mut self, input: &GzCodecInput) {
+        self.input.update(input.cursor(), input.available());
         self.codec.record_input(&self.input);
     }
 
@@ -986,22 +999,21 @@ impl GzDecompState {
         })
     }
 
-    pub(crate) fn record_inflate(
-        &mut self,
-        result: ::core::ffi::c_int,
-        available: crate::stdlib::uInt,
-        total_in: crate::stdlib::uLong,
-        total_out: crate::stdlib::uLong,
-    ) -> GzDecompAction {
-        self.output.record_available(available);
-        self.codec.record_output(available);
-        self.codec.total_in = total_in;
-        self.codec.total_out = total_out;
+    pub(crate) fn record_inflate(&mut self, result: &GzCodecResult) -> GzDecompAction {
+        self.output.record_available(result.output_available);
+        self.codec.record_output(result.output_available);
+        self.codec.total_in = result.total_in;
+        self.codec.total_out = result.total_out;
         let produced_output = self.output.has_output();
         if produced_output {
             self.junk = 0;
         }
-        let step = gz_decomp_step(result, available, produced_output, self.junk);
+        let step = gz_decomp_step(
+            result.result,
+            result.output_available,
+            produced_output,
+            self.junk,
+        );
         if matches!(step.action, GzDecompAction::Junk) {
             self.eof = 1;
             self.how = crate::gzguts_h::LOOK;
