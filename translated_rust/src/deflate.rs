@@ -64,6 +64,35 @@ pub type Posf = crate::src::deflate::Pos;
 pub type IPos = ::core::ffi::c_uint;
 
 pub type deflate_state = crate::src::deflate::internal_state;
+
+// `deflateSetHeader()` registers header data for later deflate calls.  Keep a
+// byte-exact owned snapshot instead of retaining a foreign header pointer
+// across those calls.  The C-facing conversion is confined to the setter;
+// the compressor and bound calculation only inspect this pointer-free form.
+struct GzipHeader {
+    text: ::core::ffi::c_int,
+    time: crate::stdlib::uLong,
+    os: ::core::ffi::c_int,
+    extra_len: crate::stdlib::uInt,
+    extra: Option<Box<[u8]>>,
+    name: Option<Box<[u8]>>,
+    comment: Option<Box<[u8]>>,
+    hcrc: bool,
+}
+
+fn copy_gzip_header(header: &GzipHeader) -> GzipHeader {
+    GzipHeader {
+        text: header.text,
+        time: header.time,
+        os: header.os,
+        extra_len: header.extra_len,
+        extra: header.extra.as_deref().map(Into::into),
+        name: header.name.as_deref().map(Into::into),
+        comment: header.comment.as_deref().map(Into::into),
+        hcrc: header.hcrc,
+    }
+}
+
 #[repr(C)]
 
 pub struct internal_state {
@@ -76,8 +105,8 @@ pub struct internal_state {
     pub pending_out: usize,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
-    pub gzhead: crate::zlib_h::gz_headerp,
-    pub gzindex: crate::zutil_h::ulg,
+    gzhead: Option<GzipHeader>,
+    pub gzindex: usize,
     pub method: crate::stdlib::Byte,
     pub last_flush: ::core::ffi::c_int,
     pub w_size: crate::stdlib::uInt,
@@ -702,7 +731,7 @@ pub unsafe extern "C" fn deflateInit2_(
     (*s).strm = strm;
     (*s).status = crate::src::deflate::INIT_STATE;
     (*s).wrap = layout.wrap;
-    (*s).gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+    (*s).gzhead = None;
     (*s).w_bits = layout.w_bits;
     (*s).w_size = layout.w_size;
     (*s).w_mask = layout.w_mask;
@@ -1118,7 +1147,46 @@ pub unsafe extern "C" fn deflateSetHeader(
     if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*(*strm).state).gzhead = head;
+    let header = if head.is_null() {
+        None
+    } else {
+        let header = &*head;
+        let extra_len = header.extra_len & 0xffff as crate::stdlib::uInt;
+        Some(GzipHeader {
+            text: header.text,
+            time: header.time,
+            os: header.os,
+            extra_len: header.extra_len,
+            extra: if header.extra.is_null() {
+                None
+            } else {
+                Some(
+                    ::core::slice::from_raw_parts(header.extra, extra_len as usize)
+                        .into(),
+                )
+            },
+            name: if header.name.is_null() {
+                None
+            } else {
+                Some(
+                    ::std::ffi::CStr::from_ptr(header.name.cast())
+                        .to_bytes_with_nul()
+                        .into(),
+                )
+            },
+            comment: if header.comment.is_null() {
+                None
+            } else {
+                Some(
+                    ::std::ffi::CStr::from_ptr(header.comment.cast())
+                        .to_bytes_with_nul()
+                        .into(),
+                )
+            },
+            hcrc: header.hcrc != 0,
+        })
+    };
+    (*(*strm).state).gzhead = header;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateSetHeader"]
@@ -1527,26 +1595,13 @@ pub unsafe extern "C" fn deflateBound_z(
     let mut gzip_comment_len = None;
     let mut gzip_hcrc = false;
     if state.wrap == 2 as ::core::ffi::c_int || state.wrap == -2 as ::core::ffi::c_int {
-        if !state.gzhead.is_null() {
-            let header = &*state.gzhead;
-            if !header.extra.is_null() {
+        if let Some(header) = state.gzhead.as_ref() {
+            if header.extra.is_some() {
                 gzip_extra_len = Some(header.extra_len);
             }
-            if !header.name.is_null() {
-                gzip_name_len = Some(
-                    ::std::ffi::CStr::from_ptr(header.name.cast())
-                        .to_bytes_with_nul()
-                        .len(),
-                );
-            }
-            if !header.comment.is_null() {
-                gzip_comment_len = Some(
-                    ::std::ffi::CStr::from_ptr(header.comment.cast())
-                        .to_bytes_with_nul()
-                        .len(),
-                );
-            }
-            gzip_hcrc = header.hcrc != 0;
+            gzip_name_len = header.name.as_ref().map(|name| name.len());
+            gzip_comment_len = header.comment.as_ref().map(|comment| comment.len());
+            gzip_hcrc = header.hcrc;
         }
     }
     deflate_bound_impl(
@@ -1910,7 +1965,7 @@ pub unsafe extern "C" fn deflate(
         } else {
             0
         };
-        if state.gzhead.is_null() {
+        if state.gzhead.is_none() {
             for byte in [0, 0, 0, 0, 0, xfl, 3] {
                 push_pending_byte(pending_buf, &mut state.pending, byte);
             }
@@ -1921,7 +1976,7 @@ pub unsafe extern "C" fn deflate(
                 return crate::zlib_h::Z_OK;
             }
         } else {
-            let gzhead = &*state.gzhead;
+            let gzhead = state.gzhead.as_ref().expect("gzip header was checked");
             push_pending_byte(
                 pending_buf,
                 &mut state.pending,
@@ -1929,19 +1984,19 @@ pub unsafe extern "C" fn deflate(
                     1 as ::core::ffi::c_int
                 } else {
                     0 as ::core::ffi::c_int
-                }) + (if gzhead.hcrc != 0 {
+                }) + (if gzhead.hcrc {
                     2 as ::core::ffi::c_int
                 } else {
                     0 as ::core::ffi::c_int
-                }) + (if gzhead.extra.is_null() {
+                }) + (if gzhead.extra.is_none() {
                     0 as ::core::ffi::c_int
                 } else {
                     4 as ::core::ffi::c_int
-                }) + (if gzhead.name.is_null() {
+                }) + (if gzhead.name.is_none() {
                     0 as ::core::ffi::c_int
                 } else {
                     8 as ::core::ffi::c_int
-                }) + (if gzhead.comment.is_null() {
+                }) + (if gzhead.comment.is_none() {
                     0 as ::core::ffi::c_int
                 } else {
                     16 as ::core::ffi::c_int
@@ -1960,7 +2015,7 @@ pub unsafe extern "C" fn deflate(
                 &mut state.pending,
                 (gzhead.os & 0xff as ::core::ffi::c_int) as crate::stdlib::Bytef,
             );
-            if !gzhead.extra.is_null() {
+            if gzhead.extra.is_some() {
                 push_pending_byte(
                     pending_buf,
                     &mut state.pending,
@@ -1972,33 +2027,29 @@ pub unsafe extern "C" fn deflate(
                     (gzhead.extra_len >> 8 & 0xff as crate::stdlib::uInt) as crate::stdlib::Bytef,
                 );
             }
-            if gzhead.hcrc != 0 {
+            if gzhead.hcrc {
                 (*strm).adler = crate::src::crc32::crc32_z(
                     (*strm).adler,
                     Some(&pending_buf[..state.pending as usize]),
                 );
             }
-            state.gzindex = 0 as crate::zutil_h::ulg;
+            state.gzindex = 0;
             state.status = crate::src::deflate::EXTRA_STATE;
         }
     }
     if (*s).status == crate::src::deflate::EXTRA_STATE {
-        if !(*(*s).gzhead).extra.is_null() {
-            let gzhead = &*(*s).gzhead;
-            let hcrc = gzhead.hcrc != 0;
-            let mut left: crate::zutil_h::ulg = ((gzhead.extra_len & 0xffff as crate::stdlib::uInt)
-                as crate::zutil_h::ulg)
-                .wrapping_sub((*s).gzindex);
-            while (*s).pending.wrapping_add(left) > (*s).pending_buf_size {
+        if (*s)
+            .gzhead
+            .as_ref()
+            .is_some_and(|header| header.extra.is_some())
+        {
+            let gzhead = (*s).gzhead.as_ref().expect("gzip header was checked");
+            let extra = gzhead.extra.as_deref().expect("gzip extra was checked");
+            let hcrc = gzhead.hcrc;
+            let mut left = extra.len().wrapping_sub((*s).gzindex);
+            while (*s).pending.wrapping_add(left as crate::zutil_h::ulg) > (*s).pending_buf_size {
                 let mut copy: crate::zutil_h::ulg =
                     (*s).pending_buf_size.wrapping_sub((*s).pending);
-                // The source view is limited to the still-unemitted bytes,
-                // not the whole foreign header allocation.  The destination
-                // allocation has exactly `pending_buf_size` bytes.
-                let extra = ::core::slice::from_raw_parts(
-                    gzhead.extra.add((*s).gzindex as usize),
-                    left as usize,
-                );
                 let pending_buf = ::core::slice::from_raw_parts_mut(
                     (*s).pending_buf,
                     (*s).pending_buf_size as usize,
@@ -2008,37 +2059,37 @@ pub unsafe extern "C" fn deflate(
                     (*strm).adler =
                         crate::src::crc32::crc32_z((*strm).adler, Some(&extra[..copy as usize]));
                 }
-                (*s).gzindex = (*s).gzindex.wrapping_add(copy);
+                (*s).gzindex = (*s).gzindex.wrapping_add(copy as usize);
                 flush_pending(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
                 }
-                left = left.wrapping_sub(copy);
+                left = left.wrapping_sub(copy as usize);
             }
             if left != 0 {
-                let extra = ::core::slice::from_raw_parts(
-                    gzhead.extra.add((*s).gzindex as usize),
-                    left as usize,
-                );
                 let pending_buf = ::core::slice::from_raw_parts_mut(
                     (*s).pending_buf,
                     (*s).pending_buf_size as usize,
                 );
-                append_pending_bytes(pending_buf, &mut (*s).pending, extra);
+                append_pending_bytes(pending_buf, &mut (*s).pending, &extra[..left]);
                 if hcrc {
-                    (*strm).adler = crate::src::crc32::crc32_z((*strm).adler, Some(extra));
+                    (*strm).adler = crate::src::crc32::crc32_z((*strm).adler, Some(&extra[..left]));
                 }
             }
-            (*s).gzindex = 0 as crate::zutil_h::ulg;
+            (*s).gzindex = 0;
         }
         (*s).status = crate::src::deflate::NAME_STATE;
     }
     if (*s).status == crate::src::deflate::NAME_STATE {
-        if !(*(*s).gzhead).name.is_null() {
-            let gzhead = &*(*s).gzhead;
-            let name = ::std::ffi::CStr::from_ptr(gzhead.name.cast()).to_bytes_with_nul();
-            let hcrc = gzhead.hcrc != 0;
+        if (*s)
+            .gzhead
+            .as_ref()
+            .is_some_and(|header| header.name.is_some())
+        {
+            let gzhead = (*s).gzhead.as_ref().expect("gzip header was checked");
+            let name = gzhead.name.as_deref().expect("gzip name was checked");
+            let hcrc = gzhead.hcrc;
             let mut beg_0: crate::zutil_h::ulg = (*s).pending;
             loop {
                 if (*s).pending == (*s).pending_buf_size {
@@ -2062,7 +2113,7 @@ pub unsafe extern "C" fn deflate(
                 }
                 let complete = {
                     let state = &mut *s;
-                    let mut source_index = state.gzindex as usize;
+                    let mut source_index = state.gzindex;
                     let pending_buf = ::core::slice::from_raw_parts_mut(
                         state.pending_buf,
                         state.pending_buf_size as usize,
@@ -2073,7 +2124,7 @@ pub unsafe extern "C" fn deflate(
                         pending_buf,
                         &mut state.pending,
                     );
-                    state.gzindex = source_index as crate::zutil_h::ulg;
+                    state.gzindex = source_index;
                     complete
                 };
                 if complete {
@@ -2091,15 +2142,19 @@ pub unsafe extern "C" fn deflate(
                     Some(&pending_buf[beg_0 as usize..state.pending as usize]),
                 );
             }
-            (*s).gzindex = 0 as crate::zutil_h::ulg;
+            (*s).gzindex = 0;
         }
         (*s).status = crate::src::deflate::COMMENT_STATE;
     }
     if (*s).status == crate::src::deflate::COMMENT_STATE {
-        if !(*(*s).gzhead).comment.is_null() {
-            let gzhead = &*(*s).gzhead;
-            let comment = ::std::ffi::CStr::from_ptr(gzhead.comment.cast()).to_bytes_with_nul();
-            let hcrc = gzhead.hcrc != 0;
+        if (*s)
+            .gzhead
+            .as_ref()
+            .is_some_and(|header| header.comment.is_some())
+        {
+            let gzhead = (*s).gzhead.as_ref().expect("gzip header was checked");
+            let comment = gzhead.comment.as_deref().expect("gzip comment was checked");
+            let hcrc = gzhead.hcrc;
             let mut beg_1: crate::zutil_h::ulg = (*s).pending;
             loop {
                 if (*s).pending == (*s).pending_buf_size {
@@ -2123,7 +2178,7 @@ pub unsafe extern "C" fn deflate(
                 }
                 let complete = {
                     let state = &mut *s;
-                    let mut source_index = state.gzindex as usize;
+                    let mut source_index = state.gzindex;
                     let pending_buf = ::core::slice::from_raw_parts_mut(
                         state.pending_buf,
                         state.pending_buf_size as usize,
@@ -2134,7 +2189,7 @@ pub unsafe extern "C" fn deflate(
                         pending_buf,
                         &mut state.pending,
                     );
-                    state.gzindex = source_index as crate::zutil_h::ulg;
+                    state.gzindex = source_index;
                     complete
                 };
                 if complete {
@@ -2156,7 +2211,11 @@ pub unsafe extern "C" fn deflate(
         (*s).status = crate::src::deflate::HCRC_STATE;
     }
     if (*s).status == crate::src::deflate::HCRC_STATE {
-        if (*(*s).gzhead).hcrc != 0 {
+        if (*s)
+            .gzhead
+            .as_ref()
+            .is_some_and(|header| header.hcrc)
+        {
             if (*s).pending.wrapping_add(2 as crate::zutil_h::ulg) > (*s).pending_buf_size {
                 flush_pending(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -2338,6 +2397,9 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     status = (*(*strm).state).status;
+    // The state itself is released through the caller's zfree callback, so
+    // drop the owned gzip-header snapshot before releasing that allocation.
+    ::core::ptr::drop_in_place(::core::ptr::addr_of_mut!((*(*strm).state).gzhead));
     if !(*(*strm).state).pending_buf.is_null() {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
@@ -2415,6 +2477,10 @@ pub unsafe extern "C" fn deflateCopy(
         ss as *const ::core::ffi::c_void,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
     );
+    // The bytewise state copy above is needed for the C allocator-backed
+    // storage.  Replace the copied owner before it can be observed or
+    // released, making the header registration an independent deep copy.
+    ::core::ptr::addr_of_mut!((*ds).gzhead).write((*ss).gzhead.as_ref().map(copy_gzip_header));
     (*ds).strm = dest;
     (*ds).window = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
