@@ -2697,28 +2697,48 @@ pub unsafe extern "C" fn deflate(
                     &mut state.bi_valid,
                 );
             } else if flush != crate::zlib_h::Z_BLOCK {
-                crate::src::trees::_tr_stored_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    ::core::ptr::null_mut::<crate::stdlib::charf>(),
-                    0 as crate::zutil_h::ulg,
-                    0 as ::core::ffi::c_int,
-                );
+                // This stream boundary already owns the callback-allocated
+                // pending buffer lend.  An empty stored block has no caller
+                // buffer, so emit it through the slice-only tree core.
+                let state = &mut *s;
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if pending_len != 0 && state.pending_buf.is_null() {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let pending_buf = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                };
+                if !crate::src::trees::tr_stored_block_state(
+                    pending_buf,
+                    &mut state.pending,
+                    &mut state.bi_buf,
+                    &mut state.bi_valid,
+                    &mut state.bi_used,
+                    &[],
+                    0,
+                ) {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *(*s).head.wrapping_add(
-                        (*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
+                    *state.head.wrapping_add(
+                        state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
                     ) = NIL as crate::src::deflate::Posf;
                     crate::stdlib::memset(
-                        (*s).head as *mut ::core::ffi::c_void,
+                        state.head as *mut ::core::ffi::c_void,
                         0 as ::core::ffi::c_int,
-                        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
+                        (state.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
                             as crate::__stddef_size_t_h::size_t)
                             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
                     );
-                    (*s).slid = 0 as ::core::ffi::c_int;
-                    if (*s).lookahead == 0 as crate::stdlib::uInt {
-                        (*s).strstart = 0 as crate::stdlib::uInt;
-                        (*s).block_start = 0 as ::core::ffi::c_long;
-                        (*s).insert = 0 as crate::stdlib::uInt;
+                    state.slid = 0 as ::core::ffi::c_int;
+                    if state.lookahead == 0 as crate::stdlib::uInt {
+                        state.strstart = 0 as crate::stdlib::uInt;
+                        state.block_start = 0 as ::core::ffi::c_long;
+                        state.insert = 0 as crate::stdlib::uInt;
                     }
                 }
             }
