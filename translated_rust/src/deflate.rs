@@ -1251,9 +1251,24 @@ fn lm_match_parameters(
     )
 }
 
+fn lm_initial_state(w_size: crate::stdlib::uInt) -> (crate::zutil_h::ulg, crate::stdlib::uInt) {
+    (
+        (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
+            .wrapping_mul(w_size as crate::zutil_h::ulg),
+        (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
+    )
+}
+
+fn lm_head_clear_len(hash_size: crate::stdlib::uInt) -> crate::__stddef_size_t_h::size_t {
+    (hash_size.wrapping_sub(1 as crate::stdlib::uInt) as crate::__stddef_size_t_h::size_t)
+        .wrapping_mul(
+            ::core::mem::size_of::<crate::src::deflate::Posf>() as crate::__stddef_size_t_h::size_t
+        )
+}
+
 unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
-        .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
+    let (window_size, prev_length) = lm_initial_state((*s).w_size);
+    (*s).window_size = window_size;
     *(*s)
         .head
         .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
@@ -1261,9 +1276,7 @@ unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     crate::stdlib::memset(
         (*s).head as *mut ::core::ffi::c_void,
         0 as ::core::ffi::c_int,
-        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
-                as crate::__stddef_size_t_h::size_t),
+        lm_head_clear_len((*s).hash_size),
     );
     (*s).slid = 0 as ::core::ffi::c_int;
     (
@@ -1276,7 +1289,7 @@ unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).block_start = 0 as ::core::ffi::c_long;
     (*s).lookahead = 0 as crate::stdlib::uInt;
     (*s).insert = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    (*s).prev_length = prev_length;
     (*s).match_length = (*s).prev_length;
     (*s).match_available = 0 as ::core::ffi::c_int;
     (*s).ins_h = 0 as crate::stdlib::uInt;
@@ -4025,14 +4038,15 @@ mod tests {
         fill_window_cursor, fill_window_insert_after_slide, fill_window_should_refill,
         fill_window_should_slide, fill_window_zero_range, flush_pending_accounting,
         gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        lm_match_parameters, longest_match_candidate_update, longest_match_clamp_length,
-        longest_match_limit, longest_match_next_chain_length, longest_match_search_parameters,
-        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
-        pending_short_cursors, read_buf_checksum, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
-        stored_block_is_last, stored_block_min_size, stored_block_payload_len,
-        stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
-        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, ReadBufChecksum,
+        lm_head_clear_len, lm_initial_state, lm_match_parameters, longest_match_candidate_update,
+        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
+        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
+        pending_output_len, pending_short_cursors, read_buf_checksum, read_buf_len,
+        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
+        stored_block_available_output, stored_block_can_emit, stored_block_is_last,
+        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction,
+        DeflatePreflight, DeflateRleRefillAction, ReadBufChecksum,
     };
 
     #[test]
@@ -4149,6 +4163,34 @@ mod tests {
         assert_eq!(lm_match_parameters(1), (4, 4, 8, 4));
         assert_eq!(lm_match_parameters(6), (16, 8, 128, 128));
         assert_eq!(lm_match_parameters(9), (258, 32, 258, 4096));
+    }
+
+    #[test]
+    fn lm_initial_state_preserves_window_size_and_match_baseline() {
+        let baseline = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+
+        assert_eq!(lm_initial_state(0), (0, baseline));
+        assert_eq!(lm_initial_state(32), (64, baseline));
+        assert_eq!(
+            lm_initial_state(crate::stdlib::uInt::MAX),
+            (
+                (crate::stdlib::uInt::MAX as crate::zutil_h::ulg).wrapping_mul(2),
+                baseline,
+            ),
+        );
+    }
+
+    #[test]
+    fn lm_head_clear_len_preserves_hash_entry_count_and_wrapping() {
+        let entry_size =
+            ::core::mem::size_of::<crate::src::deflate::Posf>() as crate::__stddef_size_t_h::size_t;
+
+        assert_eq!(lm_head_clear_len(1), 0);
+        assert_eq!(lm_head_clear_len(17), 16 * entry_size);
+        assert_eq!(
+            lm_head_clear_len(0),
+            (crate::stdlib::uInt::MAX as crate::__stddef_size_t_h::size_t).wrapping_mul(entry_size),
+        );
     }
 
     #[test]

@@ -159,6 +159,22 @@ fn inflate_mode_is_valid(mode: inflate_mode) -> bool {
     mode >= HEAD && mode <= SYNC
 }
 
+fn inflate_mode_on_entry(mode: inflate_mode) -> inflate_mode {
+    if mode == TYPE {
+        TYPEDO
+    } else {
+        mode
+    }
+}
+
+fn inflate_head_skip_mode(wrap: ::core::ffi::c_int) -> Option<inflate_mode> {
+    if wrap == 0 {
+        Some(TYPEDO)
+    } else {
+        None
+    }
+}
+
 fn inflate_state_metadata_is_valid(stream_matches: bool, mode: inflate_mode) -> bool {
     stream_matches && inflate_mode_is_valid(mode)
 }
@@ -1053,11 +1069,7 @@ pub unsafe extern "C" fn inflate(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).mode as ::core::ffi::c_uint
-        == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        (*state).mode = crate::src::inflate::TYPEDO;
-    }
+    (*state).mode = inflate_mode_on_entry((*state).mode);
     put = (*strm).next_out as *mut ::core::ffi::c_uchar;
     output_start = put as *const crate::stdlib::Bytef;
     checksum_start = output_start;
@@ -1072,8 +1084,8 @@ pub unsafe extern "C" fn inflate(
     's_88: loop {
         match (*state).mode as ::core::ffi::c_uint {
             16180 => {
-                if (*state).wrap == 0 as ::core::ffi::c_int {
-                    (*state).mode = crate::src::inflate::TYPEDO;
+                if let Some(next_mode) = inflate_head_skip_mode((*state).wrap) {
+                    (*state).mode = next_mode;
                     continue;
                 } else {
                     while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint {
@@ -3047,25 +3059,26 @@ mod tests {
         inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
         inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
         inflate_gzip_flags_error, inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_extra,
-        inflate_gzip_header_has_name, inflate_header_crc_enabled,
+        inflate_gzip_header_has_name, inflate_head_skip_mode, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
         inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
-        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
-        inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
-        inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
-        inflate_state_is_usable, inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
-        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
-        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
-        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
-        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, update_window_core, window_allocation_failed,
-        window_allocation_request, window_needs_allocation, window_update_plan,
-        DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress, InflateGzipExtraProgress,
-        InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource,
-        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
-        InflateZlibHeaderTransition, InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_mode_is_valid, inflate_mode_on_entry, inflate_needs_buffer_error,
+        inflate_output_checksum, inflate_prime_update, inflate_reset2_discards_window,
+        inflate_reset2_params, inflate_should_update_window, inflate_state_check_impl,
+        inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
+        inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
+        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
+        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
+        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
+        inflate_zlib_header_transition, inflate_zlib_window_params, initial_window_metadata,
+        reset_window_history, stored_block_length, syncsearch_safe, update_window_core,
+        window_allocation_failed, window_allocation_request, window_needs_allocation,
+        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
+        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
+        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
+        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        TYPEDO,
     };
 
     #[test]
@@ -4066,6 +4079,20 @@ mod tests {
                 whave: 8,
             }
         );
+    }
+
+    #[test]
+    fn inflate_mode_on_entry_only_advances_type() {
+        assert_eq!(inflate_mode_on_entry(TYPE), TYPEDO);
+        assert_eq!(inflate_mode_on_entry(HEAD), HEAD);
+        assert_eq!(inflate_mode_on_entry(LEN_), LEN_);
+    }
+
+    #[test]
+    fn inflate_head_skip_mode_only_skips_raw_deflate() {
+        assert_eq!(inflate_head_skip_mode(0), Some(TYPEDO));
+        assert_eq!(inflate_head_skip_mode(1), None);
+        assert_eq!(inflate_head_skip_mode(-1), None);
     }
 
     #[test]

@@ -689,6 +689,26 @@ fn gz_comp_deflate_stream_is_corrupt(ret: ::core::ffi::c_int) -> bool {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+enum GzCompDeflateAction {
+    Error,
+    Done,
+    Continue,
+}
+
+fn gz_comp_deflate_action(
+    ret: ::core::ffi::c_int,
+    produced: ::core::ffi::c_uint,
+) -> GzCompDeflateAction {
+    if gz_comp_deflate_stream_is_corrupt(ret) {
+        GzCompDeflateAction::Error
+    } else if !gz_comp_has_output(produced) {
+        GzCompDeflateAction::Done
+    } else {
+        GzCompDeflateAction::Continue
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct GzWriteBufferedProgress {
     copy: ::core::ffi::c_uint,
     avail_in: crate::stdlib::uInt,
@@ -753,7 +773,7 @@ unsafe fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         ) != crate::zlib_h::Z_OK
         {
-            crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
             crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
@@ -776,25 +796,26 @@ unsafe fn gz_comp(
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
     let mut max: ::core::ffi::c_uint = gz_comp_max_write_chunk();
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if !gz_buffer_is_initialized((*state).size) && gz_init(state) == -1 as ::core::ffi::c_int {
+    let state = &mut *state;
+    if !gz_buffer_is_initialized(state.size) && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    let out_pending = &mut (*state).out_pending;
-    if (*state).direct != 0 {
+    let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
+    let out_pending = &mut state.out_pending;
+    if state.direct != 0 {
         while (*strm).avail_in != 0 {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-            (*state).again = 0 as ::core::ffi::c_int;
+            state.again = 0 as ::core::ffi::c_int;
             put = gz_comp_write_chunk_len((*strm).avail_in as usize, max);
             writ = crate::stdlib::write(
-                (*state).fd,
+                state.fd,
                 (*strm).next_in as *const ::core::ffi::c_void,
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             let errno = *crate::stdlib::__errno_location();
             match gz_comp_write_result(writ, errno) {
                 GzCompWriteResult::Error { again } => {
-                    (*state).again = again;
+                    state.again = again;
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_ERRNO,
@@ -810,7 +831,7 @@ unsafe fn gz_comp(
         }
         return 0 as ::core::ffi::c_int;
     }
-    let mut reset = (*state).reset;
+    let mut reset = state.reset;
     let reset_action = gz_comp_reset_action(reset, (*strm).avail_in, flush);
     match &reset_action {
         GzCompResetAction::Skip => return 0 as ::core::ffi::c_int,
@@ -820,23 +841,23 @@ unsafe fn gz_comp(
         GzCompResetAction::Continue => {}
     }
     reset = gz_comp_reset_value(&reset_action, reset);
-    (*state).reset = reset;
+    state.reset = reset;
     ret = crate::zlib_h::Z_OK;
     loop {
         if gz_comp_needs_output_write((*strm).avail_out, flush, ret) {
             while let Some(chunk_len) = gz_comp_output_write_chunk_len(*out_pending, max) {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                (*state).again = 0 as ::core::ffi::c_int;
+                state.again = 0 as ::core::ffi::c_int;
                 put = chunk_len;
                 writ = crate::stdlib::write(
-                    (*state).fd,
-                    (*state).x.next as *const ::core::ffi::c_void,
+                    state.fd,
+                    state.x.next as *const ::core::ffi::c_void,
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 let errno = *crate::stdlib::__errno_location();
                 match gz_comp_write_result(writ, errno) {
                     GzCompWriteResult::Error { again } => {
-                        (*state).again = again;
+                        state.again = again;
                         crate::src::gzlib::gz_error(
                             state as *mut crate::gzguts_h::gz_state,
                             crate::zlib_h::Z_ERRNO,
@@ -847,39 +868,43 @@ unsafe fn gz_comp(
                     GzCompWriteResult::Written(written) => writ = written,
                 }
                 let progress = gz_comp_output_write_progress(*out_pending, writ);
-                (*state).x.next = (*state).x.next.wrapping_add(progress.cursor_advance);
+                state.x.next = state.x.next.wrapping_add(progress.cursor_advance);
                 *out_pending = progress.remaining_pending;
             }
             match gz_comp_output_buffer_action((*strm).avail_out) {
                 GzCompOutputBufferAction::Keep => {}
                 GzCompOutputBufferAction::Reset => {
-                    (*strm).avail_out = (*state).size as crate::stdlib::uInt;
-                    (*strm).next_out = (*state).out;
-                    (*state).x.next = (*state).out;
+                    (*strm).avail_out = state.size as crate::stdlib::uInt;
+                    (*strm).next_out = state.out;
+                    state.x.next = state.out;
                     *out_pending = 0;
                 }
             }
         }
         have = (*strm).avail_out as ::core::ffi::c_uint;
         ret = crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
-        if gz_comp_deflate_stream_is_corrupt(ret) {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"internal error: deflate stream corrupt\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        have = gz_comp_apply_deflate_progress(
-            out_pending,
-            have,
-            (*strm).avail_out as ::core::ffi::c_uint,
-        );
-        if !gz_comp_has_output(have) {
-            break;
+        let produced = gz_comp_output_produced(have, (*strm).avail_out as ::core::ffi::c_uint);
+        match gz_comp_deflate_action(ret, produced) {
+            GzCompDeflateAction::Error => {
+                crate::src::gzlib::gz_error(
+                    state as *mut crate::gzguts_h::gz_state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal error: deflate stream corrupt\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                );
+                return -1 as ::core::ffi::c_int;
+            }
+            GzCompDeflateAction::Done => break,
+            GzCompDeflateAction::Continue => {
+                have = gz_comp_apply_deflate_progress(
+                    out_pending,
+                    have,
+                    (*strm).avail_out as ::core::ffi::c_uint,
+                );
+            }
         }
     }
-    (*state).reset = gz_comp_reset_after_flush(flush, reset);
+    state.reset = gz_comp_reset_after_flush(flush, reset);
     return 0 as ::core::ffi::c_int;
 }
 
@@ -1367,18 +1392,18 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffer_is_initialized, gz_comp_apply_deflate_progress, gz_comp_deflate_progress,
-        gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress, gz_comp_has_output,
-        gz_comp_max_write_chunk, gz_comp_needs_output_write, gz_comp_needs_reset,
-        gz_comp_output_buffer_action, gz_comp_output_produced, gz_comp_output_write_chunk_len,
-        gz_comp_output_write_progress, gz_comp_pending_after_write, gz_comp_reset_action,
-        gz_comp_reset_after_flush, gz_comp_reset_value, gz_comp_skips_empty_flush,
-        gz_comp_write_again, gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
-        gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip, gz_init_allocation_plan,
-        gz_init_mode, gz_init_stream_defaults, gz_write_advanced_pos,
-        gz_write_apply_chunk_progress, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
-        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
-        gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
+        gz_buffer_is_initialized, gz_comp_apply_deflate_progress, gz_comp_deflate_action,
+        gz_comp_deflate_progress, gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress,
+        gz_comp_has_output, gz_comp_max_write_chunk, gz_comp_needs_output_write,
+        gz_comp_needs_reset, gz_comp_output_buffer_action, gz_comp_output_produced,
+        gz_comp_output_write_chunk_len, gz_comp_output_write_progress, gz_comp_pending_after_write,
+        gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_reset_value,
+        gz_comp_skips_empty_flush, gz_comp_write_again, gz_comp_write_chunk_len,
+        gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result, gz_has_pending_input,
+        gz_has_pending_skip, gz_init_allocation_plan, gz_init_mode, gz_init_stream_defaults,
+        gz_write_advanced_pos, gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
+        gz_write_buffered_copy_len, gz_write_buffered_input_action, gz_write_buffered_progress,
+        gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
         gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
@@ -1387,10 +1412,10 @@ mod tests {
         gzclose_w_result, gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result,
         gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action,
         gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
-        GzCloseBufferAction, GzCompOutputBufferAction, GzCompResetAction, GzCompWriteFailure,
-        GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
-        GzSetParamsBufferAction, GzWriteBufferedInputAction, GzWriteDirectAction, GzZeroAction,
-        GzZeroStep,
+        GzCloseBufferAction, GzCompDeflateAction, GzCompOutputBufferAction, GzCompResetAction,
+        GzCompWriteFailure, GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode,
+        GzPutcWriteAction, GzSetParamsBufferAction, GzWriteBufferedInputAction,
+        GzWriteDirectAction, GzZeroAction, GzZeroStep,
     };
 
     #[test]
@@ -2067,6 +2092,38 @@ mod tests {
         assert!(!gz_comp_deflate_stream_is_corrupt(
             crate::zlib_h::Z_STREAM_END
         ));
+    }
+
+    #[test]
+    fn gz_comp_deflate_action_prioritizes_stream_errors_over_output() {
+        assert_eq!(
+            gz_comp_deflate_action(crate::zlib_h::Z_STREAM_ERROR, 1),
+            GzCompDeflateAction::Error
+        );
+    }
+
+    #[test]
+    fn gz_comp_deflate_action_finishes_without_output() {
+        assert_eq!(
+            gz_comp_deflate_action(crate::zlib_h::Z_OK, 0),
+            GzCompDeflateAction::Done
+        );
+        assert_eq!(
+            gz_comp_deflate_action(crate::zlib_h::Z_STREAM_END, 0),
+            GzCompDeflateAction::Done
+        );
+    }
+
+    #[test]
+    fn gz_comp_deflate_action_continues_when_output_is_available() {
+        assert_eq!(
+            gz_comp_deflate_action(crate::zlib_h::Z_OK, 1),
+            GzCompDeflateAction::Continue
+        );
+        assert_eq!(
+            gz_comp_deflate_action(crate::zlib_h::Z_STREAM_END, ::core::ffi::c_uint::MAX),
+            GzCompDeflateAction::Continue
+        );
     }
 
     #[test]
