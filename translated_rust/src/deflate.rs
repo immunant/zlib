@@ -1398,6 +1398,45 @@ impl gzip_header {
             hcrc,
         })
     }
+
+    fn from_z_header(head: &crate::zlib_h::gz_header) -> Result<Self, ()> {
+        let extra = head
+            .extra
+            .as_deref()
+            .map(|extra| extra.get(..head.extra_len as usize).ok_or(()))
+            .transpose()?;
+        let name = head
+            .name
+            .as_deref()
+            .map(|bytes| {
+                bytes
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .map(|nul| &bytes[..=nul])
+                    .ok_or(())
+            })
+            .transpose()?;
+        let comment = head
+            .comment
+            .as_deref()
+            .map(|bytes| {
+                bytes
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .map(|nul| &bytes[..=nul])
+                    .ok_or(())
+            })
+            .transpose()?;
+        Self::from_parts(
+            head.text,
+            head.time,
+            head.os,
+            extra,
+            name,
+            comment,
+            head.hcrc,
+        )
+    }
 }
 
 #[export_name = "deflateSetHeader"]
@@ -1416,35 +1455,15 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     if deflateStateCheck(strm, state) != 0 || state.wrap != 2 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-
     let head = if head.is_null() {
         None
     } else {
         let head = &*head;
-        let extra = if head.extra.is_null() {
-            None
-        } else {
-            Some(::core::slice::from_raw_parts(
-                head.extra,
-                head.extra_len as usize,
-            ))
-        };
-        let name = if head.name.is_null() {
-            None
-        } else {
-            Some(std::ffi::CStr::from_ptr(head.name.cast()).to_bytes_with_nul())
-        };
-        let comment = if head.comment.is_null() {
-            None
-        } else {
-            Some(std::ffi::CStr::from_ptr(head.comment.cast()).to_bytes_with_nul())
-        };
-        match gzip_header::from_parts(
-            head.text, head.time, head.os, extra, name, comment, head.hcrc,
-        ) {
-            Ok(head) => Some(head),
-            Err(()) => return crate::zlib_h::Z_MEM_ERROR,
-        }
+        Some(head)
+    };
+    let head = match head.map(gzip_header::from_z_header).transpose() {
+        Ok(head) => head,
+        Err(()) => return crate::zlib_h::Z_STREAM_ERROR,
     };
     let state = strm
         .state

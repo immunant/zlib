@@ -1629,10 +1629,7 @@ pub unsafe extern "C" fn inflate(
                                                     hold = 0 as ::core::ffi::c_ulong;
                                                     bits = 0 as ::core::ffi::c_uint;
                                                 } else if !(*state).head.is_null() {
-                                                    (*(*state).head).extra = ::core::ptr::null_mut::<
-                                                        crate::stdlib::Bytef,
-                                                    >(
-                                                    );
+                                                    (*(*state).head).extra = None;
                                                 }
                                                 (*state).mode = crate::src::inflate::EXTRA;
                                                 break 'c_2319;
@@ -1779,30 +1776,22 @@ pub unsafe extern "C" fn inflate(
                                             copy = have;
                                         }
                                         if copy != 0 {
-                                            if !(*state).head.is_null()
-                                                && !(*(*state).head).extra.is_null()
-                                                && {
-                                                    len = ((*(*state).head).extra_len
+                                            if !(*state).head.is_null() {
+                                                let head = &mut *(*state).head;
+                                                if let Some(extra) = head.extra.as_mut() {
+                                                    len = (head.extra_len
                                                         as ::core::ffi::c_uint)
                                                         .wrapping_sub((*state).length);
-                                                    len < (*(*state).head).extra_max
+                                                    let max = (head.extra_max as usize).min(extra.len());
+                                                    if (len as usize) < max {
+                                                        let copied = (copy as usize).min(max - len as usize);
+                                                        extra[len as usize..len as usize + copied]
+                                                            .copy_from_slice(::core::slice::from_raw_parts(
+                                                                next,
+                                                                copied,
+                                                            ));
+                                                    }
                                                 }
-                                            {
-                                                crate::stdlib::memcpy(
-                                                    (*(*state).head).extra.offset(len as isize)
-                                                        as *mut ::core::ffi::c_void,
-                                                    next as *const ::core::ffi::c_void,
-                                                    (if len.wrapping_add(copy)
-                                                        > (*(*state).head).extra_max
-                                                    {
-                                                        ((*(*state).head).extra_max
-                                                            as ::core::ffi::c_uint)
-                                                            .wrapping_sub(len)
-                                                    } else {
-                                                        copy
-                                                    })
-                                                        as crate::__stddef_size_t_h::size_t,
-                                                );
                                             }
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                                                 && (*state).wrap & 4 as ::core::ffi::c_int != 0
@@ -1864,14 +1853,16 @@ pub unsafe extern "C" fn inflate(
                                     copy = copy.wrapping_add(1);
                                     len =
                                         *next.offset(c2rust_fresh5 as isize) as ::core::ffi::c_uint;
-                                    if !(*state).head.is_null()
-                                        && !(*(*state).head).name.is_null()
-                                        && (*state).length < (*(*state).head).name_max
-                                    {
-                                        let c2rust_fresh6 = (*state).length;
-                                        (*state).length = (*state).length.wrapping_add(1);
-                                        *(*(*state).head).name.offset(c2rust_fresh6 as isize) =
-                                            len as crate::stdlib::Bytef;
+                                    if !(*state).head.is_null() {
+                                        let head = &mut *(*state).head;
+                                        if let Some(name) = head.name.as_mut() {
+                                            let max = (head.name_max as usize).min(name.len());
+                                            if ((*state).length as usize) < max {
+                                                let c2rust_fresh6 = (*state).length as usize;
+                                                (*state).length = (*state).length.wrapping_add(1);
+                                                name[c2rust_fresh6] = len as crate::stdlib::Bytef;
+                                            }
+                                        }
                                     }
                                     if !(len != 0 && copy < have) {
                                         break;
@@ -1893,8 +1884,7 @@ pub unsafe extern "C" fn inflate(
                                     break '_inf_leave;
                                 }
                             } else if !(*state).head.is_null() {
-                                (*(*state).head).name =
-                                    ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                                (*(*state).head).name = None;
                             }
                             (*state).length = 0 as ::core::ffi::c_uint;
                             (*state).mode = crate::src::inflate::COMMENT;
@@ -1983,14 +1973,16 @@ pub unsafe extern "C" fn inflate(
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
                             len = *next.offset(c2rust_fresh7 as isize) as ::core::ffi::c_uint;
-                            if !(*state).head.is_null()
-                                && !(*(*state).head).comment.is_null()
-                                && (*state).length < (*(*state).head).comm_max
-                            {
-                                let c2rust_fresh8 = (*state).length;
-                                (*state).length = (*state).length.wrapping_add(1);
-                                *(*(*state).head).comment.offset(c2rust_fresh8 as isize) =
-                                    len as crate::stdlib::Bytef;
+                            if !(*state).head.is_null() {
+                                let head = &mut *(*state).head;
+                                if let Some(comment) = head.comment.as_mut() {
+                                    let max = (head.comm_max as usize).min(comment.len());
+                                    if ((*state).length as usize) < max {
+                                        let c2rust_fresh8 = (*state).length as usize;
+                                        (*state).length = (*state).length.wrapping_add(1);
+                                        comment[c2rust_fresh8] = len as crate::stdlib::Bytef;
+                                    }
+                                }
                             }
                             if !(len != 0 && copy < have) {
                                 break;
@@ -2011,7 +2003,7 @@ pub unsafe extern "C" fn inflate(
                             break '_inf_leave;
                         }
                     } else if !(*state).head.is_null() {
-                        (*(*state).head).comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                        (*(*state).head).comment = None;
                     }
                     (*state).mode = crate::src::inflate::HCRC;
                     break 'c_2327;

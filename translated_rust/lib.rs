@@ -155,20 +155,18 @@ pub mod zlib_h {
 
     pub type gz_header = crate::zlib_h::gz_header_s;
 
-    #[derive(Copy, Clone)]
-    #[repr(C)]
-
+    #[derive(Clone)]
     pub struct gz_header_s {
         pub text: ::core::ffi::c_int,
         pub time: crate::stdlib::uLong,
         pub xflags: ::core::ffi::c_int,
         pub os: ::core::ffi::c_int,
-        pub extra: *mut crate::stdlib::Bytef,
+        pub extra: Option<Vec<crate::stdlib::Bytef>>,
         pub extra_len: crate::stdlib::uInt,
         pub extra_max: crate::stdlib::uInt,
-        pub name: *mut crate::stdlib::Bytef,
+        pub name: Option<Vec<crate::stdlib::Bytef>>,
         pub name_max: crate::stdlib::uInt,
-        pub comment: *mut crate::stdlib::Bytef,
+        pub comment: Option<Vec<crate::stdlib::Bytef>>,
         pub comm_max: crate::stdlib::uInt,
         pub hcrc: ::core::ffi::c_int,
         pub done: ::core::ffi::c_int,
