@@ -3083,10 +3083,11 @@ unsafe extern "C" fn deflate_slow(
         }
     }
     if (*s).match_available != 0 {
-        let mut cc_0: crate::zutil_h::uch = *(*s)
-            .window
-            .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
-            as crate::zutil_h::uch;
+        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
+        let cc_0 = literal_byte(
+            window,
+            (*s).strstart.wrapping_sub(1 as crate::stdlib::uInt),
+        );
         bflush = crate::src::trees::_tr_tally(s, 0, cc_0 as ::core::ffi::c_uint);
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
@@ -3301,8 +3302,8 @@ unsafe extern "C" fn deflate_huff(
             }
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
-        let mut cc: crate::zutil_h::uch =
-            *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
+        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
+        let cc = literal_byte(window, (*s).strstart);
         bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);
         (*s).strstart = (*s).strstart.wrapping_add(1);
