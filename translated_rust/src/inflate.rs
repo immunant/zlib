@@ -2454,18 +2454,21 @@ pub unsafe extern "C" fn inflate_ffi(
     inflate(strm, flush)
 }
 pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    drop((*state).owned_window.take());
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    // Keep the ABI projections at the callback-release boundary.  The
+    // window must be dropped before the caller-owned state allocation is
+    // released, and the stream must continue to point at that state during
+    // the callback just as it did in the C implementation.
+    let stream = &mut *strm;
+    let state_ptr = stream.state as *mut crate::src::inflate::inflate_state;
+    let state = &mut *state_ptr;
+    drop(state.owned_window.take());
+    let zfree = stream.zfree.expect("non-null function pointer");
+    let opaque = stream.opaque;
+    zfree(opaque, state_ptr.cast());
+    stream.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateEnd"]
