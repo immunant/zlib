@@ -3666,6 +3666,33 @@ fn heap_node_precedes(
         || left_frequency == right_frequency && left_depth <= right_depth
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HeapChild {
+    heap_position: ::core::ffi::c_int,
+    node_index: ::core::ffi::c_int,
+    frequency: crate::zutil_h::ush,
+    depth: crate::zutil_h::uch,
+}
+
+fn pqdownheap_child_to_promote(
+    parent_frequency: crate::zutil_h::ush,
+    parent_depth: crate::zutil_h::uch,
+    left: HeapChild,
+    right: Option<HeapChild>,
+) -> Option<HeapChild> {
+    let child = match right {
+        Some(right)
+            if heap_node_precedes(right.frequency, right.depth, left.frequency, left.depth) =>
+        {
+            right
+        }
+        _ => left,
+    };
+
+    (!heap_node_precedes(parent_frequency, parent_depth, child.frequency, child.depth))
+        .then_some(child)
+}
+
 fn combined_tree_frequency(
     left_frequency: crate::zutil_h::ush,
     right_frequency: crate::zutil_h::ush,
@@ -3935,31 +3962,34 @@ unsafe fn pqdownheap(
     mut k: ::core::ffi::c_int,
 ) {
     let mut v: ::core::ffi::c_int = (*s).heap[k as usize];
+    let parent_frequency = (*tree.wrapping_add(v as usize)).fc.value;
+    let parent_depth = (*s).depth[v as usize];
     let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
     while j <= (*s).heap_len {
-        if j < (*s).heap_len {
-            let right = (*s).heap[(j + 1 as ::core::ffi::c_int) as usize];
-            let left = (*s).heap[j as usize];
-            if heap_node_precedes(
-                (*tree.wrapping_add(right as usize)).fc.value,
-                (*s).depth[right as usize],
-                (*tree.wrapping_add(left as usize)).fc.value,
-                (*s).depth[left as usize],
-            ) {
-                j += 1;
-            }
-        }
-        let child = (*s).heap[j as usize];
-        if heap_node_precedes(
-            (*tree.wrapping_add(v as usize)).fc.value,
-            (*s).depth[v as usize],
-            (*tree.wrapping_add(child as usize)).fc.value,
-            (*s).depth[child as usize],
-        ) {
+        let left_index = (*s).heap[j as usize];
+        let left = HeapChild {
+            heap_position: j,
+            node_index: left_index,
+            frequency: (*tree.wrapping_add(left_index as usize)).fc.value,
+            depth: (*s).depth[left_index as usize],
+        };
+        let right = if j < (*s).heap_len {
+            let right_index = (*s).heap[(j + 1 as ::core::ffi::c_int) as usize];
+            Some(HeapChild {
+                heap_position: j + 1 as ::core::ffi::c_int,
+                node_index: right_index,
+                frequency: (*tree.wrapping_add(right_index as usize)).fc.value,
+                depth: (*s).depth[right_index as usize],
+            })
+        } else {
+            None
+        };
+        let Some(child) = pqdownheap_child_to_promote(parent_frequency, parent_depth, left, right)
+        else {
             break;
-        }
-        (*s).heap[k as usize] = child;
-        k = j;
+        };
+        (*s).heap[k as usize] = child.node_index;
+        k = child.heap_position;
         j <<= 1 as ::core::ffi::c_int;
     }
     (*s).heap[k as usize] = v;
@@ -5277,10 +5307,11 @@ mod tests {
         canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
         combined_tree_frequency, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
         last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
-        static_d_desc, static_l_desc, supplemental_tree_node, symbol_buffer_is_full,
-        symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor,
-        tree_run_continues, tree_run_limits, BlockEncoding, ScanTreeAction, END_BLOCK, MAX_BITS,
+        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_block_trees,
+        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
+        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_continues,
+        tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5561,6 +5592,29 @@ mod tests {
         assert!(heap_node_precedes(3, 4, 3, 4));
         assert!(heap_node_precedes(3, 4, 3, 5));
         assert!(!heap_node_precedes(3, 5, 3, 4));
+    }
+
+    #[test]
+    fn pqdownheap_promotion_preserves_child_and_parent_tie_rules() {
+        let left = HeapChild {
+            heap_position: 2,
+            node_index: 2,
+            frequency: 4,
+            depth: 3,
+        };
+        let right = HeapChild {
+            heap_position: 3,
+            node_index: 3,
+            frequency: 4,
+            depth: 3,
+        };
+
+        assert_eq!(pqdownheap_child_to_promote(5, 0, left, None), Some(left));
+        assert_eq!(
+            pqdownheap_child_to_promote(5, 0, left, Some(right)),
+            Some(right),
+        );
+        assert_eq!(pqdownheap_child_to_promote(4, 3, left, Some(right)), None);
     }
 
     #[test]
