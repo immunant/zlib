@@ -3728,27 +3728,26 @@ fn init_block(s: &mut crate::src::deflate::deflate_state) {
     reset_block_metadata(s);
 }
 
-pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
+pub fn _tr_init(s: &mut crate::src::deflate::deflate_state) {
     tr_static_init();
-    let state = &mut *s;
-    state.l_desc.dyn_tree = &raw mut state.dyn_ltree as *mut crate::src::deflate::ct_data_s
+    s.l_desc.dyn_tree = &raw mut s.dyn_ltree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    state.l_desc.stat_desc = &raw const static_l_desc;
-    state.d_desc.dyn_tree = &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
+    s.l_desc.stat_desc = &raw const static_l_desc;
+    s.d_desc.dyn_tree = &raw mut s.dyn_dtree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    state.d_desc.stat_desc = &raw const static_d_desc;
-    state.bl_desc.dyn_tree = &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
+    s.d_desc.stat_desc = &raw const static_d_desc;
+    s.bl_desc.dyn_tree = &raw mut s.bl_tree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    state.bl_desc.stat_desc = &raw const static_bl_desc;
-    state.bi_buf = 0 as crate::zutil_h::ush;
-    state.bi_valid = 0 as ::core::ffi::c_int;
-    state.bi_used = 0 as ::core::ffi::c_int;
-    init_block(state);
+    s.bl_desc.stat_desc = &raw const static_bl_desc;
+    s.bi_buf = 0 as crate::zutil_h::ush;
+    s.bi_valid = 0 as ::core::ffi::c_int;
+    s.bi_used = 0 as ::core::ffi::c_int;
+    init_block(s);
 }
 #[export_name = "_tr_init"]
 
 pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_init(s)
+    _tr_init(&mut *s)
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 

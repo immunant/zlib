@@ -961,8 +961,7 @@ pub unsafe extern "C" fn deflateResetKeep(
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     let result = deflate_reset_keep(strm, state);
-    crate::src::trees::_tr_init(state as *mut crate::src::deflate::deflate_state
-        as *mut crate::src::deflate::internal_state);
+    crate::src::trees::_tr_init(state);
     result
 }
 
