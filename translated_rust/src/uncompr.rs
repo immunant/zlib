@@ -137,7 +137,10 @@ pub unsafe extern "C" fn uncompress2_z(
     left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
     *sourceLen = (*sourceLen).wrapping_sub(len);
     *destLen = (*destLen).wrapping_sub(left);
-    crate::src::inflate::inflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+    // This one-shot stream was initialized with zlib's default callbacks,
+    // so its teardown can stay reference-bound instead of re-entering the
+    // raw public `inflateEnd()` adapter.
+    crate::src::inflate::inflate_end_default_bound(&mut stream);
     uncompress_result(err, len)
 }
 #[export_name = "uncompress2_z"]
