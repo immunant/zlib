@@ -239,7 +239,7 @@ pub unsafe extern "C" fn inflate_fast(
             input_remaining = input_remaining_after_read(input_remaining);
             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh1);
         }
-        here = lcode.offset((hold & lmask as ::core::ffi::c_ulong) as isize);
+        here = lcode.wrapping_add((hold & lmask as ::core::ffi::c_ulong) as usize);
         loop {
             op = (*here).bits as ::core::ffi::c_uint;
             (hold, bits) = consume_bits(hold, bits, op);

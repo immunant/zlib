@@ -661,7 +661,7 @@ unsafe fn gz_write(
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
-            buf = (buf as *const ::core::ffi::c_char).wrapping_add(copy as usize)
+            buf = (buf as *mut crate::stdlib::Bytef).wrapping_add(copy as usize)
                 as crate::stdlib::voidpc;
             if gz_write_is_empty(len) {
                 break;

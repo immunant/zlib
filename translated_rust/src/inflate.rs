@@ -768,6 +768,8 @@ pub unsafe extern "C" fn inflate(
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut output_start: *const crate::stdlib::Bytef = ::core::ptr::null::<crate::stdlib::Bytef>();
+    let mut checksum_start: *const crate::stdlib::Bytef =
+        ::core::ptr::null::<crate::stdlib::Bytef>();
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -803,6 +805,7 @@ pub unsafe extern "C" fn inflate(
     }
     put = (*strm).next_out as *mut ::core::ffi::c_uchar;
     output_start = put as *const crate::stdlib::Bytef;
+    checksum_start = output_start;
     left = (*strm).avail_out as ::core::ffi::c_uint;
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
     have = (*strm).avail_in as ::core::ffi::c_uint;
@@ -1140,18 +1143,19 @@ pub unsafe extern "C" fn inflate(
                         (*state).check = (if (*state).flags != 0 {
                             crate::src::crc32::crc32_ffi(
                                 (*state).check as crate::stdlib::uLong,
-                                put.offset(-(out as isize)),
+                                checksum_start,
                                 out as crate::stdlib::uInt,
                             )
                         } else {
                             crate::src::adler32::adler32_ffi(
                                 (*state).check as crate::stdlib::uLong,
-                                put.offset(-(out as isize)),
+                                checksum_start,
                                 out as crate::stdlib::uInt,
                             )
                         }) as ::core::ffi::c_ulong;
                         (*strm).adler = (*state).check as crate::stdlib::uLong;
                     }
+                    checksum_start = put as *const crate::stdlib::Bytef;
                     out = left;
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0
                         && (if (*state).flags != 0 {
@@ -2184,13 +2188,13 @@ pub unsafe extern "C" fn inflate(
         (*state).check = (if (*state).flags != 0 {
             crate::src::crc32::crc32_ffi(
                 (*state).check as crate::stdlib::uLong,
-                (*strm).next_out.offset(-(out as isize)),
+                checksum_start,
                 out as crate::stdlib::uInt,
             )
         } else {
             crate::src::adler32::adler32_ffi(
                 (*state).check as crate::stdlib::uLong,
-                (*strm).next_out.offset(-(out as isize)),
+                checksum_start,
                 out as crate::stdlib::uInt,
             )
         }) as ::core::ffi::c_ulong;
@@ -3429,5 +3433,25 @@ mod tests {
             super::inflate_cursor_progress(0, 1),
             ::core::ffi::c_uint::MAX
         );
+    }
+
+    #[test]
+    fn checksum_cursor_preserves_the_adler_output_range() {
+        let output = *b"hello";
+        let first_checksum =
+            unsafe { crate::src::adler32::adler32_ffi(1, output[..2].as_ptr(), 2) };
+        let checksum_cursor = output[2..].as_ptr();
+        let cursor_checksum =
+            unsafe { crate::src::adler32::adler32_ffi(first_checksum, checksum_cursor, 3) };
+        let whole_output_checksum = unsafe {
+            crate::src::adler32::adler32_ffi(
+                1,
+                output.as_ptr(),
+                output.len() as crate::stdlib::uInt,
+            )
+        };
+
+        assert_eq!(cursor_checksum, whole_output_checksum);
+        assert_eq!(cursor_checksum, 0x062c_0215);
     }
 }
