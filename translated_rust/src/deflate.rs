@@ -910,33 +910,26 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
                 return;
             }
         }
-        if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && progress.avail_in != 0 as crate::stdlib::uInt)
+        if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            && progress.avail_in != 0 as crate::stdlib::uInt
         {
-            break;
+            continue;
         }
-    }
-    if state.high_water < state.window_size {
-        let Ok(window_len) = usize::try_from(state.window_size) else {
-            return;
-        };
-        if window_len != 0 && state.window.is_null() {
-            return;
-        }
-        let window = if window_len == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(state.window, window_len)
-        };
-        if !clear_window_tail_state(
-            window,
-            state.window_size,
-            state.strstart,
-            state.lookahead,
-            &mut state.high_water,
-        ) {
+        // Reuse this iteration's already validated window lend for the
+        // final high-water initialization.  Taking another raw slice after
+        // the loop would only duplicate the same boundary conversion.
+        if state.high_water < state.window_size
+            && !clear_window_tail_state(
+                window,
+                state.window_size,
+                state.strstart,
+                state.lookahead,
+                &mut state.high_water,
+            )
+        {
             return;
         }
+        break;
     }
 }
 
