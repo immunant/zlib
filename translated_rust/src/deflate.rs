@@ -840,153 +840,174 @@ fn fill_window_write_span(
     (end <= window_len).then_some(start..end)
 }
 
+/// The callback allocator owns these three deflate work buffers.  Keep their
+/// lends together at the compatibility boundary so the refill state machine
+/// below only manipulates checked Rust slices.
+struct DeflateWindowHashBuffers<'a> {
+    window: &'a mut [crate::stdlib::Byte],
+    head: &'a mut [crate::src::deflate::Posf],
+    prev: &'a mut [crate::src::deflate::Posf],
+}
+
+fn fill_window_hash_lends_match_state(
+    state: &crate::src::deflate::deflate_state,
+    buffers: &DeflateWindowHashBuffers<'_>,
+) -> bool {
+    let Ok(head_len) = usize::try_from(state.hash_size) else {
+        return false;
+    };
+    let Ok(prev_len) = usize::try_from(state.w_size) else {
+        return false;
+    };
+    buffers.head.len() == head_len && buffers.prev.len() == prev_len
+}
+
+/// The pointer-free refill state machine.  The caller has already lent the
+/// callback-owned allocations; malformed or absent hash lends are rejected
+/// only at the same slide/insertion transitions where legacy code used them.
+fn fill_window_state(
+    s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    input: &mut &[crate::stdlib::Byte],
+    buffers: &mut DeflateWindowHashBuffers<'_>,
+) {
+    let mut n: ::core::ffi::c_uint = 0;
+    let mut more: ::core::ffi::c_uint = 0;
+    let state = s;
+    let wsize: crate::stdlib::uInt = state.w_size;
+    loop {
+        let (space, should_slide) =
+            fill_window_space_state(state.window_size, state.lookahead, state.strstart, wsize);
+        more = space;
+        let Ok(window_len) = usize::try_from(state.window_size) else {
+            return;
+        };
+        if buffers.window.len() != window_len {
+            return;
+        }
+        let hash_lends_match = fill_window_hash_lends_match_state(state, buffers);
+        let (window, head, prev) = (&mut *buffers.window, &mut *buffers.head, &mut *buffers.prev);
+        if should_slide {
+            let Some(next_more) = slide_window_state(
+                window,
+                wsize,
+                more,
+                &mut state.match_start,
+                &mut state.strstart,
+                &mut state.block_start,
+                &mut state.insert,
+            ) else {
+                return;
+            };
+            // Preserve the legacy early malformed-state exit before the
+            // refill. The actual hash update can wait until after the refill:
+            // no code between these points consults the hash chains.
+            if !hash_lends_match {
+                return;
+            }
+            more = next_more;
+        }
+        // `read_buf()` consumes at most this exact available-input snapshot.
+        let Some(write_span) =
+            fill_window_write_span(window.len(), state.strstart, state.lookahead, more)
+        else {
+            return;
+        };
+        let Some(output) = window.get_mut(write_span) else {
+            return;
+        };
+        let progress = read_buf(strm, input, output, more, state.wrap);
+        n = progress.copied;
+        state.lookahead = state.lookahead.wrapping_add(n);
+        let insert_pending = state.lookahead.wrapping_add(state.insert)
+            >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+        if should_slide || insert_pending {
+            if !hash_lends_match {
+                return;
+            }
+            if should_slide {
+                slide_hash_state(head, prev, wsize);
+                state.slid = 1;
+            }
+            if insert_pending
+                && !insert_pending_strings_state(
+                    window,
+                    head,
+                    prev,
+                    state.strstart,
+                    state.lookahead,
+                    &mut state.insert,
+                    &mut state.ins_h,
+                    state.hash_shift,
+                    state.hash_mask,
+                    state.w_mask,
+                )
+            {
+                return;
+            }
+        }
+        if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            && progress.avail_in != 0 as crate::stdlib::uInt
+        {
+            continue;
+        }
+        if state.high_water < state.window_size
+            && !clear_window_tail_state(
+                window,
+                state.window_size,
+                state.strstart,
+                state.lookahead,
+                &mut state.high_water,
+            )
+        {
+            return;
+        }
+        break;
+    }
+}
+
 fn fill_window(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     input: &mut &[crate::stdlib::Byte],
 ) {
     unsafe {
-        let mut n: ::core::ffi::c_uint = 0;
-        let mut more: ::core::ffi::c_uint = 0;
-        // This remains the transitional state/allocator boundary, but adopt the
-        // validated state record once.  The bounded slice helpers below continue
-        // to own all ordinary buffer manipulation.
-        let state = s;
-        let wsize: crate::stdlib::uInt = state.w_size;
-        loop {
-            let (space, should_slide) =
-                fill_window_space_state(state.window_size, state.lookahead, state.strstart, wsize);
-            more = space;
-            // Lend the window once for this iteration.  Both the slide path and
-            // the post-refill hash insertion use the same checked allocation, so
-            // retaining this one view avoids a second raw window adapter.
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return;
-            };
-            if window_len != 0 && state.window.is_null() {
-                return;
-            }
-            let window = if window_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.window, window_len)
-            };
-            if should_slide {
-                let Some(next_more) = slide_window_state(
-                    window,
-                    wsize,
-                    more,
-                    &mut state.match_start,
-                    &mut state.strstart,
-                    &mut state.block_start,
-                    &mut state.insert,
-                ) else {
-                    return;
-                };
-                // Preserve the legacy early malformed-state exit before the
-                // refill. The actual hash update can wait until after the
-                // refill: no code between these points consults the hash
-                // chains, and delaying it lets the same checked lends serve a
-                // subsequent pending-string insertion.
-                let Ok(head_len) = usize::try_from(state.hash_size) else {
-                    return;
-                };
-                let Ok(prev_len) = usize::try_from(state.w_size) else {
-                    return;
-                };
-                if (head_len != 0 && state.head.is_null())
-                    || (prev_len != 0 && state.prev.is_null())
-                {
-                    return;
-                }
-                more = next_more;
-            }
-            // `read_buf()` consumes at most this exact available-input snapshot.
-            // Retain it so the loop need not dereference the compatibility stream
-            // again merely to decide whether more input remains.
-            let Some(write_span) =
-                fill_window_write_span(window.len(), state.strstart, state.lookahead, more)
-            else {
-                return;
-            };
-            let Some(output) = window.get_mut(write_span) else {
-                return;
-            };
-            let progress = read_buf(strm, input, output, more, state.wrap);
-            n = progress.copied;
-            state.lookahead = state.lookahead.wrapping_add(n);
-            let insert_pending = state.lookahead.wrapping_add(state.insert)
-                >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
-            if should_slide || insert_pending {
-                // `fill_window` is the sole transitional owner of these
-                // callback-allocated hash buffers. One pair of lends now
-                // serves both the slide and the optional insertion below.
-                // The slide prevalidated these lengths and pointers above;
-                // insertion-only iterations validate them at their original
-                // post-refill point.
-                let Ok(head_len) = usize::try_from(state.hash_size) else {
-                    return;
-                };
-                let Ok(prev_len) = usize::try_from(state.w_size) else {
-                    return;
-                };
-                if (head_len != 0 && state.head.is_null())
-                    || (prev_len != 0 && state.prev.is_null())
-                {
-                    return;
-                }
-                let head = if head_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.head, head_len)
-                };
-                let prev = if prev_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                };
-                if should_slide {
-                    slide_hash_state(head, prev, wsize);
-                    state.slid = 1;
-                }
-                if insert_pending
-                    && !insert_pending_strings_state(
-                        window,
-                        head,
-                        prev,
-                        state.strstart,
-                        state.lookahead,
-                        &mut state.insert,
-                        &mut state.ins_h,
-                        state.hash_shift,
-                        state.hash_mask,
-                        state.w_mask,
-                    )
-                {
-                    return;
-                }
-            }
-            if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                && progress.avail_in != 0 as crate::stdlib::uInt
-            {
-                continue;
-            }
-            // Reuse this iteration's already validated window lend for the
-            // final high-water initialization.  Taking another raw slice after
-            // the loop would only duplicate the same boundary conversion.
-            if state.high_water < state.window_size
-                && !clear_window_tail_state(
-                    window,
-                    state.window_size,
-                    state.strstart,
-                    state.lookahead,
-                    &mut state.high_water,
-                )
-            {
-                return;
-            }
-            break;
+        let Ok(window_len) = usize::try_from(s.window_size) else {
+            return;
+        };
+        let Ok(head_len) = usize::try_from(s.hash_size) else {
+            return;
+        };
+        let Ok(prev_len) = usize::try_from(s.w_size) else {
+            return;
+        };
+        if window_len != 0 && s.window.is_null() {
+            return;
         }
+        // A missing hash table remains observable only when a slide or an
+        // insertion reaches it.  Represent it with an empty safe lend here so
+        // `fill_window_state()` retains that historical admission point.
+        let window = if window_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(s.window, window_len)
+        };
+        let head = if s.head.is_null() {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(s.head, head_len)
+        };
+        let prev = if s.prev.is_null() {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(s.prev, prev_len)
+        };
+        fill_window_state(
+            s,
+            strm,
+            input,
+            &mut DeflateWindowHashBuffers { window, head, prev },
+        );
     }
 }
 
