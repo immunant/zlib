@@ -101,11 +101,13 @@ pub(crate) struct GzBufferedInput<'a> {
     have: usize,
 }
 
-// Codec calls see short-lived slices of gzip's two owned buffers.  Keep the
-// cursor validation and output-capacity check in pointer-free views so later
-// codec projections can carry slices instead of ABI `z_stream` cursors.
-pub(crate) struct GzCodecInputView<'a> {
-    bytes: &'a [u8],
+// The codec owner keeps its unread input as a checked index and byte count.
+// ABI boundaries convert a stream cursor to this form for the duration of a
+// call, while refill and decompression state keep only this pointer-free
+// representation.
+pub(crate) struct GzCodecInput {
+    cursor: usize,
+    available: crate::stdlib::uInt,
 }
 
 pub(crate) struct GzCodecOutputView<'a> {
@@ -286,27 +288,46 @@ impl<'a> GzBufferedInput<'a> {
     }
 }
 
-impl<'a> GzCodecInputView<'a> {
+impl GzCodecInput {
     // A codec input cursor is valid only when its entire advertised range is
-    // within gzip's owned input allocation.  Preserve the zero-length case:
+    // within gzip's owned input allocation. Preserve the zero-length case:
     // it may carry a null ABI cursor and therefore has no address to check.
     pub(crate) fn from_owned_buffer(
-        buffer: &'a [u8],
+        buffer: &[u8],
         cursor_address: usize,
         available: u32,
     ) -> Option<Self> {
         if available == 0 {
-            return Some(Self { bytes: &[] });
+            return Some(Self {
+                cursor: 0,
+                available: 0,
+            });
         }
         let start = cursor_address.checked_sub(buffer.as_ptr().addr())?;
         let end = start.checked_add(available as usize)?;
+        buffer.get(start..end)?;
         Some(Self {
-            bytes: buffer.get(start..end)?,
+            cursor: start,
+            available,
         })
     }
 
-    pub(crate) fn bytes(&self) -> &'a [u8] {
-        self.bytes
+    pub(crate) fn available(&self) -> u32 {
+        self.available
+    }
+
+    pub(crate) fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub(crate) fn bytes<'a>(&self, buffer: &'a [u8]) -> Option<&'a [u8]> {
+        let end = self.cursor.checked_add(self.available as usize)?;
+        buffer.get(self.cursor..end)
+    }
+
+    pub(crate) fn update(&mut self, cursor: usize, available: u32) {
+        self.cursor = cursor;
+        self.available = available;
     }
 }
 
@@ -660,7 +681,7 @@ pub(crate) struct GzDecompStep {
 // `gz_state`; the current boundary only snapshots and republishes the values.
 pub(crate) struct GzDecompState {
     output: GzCodecOutput,
-    input_available: crate::stdlib::uInt,
+    input: GzCodecInput,
     junk: ::core::ffi::c_int,
     eof: ::core::ffi::c_int,
     how: ::core::ffi::c_int,
@@ -669,14 +690,14 @@ pub(crate) struct GzDecompState {
 impl GzDecompState {
     pub(crate) fn new(
         output_capacity: usize,
-        input_available: crate::stdlib::uInt,
+        input: GzCodecInput,
         junk: ::core::ffi::c_int,
         eof: ::core::ffi::c_int,
         how: ::core::ffi::c_int,
     ) -> Option<Self> {
         Some(Self {
             output: GzCodecOutput::new(output_capacity)?,
-            input_available,
+            input,
             junk,
             eof,
             how,
@@ -688,11 +709,15 @@ impl GzDecompState {
     // transition; the current boundary only snapshots it around each codec
     // call until the stream owner/view split is complete.
     pub(crate) fn needs_input(&self) -> bool {
-        self.input_available == 0
+        self.input.available() == 0
     }
 
-    pub(crate) fn record_input_available(&mut self, available: crate::stdlib::uInt) {
-        self.input_available = available;
+    pub(crate) fn record_input(&mut self, input: GzCodecInput) {
+        self.input = input;
+    }
+
+    pub(crate) fn input(&self) -> &GzCodecInput {
+        &self.input
     }
 
     pub(crate) fn output_available(&self) -> crate::stdlib::uInt {

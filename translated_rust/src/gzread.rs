@@ -46,6 +46,8 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+use crate::src::gzlib::GzCodecInput;
+
 fn is_gzip_header(input: &[u8]) -> bool {
     input.len() >= 4 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32
 }
@@ -176,53 +178,6 @@ struct GzAvailState<'a> {
     message: &'a mut Option<Box<[u8]>>,
     buffered: &'a mut ::core::ffi::c_uint,
     path: Option<&'a [u8]>,
-}
-
-// This is the owner-side representation of gzip's codec-input cursor.  It
-// deliberately retains an index rather than a pointer, so refill and
-// compaction can become safe owner operations before the embedded ABI stream
-// is removed.  The current callers perform the raw cursor conversion only at
-// their short-lived state boundary.
-struct GzCodecInput {
-    cursor: usize,
-    available: crate::stdlib::uInt,
-}
-
-impl GzCodecInput {
-    fn from_owned_buffer(
-        buffer: &[u8],
-        cursor_address: usize,
-        available: crate::stdlib::uInt,
-    ) -> Option<Self> {
-        if available == 0 {
-            return Some(Self {
-                cursor: 0,
-                available: 0,
-            });
-        }
-        let cursor = cursor_address.checked_sub(buffer.as_ptr().addr())?;
-        let end = cursor.checked_add(available as usize)?;
-        buffer.get(cursor..end)?;
-        Some(Self { cursor, available })
-    }
-
-    fn available(&self) -> crate::stdlib::uInt {
-        self.available
-    }
-
-    fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    fn bytes<'a>(&self, buffer: &'a [u8]) -> Option<&'a [u8]> {
-        let end = self.cursor.checked_add(self.available as usize)?;
-        buffer.get(self.cursor..end)
-    }
-
-    fn update(&mut self, cursor: usize, available: crate::stdlib::uInt) {
-        self.cursor = cursor;
-        self.available = available;
-    }
 }
 
 // Skipping buffered gzip output needs only a checked buffer offset and scalar
@@ -596,13 +551,14 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     }) else {
         return -1 as ::core::ffi::c_int;
     };
-    let Some(mut decomp) = crate::src::gzlib::GzDecompState::new(
-        output_len,
-        state.strm.avail_in,
-        state.junk,
-        state.eof,
-        state.how,
-    ) else {
+    let Some(input) = state.in_0.as_deref().and_then(|buffer| {
+        GzCodecInput::from_owned_buffer(buffer, state.strm.next_in.addr(), state.strm.avail_in)
+    }) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    let Some(mut decomp) =
+        crate::src::gzlib::GzDecompState::new(output_len, input, state.junk, state.eof, state.how)
+    else {
         return -1 as ::core::ffi::c_int;
     };
     state.strm.avail_out = decomp.output_available();
@@ -642,7 +598,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
             strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
             strm.avail_in = input_cursor.available();
-            decomp.record_input_available(input_cursor.available());
+            decomp.record_input(input_cursor);
         }
         if decomp.needs_input() {
             if state.again == 0 {
@@ -661,7 +617,13 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );
-            decomp.record_input_available(strm.avail_in);
+            let Some(input) = state.in_0.as_deref().and_then(|buffer| {
+                GzCodecInput::from_owned_buffer(buffer, strm.next_in.addr(), strm.avail_in)
+            }) else {
+                ret = -1 as ::core::ffi::c_int;
+                break;
+            };
+            decomp.record_input(input);
             match decomp.record_inflate(ret, strm.avail_out) {
                 crate::src::gzlib::GzDecompAction::Continue => {}
                 crate::src::gzlib::GzDecompAction::Stop => break,
@@ -722,6 +684,12 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     state.x.have = decomp.written() as ::core::ffi::c_uint;
     state.x.next = output_start;
     let result = decomp.finish(ret);
+    let input = decomp.input();
+    let Some(buffer) = state.in_0.as_deref_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    state.strm.next_in = buffer.as_mut_ptr().wrapping_add(input.cursor());
+    state.strm.avail_in = input.available();
     let (junk, eof, how) = decomp.fields();
     state.junk = junk;
     state.eof = eof;
