@@ -1070,7 +1070,7 @@ unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
         .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
     *(*s)
         .head
-        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
+        .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
         NIL as crate::src::deflate::Posf;
     crate::stdlib::memset(
         (*s).head as *mut ::core::ffi::c_void,
