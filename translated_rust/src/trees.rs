@@ -5546,47 +5546,56 @@ fn tr_flush_block_state(
         )
 }
 
-pub unsafe extern "C" fn _tr_flush_block(
+/// Compatibility adapter for the legacy deflate block-flush boundary.
+///
+/// Rust callers do not need an unsafe-function contract: the raw state and
+/// buffer adoption remains tightly scoped while the actual tree work is
+/// delegated to `tr_flush_block_state`.
+pub fn _tr_flush_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    if s.is_null() {
-        return;
+    // Raw state and buffer conversion is retained only at this transitional
+    // compatibility boundary. Everything after the lends is slice-based.
+    unsafe {
+        if s.is_null() {
+            return;
+        }
+        let state = &mut *s;
+        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            return;
+        };
+        let Ok(stored_len_usize) = usize::try_from(stored_len) else {
+            return;
+        };
+        let strm = state.strm;
+        if (pending_len != 0 && state.pending_buf.is_null()) || strm.is_null() {
+            return;
+        }
+        let pending_and_symbols = if pending_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+        };
+        let stored = if buf.is_null() {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts(
+                buf as *const crate::stdlib::Byte,
+                stored_len_usize,
+            ))
+        };
+        let _ = tr_flush_block_state(
+            state,
+            &mut (*strm).data_type,
+            pending_and_symbols,
+            stored,
+            stored_len,
+            last,
+        );
     }
-    let state = &mut *s;
-    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-        return;
-    };
-    let Ok(stored_len_usize) = usize::try_from(stored_len) else {
-        return;
-    };
-    let strm = state.strm;
-    if (pending_len != 0 && state.pending_buf.is_null()) || strm.is_null() {
-        return;
-    }
-    let pending_and_symbols = if pending_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-    };
-    let stored = if buf.is_null() {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts(
-            buf as *const crate::stdlib::Byte,
-            stored_len_usize,
-        ))
-    };
-    let _ = tr_flush_block_state(
-        state,
-        &mut (*strm).data_type,
-        pending_and_symbols,
-        stored,
-        stored_len,
-        last,
-    );
 }
 #[export_name = "_tr_flush_block"]
 
