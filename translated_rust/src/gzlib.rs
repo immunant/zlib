@@ -307,6 +307,43 @@ fn gzdopen_impl(
     Box::new(prepared.state)
 }
 
+/// Open a gzip state from already-validated C strings.
+///
+/// Raw path and mode conversion belongs to the exported wrappers.  Keeping
+/// the remainder here lets both `gzopen` variants share the owner-backed
+/// setup without an unsafe forwarding function.
+fn gzopen_impl(
+    path: &::core::ffi::CStr,
+    mode: &::core::ffi::CStr,
+) -> Option<Box<crate::gzguts_h::gz_state>> {
+    let (mut state, mut oflag, exclusive) = gz_open_state(mode)?;
+    let path_bytes = path.to_bytes_with_nul();
+    let mut owned_path = Vec::new();
+    owned_path.try_reserve_exact(path_bytes.len()).ok()?;
+    owned_path.extend_from_slice(path_bytes);
+    state.path = std::ffi::CString::from_vec_with_nul(owned_path)
+        .expect("a C string is always a valid C string");
+    oflag |= crate::stdlib::O_LARGEFILE
+        | (if state.mode == crate::gzguts_h::GZ_READ {
+            crate::stdlib::O_RDONLY
+        } else {
+            crate::stdlib::O_WRONLY
+                | crate::stdlib::O_CREAT
+                | (if exclusive != 0 {
+                    crate::stdlib::O_EXCL
+                } else {
+                    0
+                })
+                | (if state.mode == crate::gzguts_h::GZ_WRITE {
+                    crate::stdlib::O_TRUNC
+                } else {
+                    crate::stdlib::O_APPEND
+                })
+        });
+    let fd = gz_open_file(path, state.mode, exclusive, oflag)?;
+    Some(gzdopen_impl(GzDopenPreparation { state, oflag }, fd))
+}
+
 unsafe extern "C" fn gz_open(
     path: *const ::core::ffi::c_void,
     fd: ::core::ffi::c_int,
@@ -406,23 +443,20 @@ pub unsafe extern "C" fn gzopen_ffi(
 ) -> crate::zlib_h::gzFile {
     gz_open(path.cast(), -1 as ::core::ffi::c_int, mode)
 }
-pub unsafe extern "C" fn gzopen64(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    return gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    );
-}
 #[export_name = "gzopen64"]
 
 pub unsafe extern "C" fn gzopen64_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gzopen64(path, mode)
+    if path.is_null() || mode.is_null() {
+        return ::core::ptr::null_mut();
+    }
+    let path = ::core::ffi::CStr::from_ptr(path);
+    let mode = ::core::ffi::CStr::from_ptr(mode);
+    gzopen_impl(path, mode)
+        .map(Box::into_raw)
+        .unwrap_or(::core::ptr::null_mut()) as crate::zlib_h::gzFile
 }
 #[export_name = "gzdopen"]
 
