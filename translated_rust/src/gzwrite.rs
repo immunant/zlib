@@ -400,10 +400,9 @@ fn gz_comp_write_failure(errno: ::core::ffi::c_int) -> GzCompWriteFailure {
 }
 
 fn gz_comp_write_again(errno: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    if matches!(gz_comp_write_failure(errno), GzCompWriteFailure::Retryable) {
-        1
-    } else {
-        0
+    match gz_comp_write_failure(errno) {
+        GzCompWriteFailure::Retryable => 1,
+        GzCompWriteFailure::Fatal => 0,
     }
 }
 
@@ -1351,6 +1350,12 @@ mod tests {
         assert_eq!(gz_comp_write_again(crate::stdlib::EWOULDBLOCK), 1);
         assert_eq!(gz_comp_write_again(0), 0);
         assert_eq!(gz_comp_write_again(1), 0);
+    }
+
+    #[test]
+    fn gz_comp_write_again_rejects_non_retryable_extreme_errors() {
+        assert_eq!(gz_comp_write_again(::core::ffi::c_int::MIN), 0);
+        assert_eq!(gz_comp_write_again(::core::ffi::c_int::MAX), 0);
     }
 
     #[test]

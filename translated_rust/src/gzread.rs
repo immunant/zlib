@@ -373,6 +373,13 @@ fn gz_cursor_advance(
     pos.wrapping_add(consumed as crate::stdlib::off64_t)
 }
 
+fn gz_cursor_rewind(
+    pos: crate::stdlib::off64_t,
+    pushed_back: ::core::ffi::c_uint,
+) -> crate::stdlib::off64_t {
+    pos.wrapping_sub(pushed_back as crate::stdlib::off64_t)
+}
+
 fn gz_read_progress(
     len: crate::stdlib::z_size_t,
     got: crate::stdlib::z_size_t,
@@ -512,7 +519,7 @@ fn gz_ungetc_progress(
     crate::stdlib::off64_t,
     ::core::ffi::c_int,
 ) {
-    (gz_ungetc_next_have(have), pos.wrapping_sub(1), 0)
+    (gz_ungetc_next_have(have), gz_cursor_rewind(pos, 1), 0)
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1771,6 +1778,15 @@ mod tests {
         assert_eq!(
             gz_cursor_advance(crate::stdlib::off64_t::MAX, 1),
             crate::stdlib::off64_t::MIN
+        );
+    }
+
+    #[test]
+    fn gz_cursor_rewind_preserves_backward_wrapping() {
+        assert_eq!(gz_cursor_rewind(42, 3), 39);
+        assert_eq!(
+            gz_cursor_rewind(crate::stdlib::off64_t::MIN, 1),
+            crate::stdlib::off64_t::MAX
         );
     }
 

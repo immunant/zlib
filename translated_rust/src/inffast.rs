@@ -91,9 +91,9 @@ fn append_input_byte(
     )
 }
 
-fn subtable_offset(entry: code, hold: ::core::ffi::c_ulong) -> isize {
-    entry.val as ::core::ffi::c_int as isize
-        + (hold & bit_mask(entry.op as ::core::ffi::c_uint) as ::core::ffi::c_ulong) as isize
+fn subtable_index(entry: code, hold: ::core::ffi::c_ulong) -> usize {
+    entry.val as usize
+        + (hold & bit_mask(entry.op as ::core::ffi::c_uint) as ::core::ffi::c_ulong) as usize
 }
 
 fn unread_input_state(
@@ -296,7 +296,7 @@ pub unsafe extern "C" fn inflate_fast(
                     break;
                 }
                 FastLitLenAction::Subtable => {
-                    here = lcode.wrapping_add(subtable_offset(*here, hold) as usize);
+                    here = lcode.wrapping_add(subtable_index(*here, hold));
                 }
                 FastLitLenAction::End => {
                     c2rust_current_block_141 = 13505557363059842426;
@@ -341,7 +341,7 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                         }
                         FastDistAction::Subtable => {
-                            here = dcode.wrapping_add(subtable_offset(*here, hold) as usize);
+                            here = dcode.wrapping_add(subtable_index(*here, hold));
                         }
                         FastDistAction::Invalid => {
                             (*strm).msg = b"invalid distance code\0".as_ptr()
@@ -579,7 +579,7 @@ mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_dist_action, fast_litlen_action, fast_window_distance_is_invalid,
-        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_offset,
+        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
         unread_input_state, window_match_start, FastDistAction, FastLitLenAction,
     };
 
@@ -646,13 +646,20 @@ mod tests {
     }
 
     #[test]
-    fn subtable_offset_combines_base_and_low_bit_index() {
+    fn subtable_index_combines_base_and_low_bit_index() {
         let entry = code {
             op: 5,
             bits: 0,
             val: 96,
         };
-        assert_eq!(subtable_offset(entry, 0b1_1011), 123);
+        assert_eq!(subtable_index(entry, 0b1_1011), 123);
+
+        let entry = code {
+            op: 15,
+            bits: 0,
+            val: ::core::ffi::c_ushort::MAX,
+        };
+        assert_eq!(subtable_index(entry, ::core::ffi::c_ulong::MAX), 98_302);
     }
 
     #[test]
