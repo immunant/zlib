@@ -435,11 +435,14 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     }
     gzfwrite(buf, size, nitems, &mut *(file as crate::gzguts_h::gz_statep))
 }
-pub unsafe extern "C" fn gzputc(
+// The one-byte request can use the same buffered/streaming adapter as larger
+// writes.  Keeping the byte in a local array lets this coordinator remain
+// reference-bound; `gz_write()` retains the sole raw-copy boundary.
+pub fn gzputc(
     state: &mut crate::gzguts_h::gz_state,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
+    let buf: [::core::ffi::c_uchar; 1] = [c as ::core::ffi::c_uchar];
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
@@ -447,18 +450,9 @@ pub unsafe extern "C" fn gzputc(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    match crate::src::gzlib::gz_putc_plan(state) {
-        crate::src::gzlib::GzPutcPlan::Buffered { offset } => {
-            *state.in_0.wrapping_add(offset as usize) = c as ::core::ffi::c_uchar;
-            crate::src::gzlib::gz_putc_buffered_progress(state);
-            return c & 0xff as ::core::ffi::c_int;
-        }
-        crate::src::gzlib::GzPutcPlan::Write => {}
-    }
-    buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
     if gz_write(
         state,
-        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidpc,
+        buf.as_ptr() as crate::stdlib::voidpc,
         1 as crate::stdlib::z_size_t,
     ) != 1 as crate::stdlib::z_size_t
     {

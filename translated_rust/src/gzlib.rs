@@ -660,28 +660,6 @@ pub(crate) fn gz_buffered_copy_progress(
     *remaining = remaining.wrapping_sub(copied as crate::stdlib::z_size_t);
 }
 
-pub(crate) fn gz_putc_buffered_progress(state: &mut crate::gzguts_h::gz_state) {
-    gz_append_input(state, 1);
-}
-
-// Select `gzputc()`'s fast buffer path without touching the input pointer.
-// The write adapter retains the one byte store; this helper owns the scalar
-// cursor setup and capacity check shared by that decision.
-pub(crate) enum GzPutcPlan {
-    Buffered { offset: ::core::ffi::c_uint },
-    Write,
-}
-
-pub(crate) fn gz_putc_plan(state: &mut crate::gzguts_h::gz_state) -> GzPutcPlan {
-    if state.size != 0 {
-        let offset = gz_buffered_input_len(state);
-        if offset < state.size {
-            return GzPutcPlan::Buffered { offset };
-        }
-    }
-    GzPutcPlan::Write
-}
-
 // `gzputs()` obtains the string length at its caller-pointer boundary.  Keep
 // C's representability check and its return-value convention scalar so that
 // boundary only needs to measure and pass the string through to `gz_write()`.
