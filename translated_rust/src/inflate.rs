@@ -1643,7 +1643,12 @@ pub fn inflate(
                                                                                                             continue '_inf_leave;
                                                                                                         } else {
                                                                                                             if !state_ref.head.is_null() {
-                                                                                                                (*state_ref.head).done = -1 as ::core::ffi::c_int;
+                                                                                                                // The retained gzip header remains an ABI
+                                                                                                                // destination, but this no-callback transition
+                                                                                                                // only needs a short-lived borrow to publish its
+                                                                                                                // initial incomplete status.
+                                                                                                                let head = &mut *state_ref.head;
+                                                                                                                head.done = -1 as ::core::ffi::c_int;
                                                                                                             }
                                                                                                             let header_plan = match inflate_zlib_header_plan(
                                                                                                                state_ref.wrap,
@@ -1714,7 +1719,8 @@ pub fn inflate(
                                                                                                     state_ref.flags = flags_plan.flags;
                                                                                                     {
                                                                                                        if !state_ref.head.is_null() {
-                                                                                                            (*state_ref.head).text = flags_plan.text;
+                                                                                                            let head = &mut *state_ref.head;
+                                                                                                            head.text = flags_plan.text;
                                                                                                        }
                                                                                                         if flags_plan.update_crc {
                                                                                                             hbuf[0 as ::core::ffi::c_int as usize] = hold
@@ -2734,8 +2740,8 @@ pub fn inflate(
                                                         );
                                                         state_ref.length = extra_plan.length;
                                                         if !state_ref.head.is_null() {
-                                                            (*state_ref.head).extra_len = extra_plan
-                                                                .length
+                                                            let head = &mut *state_ref.head;
+                                                            head.extra_len = extra_plan.length
                                                                 as crate::stdlib::uInt;
                                                         }
                                                         if extra_plan.update_crc {
@@ -2755,11 +2761,11 @@ pub fn inflate(
                                                         hold = 0 as ::core::ffi::c_ulong;
                                                         bits = 0 as ::core::ffi::c_uint;
                                                     } else if !state_ref.head.is_null() {
-                                                        (*state_ref.head).extra =
-                                                            ::core::ptr::null_mut::<
-                                                                crate::stdlib::Bytef,
-                                                            >(
-                                                            );
+                                                        let head = &mut *state_ref.head;
+                                                        head.extra = ::core::ptr::null_mut::<
+                                                            crate::stdlib::Bytef,
+                                                        >(
+                                                        );
                                                     }
                                                     state_ref.mode = crate::src::inflate::EXTRA;
                                                     break 'c_2319;
