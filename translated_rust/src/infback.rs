@@ -119,6 +119,31 @@ enum InflateBackBlockType {
     Invalid,
 }
 
+// The raw decoder owns callback and cursor control flow, but choosing the
+// decoder arm from the reference-bound inflater mode is ordinary state
+// bookkeeping.  Keep the terminal return mapping here as well, so the raw
+// loop does not have to encode the public status for completed or bad state.
+#[derive(Copy, Clone)]
+enum InflateBackDecodeMode {
+    Type,
+    Stored,
+    Table,
+    Length,
+    Terminal(::core::ffi::c_int),
+}
+
+fn inflate_back_decode_mode(mode: crate::src::inflate::inflate_mode) -> InflateBackDecodeMode {
+    match mode {
+        crate::src::inflate::TYPE => InflateBackDecodeMode::Type,
+        crate::src::inflate::STORED => InflateBackDecodeMode::Stored,
+        crate::src::inflate::TABLE => InflateBackDecodeMode::Table,
+        crate::src::inflate::LEN => InflateBackDecodeMode::Length,
+        crate::src::inflate::DONE => InflateBackDecodeMode::Terminal(crate::zlib_h::Z_STREAM_END),
+        crate::src::inflate::BAD => InflateBackDecodeMode::Terminal(crate::zlib_h::Z_DATA_ERROR),
+        _ => InflateBackDecodeMode::Terminal(crate::zlib_h::Z_STREAM_ERROR),
+    }
+}
+
 // A decode error changes only the stream diagnostic and the decoder mode.
 // Keep that publication reference-bound so the raw callback/cursor loop only
 // selects which decoder error occurred.
@@ -331,6 +356,20 @@ fn inflate_back_begin_decode(
     stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     inflate_back_reset(state);
     state.wsize
+}
+
+// `next_in` itself remains a raw cursor owned by the decoder.  Once it has
+// established whether that cursor is present, deriving the accompanying
+// available-byte count is ordinary stream bookkeeping.
+fn inflate_back_initial_input_available(
+    stream: &crate::zlib_h::z_stream,
+    has_next: bool,
+) -> ::core::ffi::c_uint {
+    if has_next {
+        stream.avail_in as ::core::ffi::c_uint
+    } else {
+        0
+    }
 }
 
 fn inflate_back_block_header(
@@ -1100,17 +1139,13 @@ pub unsafe extern "C" fn inflateBack(
     };
     left = inflate_back_begin_decode(strm, state_ref);
     next = strm.next_in as *mut ::core::ffi::c_uchar;
-    have = (if !next.is_null() {
-        strm.avail_in
-    } else {
-        0 as crate::stdlib::uInt
-    }) as ::core::ffi::c_uint;
+    have = inflate_back_initial_input_available(strm, !next.is_null());
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
     put = state_ref.window;
     '_inf_leave: loop {
-        match state_ref.mode as ::core::ffi::c_uint {
-            16191 => {
+        match inflate_back_decode_mode(state_ref.mode) {
+            InflateBackDecodeMode::Type => {
                 if state_ref.last != 0 {
                     let padding = bits & 7;
                     inflate_back_drop_bits(&mut hold, &mut bits, padding);
@@ -1141,7 +1176,7 @@ pub unsafe extern "C" fn inflateBack(
                     continue;
                 }
             }
-            16193 => {
+            InflateBackDecodeMode::Stored => {
                 let padding = bits & 7;
                 inflate_back_drop_bits(&mut hold, &mut bits, padding);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
@@ -1199,7 +1234,7 @@ pub unsafe extern "C" fn inflateBack(
                     continue;
                 }
             }
-            16196 => {
+            InflateBackDecodeMode::Table => {
                 while bits < 14 as ::core::ffi::c_int as ::core::ffi::c_uint {
                     if have == 0 as ::core::ffi::c_uint {
                         have = inflate_back_refill!(in_0, in_desc, next);
@@ -1386,17 +1421,9 @@ pub unsafe extern "C" fn inflateBack(
                     }
                 }
             }
-            16200 => {}
-            16208 => {
-                ret = crate::zlib_h::Z_STREAM_END;
-                break;
-            }
-            16209 => {
-                ret = crate::zlib_h::Z_DATA_ERROR;
-                break;
-            }
-            _ => {
-                ret = crate::zlib_h::Z_STREAM_ERROR;
+            InflateBackDecodeMode::Length => {}
+            InflateBackDecodeMode::Terminal(status) => {
+                ret = status;
                 break;
             }
         }
