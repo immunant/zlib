@@ -356,25 +356,43 @@ pub(crate) fn inflate_reset_stream_bound(
     };
     inflate_reset_bound(strm, state)
 }
+
+// Keep reset validation in named implementations so the exported ABI
+// forwarders below only bind the caller's stream pointer and dispatch.
+pub fn inflateResetKeep(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    let Some((strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_reset_keep(strm, state)
+}
+
+pub fn inflateReset(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    inflate_reset_stream_bound(strm)
+}
+
 #[export_name = "inflateResetKeep"]
 
 pub unsafe extern "C" fn inflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm) else {
+    // SAFETY: this is the ABI boundary that binds the caller's optional
+    // stream pointer; the named implementation owns state validation.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_reset_keep(strm, state)
+    inflateResetKeep(strm)
 }
 #[export_name = "inflateReset"]
 
 pub unsafe extern "C" fn inflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = inflateStateCheck(strm) else {
+    // SAFETY: this is the ABI boundary that binds the caller's optional
+    // stream pointer; the named implementation owns state validation.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_reset_bound(strm, state)
+    inflateReset(strm)
 }
 // Resetting an already-bound stream keeps all state validation and teardown
 // in the implementation. The exported ABI wrapper below only establishes the
