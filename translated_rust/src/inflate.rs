@@ -168,6 +168,37 @@ fn inflate_stream_has_allocator_callbacks(has_zalloc: bool, has_zfree: bool) -> 
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum InflateZlibHeaderError {
+    IncorrectCheck,
+    UnknownCompressionMethod,
+}
+
+fn inflate_zlib_header_error(
+    wrap: ::core::ffi::c_int,
+    hold: crate::stdlib::uLong,
+) -> Option<InflateZlibHeaderError> {
+    if wrap & 1 == 0 {
+        return Some(InflateZlibHeaderError::IncorrectCheck);
+    }
+
+    let header = (((hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << 8).wrapping_sub(1))
+        << 8) as crate::stdlib::uLong)
+        .wrapping_add(hold >> 8);
+    if header.wrapping_rem(31) != 0 {
+        return Some(InflateZlibHeaderError::IncorrectCheck);
+    }
+
+    if hold as ::core::ffi::c_uint & ((1 as ::core::ffi::c_uint) << 4).wrapping_sub(1)
+        != crate::zlib_h::Z_DEFLATED as ::core::ffi::c_uint
+    {
+        return Some(InflateZlibHeaderError::UnknownCompressionMethod);
+    }
+
+    None
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateBlockKind {
     Stored,
     Fixed,
@@ -858,25 +889,15 @@ pub unsafe extern "C" fn inflate(
                         if !(*state).head.is_null() {
                             (*(*state).head).done = -1 as ::core::ffi::c_int;
                         }
-                        if (*state).wrap & 1 as ::core::ffi::c_int == 0
-                            || (((hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << 8 as ::core::ffi::c_int)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint))
-                                << 8 as ::core::ffi::c_int)
-                                as ::core::ffi::c_ulong)
-                                .wrapping_add(hold >> 8 as ::core::ffi::c_int)
-                                .wrapping_rem(31 as ::core::ffi::c_ulong)
-                                != 0
-                        {
+                        let zlib_header_error = inflate_zlib_header_error((*state).wrap, hold);
+                        if zlib_header_error == Some(InflateZlibHeaderError::IncorrectCheck) {
                             (*strm).msg = b"incorrect header check\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
                             (*state).mode = crate::src::inflate::BAD;
                             continue;
-                        } else if hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                                .wrapping_sub(1 as ::core::ffi::c_uint)
-                            != crate::zlib_h::Z_DEFLATED as ::core::ffi::c_uint
+                        } else if zlib_header_error
+                            == Some(InflateZlibHeaderError::UnknownCompressionMethod)
                         {
                             (*strm).msg = b"unknown compression method\0".as_ptr()
                                 as *const ::core::ffi::c_char
@@ -2132,8 +2153,7 @@ pub unsafe extern "C" fn inflate(
             remaining_length,
         } = match_plan
         else {
-            (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                as *const ::core::ffi::c_char
+            (*strm).msg = b"invalid distance too far back\0".as_ptr() as *const ::core::ffi::c_char
                 as *mut ::core::ffi::c_char;
             (*state).mode = crate::src::inflate::BAD;
             continue;
@@ -2819,9 +2839,10 @@ mod tests {
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
-        inflate_validate_wrap, initial_window_metadata, stored_block_length, syncsearch_safe,
-        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflateMatchPlan, InflateMatchSource, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
+        inflate_validate_wrap, inflate_zlib_header_error, initial_window_metadata,
+        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
+        InflateBlockKind, InflateCopyProgress, InflateMatchPlan, InflateMatchSource,
+        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, BAD, CHECK,
         CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
@@ -2926,6 +2947,23 @@ mod tests {
         assert!(!inflate_header_crc_enabled(0, 4));
         assert!(!inflate_header_crc_enabled(0x200, 0));
         assert!(!inflate_header_crc_enabled(0x400, 2));
+    }
+
+    #[test]
+    fn inflate_zlib_header_classification_preserves_validation_order() {
+        assert_eq!(inflate_zlib_header_error(1, 0x9c78), None);
+        assert_eq!(
+            inflate_zlib_header_error(0, 0x9c78),
+            Some(InflateZlibHeaderError::IncorrectCheck)
+        );
+        assert_eq!(
+            inflate_zlib_header_error(1, 0x9d78),
+            Some(InflateZlibHeaderError::IncorrectCheck)
+        );
+        assert_eq!(
+            inflate_zlib_header_error(1, 0x0977),
+            Some(InflateZlibHeaderError::UnknownCompressionMethod)
+        );
     }
 
     #[test]

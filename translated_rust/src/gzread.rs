@@ -959,17 +959,24 @@ fn gz_fetch_should_continue(
     have == 0 && (eof == 0 || avail_in != 0)
 }
 
-fn gz_skip_core(
-    have: &mut ::core::ffi::c_uint,
-    pos: &mut crate::stdlib::off64_t,
-    skip: &mut crate::stdlib::off64_t,
+fn gz_skip_progress(
+    have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
     intmax: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
-    let n = gz_skip_len(*have, *skip, intmax);
-    *have = have.wrapping_sub(n);
-    *pos = gz_cursor_advance(*pos, n);
-    *skip -= n as crate::stdlib::off64_t;
-    n
+) -> (
+    ::core::ffi::c_uint,
+    crate::stdlib::off64_t,
+    crate::stdlib::off64_t,
+    ::core::ffi::c_uint,
+) {
+    let n = gz_skip_len(have, skip, intmax);
+    (
+        have.wrapping_sub(n),
+        gz_cursor_advance(pos, n),
+        skip - n as crate::stdlib::off64_t,
+        n,
+    )
 }
 
 fn gz_skip_len(
@@ -1070,12 +1077,15 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         match action {
             GzSkipAction::ConsumeBuffered => {
                 let state_ref = &mut *state;
-                let n = gz_skip_core(
-                    &mut state_ref.x.have,
-                    &mut state_ref.x.pos,
-                    &mut state_ref.skip,
+                let (have, pos, skip, n) = gz_skip_progress(
+                    state_ref.x.have,
+                    state_ref.x.pos,
+                    state_ref.skip,
                     crate::src::gzlib::gz_intmax(),
                 );
+                state_ref.x.have = have;
+                state_ref.x.pos = pos;
+                state_ref.skip = skip;
                 state_ref.x.next = state_ref.x.next.wrapping_add(n as usize);
             }
             GzSkipAction::StopAtEof => break,
@@ -1863,6 +1873,19 @@ mod tests {
         assert_eq!(gz_skip_len(10, 3, 5), 3);
         assert_eq!(gz_skip_len(10, 10, 5), 10);
         assert_eq!(gz_skip_len(10, 15, 5), 10);
+    }
+
+    #[test]
+    fn gz_skip_progress_updates_buffered_state_and_cursor() {
+        assert_eq!(gz_skip_progress(10, 42, 3, 5), (7, 45, 0, 3));
+    }
+
+    #[test]
+    fn gz_skip_progress_wraps_signed_position_at_boundary() {
+        assert_eq!(
+            gz_skip_progress(1, crate::stdlib::off64_t::MAX, 1, ::core::ffi::c_uint::MAX),
+            (0, crate::stdlib::off64_t::MIN, 0, 1)
+        );
     }
 
     #[test]

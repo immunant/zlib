@@ -4117,6 +4117,16 @@ fn tree_next_cursor(index: ::core::ffi::c_int) -> usize {
     index.wrapping_add(1) as usize
 }
 
+fn last_nonzero_bl_code_rank(
+    nonzero_at_rank: &[bool; crate::src::deflate::BL_CODES as usize],
+) -> ::core::ffi::c_int {
+    let mut rank = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
+    while rank >= 3 as ::core::ffi::c_int && !nonzero_at_rank[rank as usize] {
+        rank -= 1;
+    }
+    rank
+}
+
 unsafe extern "C" fn scan_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
@@ -4457,15 +4467,13 @@ unsafe extern "C" fn build_bl_tree(
         s,
         &raw mut (*s).bl_desc as *mut crate::src::deflate::tree_desc,
     );
-    max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
-    while max_blindex >= 3 as ::core::ffi::c_int {
-        if (*s).bl_tree[bl_order[max_blindex as usize] as usize].dl.len as ::core::ffi::c_int
-            != 0 as ::core::ffi::c_int
-        {
-            break;
-        }
-        max_blindex -= 1;
+    let mut nonzero_at_rank = [false; crate::src::deflate::BL_CODES as usize];
+    let mut rank = 0usize;
+    while rank < nonzero_at_rank.len() {
+        nonzero_at_rank[rank] = (*s).bl_tree[bl_order[rank] as usize].dl.len != 0;
+        rank += 1;
     }
+    max_blindex = last_nonzero_bl_code_rank(&nonzero_at_rank);
     (*s).opt_len = (*s).opt_len.wrapping_add(
         (3 as crate::zutil_h::ulg)
             .wrapping_mul(
@@ -5174,7 +5182,7 @@ mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, block_bit_length_bytes,
         block_header_bits, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
-        next_code_for_len, next_codes, pending_cursor_after_bytes,
+        last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
         rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
         static_d_desc, static_l_desc, symbol_triplet_cursors, tally_match_tree_indices,
         tally_symbol_bytes, tree_next_cursor, tree_run_continues, tree_run_limits, BlockEncoding,
@@ -5275,6 +5283,25 @@ mod tests {
         assert_eq!(
             tree_next_cursor(::core::ffi::c_int::MAX),
             ::core::ffi::c_int::MIN as usize
+        );
+    }
+
+    #[test]
+    fn last_nonzero_bl_code_rank_preserves_header_threshold_and_order() {
+        let mut nonzero_at_rank = [false; crate::src::deflate::BL_CODES as usize];
+        assert_eq!(last_nonzero_bl_code_rank(&nonzero_at_rank), 2);
+
+        nonzero_at_rank[3] = true;
+        assert_eq!(last_nonzero_bl_code_rank(&nonzero_at_rank), 3);
+
+        nonzero_at_rank[3] = false;
+        nonzero_at_rank[7] = true;
+        assert_eq!(last_nonzero_bl_code_rank(&nonzero_at_rank), 7);
+
+        nonzero_at_rank[crate::src::deflate::BL_CODES as usize - 1] = true;
+        assert_eq!(
+            last_nonzero_bl_code_rank(&nonzero_at_rank),
+            crate::src::deflate::BL_CODES - 1
         );
     }
 
