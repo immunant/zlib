@@ -2549,10 +2549,18 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     };
     deflateEnd(strm)
 }
-pub unsafe extern "C" fn deflateCopy(
+// The exported adapter below owns the foreign-call boundary. Keep this
+// implementation callable through that dispatcher without exposing its raw
+// stream and allocation work as an unsafe-function contract to Rust callers.
+pub fn deflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this implementation preserves zlib's raw stream and allocator
+    // protocol. Each raw allocation or stream binding is validated before it
+    // is turned into a reference, and no such reference spans an allocator
+    // callback that may inspect either stream.
+    unsafe {
     // Do all source inspection before the first allocator callback.  Apart
     // from preserving zlib's observable publication order, this keeps the
     // copy plan reference-bound instead of repeatedly dereferencing the
@@ -2722,6 +2730,7 @@ pub unsafe extern "C" fn deflateCopy(
     destination_state.bl_desc.dyn_tree = &raw mut destination_state.bl_tree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
+    }
 }
 
 fn deflate_copy_state(
