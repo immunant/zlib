@@ -367,7 +367,9 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
         }
     }
     len = bits >> 3 as ::core::ffi::c_int;
-    in_0 = in_0.offset(-(len as isize));
+    // `len` is the whole-byte portion of the bits just read, so this rewind
+    // remains within the input cursor range established by the fast loop.
+    in_0 = in_0.wrapping_offset(-(len as isize));
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
