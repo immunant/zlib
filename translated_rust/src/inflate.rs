@@ -934,7 +934,15 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     (*state).strm = strm;
     (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     (*state).mode = crate::src::inflate::HEAD;
-    ret = inflateReset2_ffi(strm, windowBits);
+    if let Some(config) = inflate_reset2_config(windowBits) {
+        let state_ref = &mut *state;
+        state_ref.wrap = config.wrap;
+        state_ref.wbits = config.window_bits as ::core::ffi::c_uint;
+        inflate_reset_window_state(state_ref);
+        ret = inflate_reset_keep_state(&mut *strm, state_ref);
+    } else {
+        ret = crate::zlib_h::Z_STREAM_ERROR;
+    }
     if ret != crate::zlib_h::Z_OK {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
