@@ -330,10 +330,12 @@ fn slide_hash_entries_pair(
     slide_hash_entries(prev, wsize);
 }
 
-fn slide_hash(s: &mut crate::src::deflate::deflate_state) {
+fn slide_hash(
+    s: &mut crate::src::deflate::deflate_state,
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+) {
     let wsize = s.w_size;
-    let head = unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(s.head, s.hash_size as usize) };
-    let prev = unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(s.prev, wsize as usize) };
     slide_hash_entries_pair(head, prev, wsize);
     s.slid = 1 as ::core::ffi::c_int;
 }
@@ -388,6 +390,11 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
         let mut n: ::core::ffi::c_uint = 0;
         let mut more: ::core::ffi::c_uint = 0;
         let wsize: crate::stdlib::uInt = state.w_size;
+        let window =
+            &mut *::core::ptr::slice_from_raw_parts_mut(state.window, state.window_size as usize);
+        let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, wsize as usize);
+        let head =
+            &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
         loop {
             more = state
                 .window_size
@@ -412,8 +419,6 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
                 )
             {
                 {
-                    let window =
-                        ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
                     let copy_len = wsize.wrapping_sub(more) as usize;
                     window.copy_within(wsize as usize..wsize as usize + copy_len, 0);
                 }
@@ -423,34 +428,20 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
                 if state.insert > state.strstart {
                     state.insert = state.strstart;
                 }
-                slide_hash(state);
+                slide_hash(state, head, prev);
                 more = more.wrapping_add(wsize as ::core::ffi::c_uint);
             }
             let strm = &mut *state.strm;
             if strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
-            let out = ::core::slice::from_raw_parts_mut(
-                state
-                    .window
-                    .wrapping_add(state.strstart as usize)
-                    .wrapping_add(state.lookahead as usize),
-                more as usize,
-            );
+            let out_start = state.strstart.wrapping_add(state.lookahead) as usize;
+            let out = &mut window[out_start..out_start + more as usize];
             n = read_buf(strm, state.wrap, out);
             state.lookahead = state.lookahead.wrapping_add(n);
             if state.lookahead.wrapping_add(state.insert)
                 >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             {
-                let window = &mut *::core::ptr::slice_from_raw_parts_mut(
-                    state.window,
-                    state.window_size as usize,
-                );
-                let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, wsize as usize);
-                let head = &mut *::core::ptr::slice_from_raw_parts_mut(
-                    state.head,
-                    state.hash_size as usize,
-                );
                 let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
                 state.ins_h = window[str as usize] as crate::stdlib::uInt;
                 state.ins_h = deflate_hash_update(
@@ -488,8 +479,6 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
             }
         }
         if state.high_water < state.window_size {
-            let window =
-                ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
             let curr: crate::zutil_h::ulg = (state.strstart as crate::zutil_h::ulg)
                 .wrapping_add(state.lookahead as crate::zutil_h::ulg);
             let mut init: crate::zutil_h::ulg = 0;
@@ -1327,7 +1316,9 @@ pub unsafe extern "C" fn deflateParams_ffi(
     if state.level != level {
         if state.level == 0 as ::core::ffi::c_int && state.matches != 0 as crate::stdlib::uInt {
             if state.matches == 1 as crate::stdlib::uInt {
-                slide_hash(state);
+                let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+                let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+                slide_hash(state, head, prev);
             } else {
                 let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
                 deflate_clear_hash_head(head);
