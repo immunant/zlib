@@ -1151,20 +1151,35 @@ fn inflate_fast_span(
     left: ::core::ffi::c_uint,
     out: ::core::ffi::c_uint,
     wsize: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    wnext: ::core::ffi::c_uint,
 ) -> Option<InflateFastSpan> {
     if have < 6 || left < 258 {
         return None;
     }
     let output_start = usize::try_from(out.checked_sub(left)?).ok()?;
     let output_len = usize::try_from(out).ok()?;
+    let window_len = usize::try_from(wsize).ok()?;
+    let history_len = usize::try_from(whave).ok()?;
+    let history_next = usize::try_from(wnext).ok()?;
     if output_start > output_len {
+        return None;
+    }
+    // Validate the history cursors before the transitional boundary lends its
+    // callback-owned window. `inflate_fast_core()` enforces the same
+    // invariants, but doing the scalar check first avoids forming a temporary
+    // view for a malformed compatibility state.
+    if history_len > window_len
+        || window_len == 0 && history_next != 0
+        || window_len != 0 && history_next >= window_len
+    {
         return None;
     }
     Some(InflateFastSpan {
         input_len: usize::try_from(have).ok()?,
         output_start,
         output_len,
-        window_len: usize::try_from(wsize).ok()?,
+        window_len,
     })
 }
 
@@ -2629,9 +2644,14 @@ pub fn inflate(
                                                     as usize,
                                                 &crate::src::inftrees::inffixed_h::lenfix,
                                             );
-                                            let fast = if let Some(span) =
-                                                inflate_fast_span(have, left, out, state_ref.wsize)
-                                            {
+                                            let fast = if let Some(span) = inflate_fast_span(
+                                                have,
+                                                left,
+                                                out,
+                                                state_ref.wsize,
+                                                state_ref.whave,
+                                                state_ref.wnext,
+                                            ) {
                                                 // `out` is the output capacity at the beginning of
                                                 // this inflate call, while `put` has already advanced
                                                 // over any bytes decoded by the slow path. Lend the
