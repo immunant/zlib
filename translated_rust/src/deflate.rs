@@ -1379,6 +1379,36 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     }
     crate::zlib_h::Z_OK
 }
+
+struct PrimeBitsStep {
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+}
+
+fn prime_bits_step(
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> Option<PrimeBitsStep> {
+    if !(0..=crate::src::deflate::Buf_size).contains(&bi_valid) || !(0..=16).contains(&bits) {
+        return None;
+    }
+    let put = (crate::src::deflate::Buf_size - bi_valid).min(bits);
+    let mask = (1 as ::core::ffi::c_int).checked_shl(put as u32)? - 1;
+    let fragment = (value & mask).checked_shl(bi_valid as u32)?;
+    Some(PrimeBitsStep {
+        bi_buf: (bi_buf as ::core::ffi::c_int
+            | (fragment as crate::zutil_h::ush as ::core::ffi::c_int))
+            as crate::zutil_h::ush,
+        bi_valid: bi_valid + put,
+        bits: bits - put,
+        value: value >> put,
+    })
+}
+
 pub unsafe extern "C" fn deflatePrime(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: ::core::ffi::c_int,
@@ -1386,7 +1416,6 @@ pub unsafe extern "C" fn deflatePrime(
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut put: ::core::ffi::c_int = 0;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1402,18 +1431,14 @@ pub unsafe extern "C" fn deflatePrime(
         return crate::zlib_h::Z_BUF_ERROR;
     }
     loop {
-        put = crate::src::deflate::Buf_size - (*s).bi_valid;
-        if put > bits {
-            put = bits;
-        }
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | ((value & ((1 as ::core::ffi::c_int) << put) - 1 as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
-            as crate::zutil_h::ush;
-        (*s).bi_valid += put;
+        let Some(step) = prime_bits_step((*s).bi_buf, (*s).bi_valid, bits, value) else {
+            return crate::zlib_h::Z_BUF_ERROR;
+        };
+        (*s).bi_buf = step.bi_buf;
+        (*s).bi_valid = step.bi_valid;
         crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
-        value >>= put;
-        bits -= put;
+        value = step.value;
+        bits = step.bits;
         if bits == 0 {
             break;
         }
