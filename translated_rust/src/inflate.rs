@@ -2594,67 +2594,84 @@ pub unsafe fn inflate(
             (*state).mode = crate::src::inflate::LEN;
         }
     }
-    (*strm).next_out = put as *mut crate::stdlib::Bytef;
-    (*strm).avail_out = left as crate::stdlib::uInt;
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = have as crate::stdlib::uInt;
-    (*state).hold = hold;
-    (*state).bits = bits;
-    if (*state).wsize != 0
-        || out != (*strm).avail_out
-            && ((*state).mode as ::core::ffi::c_uint)
-                < crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
-            && (((*state).mode as ::core::ffi::c_uint)
-                < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
-                || flush != crate::zlib_h::Z_FINISH)
-    {
-        if updatewindow(
-            strm,
-            (*strm).next_out,
-            out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint),
-        ) != 0
+    // Keep the decoder loop's raw cursors local to that loop.  The exit
+    // commit adopts each ABI record once, so cursor publication, history
+    // planning, totals, and checksum state use ordinary field access.
+    let window_update = {
+        let strm_ref = &mut *strm;
+        let state_ref = &mut *state;
+        strm_ref.next_out = put as *mut crate::stdlib::Bytef;
+        strm_ref.avail_out = left as crate::stdlib::uInt;
+        strm_ref.next_in = next as *mut crate::stdlib::Bytef;
+        strm_ref.avail_in = have as crate::stdlib::uInt;
+        state_ref.hold = hold;
+        state_ref.bits = bits;
+        if state_ref.wsize != 0
+            || out != strm_ref.avail_out
+                && (state_ref.mode as ::core::ffi::c_uint)
+                    < crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
+                && ((state_ref.mode as ::core::ffi::c_uint)
+                    < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
+                    || flush != crate::zlib_h::Z_FINISH)
         {
-            (*state).mode = crate::src::inflate::MEM;
+            Some((
+                strm_ref.next_out as *const crate::stdlib::Bytef,
+                out.wrapping_sub(strm_ref.avail_out as ::core::ffi::c_uint),
+            ))
+        } else {
+            None
+        }
+    };
+    if let Some((end, copied)) = window_update {
+        if updatewindow(strm, end, copied) != 0 {
+            let state_ref = &mut *state;
+            state_ref.mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    in_0 = in_0.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-    out = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
-    (*strm).total_in = (*strm).total_in.wrapping_add(in_0 as crate::stdlib::uLong);
-    (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
-    (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
-    if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
-        let output =
-            core::slice::from_raw_parts((*strm).next_out.wrapping_sub(out as usize), out as usize);
-        (*state).check = inflate_output_checksum(
-            (*state).check as crate::stdlib::uLong,
-            (*state).flags,
-            output,
-        );
-        (*strm).adler = (*state).check as crate::stdlib::uLong;
+    {
+        let strm_ref = &mut *strm;
+        let state_ref = &mut *state;
+        in_0 = in_0.wrapping_sub(strm_ref.avail_in as ::core::ffi::c_uint);
+        out = out.wrapping_sub(strm_ref.avail_out as ::core::ffi::c_uint);
+        strm_ref.total_in = strm_ref.total_in.wrapping_add(in_0 as crate::stdlib::uLong);
+        strm_ref.total_out = strm_ref.total_out.wrapping_add(out as crate::stdlib::uLong);
+        state_ref.total = state_ref.total.wrapping_add(out as ::core::ffi::c_ulong);
+        if state_ref.wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
+            let output = core::slice::from_raw_parts(
+                strm_ref.next_out.wrapping_sub(out as usize),
+                out as usize,
+            );
+            state_ref.check = inflate_output_checksum(
+                state_ref.check as crate::stdlib::uLong,
+                state_ref.flags,
+                output,
+            );
+            strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+        }
+        strm_ref.data_type = state_ref.bits as ::core::ffi::c_int
+            + if state_ref.last != 0 {
+                64 as ::core::ffi::c_int
+            } else {
+                0 as ::core::ffi::c_int
+            }
+            + if state_ref.mode as ::core::ffi::c_uint
+                == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
+            {
+                128 as ::core::ffi::c_int
+            } else {
+                0 as ::core::ffi::c_int
+            }
+            + if state_ref.mode as ::core::ffi::c_uint
+                == crate::src::inflate::LEN_ as ::core::ffi::c_int as ::core::ffi::c_uint
+                || state_ref.mode as ::core::ffi::c_uint
+                    == crate::src::inflate::COPY_ as ::core::ffi::c_int as ::core::ffi::c_uint
+            {
+                256 as ::core::ffi::c_int
+            } else {
+                0 as ::core::ffi::c_int
+            };
     }
-    (*strm).data_type = (*state).bits as ::core::ffi::c_int
-        + (if (*state).last != 0 {
-            64 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        })
-        + (if (*state).mode as ::core::ffi::c_uint
-            == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            128 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        })
-        + (if (*state).mode as ::core::ffi::c_uint
-            == crate::src::inflate::LEN_ as ::core::ffi::c_int as ::core::ffi::c_uint
-            || (*state).mode as ::core::ffi::c_uint
-                == crate::src::inflate::COPY_ as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            256 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        });
     if (in_0 == 0 as ::core::ffi::c_uint && out == 0 as ::core::ffi::c_uint
         || flush == crate::zlib_h::Z_FINISH)
         && ret == crate::zlib_h::Z_OK
