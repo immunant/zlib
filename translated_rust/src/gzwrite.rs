@@ -144,7 +144,6 @@ fn gz_comp(
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    let mut put: ::core::ffi::c_uint = 0;
     if crate::src::gzlib::gz_write_needs_init(state)
         && gz_init(state) == -1 as ::core::ffi::c_int
     {
@@ -156,10 +155,10 @@ fn gz_comp(
                 // SAFETY: the direct write state exposes `avail_in` bytes at
                 // `next_in`; this request is capped by that count. The errno
                 // slot and descriptor are used only for this POSIX write.
+                let put = crate::src::gzlib::gz_comp_direct_write_request(state);
+                crate::src::gzlib::gz_begin_io(state);
                 let (written, errno) = unsafe {
                     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                    crate::src::gzlib::gz_begin_io(state);
-                    put = crate::src::gzlib::gz_comp_direct_write_request(state);
                     let written = crate::stdlib::write(
                         state.fd,
                         state.strm.next_in as *const ::core::ffi::c_void,
@@ -203,10 +202,10 @@ fn gz_comp(
                 // SAFETY: the output plan bounds the pending range from
                 // `x.next`, and this scope owns the descriptor/errno bridge
                 // for draining that initialized output buffer.
+                let put = crate::src::gzlib::gz_comp_output_write_request(state);
+                crate::src::gzlib::gz_begin_io(state);
                 let (written, errno) = unsafe {
                     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                    crate::src::gzlib::gz_begin_io(state);
-                    put = crate::src::gzlib::gz_comp_output_write_request(state);
                     let written = crate::stdlib::write(
                         state.fd,
                         state.x.next as *const ::core::ffi::c_void,
