@@ -3369,5 +3369,8 @@ pub(crate) fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state
 #[export_name = "inflate_fixed"]
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
+    if state.is_null() {
+        return;
+    }
     inflate_fixed_state(&mut *state)
 }
