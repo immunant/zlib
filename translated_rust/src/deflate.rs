@@ -1896,6 +1896,12 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     let Some(state) = (strm.state as *mut crate::src::deflate::deflate_state).as_mut() else {
         return deflate_prime(Some(strm), None, None, bits, value);
     };
+    // A malformed or partially initialized stream can retain a state without
+    // its pending allocation.  Do not turn that absent storage into a slice:
+    // the safe core owns the matching Z_STREAM_ERROR dispatch.
+    if state.pending_buf.is_null() {
+        return deflate_prime(Some(strm), Some(state), None, bits, value);
+    }
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     deflate_prime(Some(strm), Some(state), Some(pending_buf), bits, value)
