@@ -252,19 +252,33 @@ pub unsafe extern "C" fn compress_ffi(
     // output pointer. `compress` validates the associated byte buffers.
     compress(dest, unsafe { &mut *destLen }, source, sourceLen)
 }
-pub extern "C" fn compressBound_z(
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
-    let mut bound: crate::stdlib::z_size_t = sourceLen
-        .wrapping_add(sourceLen >> 12 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 14 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 25 as ::core::ffi::c_int)
+// Keep the bound calculation value-only so the exported ABI functions only
+// select their public integer width.  The wrapping arithmetic and overflow
+// sentinel match zlib's unsigned C calculation.
+fn compress_bound_z_value(source_len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
+    let bound = source_len
+        .wrapping_add(source_len >> 12 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 14 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 25 as ::core::ffi::c_int)
         .wrapping_add(13 as crate::stdlib::z_size_t);
-    return if bound < sourceLen {
+    if bound < source_len {
         -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
     } else {
         bound
-    };
+    }
+}
+
+fn compress_bound_ulong_value(source_len: crate::stdlib::uLong) -> crate::stdlib::uLong {
+    let bound = compress_bound_z_value(source_len as crate::stdlib::z_size_t);
+    if bound as crate::stdlib::uLong as crate::stdlib::z_size_t != bound {
+        -1 as ::core::ffi::c_int as crate::stdlib::uLong
+    } else {
+        bound as crate::stdlib::uLong
+    }
+}
+
+pub extern "C" fn compressBound_z(sourceLen: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
+    compress_bound_z_value(sourceLen)
 }
 #[export_name = "compressBound_z"]
 
@@ -273,15 +287,8 @@ pub unsafe extern "C" fn compressBound_z_ffi(
 ) -> crate::stdlib::z_size_t {
     compressBound_z(sourceLen)
 }
-pub extern "C" fn compressBound(
-    mut sourceLen: crate::stdlib::uLong,
-) -> crate::stdlib::uLong {
-    let mut bound: crate::stdlib::z_size_t = compressBound_z(sourceLen as crate::stdlib::z_size_t);
-    return if bound != bound {
-        -1 as ::core::ffi::c_int as crate::stdlib::uLong
-    } else {
-        bound as crate::stdlib::uLong
-    };
+pub extern "C" fn compressBound(sourceLen: crate::stdlib::uLong) -> crate::stdlib::uLong {
+    compress_bound_ulong_value(sourceLen)
 }
 #[export_name = "compressBound"]
 
