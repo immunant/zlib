@@ -382,14 +382,6 @@ static configuration_table: [config; 10] = [
     },
 ];
 
-unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-    slide_hash_tables(head, prev, state.w_size);
-    state.slid = 1 as ::core::ffi::c_int;
-}
-
 fn slide_hash_tables(
     head: &mut [crate::src::deflate::Posf],
     prev: &mut [crate::src::deflate::Posf],
