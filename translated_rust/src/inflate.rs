@@ -2481,26 +2481,28 @@ pub unsafe extern "C" fn inflateGetDictionary(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).whave != 0 && !dictionary.is_null() {
+    // Keep the opaque-state projection scoped to the stream borrow.  The
+    // caller output remains the only raw cursor below; the history copy is
+    // wholly slice-based.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    if state.whave != 0 && !dictionary.is_null() {
         // The caller dictionary buffer and internal history allocation are
         // distinct, as required by the translated C memcpy operations. Form
         // bounded views once, then keep the ring-order copy pointer-free.
-        let whave = (*state).whave as usize;
-        let window = (*state)
+        let whave = state.whave as usize;
+        let window = state
             .owned_window
             .as_deref()
             .expect("normal inflate owns its history window");
         let output = ::core::slice::from_raw_parts_mut(dictionary, whave);
-        copy_history_dictionary(output, window, (*state).wnext as usize, whave);
+        copy_history_dictionary(output, window, state.wnext as usize, whave);
     }
     if !dictLength.is_null() {
-        *dictLength = (*state).whave as crate::stdlib::uInt;
+        *dictLength = state.whave as crate::stdlib::uInt;
     }
     return crate::zlib_h::Z_OK;
 }
