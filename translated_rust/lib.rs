@@ -51,17 +51,14 @@ pub mod gzguts_h {
         pub path: std::ffi::CString,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
-        // The raw pointers below are cursors used by the translated zlib
-        // engine.  Their storage is owned by these vectors, never by C
-        // allocation routines.
+        // Gzip I/O storage is entirely Rust-owned.  The translated stream
+        // receives temporary cursors into these buffers only while it runs.
         pub in_buf: Vec<u8>,
         pub out_buf: Vec<u8>,
         // End of the pending input in `in_buf`.  This keeps buffered-write
         // progress in a Rust index rather than deriving it from raw cursors.
         pub in_end: usize,
         pub out_start: usize,
-        pub in_0: *mut ::core::ffi::c_uchar,
-        pub out: *mut ::core::ffi::c_uchar,
         pub direct: ::core::ffi::c_int,
         pub junk: ::core::ffi::c_int,
         pub how: ::core::ffi::c_int,

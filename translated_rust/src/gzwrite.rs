@@ -130,8 +130,6 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.in_buf.clear();
         state.out_buf.clear();
         state.in_end = 0;
-        state.in_0 = ::core::ptr::null_mut();
-        state.out = ::core::ptr::null_mut();
         crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_MEM_ERROR, Some(c"out of memory"));
         return -1 as ::core::ffi::c_int;
     }
@@ -139,7 +137,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     state.size = state.want;
     state.out_start = 0;
     state.strm.avail_out = state.size as crate::stdlib::uInt;
-    state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
+    state.strm.next_out = state.out_buf.as_mut_ptr();
     state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
     return 0 as ::core::ffi::c_int;
 }
@@ -191,8 +189,8 @@ fn gz_comp(
             }
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
                 state.strm.avail_out = state.size as crate::stdlib::uInt;
-                state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
-                state.x.next = state.out;
+                state.strm.next_out = state.out_buf.as_mut_ptr();
+                state.x.next = state.out_buf.as_mut_ptr();
                 state.out_start = 0;
             }
         }
@@ -280,7 +278,7 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             first = 0 as ::core::ffi::c_int;
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
-        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+        state.strm.next_in = state.in_buf.as_mut_ptr();
         state.in_end = n as usize;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
@@ -332,7 +330,7 @@ fn gz_write(state: &mut crate::gzguts_h::gz_state, mut input: &[u8]) -> crate::s
             let mut have: ::core::ffi::c_uint = 0;
             let mut copy: ::core::ffi::c_uint = 0;
             if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+                state.strm.next_in = state.in_buf.as_mut_ptr();
                 state.in_end = 0;
             }
             have = state.in_end as ::core::ffi::c_uint;
@@ -506,7 +504,7 @@ fn gzputc(state: &mut crate::gzguts_h::gz_state, c: ::core::ffi::c_int) -> ::cor
     }
     if state.direct == 0 && state.size != 0 {
         if state.strm.avail_in == 0 as crate::stdlib::uInt {
-            state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+            state.strm.next_in = state.in_buf.as_mut_ptr();
             state.in_end = 0;
         }
         let have = state.in_end as ::core::ffi::c_uint;
