@@ -1041,11 +1041,8 @@ pub unsafe extern "C" fn inflate(
                             (*state).wbits = window_params.wbits;
                             (*state).dmax = window_params.dmax;
                             (*state).flags = 0 as ::core::ffi::c_int;
-                            (*state).check = crate::src::adler32::adler32_ffi(
-                                0 as crate::stdlib::uLong,
-                                ::core::ptr::null::<crate::stdlib::Bytef>(),
-                                0 as crate::stdlib::uInt,
-                            ) as ::core::ffi::c_ulong;
+                            (*state).check =
+                                crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
                             (*strm).adler = (*state).check as crate::stdlib::uLong;
                             (*state).mode = window_params.next_mode;
                             hold = 0 as ::core::ffi::c_ulong;
@@ -1422,11 +1419,7 @@ pub unsafe extern "C" fn inflate(
                     (*state).bits = bits;
                     return crate::zlib_h::Z_NEED_DICT;
                 }
-                (*state).check = crate::src::adler32::adler32_ffi(
-                    0 as crate::stdlib::uLong,
-                    ::core::ptr::null::<crate::stdlib::Bytef>(),
-                    0 as crate::stdlib::uInt,
-                ) as ::core::ffi::c_ulong;
+                (*state).check = crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
                 (*strm).adler = (*state).check as crate::stdlib::uLong;
                 (*state).mode = crate::src::inflate::TYPE;
                 c2rust_current_block = 11604185039344352166;
@@ -2400,11 +2393,7 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
-        dictid = crate::src::adler32::adler32_ffi(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        ) as ::core::ffi::c_ulong;
+        dictid = crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
         dictid = crate::src::adler32::adler32_ffi(
             dictid as crate::stdlib::uLong,
             dictionary,

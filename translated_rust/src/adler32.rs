@@ -13,6 +13,7 @@ pub use crate::zlib_h::Z_NULL;
 
 pub const BASE: ::core::ffi::c_uint = 65_521;
 pub const NMAX: ::core::ffi::c_int = 5_552;
+pub const ADLER32_INITIAL: uLong = 1;
 
 const BASE_U64: u64 = BASE as u64;
 const NMAX_USIZE: usize = NMAX as usize;
@@ -85,7 +86,7 @@ pub fn adler32(adler: uLong, buf: &[Bytef]) -> uLong {
 }
 
 fn adler32_ffi_input(adler: uLong, input: Option<&[Bytef]>) -> uLong {
-    input.map_or(1, |input| adler32_z(adler, input))
+    input.map_or(ADLER32_INITIAL, |input| adler32_z(adler, input))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -200,8 +201,14 @@ mod tests {
             adler32_z(seed, &[])
         );
         assert_eq!(unsafe { adler32_ffi(seed, pointer, 0) }, adler32(seed, &[]));
-        assert_eq!(unsafe { adler32_z_ffi(seed, core::ptr::null(), 0) }, 1);
-        assert_eq!(unsafe { adler32_ffi(seed, core::ptr::null(), 0) }, 1);
+        assert_eq!(
+            unsafe { adler32_z_ffi(seed, core::ptr::null(), 0) },
+            ADLER32_INITIAL
+        );
+        assert_eq!(
+            unsafe { adler32_ffi(seed, core::ptr::null(), 0) },
+            ADLER32_INITIAL
+        );
     }
 
     #[test]
@@ -209,7 +216,7 @@ mod tests {
         let seed = 0x1234_5678;
         let input = b"input";
 
-        assert_eq!(adler32_ffi_input(seed, None), 1);
+        assert_eq!(adler32_ffi_input(seed, None), ADLER32_INITIAL);
         assert_eq!(adler32_ffi_input(seed, Some(input)), adler32_z(seed, input));
     }
 
