@@ -777,16 +777,16 @@ fn gzclose_w_cleanup(state: &mut crate::gzguts_h::gz_state) {
     let path = ::core::mem::replace(&mut state.path, ::core::mem::ManuallyDrop::new(None));
     drop(::core::mem::ManuallyDrop::into_inner(path));
 }
-pub fn gzclose_w(mut allocation: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+pub fn gzclose_w(
+    state: &mut crate::gzguts_h::gz_state,
+) -> crate::src::gzclose::GzCloseResult {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     // `gz_open` allocates exactly one state. Keep the C error path's
     // non-consuming behavior for a mismatched close entry point.
-    if allocation.mode != crate::gzguts_h::GZ_WRITE {
-        ::core::mem::forget(allocation);
-        return crate::zlib_h::Z_STREAM_ERROR;
+    if state.mode != crate::gzguts_h::GZ_WRITE {
+        return crate::src::gzclose::GzCloseResult::Retained(crate::zlib_h::Z_STREAM_ERROR);
     }
     let fd = {
-        let state = allocation.as_mut();
         if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
             ret = state.err;
         }
@@ -809,7 +809,7 @@ pub fn gzclose_w(mut allocation: Box<crate::gzguts_h::gz_state>) -> ::core::ffi:
     if close_result == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
-    return ret;
+    return crate::src::gzclose::GzCloseResult::Closed(ret);
 }
 #[export_name = "gzclose_w"]
 
@@ -817,6 +817,12 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let allocation = Box::from_raw(file as crate::gzguts_h::gz_statep);
-    gzclose_w(allocation)
+    let state = Box::leak(Box::from_raw(file as crate::gzguts_h::gz_statep));
+    match gzclose_w(state) {
+        crate::src::gzclose::GzCloseResult::Closed(result) => {
+            drop(Box::from_raw(file as crate::gzguts_h::gz_statep));
+            result
+        }
+        crate::src::gzclose::GzCloseResult::Retained(result) => result,
+    }
 }

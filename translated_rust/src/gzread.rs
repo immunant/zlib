@@ -1004,15 +1004,15 @@ fn gzclose_r_cleanup(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_in
     drop(::core::mem::ManuallyDrop::into_inner(path));
     err
 }
-pub fn gzclose_r(mut allocation: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+pub fn gzclose_r(
+    state: &mut crate::gzguts_h::gz_state,
+) -> crate::src::gzclose::GzCloseResult {
     // `gz_open` allocates exactly one state. Keep the C error path's
     // non-consuming behavior for a mismatched close entry point.
-    if allocation.mode != crate::gzguts_h::GZ_READ {
-        ::core::mem::forget(allocation);
-        return crate::zlib_h::Z_STREAM_ERROR;
+    if state.mode != crate::gzguts_h::GZ_READ {
+        return crate::src::gzclose::GzCloseResult::Retained(crate::zlib_h::Z_STREAM_ERROR);
     }
     let (fd, err) = {
-        let state = allocation.as_mut();
         if state.size != 0 {
             // The initialized gzip state owns this stream until close.
             crate::src::inflate::inflateEnd(&mut state.strm);
@@ -1026,11 +1026,11 @@ pub fn gzclose_r(mut allocation: Box<crate::gzguts_h::gz_state>) -> ::core::ffi:
         Some(fd) => nix::unistd::close(fd).map_or(-1, |_| 0),
         None => -1,
     };
-    return if ret != 0 {
+    return crate::src::gzclose::GzCloseResult::Closed(if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
         err
-    };
+    });
 }
 #[export_name = "gzclose_r"]
 
@@ -1038,6 +1038,12 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let allocation = Box::from_raw(file as crate::gzguts_h::gz_statep);
-    gzclose_r(allocation)
+    let state = Box::leak(Box::from_raw(file as crate::gzguts_h::gz_statep));
+    match gzclose_r(state) {
+        crate::src::gzclose::GzCloseResult::Closed(result) => {
+            drop(Box::from_raw(file as crate::gzguts_h::gz_statep));
+            result
+        }
+        crate::src::gzclose::GzCloseResult::Retained(result) => result,
+    }
 }
