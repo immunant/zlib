@@ -735,7 +735,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.avail_in = 0 as crate::stdlib::uInt;
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
         if crate::src::inflate::inflateInit2_(
-            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+            Some(&mut state.strm),
             15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
             crate::zlib_h::ZLIB_VERSION.as_ptr(),
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,

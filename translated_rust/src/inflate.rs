@@ -172,7 +172,7 @@ pub(crate) fn inflate_one_shot(
     let max = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut status = unsafe {
         inflateInit2_(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+            Some(&mut stream),
             crate::zutil_h::DEF_WBITS,
             crate::zlib_h::ZLIB_VERSION.as_ptr(),
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
@@ -594,7 +594,7 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     inflateReset2(strm, windowBits)
 }
 pub unsafe extern "C" fn inflateInit2_(
-    mut strm: crate::zlib_h::z_streamp,
+    strm: Option<&mut crate::zlib_h::z_stream_s>,
     mut windowBits: ::core::ffi::c_int,
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
@@ -606,13 +606,12 @@ pub unsafe extern "C" fn inflateInit2_(
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() {
+    let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
     // Keep the caller's stream projection at the allocator boundary. The
     // callback-owned state is published only after it has been fully
     // initialized below, since zalloc() need not return initialized bytes.
-    let strm = &mut *strm;
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if strm.zalloc.is_none() {
         strm.zalloc = Some(
@@ -640,8 +639,16 @@ pub unsafe extern "C" fn inflateInit2_(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    // Publish one complete value into the callback-owned allocation.  The
-    // reset below then applies the requested wrapper/window policy.  Writing
+    // Apply the requested wrapper/window policy before publishing the state.
+    // The normal decoder is still entirely pointer-free here, so initialization
+    // need not re-enter the stream/state reset adapter it is about to install.
+    // Keep the allocation and publication order unchanged: even an invalid
+    // window request receives a complete initial value before the matching
+    // callback release below.
+    let mut normal = initial_inflate_normal_state();
+    let reset = inflate_reset2_normal(&mut normal, windowBits);
+
+    // Publish one complete value into the callback-owned allocation.  Writing
     // fields piecemeal here would briefly treat uninitialized callback bytes
     // as Rust fields with drop glue.
     ::core::ptr::write(
@@ -650,7 +657,7 @@ pub unsafe extern "C" fn inflateInit2_(
             stream_identity: ::core::ptr::from_mut(strm).addr(),
             head: None,
             window: None,
-            normal: initial_inflate_normal_state(),
+            normal,
         },
     );
     strm.state = Some(
@@ -658,15 +665,25 @@ pub unsafe extern "C" fn inflateInit2_(
             .expect("checked state allocation")
             .cast(),
     );
-    let ret = inflateReset2(strm, windowBits);
-    if ret != crate::zlib_h::Z_OK {
-        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            strm.opaque,
-            state as crate::stdlib::voidpf,
-        );
-        strm.state = None;
+    let update = match reset {
+        Ok(update) => update,
+        Err(status) => {
+            Some(strm.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                strm.opaque, state as crate::stdlib::voidpf
+            );
+            strm.state = None;
+            return status;
+        }
+    };
+    strm.total_out = 0;
+    strm.total_in = strm.total_out;
+    strm.msg = ::core::ptr::null_mut();
+    strm.data_type = 0;
+    if let Some(adler) = update.adler {
+        strm.adler = adler;
     }
-    return ret;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateInit2_"]
 
@@ -676,7 +693,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit2_(strm, windowBits, version, stream_size)
+    inflateInit2_(strm.as_mut(), windowBits, version, stream_size)
 }
 #[export_name = "inflateInit_"]
 
@@ -685,7 +702,12 @@ pub unsafe extern "C" fn inflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size)
+    inflateInit2_(
+        strm.as_mut(),
+        crate::zutil_h::DEF_WBITS,
+        version,
+        stream_size,
+    )
 }
 // Bit priming is normal-decoder state only.  Keep its validation and update
 // independent of the ABI stream so the stream/state adapter retains the one
