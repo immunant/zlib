@@ -1023,19 +1023,16 @@ fn inflate_back_end_impl(state: &mut crate::src::inflate::inflate_state) -> ::co
 /// place that still knows the callback pair and raw allocation address.
 unsafe fn inflate_back_end_boundary(
     strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
-    let state_allocation = strm.state.cast::<crate::src::inflate::inflate_state>();
     let Some(zfree) = strm.zfree else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let Some(state) = state_allocation.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let end = inflate_back_end_impl(state);
     if end != crate::zlib_h::Z_STREAM_ERROR {
         // Safe cleanup released the state's only owned member.  This callback
         // owns and frees the allocation itself.
-        zfree(strm.opaque, state_allocation.cast());
+        zfree(strm.opaque, core::ptr::from_mut(state).cast());
         strm.state = core::ptr::null_mut();
     }
     end
@@ -1049,5 +1046,12 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_back_end_boundary(strm)
+    let Some(state) = strm
+        .state
+        .cast::<crate::src::inflate::inflate_state>()
+        .as_mut()
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    unsafe { inflate_back_end_boundary(strm, state) }
 }
