@@ -954,9 +954,10 @@ pub fn inflate(
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
     let mut output_capacity: usize = 0;
-    // Name and comment bytes are published together after this synchronous
-    // decode call. Each record describes a bounded prefix of the input range
-    // and its matching caller-provided gzip-header field.
+    // Gzip-header bytes are published together after this synchronous decode
+    // call. Each record describes a bounded prefix of the input range and its
+    // matching caller-provided gzip-header field.
+    let mut header_extra_copy: Option<(usize, usize, usize)> = None;
     let mut header_name_copy: Option<(usize, usize, usize)> = None;
     let mut header_comment_copy: Option<(usize, usize, usize)> = None;
     static order: [::core::ffi::c_ushort; 19] = [
@@ -2287,24 +2288,17 @@ pub fn inflate(
                                                             .wrapping_sub(extra_offset),
                                                     )
                                                         as usize;
-                                                    // `extra_offset` and
-                                                    // `copy_len` were checked
-                                                    // against the caller's
-                                                    // advertised header range.
-                                                    let extra = unsafe {
-                                                        ::core::slice::from_raw_parts_mut(
-                                                            head.extra,
-                                                            head.extra_max as usize,
-                                                        )
-                                                    };
                                                     let input_start =
                                                         in_0.wrapping_sub(have) as usize;
-                                                    extra[extra_offset as usize
-                                                        ..extra_offset as usize + copy_len]
-                                                        .copy_from_slice(
-                                                            &input[input_start
-                                                                ..input_start + copy_len],
-                                                        );
+                                                    // Publish this bounded
+                                                    // prefix with the other
+                                                    // gzip-header fields at
+                                                    // the normal decode tail.
+                                                    header_extra_copy = Some((
+                                                        extra_offset as usize,
+                                                        input_start,
+                                                        copy_len,
+                                                    ));
                                                 }
                                             }
                                             if state.flags & 0x200 as ::core::ffi::c_int != 0
@@ -2626,14 +2620,15 @@ pub fn inflate(
     // pair once for the publication tail, so cursor updates, the optional
     // window allocation, and final accounting remain reference-bound.
     if let Some(head) = head.as_deref_mut() {
-        for (comment, copy) in [(false, header_name_copy), (true, header_comment_copy)] {
+        // Preserve zlib's header-field order when callers deliberately alias
+        // their extra, name, and comment buffers.
+        for (cursor, max, copy) in [
+            (head.extra, head.extra_max, header_extra_copy),
+            (head.name, head.name_max, header_name_copy),
+            (head.comment, head.comm_max, header_comment_copy),
+        ] {
             let Some((header_start, input_start, copy_len)) = copy else {
                 continue;
-            };
-            let (cursor, max) = if comment {
-                (head.comment, head.comm_max)
-            } else {
-                (head.name, head.name_max)
             };
             // Each record was collected only after this field's non-null
             // cursor and advertised bound accepted every copied byte.
@@ -3233,6 +3228,24 @@ pub fn inflateCopy(
     return crate::zlib_h::Z_OK;
 }
 
+// The ABI adapter must not create two mutable references for one foreign
+// stream. Keep that alias fact as a safe implementation input, where the
+// zlib self-copy result belongs.
+enum InflateCopyInput<'a> {
+    Same(&'a mut crate::zlib_h::z_stream),
+    Distinct(
+        &'a mut crate::zlib_h::z_stream,
+        &'a mut crate::zlib_h::z_stream,
+    ),
+}
+
+fn inflate_copy_from_input(input: InflateCopyInput<'_>) -> ::core::ffi::c_int {
+    match input {
+        InflateCopyInput::Same(_stream) => crate::zlib_h::Z_OK,
+        InflateCopyInput::Distinct(dest, source) => inflateCopy(dest, source),
+    }
+}
+
 struct InflateCopyPlan {
     window_len: Option<usize>,
     window_copy_len: usize,
@@ -3445,9 +3458,19 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     if dest.is_null() || source.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let same_stream = dest == source;
+    // SAFETY: this ABI conversion binds the non-null destination stream once.
+    // `same_stream` was captured before that binding, so the alias case never
+    // attempts to form a second mutable reference.
     let dest = unsafe { &mut *dest };
-    let source = unsafe { &mut *source };
-    inflateCopy(dest, source)
+    if same_stream {
+        inflate_copy_from_input(InflateCopyInput::Same(dest))
+    } else {
+        // SAFETY: the pointers were proven distinct above, so this ABI
+        // conversion can bind the independent source stream.
+        let source = unsafe { &mut *source };
+        inflate_copy_from_input(InflateCopyInput::Distinct(dest, source))
+    }
 }
 #[export_name = "inflateUndermine"]
 
