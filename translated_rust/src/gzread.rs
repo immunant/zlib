@@ -733,31 +733,33 @@ fn gzfread_completed_items(
     }
 }
 
-unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut n: ::core::ffi::c_uint = 0;
-    loop {
-        if state.x.have != 0 {
-            let Some(consume) = gz_skip_buffer_plan(state.x.have, state.skip) else {
-                return -1 as ::core::ffi::c_int;
-            };
-            n = consume;
-            state.x.next = state.x.next.wrapping_add(n as usize);
-            if !gz_skip_buffer_commit_state(state, n) {
-                return -1 as ::core::ffi::c_int;
-            }
+/// One safe transition of a pending forward seek.  Fetching more gzip data
+/// remains with the caller, since it can enter the transitional codec layer.
+enum GzSkipStep {
+    Complete,
+    NeedFetch,
+}
+
+fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> Result<GzSkipStep, ()> {
+    if state.x.have != 0 {
+        let Some(consume) = gz_skip_buffer_plan(state.x.have, state.skip) else {
+            return Err(());
+        };
+        state.x.next = state.x.next.wrapping_add(consume as usize);
+        if !gz_skip_buffer_commit_state(state, consume) {
+            return Err(());
+        }
+        return Ok(if state.skip == 0 {
+            GzSkipStep::Complete
         } else {
-            if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
-                break;
-            }
-            if gz_fetch(state) == -1 as ::core::ffi::c_int {
-                return -1 as ::core::ffi::c_int;
-            }
-        }
-        if state.skip == 0 {
-            break;
-        }
+            GzSkipStep::NeedFetch
+        });
     }
-    return 0 as ::core::ffi::c_int;
+    if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
+        Ok(GzSkipStep::Complete)
+    } else {
+        Ok(GzSkipStep::NeedFetch)
+    }
 }
 
 unsafe fn gz_read(
@@ -771,8 +773,16 @@ unsafe fn gz_read(
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if state_ref.skip != 0 && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
+    while state_ref.skip != 0 {
+        match gz_skip(state_ref) {
+            Ok(GzSkipStep::Complete) => break,
+            Ok(GzSkipStep::NeedFetch) => {
+                if gz_fetch(state_ref) == -1 as ::core::ffi::c_int {
+                    return 0 as crate::stdlib::z_size_t;
+                }
+            }
+            Err(()) => return 0 as crate::stdlib::z_size_t,
+        }
     }
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
@@ -1204,8 +1214,16 @@ pub unsafe extern "C" fn gzungetc_ffi(
         return -1;
     }
     crate::src::gzlib::gz_error_clear(state);
-    if state.skip != 0 && gz_skip(state) == -1 {
-        return -1;
+    while state.skip != 0 {
+        match gz_skip(state) {
+            Ok(GzSkipStep::Complete) => break,
+            Ok(GzSkipStep::NeedFetch) => {
+                if gz_fetch(state) == -1 {
+                    return -1;
+                }
+            }
+            Err(()) => return -1,
+        }
     }
 
     // `gzgetc` is allowed to advance the public prefix cursor directly, so
@@ -1280,8 +1298,16 @@ pub unsafe extern "C" fn gzgets_ffi(
     }
     let destination = ::core::slice::from_raw_parts_mut(buf as *mut u8, len as usize);
     crate::src::gzlib::gz_error_clear(state);
-    if state.skip != 0 && gz_skip(state) == -1 {
-        return ::core::ptr::null_mut();
+    while state.skip != 0 {
+        match gz_skip(state) {
+            Ok(GzSkipStep::Complete) => break,
+            Ok(GzSkipStep::NeedFetch) => {
+                if gz_fetch(state) == -1 {
+                    return ::core::ptr::null_mut();
+                }
+            }
+            Err(()) => return ::core::ptr::null_mut(),
+        }
     }
     let mut left = (destination.len() as ::core::ffi::c_uint).wrapping_sub(1);
     let mut written = 0usize;
