@@ -1736,6 +1736,44 @@ fn deflate_set_dictionary(
         Err(error) => error,
     }
 }
+
+/// Dispatch dictionary storage through the state-owned workspace when it is
+/// available, and otherwise through the one callback borrowing boundary.
+/// Keeping this choice out of the ABI wrapper is the seam a callback-paired
+/// owner needs before it can replace callback handles with safe buffers.
+fn deflate_set_dictionary_with_storage(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    dictionary: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    if state.owned_storage.is_some() {
+        return with_owned_deflate_storage(state, |state, owned| {
+            deflate_set_dictionary(
+                strm,
+                state,
+                dictionary,
+                &mut owned.window,
+                &mut owned.head,
+                &mut owned.prev,
+            )
+        })
+        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    with_callback_deflate_storage(
+        state,
+        CallbackDeflateStorageNeed::Workspace,
+        |state, storage| {
+            let (Some(window), Some(head), Some(prev)) =
+                (storage.window, storage.head, storage.prev)
+            else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            deflate_set_dictionary(strm, state, dictionary, window, head, prev)
+        },
+    )
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
+
 #[export_name = "deflateSetDictionary"]
 
 pub unsafe extern "C" fn deflateSetDictionary_ffi(
@@ -1757,26 +1795,8 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     if !deflate_stream_state_valid(Some(strm), Some(state)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.window.is_none() || state.head.is_none() || state.prev.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     let dictionary = ::core::slice::from_raw_parts(dictionary, dictLength as usize);
-    let window = ::core::slice::from_raw_parts_mut(
-        state.window.expect("checked non-null window").as_ptr(),
-        state.window_size as usize,
-    );
-    let head = ::core::slice::from_raw_parts_mut(
-        state.head.expect("checked non-null head").as_ptr(),
-        state.hash_size as usize,
-    );
-    let prev = ::core::slice::from_raw_parts_mut(
-        state
-            .prev
-            .expect("checked non-null previous chain")
-            .as_ptr(),
-        state.w_size as usize,
-    );
-    deflate_set_dictionary(strm, state, dictionary, window, head, prev)
+    deflate_set_dictionary_with_storage(strm, state, dictionary)
 }
 fn deflate_dictionary_len(
     strm: Option<&crate::zlib_h::z_stream_s>,
@@ -2326,6 +2346,33 @@ fn deflate_prime(
     }
     return crate::zlib_h::Z_OK;
 }
+
+/// Select pending storage for `deflatePrime` without making its ABI wrapper
+/// borrow an implementation workspace.  Default-pair streams use their
+/// retained vector; callback-backed streams use the existing narrow pending
+/// boundary.
+fn deflate_prime_with_storage(
+    strm: &crate::zlib_h::z_stream_s,
+    state: &mut crate::src::deflate::deflate_state,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if state.owned_storage.is_some() {
+        return with_owned_deflate_storage(state, |state, owned| {
+            deflate_prime(Some(strm), Some(state), Some(&mut owned.pending_buf), bits, value)
+        })
+        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    with_callback_deflate_storage(
+        state,
+        CallbackDeflateStorageNeed::PendingOnly,
+        |state, storage| {
+            deflate_prime(Some(strm), Some(state), storage.pending_buf, bits, value)
+        },
+    )
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
+
 #[export_name = "deflatePrime"]
 
 pub unsafe extern "C" fn deflatePrime_ffi(
@@ -2339,32 +2386,18 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     let Some(state) = (strm.state as *mut crate::src::deflate::deflate_state).as_mut() else {
         return deflate_prime(Some(strm), None, None, bits, value);
     };
-    // A malformed or partially initialized stream can retain a state without
-    // its pending allocation.  Do not turn that absent storage into a slice:
-    // the safe core owns the matching Z_STREAM_ERROR dispatch.
-    if state.pending_buf.is_none() {
-        return deflate_prime(Some(strm), Some(state), None, bits, value);
-    }
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf.expect("checked pending buffer").as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    deflate_prime(Some(strm), Some(state), Some(pending_buf), bits, value)
+    deflate_prime_with_storage(strm, state, bits, value)
 }
-pub(crate) fn deflateParams(
+fn deflate_params_prepare(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::deflate::deflate_state,
     input: Option<&[crate::stdlib::Bytef]>,
     output: Option<&mut [crate::stdlib::Bytef]>,
-    hash_tables: Option<(
-        &mut [crate::src::deflate::Posf],
-        &mut [crate::src::deflate::Posf],
-    )>,
     mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    strategy: ::core::ffi::c_int,
+) -> Result<(::core::ffi::c_int, ::core::ffi::c_int), ::core::ffi::c_int> {
     if !deflate_state_valid(strm, state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
@@ -2374,35 +2407,47 @@ pub(crate) fn deflateParams(
         || strategy < 0 as ::core::ffi::c_int
         || strategy > crate::zlib_h::Z_FIXED
     {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
     let Some(current_kind) = configuration_table
         .get(state.level as usize)
         .map(|configuration| &configuration.func)
     else {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
     let Some(next_kind) = configuration_table
         .get(level as usize)
         .map(|configuration| &configuration.func)
     else {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
     if (strategy != state.strategy || current_kind != next_kind)
         && state.last_flush != -2 as ::core::ffi::c_int
     {
         let err = deflate(strm, crate::zlib_h::Z_BLOCK, input, output);
         if err == crate::zlib_h::Z_STREAM_ERROR {
-            return err;
+            return Err(err);
         }
         if strm.avail_in != 0
             || state.strstart as ::core::ffi::c_long - state.block_start
                 + state.lookahead as ::core::ffi::c_long
                 != 0
         {
-            return crate::zlib_h::Z_BUF_ERROR;
+            return Err(crate::zlib_h::Z_BUF_ERROR);
         }
     }
+    Ok((level, strategy))
+}
+
+fn deflate_params_finish(
+    state: &mut crate::src::deflate::deflate_state,
+    hash_tables: Option<(
+        &mut [crate::src::deflate::Posf],
+        &mut [crate::src::deflate::Posf],
+    )>,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
     if state.level != level {
         if state.level == 0 as ::core::ffi::c_int && state.matches != 0 as crate::stdlib::uInt {
             let Some((head, prev)) = hash_tables else {
@@ -2432,6 +2477,79 @@ pub(crate) fn deflateParams(
     state.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
+
+pub(crate) fn deflateParams(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
+    hash_tables: Option<(
+        &mut [crate::src::deflate::Posf],
+        &mut [crate::src::deflate::Posf],
+    )>,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let (level, strategy) = match deflate_params_prepare(strm, state, input, output, level, strategy)
+    {
+        Ok(values) => values,
+        Err(error) => return error,
+    };
+    deflate_params_finish(state, hash_tables, level, strategy)
+}
+
+/// Select hash-chain storage after `deflateParams` has completed any required
+/// streaming transition.  This keeps callback/owned workspace dispatch out
+/// of ABI wrappers and is intentionally after the transition, since `deflate`
+/// itself needs to observe an installed owned workspace.
+pub(crate) fn deflate_params_with_storage(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let (level, strategy) = match deflate_params_prepare(strm, state, input, output, level, strategy)
+    {
+        Ok(values) => values,
+        Err(error) => return error,
+    };
+    let needs_hash_tables = state.level != level
+        && state.level == 0
+        && state.matches != 0;
+    if !needs_hash_tables {
+        return deflate_params_finish(state, None, level, strategy);
+    }
+    if state.owned_storage.is_some() {
+        return with_owned_deflate_storage(state, |state, owned| {
+            deflate_params_finish(
+                state,
+                Some((&mut owned.head, &mut owned.prev)),
+                level,
+                strategy,
+            )
+        })
+        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    with_callback_deflate_storage(
+        state,
+        CallbackDeflateStorageNeed::Workspace,
+        |state, storage| {
+            deflate_params_finish(
+                state,
+                match (storage.head, storage.prev) {
+                    (Some(head), Some(prev)) => Some((head, prev)),
+                    _ => None,
+                },
+                level,
+                strategy,
+            )
+        },
+    )
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
+
 #[export_name = "deflateParams"]
 
 pub unsafe extern "C" fn deflateParams_ffi(
@@ -2469,21 +2587,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
             strm.avail_out as usize,
         ))
     };
-    let hash_tables = if state.head.is_none() || state.prev.is_none() {
-        None
-    } else {
-        Some((
-            ::core::slice::from_raw_parts_mut(
-                state.head.expect("checked non-null head").as_ptr(),
-                state.hash_size as usize,
-            ),
-            ::core::slice::from_raw_parts_mut(
-                state.prev.expect("checked previous chain").as_ptr(),
-                state.w_size as usize,
-            ),
-        ))
-    };
-    deflateParams(strm, state, input, output, hash_tables, level, strategy)
+    deflate_params_with_storage(strm, state, input, output, level, strategy)
 }
 fn deflate_tune(
     state: &mut crate::src::deflate::deflate_state,

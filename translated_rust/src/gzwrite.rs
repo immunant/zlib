@@ -725,13 +725,7 @@ pub unsafe extern "C" fn gzflush_ffi(
 }
 fn gzsetparams(
     state: &mut crate::gzguts_h::gz_state,
-    deflate_state: Option<(
-        &mut crate::src::deflate::deflate_state,
-        Option<(
-            &mut [crate::src::deflate::Posf],
-            &mut [crate::src::deflate::Posf],
-        )>,
-    )>,
+    deflate_state: Option<&mut crate::src::deflate::deflate_state>,
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -754,7 +748,7 @@ fn gzsetparams(
         {
             return state.err;
         }
-        let Some((deflate_state, hash_tables)) = deflate_state else {
+        let Some(deflate_state) = deflate_state else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         let input = if state.strm.avail_in == 0 {
@@ -787,12 +781,11 @@ fn gzsetparams(
                 .and_then(|end| state.out.get_mut(..end))
                 .and_then(|output| start.and_then(|start| output.get_mut(start..)))
         };
-        let _ = crate::src::deflate::deflateParams(
+        let _ = crate::src::deflate::deflate_params_with_storage(
             &mut state.strm,
             deflate_state,
             input,
             output,
-            hash_tables,
             level,
             strategy,
         );
@@ -811,28 +804,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let deflate_state = (state.strm.state as *mut crate::src::deflate::deflate_state)
-        .as_mut()
-        .map(|deflate_state| {
-            let hash_tables = if deflate_state.head.is_none() || deflate_state.prev.is_none() {
-                None
-            } else {
-                Some((
-                    ::core::slice::from_raw_parts_mut(
-                        deflate_state.head.expect("checked non-null head").as_ptr(),
-                        deflate_state.hash_size as usize,
-                    ),
-                    ::core::slice::from_raw_parts_mut(
-                        deflate_state
-                            .prev
-                            .expect("checked non-null previous chain")
-                            .as_ptr(),
-                        deflate_state.w_size as usize,
-                    ),
-                ))
-            };
-            (deflate_state, hash_tables)
-        });
+    let deflate_state = (state.strm.state as *mut crate::src::deflate::deflate_state).as_mut();
     gzsetparams(state, deflate_state, level, strategy)
 }
 fn gzclose_w_cleanup(state: &mut crate::gzguts_h::gz_state) {
