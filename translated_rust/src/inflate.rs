@@ -3789,17 +3789,23 @@ fn inflate_validate_wrap(
     crate::zlib_h::Z_OK
 }
 
-pub unsafe extern "C" fn inflateValidate(
-    mut strm: crate::zlib_h::z_streamp,
+fn inflateValidate(
+    normal: &mut InflateNormalState,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    inflate_validate_wrap(&mut normal.wrap, check)
+}
+
+// Keep the opaque-state association in one named implementation adapter.  The
+// validation transition itself only needs pointer-free normal decoder state.
+pub unsafe fn inflate_validate_from_stream(
+    strm: &mut crate::zlib_h::z_stream_s,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_validate_wrap(&mut state.decoder.normal.wrap, check)
+    inflateValidate(&mut state.decoder.normal, check)
 }
 #[export_name = "inflateValidate"]
 
@@ -3807,7 +3813,10 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateValidate(strm, check)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_validate_from_stream(strm, check)
 }
 
 fn inflate_mark_value(
