@@ -1553,15 +1553,27 @@ fn put_short_msb_bytes(output: &mut [crate::stdlib::Bytef], b: crate::stdlib::uI
     output[1] = (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
 }
 
+// The two-byte header write only changes already-bound deflater state and a
+// bounded pending-output slice. Keep that bookkeeping safe; the raw state and
+// allocation-backed buffer binding remain in the narrow adapter below.
+fn put_short_msb(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    b: crate::stdlib::uInt,
+) {
+    let pending = state.pending as usize;
+    put_short_msb_bytes(&mut pending_buf[pending..pending + 2], b);
+    state.pending = state.pending.wrapping_add(2);
+}
+
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,
     mut b: crate::stdlib::uInt,
 ) {
     let state = &mut *s;
-    let pending = state.pending as usize;
-    let output = ::core::slice::from_raw_parts_mut(state.pending_buf.offset(pending as isize), 2);
-    put_short_msb_bytes(output, b);
-    state.pending = state.pending.wrapping_add(2);
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    put_short_msb(state, pending_buf, b);
 }
 
 fn pending_copy_len(
