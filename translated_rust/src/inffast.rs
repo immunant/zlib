@@ -266,21 +266,48 @@ fn inflate_fast_copy_history_prefix(
     }
 
     let window_end = wnext.checked_add(wsize)?;
-    let mut from = window_end.checked_sub(back)? % wsize;
+    let from = window_end.checked_sub(back)? % wsize;
     let take = back.min(len);
-    for _ in 0..take {
-        let byte = match history {
-            InflateFastHistory::Separate(window) => window.get(from).copied(),
-            InflateFastHistory::Output => output.get(from).copied(),
-        }?;
-        let slot = output.get_mut(*output_at)?;
-        *slot = byte;
-        from = match from.checked_add(1)? {
-            next if next == wsize => 0,
-            next => next,
-        };
-        *output_at = output_at.checked_add(1)?;
+    let output_end = output_at.checked_add(take)?;
+    if output_end > output.len() {
+        return None;
     }
+    match history {
+        // Normal inflate has a separate history allocation, so the prefix
+        // can be copied as at most two bounded slices across the circular
+        // wrap. Unlike the output-backed inflateBack history below, this
+        // source cannot overlap the destination.
+        InflateFastHistory::Separate(window) => {
+            let first_len = take.min(wsize.checked_sub(from)?);
+            let first_end = from.checked_add(first_len)?;
+            let destination_mid = output_at.checked_add(first_len)?;
+            output
+                .get_mut(*output_at..destination_mid)?
+                .copy_from_slice(window.get(from..first_end)?);
+
+            let second_len = take.checked_sub(first_len)?;
+            if second_len != 0 {
+                output
+                    .get_mut(destination_mid..output_end)?
+                    .copy_from_slice(window.get(..second_len)?);
+            }
+        }
+        // inflateBack uses the output allocation as its history window. A
+        // read-then-write step is required here: the source may be produced
+        // by an earlier step of the same match.
+        InflateFastHistory::Output => {
+            let mut from = from;
+            for destination in *output_at..output_end {
+                let byte = output.get(from).copied()?;
+                *output.get_mut(destination)? = byte;
+                from = match from.checked_add(1)? {
+                    next if next == wsize => 0,
+                    next => next,
+                };
+            }
+        }
+    }
+    *output_at = output_end;
     len.checked_sub(take)
 }
 
