@@ -527,6 +527,27 @@ fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     gz_uInt_fits_int(len)
 }
 
+fn gzputc_impl(
+    state: &mut crate::gzguts_h::gz_state,
+    input_buf: &mut [crate::stdlib::Bytef],
+    c: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero(state, input_buf) == -1 as ::core::ffi::c_int {
+        return -1 as ::core::ffi::c_int;
+    }
+    if state.size != 0 {
+        if let Some(ret) = gzputc_buffered(state, input_buf, c) {
+            return ret;
+        }
+    }
+    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
+    buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
+    if gz_write(state, input_buf, &buf) != 1 as crate::stdlib::z_size_t {
+        return -1 as ::core::ffi::c_int;
+    }
+    c & 0xff as ::core::ffi::c_int
+}
+
 #[export_name = "gzwrite"]
 
 pub unsafe extern "C" fn gzwrite_ffi(
@@ -608,7 +629,6 @@ pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
@@ -621,19 +641,7 @@ pub unsafe extern "C" fn gzputc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     let input_buf = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
-    if state.skip != 0 && gz_zero(state, input_buf) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.size != 0 {
-        if let Some(ret) = gzputc_buffered(state, input_buf, c) {
-            return ret;
-        }
-    }
-    buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
-    if gz_write(state, input_buf, &buf) != 1 as crate::stdlib::z_size_t {
-        return -1 as ::core::ffi::c_int;
-    }
-    return c & 0xff as ::core::ffi::c_int;
+    return gzputc_impl(state, input_buf, c);
 }
 fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
     (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
@@ -651,14 +659,39 @@ fn gzputs_return_value(
     }
 }
 
+fn gzputs_len_or_error(
+    state: &mut crate::gzguts_h::gz_state,
+    input: &[crate::stdlib::Bytef],
+) -> Option<crate::stdlib::z_size_t> {
+    let len = input.len() as crate::stdlib::z_size_t;
+    if !gzputs_len_fits_int(len) {
+        crate::src::gzlib::gz_error_static(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"string length does not fit in int\0",
+        );
+        None
+    } else {
+        Some(len)
+    }
+}
+
+fn gzputs_impl(
+    state: &mut crate::gzguts_h::gz_state,
+    input_buf: &mut [crate::stdlib::Bytef],
+    input: &[crate::stdlib::Bytef],
+    len: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_int {
+    let put = gz_write(state, input_buf, input);
+    gzputs_return_value(len, put)
+}
+
 #[export_name = "gzputs"]
 
 pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut put: crate::stdlib::z_size_t = 0;
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
@@ -668,15 +701,9 @@ pub unsafe extern "C" fn gzputs_ffi(
     }
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     let input = ::core::ffi::CStr::from_ptr(s).to_bytes();
-    len = input.len() as crate::stdlib::z_size_t;
-    if !gzputs_len_fits_int(len) {
-        crate::src::gzlib::gz_error_static(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"string length does not fit in int\0",
-        );
+    let Some(len) = gzputs_len_or_error(state, input) else {
         return -1 as ::core::ffi::c_int;
-    }
+    };
     let mut empty_input_buf = [];
     let input_buf = if input.is_empty() {
         &mut empty_input_buf[..]
@@ -686,8 +713,7 @@ pub unsafe extern "C" fn gzputs_ffi(
         }
         ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
     };
-    put = gz_write(state, input_buf, input);
-    return gzputs_return_value(len, put);
+    return gzputs_impl(state, input_buf, input, len);
 }
 fn gzflush_valid_flush(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 as ::core::ffi::c_int && flush <= crate::zlib_h::Z_FINISH

@@ -93,9 +93,10 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    let strm_ref = &mut *strm;
+    strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm_ref.zalloc.is_none() {
+        strm_ref.zalloc = Some(
             crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -103,31 +104,32 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm_ref.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm_ref.zfree.is_none() {
+        strm_ref.zfree = Some(
             crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
+    state = Some(strm_ref.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm_ref.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
-    (*state).window = window;
-    (*state).wnext = 0 as ::core::ffi::c_uint;
-    (*state).whave = 0 as ::core::ffi::c_uint;
-    (*state).sane = 1 as ::core::ffi::c_int;
+    strm_ref.state = state as *mut crate::src::deflate::internal_state;
+    let state_ref = &mut *state;
+    state_ref.dmax = 32768 as ::core::ffi::c_uint;
+    state_ref.wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
+    state_ref.wsize = (1 as ::core::ffi::c_uint) << windowBits;
+    state_ref.window = window;
+    state_ref.wnext = 0 as ::core::ffi::c_uint;
+    state_ref.whave = 0 as ::core::ffi::c_uint;
+    state_ref.sane = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBack"]
