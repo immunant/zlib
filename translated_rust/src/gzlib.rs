@@ -333,6 +333,18 @@ struct GzResetTarget<'a> {
     avail_in: &'a mut crate::stdlib::uInt,
 }
 
+// `gzrewind` needs the same reset projection as the other gzip state
+// transitions, plus only the owned descriptor and scalar seek state.  Keep
+// that view pointer-free so the rewind implementation itself needs no unsafe
+// operations or ABI-shaped state reference.
+struct GzRewindState<'a> {
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    start: crate::stdlib::off64_t,
+    fd: &'a rustix::fd::OwnedFd,
+    reset: GzResetTarget<'a>,
+}
+
 impl GzResetState {
     fn apply_reset(&mut self) {
         let fields = gz_reset_fields(self.mode);
@@ -719,24 +731,30 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     };
     gzbuffer(state.mode, state.size, &mut state.want, size)
 }
-unsafe fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gzrewind(state: GzRewindState<'_>) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_READ
         || state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR
     {
         return -1 as ::core::ffi::c_int;
     }
-    if rustix::fs::seek(
-        state.fd.as_ref().unwrap(),
-        rustix::fs::SeekFrom::Start(state.start as u64),
-    )
-    .is_err()
-    {
+    if rustix::fs::seek(state.fd, rustix::fs::SeekFrom::Start(state.start as u64)).is_err() {
         return -1 as ::core::ffi::c_int;
     }
-    let mode = state.mode;
-    reset_gz_target(
-        mode,
-        GzResetTarget {
+    reset_gz_target(state.mode, state.reset);
+    return 0 as ::core::ffi::c_int;
+}
+#[export_name = "gzrewind"]
+
+pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    gzrewind(GzRewindState {
+        mode: state.mode,
+        err: state.err,
+        start: state.start,
+        fd: state.fd.as_ref().unwrap(),
+        reset: GzResetTarget {
             have: &mut state.x.have,
             eof: &mut state.eof,
             past: &mut state.past,
@@ -750,16 +768,7 @@ unsafe fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             pos: &mut state.x.pos,
             avail_in: &mut state.strm.avail_in,
         },
-    );
-    return 0 as ::core::ffi::c_int;
-}
-#[export_name = "gzrewind"]
-
-pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
-        return -1 as ::core::ffi::c_int;
-    };
-    gzrewind(state)
+    })
 }
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
@@ -807,7 +816,27 @@ pub unsafe extern "C" fn gzseek64(
             return state.x.pos;
         }
         GzSeekAction::Rewind { offset } => {
-            if gzrewind(state) == -1 as ::core::ffi::c_int {
+            if gzrewind(GzRewindState {
+                mode: state.mode,
+                err: state.err,
+                start: state.start,
+                fd: state.fd.as_ref().unwrap(),
+                reset: GzResetTarget {
+                    have: &mut state.x.have,
+                    eof: &mut state.eof,
+                    past: &mut state.past,
+                    how: &mut state.how,
+                    junk: &mut state.junk,
+                    reset: &mut state.reset,
+                    again: &mut state.again,
+                    skip: &mut state.skip,
+                    err: &mut state.err,
+                    msg: &mut state.msg,
+                    pos: &mut state.x.pos,
+                    avail_in: &mut state.strm.avail_in,
+                },
+            }) == -1 as ::core::ffi::c_int
+            {
                 return -1 as crate::stdlib::off64_t;
             }
             offset
