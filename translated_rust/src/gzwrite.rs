@@ -1318,7 +1318,8 @@ fn gzclose_buffer_action(
     }
 }
 
-pub unsafe extern "C" fn gzwrite(
+#[export_name = "gzwrite"]
+pub unsafe extern "C" fn gzwrite_ffi(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
@@ -1347,15 +1348,6 @@ pub unsafe extern "C" fn gzwrite(
         return 0 as ::core::ffi::c_int;
     };
     return gz_write(state, buf, len) as ::core::ffi::c_int;
-}
-#[export_name = "gzwrite"]
-
-pub unsafe extern "C" fn gzwrite_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut buf: crate::stdlib::voidpc,
-    mut len: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    gzwrite(file, buf, len)
 }
 pub unsafe extern "C" fn gzfwrite(
     mut buf: crate::stdlib::voidpc,

@@ -219,6 +219,21 @@ fn fast_dist_action(op: ::core::ffi::c_uint) -> FastDistAction {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum FastDecodeError {
+    InvalidDistanceCode,
+    DistanceTooFarBack,
+    InvalidLiteralLengthCode,
+}
+
+fn fast_decode_error_message(error: FastDecodeError) -> &'static [u8] {
+    match error {
+        FastDecodeError::InvalidDistanceCode => b"invalid distance code\0",
+        FastDecodeError::DistanceTooFarBack => b"invalid distance too far back\0",
+        FastDecodeError::InvalidLiteralLengthCode => b"invalid literal/length code\0",
+    }
+}
+
 fn fast_window_distance_is_invalid(
     distance_from_window: ::core::ffi::c_uint,
     window_available: ::core::ffi::c_uint,
@@ -552,9 +567,11 @@ pub unsafe extern "C" fn inflate_fast(
                             here = dcode.wrapping_add(subtable_index(entry, hold));
                         }
                         FastDistAction::Invalid => {
-                            (*strm).msg = b"invalid distance code\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
+                            (*strm).msg =
+                                fast_decode_error_message(FastDecodeError::InvalidDistanceCode)
+                                    .as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
                             state.mode = crate::src::inflate::BAD;
                             break 's_94;
                         }
@@ -615,9 +632,11 @@ pub unsafe extern "C" fn inflate_fast(
                         ) {
                             FastWindowDistance::Valid { distance_back } => distance_back,
                             FastWindowDistance::Invalid => {
-                                (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                                    as *const ::core::ffi::c_char
-                                    as *mut ::core::ffi::c_char;
+                                (*strm).msg =
+                                    fast_decode_error_message(FastDecodeError::DistanceTooFarBack)
+                                        .as_ptr()
+                                        as *const ::core::ffi::c_char
+                                        as *mut ::core::ffi::c_char;
                                 state.mode = crate::src::inflate::BAD;
                                 break;
                             }
@@ -712,8 +731,8 @@ pub unsafe extern "C" fn inflate_fast(
                 }
             }
             9180031981464905198 => {
-                (*strm).msg = b"invalid literal/length code\0".as_ptr()
-                    as *const ::core::ffi::c_char
+                (*strm).msg = fast_decode_error_message(FastDecodeError::InvalidLiteralLengthCode)
+                    .as_ptr() as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
                 state.mode = crate::src::inflate::BAD;
                 break;
@@ -749,14 +768,14 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_code_entry, fast_decode_needs_prefetch, fast_decode_prefetch_byte_count,
-        fast_dist_action, fast_length_extra_bits_need_input, fast_litlen_action,
-        fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
+        fast_code_entry, fast_decode_error_message, fast_decode_needs_prefetch,
+        fast_decode_prefetch_byte_count, fast_dist_action, fast_length_extra_bits_need_input,
+        fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
         fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
         input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
         table_index, unread_input_state, validate_fast_window_distance, FastCodeEntry,
-        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
-        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
+        FastDecodeError, FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction,
+        FastMatchCopyLayout, FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -782,6 +801,22 @@ mod tests {
                 bits: 7,
                 value: 123,
             }
+        );
+    }
+
+    #[test]
+    fn fast_decode_error_messages_are_exact_nul_terminated_strings() {
+        assert_eq!(
+            fast_decode_error_message(FastDecodeError::InvalidDistanceCode),
+            b"invalid distance code\0"
+        );
+        assert_eq!(
+            fast_decode_error_message(FastDecodeError::DistanceTooFarBack),
+            b"invalid distance too far back\0"
+        );
+        assert_eq!(
+            fast_decode_error_message(FastDecodeError::InvalidLiteralLengthCode),
+            b"invalid literal/length code\0"
         );
     }
 

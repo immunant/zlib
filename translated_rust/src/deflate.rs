@@ -4237,13 +4237,21 @@ unsafe fn deflate_huff(
         (*s).match_length = 0 as crate::stdlib::uInt;
         let mut cc: crate::zutil_h::uch =
             *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
-        *(*s).sym_buf.offset(cursors[0] as isize) = 0 as crate::zutil_h::uchf;
-        *(*s).sym_buf.offset(cursors[1] as isize) = 0 as crate::zutil_h::uchf;
-        *(*s).sym_buf.offset(cursors[2] as isize) = cc as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc as usize].fc.value = (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
-        let (sym_next, lookahead, strstart, must_flush_block) =
-            deflate_huff_literal_progress(next, (*s).sym_end, (*s).lookahead, (*s).strstart);
+        let tally = deflate_literal_tally_plan(cc, (*s).sym_next);
+        *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
+        *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
+        *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+        (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
+            [tally.literal_tree_index]
+            .fc
+            .value
+            .wrapping_add(1);
+        let (sym_next, lookahead, strstart, must_flush_block) = deflate_huff_literal_progress(
+            tally.next_sym,
+            (*s).sym_end,
+            (*s).lookahead,
+            (*s).strstart,
+        );
         (*s).sym_next = sym_next;
         (*s).lookahead = lookahead;
         (*s).strstart = strstart;
