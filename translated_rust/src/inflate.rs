@@ -605,27 +605,24 @@ pub unsafe extern "C" fn inflateInit__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size)
 }
-pub unsafe extern "C" fn inflatePrime(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: ::core::ffi::c_int,
+// Bit priming is normal-decoder state only.  Keep its validation and update
+// independent of the ABI stream so the stream/state adapter retains the one
+// unsafe projection needed to reach the opaque state.
+fn inflate_prime_bits(
+    normal: &mut InflateNormalState,
+    bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     if bits == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_OK;
     }
     if bits < 0 as ::core::ffi::c_int {
-        state.normal.hold = 0 as ::core::ffi::c_ulong;
-        state.normal.bits = 0 as ::core::ffi::c_uint;
+        normal.hold = 0 as ::core::ffi::c_ulong;
+        normal.bits = 0 as ::core::ffi::c_uint;
         return crate::zlib_h::Z_OK;
     }
     if bits > 16 as ::core::ffi::c_int
-        || (state.normal.bits as crate::stdlib::uInt).wrapping_add(bits as crate::stdlib::uInt)
+        || (normal.bits as crate::stdlib::uInt).wrapping_add(bits as crate::stdlib::uInt)
             > 32 as ::core::ffi::c_uint
     {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -633,15 +630,26 @@ pub unsafe extern "C" fn inflatePrime(
     value = (value as ::core::ffi::c_long
         & ((1 as ::core::ffi::c_long) << bits) - 1 as ::core::ffi::c_long)
         as ::core::ffi::c_int;
-    state.normal.hold = state
-        .normal
+    normal.hold = normal
         .hold
-        .wrapping_add((value as ::core::ffi::c_ulong) << state.normal.bits);
-    state.normal.bits = state
-        .normal
+        .wrapping_add((value as ::core::ffi::c_ulong) << normal.bits);
+    normal.bits = normal
         .bits
         .wrapping_add(bits as crate::stdlib::uInt as ::core::ffi::c_uint);
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
+}
+
+// The export wrapper owns stream validation/conversion; this adapter retains
+// the stream-lifetime-bound opaque-state projection.
+pub unsafe fn inflatePrime(
+    strm: &mut crate::zlib_h::z_stream_s,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_prime_bits(&mut state.normal, bits, value)
 }
 #[export_name = "inflatePrime"]
 
@@ -650,6 +658,9 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflatePrime(strm, bits, value)
 }
 fn copy_history_window(
